@@ -1,0 +1,18 @@
+tool sendgrid httpCall
+  with config
+  baseUrl = "https://api.sendgrid.com/v3"
+  headers.Authorization <- config.sendgrid.bearerToken
+
+tool sendgrid.send extends sendgrid
+  method = POST
+  path = /mail/send
+
+bridge Mutation.sendEmail
+  with sendgrid.send as sg
+  with input as i
+
+sg.to <- i.to
+sg.from <- i.from
+sg.subject <- i.subject
+sg.content <- i.body
+messageId <- sg.headers.x-message-id

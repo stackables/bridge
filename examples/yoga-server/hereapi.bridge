@@ -1,0 +1,20 @@
+tool hereapi httpCall
+  with config
+  baseUrl = "https://geocode.search.hereapi.com/v1"
+  headers.apiKey <- config.hereapi.apiKey
+
+tool hereapi.geocode extends hereapi
+  method = GET
+  path = /geocode
+
+bridge Query.geocode
+  with hereapi.geocode as gc
+  with input as i
+
+search <- i.search
+gc.q <- i.search
+gc.limit <- i.limit
+results[] <- gc.items[]
+  .name <- .title
+  .lat  <- .position.lat
+  .lon  <- .position.lng

@@ -1,0 +1,14 @@
+type Query {
+  geocode(search: String!, limit: Int): GeocodeResult
+}
+
+type GeocodeResult {
+  search: String
+  results: [GeocodeItem!]!
+}
+
+type GeocodeItem @key(fields: "name") {
+  name: String!
+  lat: Float
+  lon: Float
+}

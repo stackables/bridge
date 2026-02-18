@@ -1,0 +1,61 @@
+# Property search — all patterns in one API
+#
+# Resolves backwards from demand:
+#   listings/topPick ← zillow ← hereapi ← user input
+
+bridge Query.propertySearch
+  with hereapi.geocode as gc
+  with zillow.search as z
+  with input as i
+  with centsToUsd as usd
+
+# passthrough: explicit input → output
+location <- i.location
+
+# user input → hereapi (rename: location → q)
+gc.q <- i.location
+
+# chained: hereapi output → zillow input
+z.latitude  <- gc.items[0].position.lat
+z.longitude <- gc.items[0].position.lng
+
+# user input → zillow (rename: budget → maxPrice)
+z.maxPrice <- i.budget
+
+# topPick: first result, nested drill + rename + tool
+topPick.address  <- z.properties[0].streetAddress
+topPick.bedrooms <- z.properties[0].beds
+topPick.city     <- z.properties[0].location.city
+
+usd.cents <- z.properties[0].priceInCents
+topPick.price    <- usd.dollars
+
+# listings: array mapping with per-element rename + nested drill
+listings[] <- z.properties[]
+  .address  <- .streetAddress
+  .price    <- .priceInCents
+  .bedrooms <- .beds
+  .city     <- .location.city
+
+---
+
+# Property comments — chained providers + scalar array via tool
+#
+# Resolves: comments ← pluckText ← reviews ← hereapi ← user input
+
+bridge Query.propertyComments
+  with hereapi.geocode as gc
+  with reviews.getByLocation as rv
+  with input as i
+  with pluckText as pt
+
+# user input → hereapi
+gc.q <- i.location
+
+# chained: hereapi → reviews
+rv.lat <- gc.items[0].position.lat
+rv.lng <- gc.items[0].position.lng
+
+# reviews.comments → pluckText → flat string array
+pt.items           <- rv.comments
+propertyComments   <- pt.result

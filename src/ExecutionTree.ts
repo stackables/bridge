@@ -1,0 +1,352 @@
+import type { Path } from "graphql/jsutils/Path";
+import { parsePath } from "./bridge-format.js";
+import type {
+  Bridge,
+  Instruction,
+  NodeRef,
+  ToolCallFn,
+  ToolDef,
+  Wire,
+} from "./types.js";
+import { SELF_MODULE } from "./types.js";
+
+type Trunk = { module: string; type: string; field: string; instance?: number };
+
+/** Stable string key for the state map */
+function trunkKey(ref: Trunk & { element?: boolean }): string {
+  if (ref.element) return `${ref.module}:${ref.type}:${ref.field}:*`;
+  return `${ref.module}:${ref.type}:${ref.field}${ref.instance != null ? `:${ref.instance}` : ""}`;
+}
+
+/** Match two trunks (ignoring path and element) */
+function sameTrunk(a: Trunk, b: Trunk): boolean {
+  return (
+    a.module === b.module &&
+    a.type === b.type &&
+    a.field === b.field &&
+    (a.instance ?? undefined) === (b.instance ?? undefined)
+  );
+}
+
+/** Strict path equality */
+function pathEquals(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Set a value at a nested path, creating intermediate objects/arrays as needed */
+function setNested(obj: any, path: string[], value: any): void {
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    const nextKey = path[i + 1];
+    if (obj[key] == null) {
+      obj[key] = /^\d+$/.test(nextKey) ? [] : {};
+    }
+    obj = obj[key];
+  }
+  if (path.length > 0) {
+    obj[path[path.length - 1]] = value;
+  }
+}
+
+export class ExecutionTree {
+  state: Record<string, any> = {};
+  bridge: Bridge | undefined;
+  private toolDepCache: Map<string, Promise<any>> = new Map();
+
+  constructor(
+    public trunk: Trunk,
+    private instructions: Instruction[],
+    private toolFns?: Record<string, ToolCallFn | ((...args: any[]) => any)>,
+    private config?: Record<string, any>,
+    private parent?: ExecutionTree,
+  ) {
+    this.bridge = instructions.find(
+      (i): i is Bridge =>
+        i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
+    );
+    if (config) {
+      this.state[
+        trunkKey({ module: SELF_MODULE, type: "Config", field: "config" })
+      ] = config;
+    }
+  }
+
+  /** Derive tool name from a trunk */
+  private getToolName(target: Trunk): string {
+    if (target.module === SELF_MODULE) return target.field;
+    return `${target.module}.${target.field}`;
+  }
+
+  /** Resolve a ToolDef by name, merging the extends chain */
+  private resolveToolDefByName(name: string): ToolDef | undefined {
+    const toolDefs = this.instructions.filter(
+      (i): i is ToolDef => i.kind === "tool",
+    );
+    const base = toolDefs.find((t) => t.name === name);
+    if (!base) return undefined;
+
+    // Build extends chain: root → ... → leaf
+    const chain: ToolDef[] = [base];
+    let current = base;
+    while (current.extends) {
+      const parent = toolDefs.find((t) => t.name === current.extends);
+      if (!parent)
+        throw new Error(
+          `Tool "${current.name}" extends unknown tool "${current.extends}"`,
+        );
+      chain.unshift(parent);
+      current = parent;
+    }
+
+    // Merge: root provides base, each child overrides
+    const merged: ToolDef = {
+      kind: "tool",
+      name,
+      fn: chain[0].fn, // fn from root ancestor
+      deps: [],
+      wires: [],
+    };
+
+    for (const def of chain) {
+      // Merge deps (dedupe by handle)
+      for (const dep of def.deps) {
+        if (!merged.deps.some((d) => d.handle === dep.handle)) {
+          merged.deps.push(dep);
+        }
+      }
+      // Merge wires (child overrides parent by target)
+      for (const wire of def.wires) {
+        const idx = merged.wires.findIndex((w) => w.target === wire.target);
+        if (idx >= 0) merged.wires[idx] = wire;
+        else merged.wires.push(wire);
+      }
+    }
+
+    return merged;
+  }
+
+  /** Resolve a tool definition's wires into a nested input object */
+  private async resolveToolWires(
+    toolDef: ToolDef,
+    input: Record<string, any>,
+  ): Promise<void> {
+    for (const wire of toolDef.wires) {
+      if (wire.kind === "constant") {
+        setNested(input, parsePath(wire.target), wire.value);
+      } else {
+        const value = await this.resolveToolSource(wire.source, toolDef);
+        setNested(input, parsePath(wire.target), value);
+      }
+    }
+  }
+
+  /** Resolve a source reference from a tool wire against its dependencies */
+  private async resolveToolSource(
+    source: string,
+    toolDef: ToolDef,
+  ): Promise<any> {
+    const dotIdx = source.indexOf(".");
+    const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
+    const restPath =
+      dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
+
+    const dep = toolDef.deps.find((d) => d.handle === handle);
+    if (!dep)
+      throw new Error(`Unknown source "${handle}" in tool "${toolDef.name}"`);
+
+    let value: any;
+    if (dep.kind === "config") {
+      value = this.config ?? this.parent?.config;
+    } else if (dep.kind === "tool") {
+      value = await this.resolveToolDep(dep.tool);
+    }
+
+    for (const segment of restPath) {
+      value = value?.[segment];
+    }
+    return value;
+  }
+
+  /** Call a tool dependency (cached per request) */
+  private resolveToolDep(toolName: string): Promise<any> {
+    // Check parent first (shadow trees delegate)
+    if (this.parent) return this.parent.resolveToolDep(toolName);
+
+    if (this.toolDepCache.has(toolName))
+      return this.toolDepCache.get(toolName)!;
+
+    const promise = (async () => {
+      const toolDef = this.resolveToolDefByName(toolName);
+      if (!toolDef) throw new Error(`Tool dependency "${toolName}" not found`);
+
+      const input: Record<string, any> = {};
+      await this.resolveToolWires(toolDef, input);
+
+      const fn = this.toolFns?.[toolDef.fn!];
+      if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
+      return fn(input);
+    })();
+
+    this.toolDepCache.set(toolName, promise);
+    return promise;
+  }
+
+  schedule(target: Trunk): any {
+    // Delegate to parent (shadow trees don't schedule directly)
+    if (this.parent) {
+      return this.parent.schedule(target);
+    }
+
+    return (async () => {
+      // Find all bridge wires whose "to" trunk matches the target
+      const bridgeWires =
+        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+
+      // Look up ToolDef for this target
+      const toolName = this.getToolName(target);
+      const toolDef = this.resolveToolDefByName(toolName);
+
+      // Build input object: tool wires first (base), then bridge wires (override)
+      const input: Record<string, any> = {};
+
+      if (toolDef) {
+        await this.resolveToolWires(toolDef, input);
+      }
+
+      // Resolve bridge wires and apply on top
+      const resolved = await Promise.all(
+        bridgeWires.map(async (w): Promise<[string[], any]> => {
+          const value = "value" in w ? w.value : await this.pullSingle(w.from);
+          return [w.to.path, value];
+        }),
+      );
+      for (const [path, value] of resolved) {
+        setNested(input, path, value);
+      }
+
+      // Call ToolDef-backed tool function
+      if (toolDef) {
+        const fn = this.toolFns?.[toolDef.fn!];
+        if (!fn)
+          throw new Error(`Tool function "${toolDef.fn}" not registered`);
+        return fn(input);
+      }
+
+      // Direct tool function lookup by name (simple or dotted)
+      const directFn = this.toolFns?.[toolName];
+      if (directFn) {
+        return directFn(input);
+      }
+
+      throw new Error(`No tool found for "${toolName}"`);
+    })();
+  }
+
+  shadow(): ExecutionTree {
+    return new ExecutionTree(
+      this.trunk,
+      this.instructions,
+      this.toolFns,
+      undefined,
+      this,
+    );
+  }
+
+  private async pullSingle(ref: NodeRef): Promise<any> {
+    const key = trunkKey(ref);
+    let value: any = this.state[key] ?? this.parent?.state[key];
+
+    if (value === undefined) {
+      this.state[key] = this.schedule(ref);
+      value = this.state[key];
+    }
+
+    if (!ref.path.length) {
+      return value;
+    }
+
+    return (async () => {
+      let result: any = await Promise.resolve(value);
+      for (const segment of ref.path) {
+        result = result[segment];
+      }
+      return result;
+    })();
+  }
+
+  async pull(refs: NodeRef[]): Promise<any> {
+    return Promise.any(refs.map((ref) => this.pullSingle(ref)));
+  }
+
+  push(args: Record<string, any>) {
+    this.state[trunkKey(this.trunk)] = args;
+  }
+
+  /** Resolve a set of matched wires — constants win, then pull from sources */
+  private resolveWires(wires: Wire[]): Promise<any> {
+    const constant = wires.find(
+      (w): w is Extract<Wire, { value: string }> => "value" in w,
+    );
+    if (constant) return Promise.resolve(constant.value);
+
+    const pulls = wires.filter(
+      (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
+    );
+    return this.pull(pulls.map((w) => w.from));
+  }
+
+  async response(ipath: Path, array: boolean): Promise<any> {
+    // Build path segments from GraphQL resolver info
+    const pathSegments: string[] = [];
+    let index = ipath;
+    while (index.prev) {
+      pathSegments.unshift(`${index.key}`);
+      index = index.prev;
+    }
+
+    if (pathSegments.length === 0) {
+      // Direct output for scalar/list return types (e.g. [String!])
+      const directOutput =
+        this.bridge?.wires.filter(
+          (w) =>
+            sameTrunk(w.to, this.trunk) &&
+            w.to.path.length === 1 &&
+            w.to.path[0] === this.trunk.field,
+        ) ?? [];
+      if (directOutput.length > 0) {
+        return this.resolveWires(directOutput);
+      }
+    }
+
+    // Strip numeric indices (array positions) from path for wire matching
+    const cleanPath = pathSegments.filter((p) => !/^\d+$/.test(p));
+
+    // Find wires whose target matches this trunk + path
+    const matches =
+      this.bridge?.wires.filter(
+        (w) =>
+          !w.to.element &&
+          sameTrunk(w.to, this.trunk) &&
+          pathEquals(w.to.path, cleanPath),
+      ) ?? [];
+
+    if (matches.length > 0) {
+      const response = this.resolveWires(matches);
+
+      if (!array) {
+        return response;
+      }
+
+      // Array: create shadow trees for per-element resolution
+      const items = (await response) as any[];
+      return items.map((item) => {
+        const s = this.shadow();
+        s.state[trunkKey({ ...this.trunk, element: true })] = item;
+        return s;
+      });
+    }
+
+    // Return self to trigger downstream resolvers
+    return this;
+  }
+}
