@@ -73,7 +73,7 @@ const fallback = { "lat": 0 }
 
 ---
 
-tool myApi httpCall
+extend httpCall as myApi
   baseUrl = "https://example.com"
 
 ---
@@ -168,7 +168,7 @@ maxItems <- c.defaults.maxItems
 describe("parseBridge: tool on error", () => {
   test("on error = <json> is parsed as onError wire with value", () => {
     const instructions = parseBridge(`
-tool myApi httpCall
+extend httpCall as myApi
   on error = { "lat": 0, "lon": 0 }
 `);
     const tool = instructions[0] as ToolDef;
@@ -182,7 +182,7 @@ tool myApi httpCall
 
   test("on error <- source is parsed as onError wire with source", () => {
     const instructions = parseBridge(`
-tool myApi httpCall
+extend httpCall as myApi
   with context
   on error <- context.fallbacks.geo
 `);
@@ -197,7 +197,7 @@ tool myApi httpCall
 
   test("on error multi-line JSON", () => {
     const instructions = parseBridge(`
-tool myApi httpCall
+extend httpCall as myApi
   on error = {
     "lat": 0,
     "lon": 0
@@ -213,10 +213,10 @@ tool myApi httpCall
 
   test("child tool inherits parent on error", () => {
     const instructions = parseBridge(`
-tool base httpCall
+extend httpCall as base
   on error = { "fallback": true }
 
-tool base.child extends base
+extend base as base.child
   method = GET
 `);
     // The engine resolves extends chains at runtime, so we just verify
@@ -231,7 +231,7 @@ tool base.child extends base
 describe("serializeBridge: tool on error roundtrip", () => {
   test("on error = <json> roundtrips", () => {
     const input = `
-tool myApi httpCall
+extend httpCall as myApi
   on error = {"lat":0,"lon":0}
 `;
     const instructions = parseBridge(input);
@@ -240,7 +240,7 @@ tool myApi httpCall
 
   test("on error <- source roundtrips", () => {
     const input = `
-tool myApi httpCall
+extend httpCall as myApi
   with context
   on error <- context.fallbacks.geo
 `;
@@ -262,7 +262,7 @@ describe("tool on error: end-to-end", () => {
 
   test("on error = <json> returns fallback when tool throws", async () => {
     const bridgeText = `
-tool flakyApi httpCall
+extend httpCall as flakyApi
   on error = { "lat": 0, "lon": 0 }
 
 ---
@@ -294,7 +294,7 @@ lon <- api.lon
 
   test("on error <- context returns context fallback when tool throws", async () => {
     const bridgeText = `
-tool flakyApi httpCall
+extend httpCall as flakyApi
   with context
   on error <- context.fallbacks.geo
 
@@ -330,7 +330,7 @@ lon <- api.lon
 
   test("on error is NOT used when tool succeeds", async () => {
     const bridgeText = `
-tool api httpCall
+extend httpCall as api
   on error = { "lat": 0, "lon": 0 }
 
 ---
@@ -362,10 +362,10 @@ lon <- api.lon
 
   test("child inherits parent on error through extends chain", async () => {
     const bridgeText = `
-tool base httpCall
+extend httpCall as base
   on error = { "lat": 0, "lon": 0 }
 
-tool base.child extends base
+extend base as base.child
   method = GET
   path = /geocode
 
@@ -618,7 +618,7 @@ name <- api.name ?? "unknown"
 
   test("?? catches chain failure (dep tool fails)", async () => {
     const bridgeText = `
-tool flakyGeo httpCall
+extend httpCall as flakyGeo
   baseUrl = "https://broken.test"
 
 ---
@@ -669,7 +669,7 @@ describe("combined: on error + ?? + const", () => {
     // Tool has on error, so lat/lon come from there.
     // 'extra' has no tool fallback but has wire ??
     const bridgeText = `
-tool geo httpCall
+extend httpCall as geo
   on error = { "lat": 0, "lon": 0 }
 
 ---

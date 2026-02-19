@@ -39,12 +39,12 @@ const maxRetries = 3
 
 Access const values in bridges or tools via `with const as c`, then reference as `c.<name>.<path>`.
 
-### 2. Tool Blocks (`tool`)
+### 2. Extend Blocks (`extend`)
 
-Defines the "Where" and the "How."
+Defines the "Where" and the "How." Takes a function (or parent tool) and configures i, giving it a new namet.
 
 ```hcl
-tool <name> [extends <parent>] [<toolFunction>]
+extend <source> as <name>
   [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from context/tool
@@ -53,6 +53,9 @@ tool <name> [extends <parent>] [<toolFunction>]
   <param> <- <source>             # Dynamic wire
 
 ```
+
+When `<source>` is a function name (e.g. `httpCall`), a new tool is created.
+When `<source>` is an existing tool name, the new tool inherits its configuration.
 
 ### 3. Bridge Blocks (`bridge`)
 
@@ -81,7 +84,7 @@ bridge <Type.field>
 
 Two layers of fault tolerance prevent a single API failure from crashing the response:
 
-1. **Layer 1 — Tool `on error`**: Catches tool execution failures. Child tools inherit this via `extends`.
+1. **Layer 1 — Tool `on error`**: Catches tool execution failures. Child tools inherit this via `extend`.
 2. **Layer 2 — Wire `??` fallback**: Catches any failure in the resolution chain (missing data, network timeout) as a last resort.
 
 ```hcl
@@ -114,7 +117,7 @@ result <- transform|normalize|i.rawData
 Full example with a tool with 2 input parameters.
 
 ```hcl
-tool convert currencyConverter
+extend currencyConverter as convert
   currency = EUR   # default currency
 
 bridge Query.price
@@ -140,6 +143,7 @@ totalPrice <- c|i.totalPrice
 | **`\|`** | **Pipe** | Chains data through tools right-to-left. | |
 | **`??`** | **Fallback** | Wire-level default if the resolution chain fails. | |
 | **`on error`** | **Tool Fallback** | Returns a default if the tool's `fn(input)` throws. | |
+| **`extend`** | **Tool Definition** | Configures a function or extends a parent tool. | |
 | **`const`** | **Named Value** | Declares reusable JSON constants. | |
 | **`[] <- []`** | **Map** | Iterates over arrays to create nested wire contexts. | |
 
@@ -184,7 +188,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 ## Built-in Tools
 
-The Bridge ships with built-in tools under the `std` namespace, always available by default. The `httpCall` tool lives at the root level for use in `tool` blocks.
+The Bridge ships with built-in tools under the `std` namespace, always available by default. The `httpCall` tool lives at the root level for use in `extend` blocks.
 
 | Namespace | Tool | Input | Output | Description |
 | --- | --- | --- | --- | --- |
@@ -197,7 +201,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 
 ### Using Built-in Tools
 
-**No `tool` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
+**No `extend` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
 
 ```hcl
 bridge Query.format
@@ -209,10 +213,10 @@ upper <- up|i.text
 lower <- lo|i.text
 ```
 
-Use a `tool` block only when you need to configure defaults:
+Use an `extend` block when you need to configure defaults:
 
 ```hcl
-tool pf std.pickFirst
+extend std.pickFirst as pf
   strict = true
 
 bridge Query.onlyResult

@@ -219,7 +219,7 @@ describe("scheduling: pipe forks run in parallel", () => {
   `;
 
   const bridgeText = `
-tool double slowDoubler
+extend slowDoubler as double
 
 ---
 
@@ -500,28 +500,28 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
   `;
 
   const bridgeText = `
-tool authService httpCall
+extend httpCall as authService
   with context
   baseUrl = "https://auth.test"
   method = POST
   path = /token
   body.clientId <- context.auth.clientId
 
-tool quotaService httpCall
+extend httpCall as quotaService
   with context
   baseUrl = "https://quota.test"
   method = GET
   path = /check
   headers.key <- context.quota.apiKey
 
-tool mainApi httpCall
+extend httpCall as mainApi
   with authService as auth
   with quotaService as quota
   baseUrl = "https://api.test"
   headers.Authorization <- auth.access_token
   headers.X-Quota <- quota.token
 
-tool mainApi.getData extends mainApi
+extend mainApi as mainApi.getData
   method = GET
   path = /data
 

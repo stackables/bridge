@@ -10,7 +10,10 @@ import { toArray } from "./to-array.js";
  *
  * Referenced in `.bridge` files as `std.upperCase`, `std.pickFirst`, etc.
  */
+const httpCallFn = createHttpCall();
+
 export const std = {
+  httpCall: httpCallFn,
   upperCase,
   lowerCase,
   findObject,
@@ -34,7 +37,6 @@ export const std = {
  */
 export const builtinTools = {
   std,
-  httpCall: createHttpCall(),
 } as const;
 
 export { createHttpCall } from "./http-call.js";

@@ -108,9 +108,11 @@ Three block types, multiple operators.
 ### Block types
 | Block | Purpose |
 |---|---|
-| `tool` | Configures an API call — URL, headers, params |
+| `extend` | Configures a function or extends a parent tool — URL, headers, params |
 | `bridge` | Connects a GraphQL field to tools |
 | `const` | Declares named JSON constants reusable across tools and bridges |
+
+> `tool` keyword is still accepted for backward compatibility but `extend` is the canonical syntax.
 
 ### `const` blocks
 Declare named values as raw JSON. Multiple consts can exist in one file.
@@ -135,21 +137,21 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
 | `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
 
-### `tool` blocks
-Define a reusable API call configuration. The first word after the tool name is the **function name** — looked up in the `tools` map at runtime.
+### `extend` blocks
+Define a reusable API call configuration. Syntax: `extend <source> as <name>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
 
 ```hcl
-tool hereapi httpCall
+extend httpCall as hereapi
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-tool hereapi.geocode extends hereapi
+extend hereapi as hereapi.geocode
   method = GET
   path = /geocode
 ```
 
-**`extends`** merges wires from the parent chain. The engine builds the deepest child's input by:
+When extending a parent tool, the engine merges wires from the parent chain by:
 1. Walking the `extends` chain from root to leaf
 2. Merging wires (child overrides parent by `target` path; `onError` wires merge by kind — child wins)
 3. Merging deps (deduplicated by handle name)
@@ -176,10 +178,10 @@ results[] <- gc.items[]
 ```
 
 **`with input as i`** — binds GraphQL field arguments.  
-**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want defaults or `extends`.  
+**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `extend` block is required. An `extend` block is only needed when you want to configure defaults or extend a parent tool.  
 **`results[] <- gc.items[]`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element.
 
-Example — pipe-like built-in tools need no `tool` block:
+Example — pipe-like built-in tools need no `extend` block:
 ```hcl
 bridge Query.format
   with std.upperCase as up
@@ -228,7 +230,7 @@ Multiple wires can target the same field (e.g. two providers). The engine races 
 ## Design Decisions Made (and why)
 
 ### No backward compat / no `provider` keyword
-The old API had a `provider` keyword and a `legacyProviderCall` option. All of this was removed. The `tool` keyword is the unified primitive.
+The old API had a `provider` keyword and a `legacyProviderCall` option. All of this was removed. The `extend` keyword is the canonical syntax; `tool` is kept for backward compatibility.
 
 ### `gateway.ts` is not public API
 `createGateway()` is a test helper. It wraps graphql-yoga + `bridgeTransform` for convenience in tests. It lives in `test/_gateway.ts`. The library itself has no dependency on graphql-yoga — users bring their own server.
@@ -242,7 +244,7 @@ Multi-provider routing was first implemented with a `Record<string, Instruction[
 ### Two-layer fallback architecture
 Fault tolerance is split into two independent layers that compose:
 
-1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `extends` chains (child overrides parent).
+1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `extend` chains (child overrides parent).
 2. **Wire `??` fallback** — catches any failure in the entire resolution chain (tool down, dep failure, missing field). Placed on the terminal wire. On pipe chains, the `??` sits on the output wire so it catches the full chain.
 
 If both are present, `on error` fires first (tool scope). If the tool fallback itself fails or doesn’t apply, `??` catches the residual.
@@ -251,7 +253,7 @@ If both are present, `on error` fires first (tool scope). If the tool fallback i
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
 ### Namespaced tools and `std` is always bundled
-`builtinTools` is a nested object: `{ std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, reference them as `std.upperCase`, `std.pickFirst`, etc. The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map. `httpCall` stays at root level for use as the function name in `tool` blocks.
+`builtinTools` is a nested object: `{ std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, reference them as `std.upperCase`, `std.pickFirst`, etc. The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map. `httpCall` stays at root level for use as the function name in `extend` blocks.
 
 ---
 
@@ -277,7 +279,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**169 tests, all passing.**
+**170 tests, all passing.**
 
 ---
 
@@ -285,7 +287,7 @@ Test runner command: `node --import tsx/esm --test test/*.test.ts`
 
 ```
 examples/
-  yoga-server/      — weather API: chains geocoding + weather, no API keys needed
+  weather-api/      — weather API: chains geocoding + weather, no API keys needed
   builtin-tools/    — std namespace tools (upperCase, lowerCase, findObject) without external APIs
 ```
 

@@ -54,7 +54,7 @@ export function parseBridge(text: string): Instruction[] {
 
     for (let i = 0; i < blockLines.length; i++) {
       const trimmed = blockLines[i].trim();
-      if (/^(tool|bridge|const)\s/i.test(trimmed) && currentLines.length > 0) {
+      if (/^(tool|bridge|const|extend)\s/i.test(trimmed) && currentLines.length > 0) {
         // Check if any non-blank content exists
         if (currentLines.some((l) => l.trim())) {
           subBlocks.push({ startOffset: currentOffset, lines: currentLines });
@@ -78,15 +78,15 @@ export function parseBridge(text: string): Instruction[] {
         firstContentLine++;
 
       const firstLine = sub.lines[firstContentLine]?.trim();
-      if (firstLine && /^tool\s/i.test(firstLine)) {
-        instructions.push(parseToolBlock(subText, sub.startOffset + firstContentLine));
+      if (firstLine && /^(tool|extend)\s/i.test(firstLine)) {
+        instructions.push(parseToolBlock(subText, sub.startOffset + firstContentLine, instructions));
       } else if (firstLine && /^bridge\s/i.test(firstLine)) {
         instructions.push(...parseBridgeBlock(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && /^const\s/i.test(firstLine)) {
         instructions.push(...parseConstLines(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && !firstLine.startsWith("#")) {
         throw new Error(
-          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool", "bridge", or "const" declaration, got: ${firstLine}`,
+          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool", "extend", "bridge", or "const" declaration, got: ${firstLine}`,
         );
       }
     }
@@ -658,20 +658,33 @@ function parseConstLines(block: string, lineOffset: number): ConstDef[] {
 // ── Tool block parser ───────────────────────────────────────────────────────
 
 /**
- * Parse a `tool` block into a ToolDef instruction.
+ * Parse a `tool` or `extend` block into a ToolDef instruction.
  *
- * Format (root tool):
+ * Legacy format (root tool):
  *   tool hereapi httpCall
  *     with context
  *     baseUrl = "https://geocode.search.hereapi.com/v1"
  *     headers.apiKey <- context.hereapi.apiKey
  *
- * Format (child tool with extends):
+ * Legacy format (child tool with extends):
  *   tool hereapi.geocode extends hereapi
  *     method = GET
  *     path = /geocode
+ *
+ * New format (extend):
+ *   extend httpCall as hereapi
+ *     with context
+ *     baseUrl = "https://geocode.search.hereapi.com/v1"
+ *
+ *   extend hereapi as hereapi.geocode
+ *     method = GET
+ *     path = /geocode
+ *
+ * When using `extend`, if the source matches a previously-defined tool name,
+ * it's treated as an extends (child inherits parent). Otherwise the source
+ * is treated as a function name.
  */
-function parseToolBlock(block: string, lineOffset: number): ToolDef {
+function parseToolBlock(block: string, lineOffset: number, previousInstructions?: Instruction[]): ToolDef {
   const lines = block.split("\n").map((l) => l.trimEnd());
 
   /** 1-based global line number for error messages */
@@ -703,6 +716,26 @@ function parseToolBlock(block: string, lineOffset: number): ToolDef {
         continue;
       }
       throw new Error(`Line ${ln(i)}: Invalid tool declaration: ${line}`);
+    }
+
+    // Extend declaration: extend <source> as <name>
+    if (/^extend\s/i.test(line)) {
+      const extendMatch = line.match(/^extend\s+(\S+)\s+as\s+(\S+)$/i);
+      if (!extendMatch) {
+        throw new Error(`Line ${ln(i)}: Invalid extend declaration: ${line}. Expected: extend <source> as <name>`);
+      }
+      const source = extendMatch[1];
+      toolName = extendMatch[2];
+      // If source matches a previously-defined tool, it's an extends; otherwise it's a function name
+      const isKnownTool = previousInstructions?.some(
+        (inst) => inst.kind === "tool" && inst.name === source,
+      );
+      if (isKnownTool) {
+        toolExtends = source;
+      } else {
+        toolFn = source;
+      }
+      continue;
     }
 
     // with context or with context as <handle>
@@ -853,11 +886,11 @@ export function serializeBridge(instructions: Instruction[]): string {
 function serializeToolBlock(tool: ToolDef): string {
   const lines: string[] = [];
 
-  // Declaration line
+  // Declaration line — use `extend` format
   if (tool.extends) {
-    lines.push(`tool ${tool.name} extends ${tool.extends}`);
+    lines.push(`extend ${tool.extends} as ${tool.name}`);
   } else {
-    lines.push(`tool ${tool.name} ${tool.fn}`);
+    lines.push(`extend ${tool.fn} as ${tool.name}`);
   }
 
   // Dependencies

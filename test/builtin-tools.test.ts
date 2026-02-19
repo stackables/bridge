@@ -138,21 +138,22 @@ describe("toArray tool", () => {
 // ── builtinTools bundle ─────────────────────────────────────────────────────
 
 describe("builtinTools bundle", () => {
-  test("has two top-level keys: std and httpCall", () => {
-    assert.deepEqual(Object.keys(builtinTools).sort(), ["httpCall", "std"]);
+  test("has one top-level key: std", () => {
+    assert.deepEqual(Object.keys(builtinTools), ["std"]);
   });
 
-  test("std namespace contains all utility tools", () => {
+  test("std namespace contains all built-in tools", () => {
+    assert.ok(builtinTools.std.httpCall, "httpCall present");
     assert.ok(builtinTools.std.upperCase, "upperCase present");
     assert.ok(builtinTools.std.lowerCase, "lowerCase present");
     assert.ok(builtinTools.std.findObject, "findObject present");
     assert.ok(builtinTools.std.pickFirst, "pickFirst present");
     assert.ok(builtinTools.std.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 5);
+    assert.equal(Object.keys(builtinTools.std).length, 6);
   });
 
-  test("httpCall is a function (factory-produced)", () => {
-    assert.equal(typeof builtinTools.httpCall, "function");
+  test("httpCall is callable with and without std. prefix", () => {
+    assert.equal(typeof builtinTools.std.httpCall, "function");
   });
 });
 
@@ -419,7 +420,7 @@ describe("pickFirst strict through bridge", () => {
   `;
 
   const bridgeText = `
-tool pf std.pickFirst
+extend std.pickFirst as pf
   strict = true
 
 bridge Query.onlyOne

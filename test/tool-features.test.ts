@@ -57,12 +57,12 @@ describe("extends chain", () => {
   // Child inherits those and adds method + path.
   // Bridge wires city from input.
   const bridgeText = `
-tool weatherApi httpCall
+extend httpCall as weatherApi
   with context
   baseUrl = "https://api.weather.test/v2"
   headers.apiKey <- context.weather.apiKey
 
-tool weatherApi.current extends weatherApi
+extend weatherApi as weatherApi.current
   method = GET
   path = /current
 
@@ -113,11 +113,11 @@ city <- w.location.name
     let capturedInput: Record<string, any> = {};
 
     const bridgeWithOverride = `
-tool base httpCall
+extend httpCall as base
   method = GET
   baseUrl = "https://default.test"
 
-tool base.special extends base
+extend base as base.special
   baseUrl = "https://override.test"
   path = /data
 
@@ -168,13 +168,13 @@ describe("context pull", () => {
   `;
 
   const bridgeText = `
-tool myapi httpCall
+extend httpCall as myapi
   with context
   baseUrl = "https://api.test"
   headers.Authorization <- context.myapi.token
   headers.X-Org <- context.myapi.orgId
 
-tool myapi.lookup extends myapi
+extend myapi as myapi.lookup
   method = GET
   path = /lookup
 
@@ -228,7 +228,7 @@ describe("tool-to-tool dependency", () => {
 
   // authService is called first, its output is used in mainApi's headers
   const bridgeText = `
-tool authService httpCall
+extend httpCall as authService
   with context
   baseUrl = "https://auth.test"
   method = POST
@@ -236,13 +236,13 @@ tool authService httpCall
   body.clientId <- context.auth.clientId
   body.secret <- context.auth.secret
 
-tool mainApi httpCall
+extend httpCall as mainApi
   with context
   with authService as auth
   baseUrl = "https://api.test"
   headers.Authorization <- auth.access_token
 
-tool mainApi.getData extends mainApi
+extend mainApi as mainApi.getData
   method = GET
   path = /data
 
@@ -401,7 +401,7 @@ describe("pipe with extra tool params", () => {
   // `currency = EUR` bakes a default.  The `with convertToEur` shorthand
   // (no `as`) uses the tool name itself as the handle.
   const bridgeText = `
-tool convertToEur currencyConverter
+extend currencyConverter as convertToEur
   currency = EUR
 
 ---
@@ -480,7 +480,7 @@ describe("pipe forking", () => {
   const doubler = (input: Record<string, any>) => input.in * 2;
 
   const bridgeText = `
-tool double doubler
+extend doubler as double
 
 ---
 
@@ -537,7 +537,7 @@ describe("pipe named input field", () => {
   const divider = (input: Record<string, any>) => input.dividend / input.divisor;
 
   const bridgeText = `
-tool divide divider
+extend divider as divide
 
 ---
 

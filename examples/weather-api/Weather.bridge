@@ -1,7 +1,7 @@
 # --- Tools ---
 
 # Tool 1: Geocoder (City Name -> Coordinates)
-tool geo httpCall
+extend std.httpCall as geo
   baseUrl = "https://nominatim.openstreetmap.org"
   method = GET
   path = /search
@@ -9,13 +9,13 @@ tool geo httpCall
   headers.User-Agent = "TheBridgeDemo/1.0" 
 
 # Tool 2: Weather (Coordinates -> Temperature)
-tool weather httpCall
+extend std.httpCall as weather
   baseUrl = "https://api.open-meteo.com/v1"
   method = GET
   path = /forecast
 
 # Nominatim returns an array — pick the first result
-tool first std.pickFirst
+extend std.pickFirst as first
 
 # --- Bridges ---
 

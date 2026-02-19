@@ -479,12 +479,12 @@ propertyComments <- pt.result
 describe("parseBridge: tool blocks", () => {
   test("parses a simple GET tool", () => {
     const result = parseBridge(`
-tool hereapi httpCall
+extend httpCall as hereapi
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-tool hereapi.geocode extends hereapi
+extend hereapi as hereapi.geocode
   method = GET
   path = /geocode
 
@@ -525,13 +525,13 @@ gc.q <- i.search
 
   test("parses POST tool with constant and pull wires", () => {
     const result = parseBridge(`
-tool sendgrid httpCall
+extend httpCall as sendgrid
   with context
   baseUrl = "https://api.sendgrid.com/v3"
   headers.Authorization <- context.sendgrid.bearerToken
   headers.X-Custom = "static-value"
 
-tool sendgrid.send extends sendgrid
+extend sendgrid as sendgrid.send
   method = POST
   path = /mail/send
 
@@ -570,14 +570,14 @@ sg.content <- i.body
 
   test("parses tool with deps (tool-to-tool)", () => {
     const result = parseBridge(`
-tool authService httpCall
+extend httpCall as authService
   with context
   method = POST
   baseUrl = "https://auth.example.com"
   path = /token
   body.client_id <- context.auth.clientId
 
-tool serviceB httpCall
+extend httpCall as serviceB
   with context
   with authService as auth
   baseUrl = "https://api.serviceb.com"
@@ -609,12 +609,12 @@ sb.q <- i.query
 describe("serializeBridge: tool roundtrip", () => {
   test("GET tool roundtrips", () => {
     const input = `
-tool hereapi httpCall
+extend httpCall as hereapi
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-tool hereapi.geocode extends hereapi
+extend hereapi as hereapi.geocode
   method = GET
   path = /geocode
 
@@ -635,12 +635,12 @@ gc.limit <- i.limit
 
   test("POST tool roundtrips", () => {
     const input = `
-tool sendgrid httpCall
+extend httpCall as sendgrid
   with context
   baseUrl = "https://api.sendgrid.com/v3"
   headers.Authorization <- context.sendgrid.bearerToken
 
-tool sendgrid.send extends sendgrid
+extend sendgrid as sendgrid.send
   method = POST
   path = /mail/send
 
@@ -661,12 +661,12 @@ messageId <- sg.id
 
   test("serialized tool output is human-readable", () => {
     const input = `
-tool hereapi httpCall
+extend httpCall as hereapi
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-tool hereapi.geocode extends hereapi
+extend hereapi as hereapi.geocode
   method = GET
   path = /geocode
 
@@ -677,8 +677,8 @@ bridge Query.geocode
 gc.q <- i.search
 `;
     const output = serializeBridge(parseBridge(input));
-    assert.ok(output.includes("tool hereapi httpCall"));
-    assert.ok(output.includes("tool hereapi.geocode extends hereapi"));
+    assert.ok(output.includes("extend httpCall as hereapi"));
+    assert.ok(output.includes("extend hereapi as hereapi.geocode"));
     assert.ok(output.includes("baseUrl = https://geocode.search.hereapi.com/v1"));
     assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
   });
@@ -714,9 +714,18 @@ gc.q <- i.search
     assert.equal(bridge.field, "geocode");
   });
 
-  test("tool keywords are case-insensitive", () => {
+  test("extend keyword is case-insensitive", () => {
     const tool = parseBridge(`
-Tool hereapi httpCall
+Extend httpCall as hereapi
+  baseUrl = "https://example.com"
+`)[0] as ToolDef;
+    assert.equal(tool.name, "hereapi");
+    assert.equal(tool.fn, "httpCall");
+  });
+
+  test("tool keyword backward compatibility", () => {
+    const tool = parseBridge(`
+tool hereapi httpCall
   baseUrl = "https://example.com"
 `)[0] as ToolDef;
     assert.equal(tool.name, "hereapi");
@@ -725,10 +734,10 @@ Tool hereapi httpCall
 
   test("--- separator with surrounding whitespace", () => {
     const result = parseBridge(`
-tool hereapi httpCall
+extend httpCall as hereapi
   baseUrl = "https://example.com"
 
-tool hereapi.geocode extends hereapi
+extend hereapi as hereapi.geocode
   method = GET
   path = /geocode
 

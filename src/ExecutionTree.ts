@@ -114,8 +114,12 @@ export class ExecutionTree {
       const flat = (this.toolFns as any)?.[name];
       return typeof flat === "function" ? flat : undefined;
     }
+    // Try root level first
     const fn = (this.toolFns as any)?.[name];
-    return typeof fn === "function" ? fn : undefined;
+    if (typeof fn === "function") return fn;
+    // Fall back to std namespace (builtins are callable without std. prefix)
+    const stdFn = (this.toolFns as any)?.std?.[name];
+    return typeof stdFn === "function" ? stdFn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */
