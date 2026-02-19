@@ -3,267 +3,174 @@
 **Declarative dataflow for GraphQL.**
 Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, no codegen, no plumbing.
 
-```
+```bash
 npm install @stackables/bridge
+
 ```
 
 ---
 
 ## The Idea
 
-Most GraphQL backends are just plumbing: take input, call an API, rename fields, call another API with the result, and return. **The Bridge** turns that manual labor into a declarative graph of intent.
+Most GraphQL backends are just plumbing: take input, call an API, rename fields, and return. **The Bridge** turns that manual labor into a declarative graph of intent.
 
 The engine resolves **backwards from demand**: when a GraphQL query requests `results[0].lat`, the engine traces the wire back to the `position.lat` of a specific API response. Only the data required to satisfy the query is ever fetched or executed.
+
+### What it is (and isn't)
+
+The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your application logic.
+
+* **Use it to:** Morph external API shapes, enforce single exit points for security, and swap providers (e.g., SendGrid to Postmark) without changing app code.
+* **Don't use it for:** Complex business logic or database transactions. Keep the "intelligence" in your Tools; keep the "connectivity" in your Bridge.
 
 ---
 
 ## The Language
 
-The Bridge uses a simple, three-keyword syntax designed for both humans and LLMs.
-
 ### 1. Tool Blocks (`tool`)
 
-A **Tool** is a reusable definition of an external service or a local function. It handles the "Where" and the "How."
+Defines the "Where" and the "How."
 
 ```hcl
-# Base configuration
-tool hereapi httpCall
-  with config
-  baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- config.hereapi.apiKey
-
-# Inheritance: Child overrides or adds to parent
-tool hereapi.geocode extends hereapi
-  method = GET
-  path = /geocode
+tool <name> [extends <parent>] [<toolFunction>]
+  [with config]                   # Injects environment secrets
+  [on error = <json_fallback>]    # Global fallback if the tool fails
+  
+  <param> = <value>               # Constant/Default value
+  <param> <- <source>             # Dynamic wire
 
 ```
-
-- **`extends`**: Builds a specialized tool from a base (inherits wires, auth, and deps).
-- **`with config`**: Injects deployment-level secrets or environment variables.
-- **`with <tool> as <handle>`**: Declares a dependency on another tool (e.g., for OAuth tokens).
 
 ### 2. Bridge Blocks (`bridge`)
 
-A **Bridge** is the resolver logic. It connects a GraphQL schema field to your tools.
+The resolver logic connecting GraphQL schema fields to your tools.
 
 ```hcl
-bridge Query.geocode
-  with hereapi.geocode as gc
-  with input as i
+bridge <Type.field>
+  with <tool> [as <alias>]
+  with input [as <i>]
 
-# Direct wiring
-gc.q <- i.search
-
-# Array mapping (the shadow tree)
-results[] <- gc.items[]
-  .name <- .title
-  .lat  <- .position.lat
-  .lon  <- .position.lng
+  # Field Mapping
+  <field> <- <source> [when <cond>] # Standard Pull (Optional condition)
+  <field> <-! <source>              # Forced Push (Eager execution)
+  
+  # Array Mapping
+  <field>[] <- <source>[]
+    .<sub_field> <- .<sub_src>      # Relative scoping
 
 ```
 
-### 3. Pipe Operator (`|`)
+---
 
-The pipe operator is shorthand for routing data through a tool inline. Instead of explicitly wiring a tool's input and output fields, you write:
+## Key Features
+
+### Resiliency & Conditionals
+
+* **Conditionals (`when`):** Wires only activate if the condition is met.
+* `email <- source.email when i.isAdmin == true`
+
+
+* **Fallbacks (`on error`):** Prevents a single API failure from crashing the entire GraphQL request.
+* `on error = { lat: 0, lon: 0 }`
+
+
+
+### Forced Wires (`<-!`)
+
+By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
 
 ```hcl
-# Without pipe (explicit wiring)
-with pluckText as pt
-pt.in <- rv.comments
-result <- pt
+bridge Mutation.updateUser
+  with db.update as update
+  with audit.logger as log
+  
+  # 'log' runs even if the client doesn't query the audit result
+  status <-! log|i.changeData 
+  result <- update|i.userData
 
-# With pipe — same thing, one line
-with pluckText as pt
-result <- pt|rv.comments
 ```
 
-Chains execute right-to-left — `source → h2 → h1 → dest`:
+### The Pipe Operator (`|`)
+
+Chains data through tools right-to-left: `dest <- tool | source`.
 
 ```hcl
-with normalize as n
-with pluckText as pt
-result <- pt|n|rv.comments   # rv.comments → n → pt → result
+# i.rawData -> normalize -> transform -> result
+result <- transform|normalize|i.rawData 
 ```
 
-**Each pipe use is an independent call.** Two lines using the same handle produce two separate tool invocations:
+Full example with a tool with 2 input parameters.
 
 ```hcl
-with double as d
-doubled.a <- d|i.a   # independent call, input = i.a
-doubled.b <- d|i.b   # independent call, input = i.b
-```
-
-**Named input field** — if the tool's primary input isn't called `in`, specify it with a dot:
-
-```hcl
-with divide as dv
-result <- dv.dividend|i.amount   # wires i.amount → dv.dividend
-dv.divisor <- i.rate             # extra param wired normally
-```
-
-**Extra params** — any non-pipe wires on the handle are applied to every call of that handle:
-
-```hcl
-tool convertToEur currencyConverter
-  currency = EUR   # default baked into the tool
+tool convert currencyConverter
+  currency = EUR   # default currency
 
 bridge Query.price
-  with convertToEur
+  with convert as c
   with input as i
 
-convertToEur.currency <- i.currency   # overrides the default per request
-price <- convertToEur|i.amount
+c.currency <- i.currency   # overrides the default per request
+
+# Safe to use repeatedly
+itemPrice <- c|i.itemPrice
+totalPrice <- c|i.totalPrice
 ```
 
-Tool functions used in pipes receive all their inputs as a flat object and return their result directly — no wrapper needed:
+---
 
-```typescript
-tools: {
-  pluckText:         ({ in: items })           => items.map(i => i.text),
-  currencyConverter: ({ in: amount, currency }) => amount / rates[currency],
-}
-```
+## Syntax Reference
 
-### 4. Forced Wires (`<-!`)
-
-By default the engine is **pull-based** — a tool only runs when a GraphQL field demands its output. A **forced wire** (`<-!`) overrides this: the target tool is scheduled eagerly as soon as the query begins, even if no field ever reads the result.
-
-This is useful for **side-effect-only tools** like audit logging, analytics, cache warming, or webhook dispatch.
-
-```hcl
-bridge Mutation.checkout
-  with payment.charge as pay
-  with audit.log as audit
-  with input as i
-
-pay.amount <- i.total
-audit.action <-! i.event        # runs even if no field reads audit output
-audit.userId <-! i.userId
-result <- pay.receipt
-```
-
-Key behaviors:
-
-- **Fire-and-forget:** The forced tool runs in parallel with demand-driven tools. The response does not wait for it unless a field explicitly reads its output.
-- **Error isolation:** If a forced tool throws, the main query result is unaffected.
-- **Works with pipes:** `result <-! transform|i.data` forces the entire pipe chain to execute.
-- **Mixes freely with `<-`:** You can wire some inputs as forced and others as regular pulls on the same tool.
-
-```hcl
-# Forced pipe chain — sideEffect tool runs even if 'processed' is not queried
-processed <-! sideEffect|normalize|i.rawData
-```
-
-### 5. Syntax Reference
-
-| Operator            | Type         | Behavior                                                                  |
-| ------------------- | ------------ | ------------------------------------------------------------------------- |
-| **`=`**             | **Constant** | Sets a static value (e.g., `method = GET`).                               |
-| **`<-`**            | **Wire**     | Pulls data from a source at runtime.                                      |
-| **`<-!`**           | **Force**    | Eagerly schedules the target tool, even if no field demands its output.   |
-| **`<- handle\|…`** | **Pipe**     | Routes data through a tool inline. Each use is an independent call.       |
-| **`[] <- []`**      | **Map**      | Iterates over an array, creating a shadow context for nested wires.       |
+| Operator | Type | Behavior | Notes |
+| --- | --- | --- | --- |
+| **`=`** | **Constant** | Sets a static value. | |
+| **`<-`** | **Wire** | Pulls data from a source at runtime. | |
+| **`<-!`** | **Force** | Eagerly schedules a tool (for side-effects). | |
+| **`when`** | **Guard** | Only executes the wire if the condition is true. | idea |
+| **`on error`** | **Fallback** | Provides a default value if a tool call fails. | planned |
+| **`[] <- []`** | **Map** | Iterates over arrays to create nested wire contexts. | |
 
 ---
 
 ## Usage
 
-The Bridge is designed to be unopinionated. It wraps your existing GraphQL schema, acting as the logic layer that handles the `resolve` function for any field it's wired to.
+### 1. Basic Setup
 
-### 1. Basic Setup (with GraphQL Yoga)
+The Bridge wraps your existing GraphQL schema, handling the `resolve` functions automatically.
 
 ```typescript
 import { createSchema, createYoga } from "graphql-yoga";
-import { createServer } from "node:http";
 import { bridgeTransform, parseBridge } from "@stackables/bridge";
-
-const typeDefs = /* your .graphql string */;
-const instructions = parseBridge(/* your .bridge string */);
-
-// Transform the schema: Bridge now handles the resolvers
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions);
-
-const yoga = createYoga({
-  schema,
-  context: () => ({
-    // Config is injected into 'with config' blocks
-    config: { hereapi: { apiKey: process.env.HEREAPI_KEY } },
-  }),
-});
-
-createServer(yoga).listen(4000);
-
-```
-
-### 2. Custom Tools (Data Transformation)
-
-For logic beyond HTTP calls, register custom tool functions.
-
-```typescript
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
-  tools: {
-    centsToUsd: (input: { cents: number }) => ({ dollars: input.cents / 100 }),
-  },
-});
-```
-
----
-
-## Advanced: Multi-Provider Routing
-
-The Bridge excels at "Provider Agnostic" APIs. You can have multiple `.bridge` files implementing the same GraphQL field (e.g., `sendgrid.bridge` and `mailjet.bridge`). Pass a function instead of a static array to select the implementation per-request:
-
-```typescript
-import { bridgeTransform, parseBridge } from "@stackables/bridge";
-
-const bridges = {
-  sendgrid: parseBridge(sendgridText),
-  mailjet: parseBridge(mailjetText),
-};
 
 const schema = bridgeTransform(
-  createSchema({ typeDefs }),
-  (ctx) => bridges[ctx.provider] ?? bridges.sendgrid,
+  createSchema({ typeDefs }), 
+  parseBridge(bridgeFileText)
 );
 
 const yoga = createYoga({
   schema,
-  context: (req) => ({
-    provider: req.headers.get("x-provider"),
-    config: { /* ... */ },
+  context: () => ({
+    config: { api: { key: process.env.API_KEY } },
   }),
 });
+
 ```
 
-The routing logic is entirely yours — header-based, tenant-based, cookie-based, whatever you need. The engine just calls the function with the full GraphQL context.
+### 2. Custom Tools
+
+```typescript
+const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+  tools: {
+    toCents: ({ in: dollars }) => ({ cents: dollars * 100 }),
+  },
+});
+
+```
 
 ---
 
 ## Why The Bridge?
 
-- **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic 50 times in TypeScript.
-- **LLM-Friendly:** The `tool` and `bridge` metaphors are natively understood by modern AI models for integration generation.
-- **Lazy by Design:** If a client doesn't ask for a field, the engine doesn't fetch the data. No "over-fetching" by default.
-- **Edge-Ready:** Small footprint, no heavy dependencies, works in Node, Bun, and Cloudflare Workers.
-
----
-
-## API Reference
-
-### `parseBridge(text: string): Instruction[]`
-
-Parses Bridge-lang text into a serializable instruction set.
-
-### `bridgeTransform(schema, instructions, options?)`
-
-Wraps a `GraphQLSchema`. `instructions` can be an `Instruction[]` or a `(context) => Instruction[]` function for per-request routing. Options:
-
-- `tools` — custom tool functions
-- `configKey` — context key to read config from (default: `"config"`)
-
-Config is read from `context.config` (or `context[configKey]`) at request time.
-
-### `createHttpCall(fetchFn?)`
-
-The default `httpCall` implementation. Supports all standard HTTP methods. Automatically maps parameters to query strings (GET) or JSON bodies (POST/PUT).
+* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic 50 times.
+* **Provider Agnostic:** Swap implementations (e.g., `mailjet.bridge` vs `sendgrid.bridge`) at the request level.
+* **LLM-Friendly:** Declarative metaphors that modern AI models understand natively.
+* **Edge-Ready:** Small footprint; works in Node, Bun, and Cloudflare Workers.
