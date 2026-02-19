@@ -145,6 +145,18 @@ export type ToolCallFn = (
 ) => Promise<Record<string, any>>;
 
 /**
+ * Recursive tool map — supports namespaced tools via nesting.
+ *
+ * Example:
+ *   { std: { upperCase, lowerCase }, httpCall: createHttpCall(), myCompany: { myTool } }
+ *
+ * Lookup is dot-separated: "std.upperCase" → tools.std.upperCase
+ */
+export type ToolMap = {
+  [key: string]: ToolCallFn | ((...args: any[]) => any) | ToolMap;
+};
+
+/**
  * Named constant definition — a reusable value defined in the bridge file.
  *
  * Constants are available in bridge blocks via `with const as c` and in tool

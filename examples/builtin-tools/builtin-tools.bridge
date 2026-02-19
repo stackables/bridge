@@ -1,8 +1,8 @@
-# Built-in tools work out of the box — no tool block needed for pipe-like tools.
+# Built-in tools live under the std namespace — no tool block needed for pipe-like tools.
 
 bridge Query.format
-  with upperCase as up
-  with lowerCase as lo
+  with std.upperCase as up
+  with std.lowerCase as lo
   with input as i
 
 original <- i.text
@@ -11,7 +11,7 @@ lower <- lo|i.text
 
 bridge Query.findEmployee
   with getEmployees as db
-  with findObject as find
+  with std.findObject as find
   with input as i
 
 find.in <- db.employees

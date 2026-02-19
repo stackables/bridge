@@ -31,7 +31,7 @@ src/
   ExecutionTree.ts    — pull-based execution engine (core logic)
   types.ts            — all shared types (NodeRef, Wire, Bridge, ToolDef, etc.)
   tools/
-    index.ts          — builtinTools bundle + re-exports
+    index.ts          — builtinTools bundle (std namespace + httpCall) + re-exports
     http-call.ts      — createHttpCall (REST API tool)
     upper-case.ts     — upperCase string tool
     lower-case.ts     — lowerCase string tool
@@ -55,13 +55,14 @@ import { parseBridge } from "@stackables/bridge";
 import { bridgeTransform } from "@stackables/bridge";
 // bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
 
-import { builtinTools, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
-// builtinTools — default tool bundle: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray }
+import { builtinTools, std, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
+// builtinTools — namespaced tool bundle: { std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }
+// std — the std namespace object (for spreading into overrides)
 // createHttpCall(fetchFn?): ToolCallFn
-// upperCase, lowerCase, findObject — individual tool functions
+// upperCase, lowerCase, findObject — individual tool functions (for direct JS use)
 
 // Types
-import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef, ConstDef } from "@stackables/bridge";
+import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef, ConstDef, ToolMap } from "@stackables/bridge";
 ```
 
 ### `InstructionSource`
@@ -73,11 +74,11 @@ Can be a static array or a **per-request function** for multi-provider routing. 
 ### `BridgeOptions`
 ```typescript
 type BridgeOptions = {
-  tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
+  tools?: ToolMap;
   contextMapper?: (context: any) => Record<string, any>;
 }
 ```
-- `tools` — tool functions by name. Defaults to `builtinTools` (httpCall, upperCase, lowerCase, findObject, pickFirst, toArray). Providing your own `tools` replaces the defaults entirely — spread `builtinTools` to keep them.
+- `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (upperCase, lowerCase, findObject, pickFirst, toArray) and `httpCall` are always included; user-provided tools are shallow-merged on top. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, upperCase: myFn } }`.
 - `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
 ### Context access
@@ -175,14 +176,14 @@ results[] <- gc.items[]
 ```
 
 **`with input as i`** — binds GraphQL field arguments.  
-**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want defaults or `extends`.  
+**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want defaults or `extends`.  
 **`results[] <- gc.items[]`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element.
 
 Example — pipe-like built-in tools need no `tool` block:
 ```hcl
 bridge Query.format
-  with upperCase as up
-  with lowerCase as lo
+  with std.upperCase as up
+  with std.lowerCase as lo
   with input as i
 
 upper <- up|i.text
@@ -249,8 +250,8 @@ If both are present, `on error` fires first (tool scope). If the tool fallback i
 ### Const blocks store raw JSON strings
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
-### `httpCall` is always registered as default
-`builtinTools` is used as the default for `allTools` in `bridge-transform.ts`. If the user provides their own `tools` option, it replaces the defaults entirely. Users who need both built-ins and custom tools should spread `builtinTools` into their tools object.
+### Namespaced tools and `std` is always bundled
+`builtinTools` is a nested object: `{ std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, reference them as `std.upperCase`, `std.pickFirst`, etc. The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map. `httpCall` stays at root level for use as the function name in `tool` blocks.
 
 ---
 
@@ -287,6 +288,7 @@ examples/
   yoga-server/      — basic GraphQL Yoga server with hereapi geocoding
   email/            — mutation example with SendGrid
   apollo-federation/— Apollo Federation subgraph (uses ApolloServer, not Yoga)
+  builtin-tools/    — std namespace tools (upperCase, lowerCase, findObject) without external APIs
 ```
 
 All examples use `.bridge` files. The apollo-federation example shows how to set context in ApolloServer plugins (`requestDidStart` / `didResolveOperation`).

@@ -1,11 +1,11 @@
 import { createSchema, createYoga } from "graphql-yoga";
 import type { InstructionSource } from "../src/bridge-transform.js";
 import { bridgeTransform } from "../src/bridge-transform.js";
-import type { ToolCallFn } from "../src/types.js";
+import type { ToolMap } from "../src/types.js";
 
 type GatewayOptions = {
   context?: Record<string, any>;
-  tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
+  tools?: ToolMap;
 };
 
 export function createGateway(

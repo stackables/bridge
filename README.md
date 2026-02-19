@@ -184,25 +184,25 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 ## Built-in Tools
 
-The Bridge ships with a set of built-in tools available by default. When no `tools` option is provided, `builtinTools` is used automatically.
+The Bridge ships with built-in tools under the `std` namespace, always available by default. The `httpCall` tool lives at the root level for use in `tool` blocks.
 
-| Tool | Input | Output | Description |
-| --- | --- | --- | --- |
-| `httpCall` | `{ baseUrl, method?, path?, headers?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. |
-| `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
-| `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
-| `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
-| `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
-| `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
+| Namespace | Tool | Input | Output | Description |
+| --- | --- | --- | --- | --- |
+| *(root)* | `httpCall` | `{ baseUrl, method?, path?, headers?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. |
+| `std` | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
+| `std` | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
+| `std` | `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
+| `std` | `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
+| `std` | `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
 
 ### Using Built-in Tools
 
-**No `tool` block needed** for pipe-like tools — reference them directly in the `with` header:
+**No `tool` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
 
 ```hcl
 bridge Query.format
-  with upperCase as up
-  with lowerCase as lo
+  with std.upperCase as up
+  with std.lowerCase as lo
   with input as i
 
 upper <- up|i.text
@@ -212,7 +212,7 @@ lower <- lo|i.text
 Use a `tool` block only when you need to configure defaults:
 
 ```hcl
-tool pf pickFirst
+tool pf std.pickFirst
   strict = true
 
 bridge Query.onlyResult
@@ -223,27 +223,29 @@ bridge Query.onlyResult
 value <- pf|api.items
 ```
 
-### Overriding Tools
+### Adding Custom Tools
 
-If you provide a `tools` object it **replaces** the defaults entirely. To keep the built-ins alongside your own tools, spread `builtinTools`:
+The `std` namespace is always included automatically. Just add your own tools — no need to spread `builtinTools`:
 
 ```typescript
-import { bridgeTransform, builtinTools } from "@stackables/bridge";
+import { bridgeTransform } from "@stackables/bridge";
 
 const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   tools: {
-    ...builtinTools,
     myCustomTool: (input) => ({ result: input.value * 2 }),
   },
 });
+// std.upperCase, std.lowerCase, etc. are still available
 ```
 
-If you only need your own tools and none of the built-ins:
+To override a `std` tool, replace the namespace (shallow merge):
 
 ```typescript
+import { bridgeTransform, std } from "@stackables/bridge";
+
 const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   tools: {
-    myOnlyTool: async (input) => fetchFromMyApi(input),
+    std: { ...std, upperCase: myCustomUpperCase },
   },
 });
 ```

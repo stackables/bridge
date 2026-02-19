@@ -7,6 +7,7 @@ import type {
   NodeRef,
   ToolCallFn,
   ToolDef,
+  ToolMap,
   Wire,
 } from "./types.js";
 import { SELF_MODULE } from "./types.js";
@@ -59,7 +60,7 @@ export class ExecutionTree {
   constructor(
     public trunk: Trunk,
     private instructions: Instruction[],
-    private toolFns?: Record<string, ToolCallFn | ((...args: any[]) => any)>,
+    private toolFns?: ToolMap,
     private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
@@ -95,6 +96,26 @@ export class ExecutionTree {
   private getToolName(target: Trunk): string {
     if (target.module === SELF_MODULE) return target.field;
     return `${target.module}.${target.field}`;
+  }
+
+  /** Deep-lookup a tool function by dotted name (e.g. "std.upperCase").
+   *  Falls back to a flat key lookup for backward compat (e.g. "hereapi.geocode" as literal key). */
+  private lookupToolFn(name: string): ToolCallFn | ((...args: any[]) => any) | undefined {
+    if (name.includes(".")) {
+      // Try namespace traversal first
+      const parts = name.split(".");
+      let current: any = this.toolFns;
+      for (const part of parts) {
+        if (current == null || typeof current !== "object") { current = undefined; break; }
+        current = current[part];
+      }
+      if (typeof current === "function") return current;
+      // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
+      const flat = (this.toolFns as any)?.[name];
+      return typeof flat === "function" ? flat : undefined;
+    }
+    const fn = (this.toolFns as any)?.[name];
+    return typeof fn === "function" ? fn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */
@@ -235,7 +256,7 @@ export class ExecutionTree {
       const input: Record<string, any> = {};
       await this.resolveToolWires(toolDef, input);
 
-      const fn = this.toolFns?.[toolDef.fn!];
+      const fn = this.lookupToolFn(toolDef.fn!);
       if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
 
       // on error: wrap the tool call with fallback from onError wire
@@ -301,7 +322,7 @@ export class ExecutionTree {
 
       // Call ToolDef-backed tool function
       if (toolDef) {
-        const fn = this.toolFns?.[toolDef.fn!];
+        const fn = this.lookupToolFn(toolDef.fn!);
         if (!fn)
           throw new Error(`Tool function "${toolDef.fn}" not registered`);
 
@@ -317,7 +338,7 @@ export class ExecutionTree {
       }
 
       // Direct tool function lookup by name (simple or dotted)
-      const directFn = this.toolFns?.[toolName];
+      const directFn = this.lookupToolFn(toolName);
       if (directFn) {
         return directFn(input);
       }

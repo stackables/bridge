@@ -6,27 +6,35 @@ import { pickFirst } from "./pick-first.js";
 import { toArray } from "./to-array.js";
 
 /**
- * Built-in tools bundle.
+ * Standard built-in tools — available under the `std` namespace.
  *
- * Used as the default value for `BridgeOptions.tools`.
- * If you provide your own `tools` object it replaces this entirely —
- * import and spread `builtinTools` if you still need them.
- *
- * ```ts
- * import { builtinTools } from "@stackables/bridge";
- *
- * bridgeTransform(schema, instructions, {
- *   tools: { ...builtinTools, myCustomTool }
- * });
- * ```
+ * Referenced in `.bridge` files as `std.upperCase`, `std.pickFirst`, etc.
  */
-export const builtinTools = {
-  httpCall: createHttpCall(),
+export const std = {
   upperCase,
   lowerCase,
   findObject,
   pickFirst,
   toArray,
+} as const;
+
+/**
+ * Built-in tools bundle.
+ *
+ * Used as the base for `BridgeOptions.tools`. The `std` namespace is always
+ * included; user-provided tools are merged on top.
+ *
+ * ```ts
+ * import { builtinTools } from "@stackables/bridge";
+ *
+ * bridgeTransform(schema, instructions, {
+ *   tools: { myCustomTool }  // std + httpCall are still available
+ * });
+ * ```
+ */
+export const builtinTools = {
+  std,
+  httpCall: createHttpCall(),
 } as const;
 
 export { createHttpCall } from "./http-call.js";

@@ -138,17 +138,17 @@ describe("toArray tool", () => {
 // ── builtinTools bundle ─────────────────────────────────────────────────────
 
 describe("builtinTools bundle", () => {
-  test("contains all expected tools", () => {
-    assert.ok(builtinTools.httpCall, "httpCall present");
-    assert.ok(builtinTools.upperCase, "upperCase present");
-    assert.ok(builtinTools.lowerCase, "lowerCase present");
-    assert.ok(builtinTools.findObject, "findObject present");
-    assert.ok(builtinTools.pickFirst, "pickFirst present");
-    assert.ok(builtinTools.toArray, "toArray present");
+  test("has two top-level keys: std and httpCall", () => {
+    assert.deepEqual(Object.keys(builtinTools).sort(), ["httpCall", "std"]);
   });
 
-  test("has exactly 6 tools", () => {
-    assert.equal(Object.keys(builtinTools).length, 6);
+  test("std namespace contains all utility tools", () => {
+    assert.ok(builtinTools.std.upperCase, "upperCase present");
+    assert.ok(builtinTools.std.lowerCase, "lowerCase present");
+    assert.ok(builtinTools.std.findObject, "findObject present");
+    assert.ok(builtinTools.std.pickFirst, "pickFirst present");
+    assert.ok(builtinTools.std.toArray, "toArray present");
+    assert.equal(Object.keys(builtinTools.std).length, 5);
   });
 
   test("httpCall is a function (factory-produced)", () => {
@@ -171,8 +171,8 @@ describe("default tools (no tools option)", () => {
 
   const bridgeText = `
 bridge Query.greet
-  with upperCase as up
-  with lowerCase as lo
+  with std.upperCase as up
+  with std.lowerCase as lo
   with input as i
 
 upper <- up|i.name
@@ -194,7 +194,7 @@ lower <- lo|i.name
   });
 });
 
-describe("user tools replace defaults entirely", () => {
+describe("user can override std namespace", () => {
   const typeDefs = /* GraphQL */ `
     type Query {
       greet(name: String!): Greeting
@@ -206,18 +206,20 @@ describe("user tools replace defaults entirely", () => {
 
   const bridgeText = `
 bridge Query.greet
-  with upperCase as up
+  with std.upperCase as up
   with input as i
 
 upper <- up|i.name
 `;
 
-  test("custom tools object replaces builtinTools", async () => {
+  test("overriding std replaces its tools", async () => {
     const instructions = parseBridge(bridgeText);
-    // Provide custom upperCase that reverses instead
+    // Replace the entire std namespace with a custom upperCase
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
-        upperCase: (opts: any) => opts.in.split("").reverse().join(""),
+        std: {
+          upperCase: (opts: any) => opts.in.split("").reverse().join(""),
+        },
       },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -230,11 +232,11 @@ upper <- up|i.name
     assert.equal(result.data.greet.upper, "olleH");
   });
 
-  test("missing builtin when overridden produces error", async () => {
+  test("missing std tool when namespace overridden", async () => {
     const instructions = parseBridge(bridgeText);
-    // Provide tools without upperCase at all
+    // Replace std with a namespace that lacks upperCase
     const gateway = createGateway(typeDefs, instructions, {
-      tools: { somethingElse: () => ({}) },
+      tools: { std: { somethingElse: () => ({}) } },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
@@ -246,7 +248,7 @@ upper <- up|i.name
   });
 });
 
-describe("user can spread builtinTools to extend", () => {
+describe("user can add custom tools alongside std", () => {
   const typeDefs = /* GraphQL */ `
     type Query {
       process(text: String!): Processed
@@ -259,7 +261,7 @@ describe("user can spread builtinTools to extend", () => {
 
   const bridgeText = `
 bridge Query.process
-  with upperCase as up
+  with std.upperCase as up
   with reverse as rev
   with input as i
 
@@ -267,11 +269,11 @@ upper <- up|i.text
 custom <- rev|i.text
 `;
 
-  test("builtinTools + custom tool works when spread together", async () => {
+  test("custom tools merge alongside std automatically", async () => {
     const instructions = parseBridge(bridgeText);
+    // No need to spread builtinTools — std is always included
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
-        ...builtinTools,
         reverse: (opts: any) => opts.in.split("").reverse().join(""),
       },
     });
@@ -303,7 +305,7 @@ describe("findObject through bridge", () => {
   const bridgeText = `
 bridge Query.findUser
   with getUsers as db
-  with findObject as find
+  with std.findObject as find
   with input as i
 
 find.in <- db.users
@@ -317,7 +319,6 @@ role <- find.role
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
-        ...builtinTools,
         getUsers: async () => ({
           users: [
             { id: 1, name: "Alice", role: "admin" },
@@ -355,7 +356,7 @@ describe("pipe with built-in tools", () => {
 
   const bridgeText = `
 bridge Query.shout
-  with upperCase as up
+  with std.upperCase as up
   with input as i
 
 value <- up|i.text
@@ -388,7 +389,7 @@ describe("pickFirst through bridge", () => {
 
   const bridgeText = `
 bridge Query.first
-  with pickFirst as pf
+  with std.pickFirst as pf
   with input as i
 
 value <- pf|i.items
@@ -418,7 +419,7 @@ describe("pickFirst strict through bridge", () => {
   `;
 
   const bridgeText = `
-tool pf pickFirst
+tool pf std.pickFirst
   strict = true
 
 bridge Query.onlyOne
@@ -469,8 +470,8 @@ describe("toArray through bridge", () => {
   // Round-trip: wrap single value in array → pick first element back out
   const bridgeText = `
 bridge Query.normalize
-  with toArray as ta
-  with pickFirst as pf
+  with std.toArray as ta
+  with std.pickFirst as pf
   with input as i
 
 value <- pf|ta|i.value
@@ -502,7 +503,7 @@ describe("toArray as tool input normalizer", () => {
   // Use toArray to wrap a scalar, then pass to a custom tool that counts items
   const bridgeText = `
 bridge Query.wrap
-  with toArray as ta
+  with std.toArray as ta
   with countItems as cnt
   with input as i
 
@@ -514,7 +515,6 @@ count <- cnt.count
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
-        ...builtinTools,
         countItems: (opts: any) => ({ count: opts.in.length }),
       },
     });
@@ -543,8 +543,8 @@ describe("inline with — no tool block", () => {
 
   const bridgeText = `
 bridge Query.format
-  with upperCase as up
-  with lowerCase as lo
+  with std.upperCase as up
+  with std.lowerCase as lo
   with input as i
 
 upper <- up|i.text

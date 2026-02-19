@@ -7,12 +7,15 @@ import {
 } from "graphql";
 import { ExecutionTree } from "./ExecutionTree.js";
 import { builtinTools } from "./tools/index.js";
-import type { Instruction, ToolCallFn } from "./types.js";
+import type { Instruction, ToolCallFn, ToolMap } from "./types.js";
 import { SELF_MODULE } from "./types.js";
 
 export type BridgeOptions = {
-  /** Tool functions available to the engine (e.g. { httpCall, centsToUsd, "hereapi.geocode": fn }) */
-  tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
+  /** Tool functions available to the engine.
+   *  Supports namespaced nesting: `{ myNamespace: { myTool } }`.
+   *  The built-in `std` namespace and `httpCall` are always included;
+   *  user tools are merged on top (shallow). */
+  tools?: ToolMap;
   /** Optional function to reshape/restrict the GQL context before it reaches bridge files.
    *  By default the full context is exposed via `with context`. */
   contextMapper?: (context: any) => Record<string, any>;
@@ -65,11 +68,11 @@ export function bridgeTransform(
                 ? instructions(context)
                 : instructions;
 
-            // Use user-provided tools or fall back to built-in bundle
-            const allTools: Record<
-              string,
-              ToolCallFn | ((...args: any[]) => any)
-            > = userTools ?? { ...builtinTools };
+            // Always include builtinTools; user tools merge on top (shallow)
+            const allTools: ToolMap = {
+              ...builtinTools,
+              ...(userTools ?? {}),
+            };
 
             source = new ExecutionTree(
               trunk,

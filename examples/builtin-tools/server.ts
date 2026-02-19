@@ -1,7 +1,7 @@
 import { createSchema, createYoga } from "graphql-yoga";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { bridgeTransform, builtinTools, parseBridge } from "../../src/index.js";
+import { bridgeTransform, parseBridge } from "../../src/index.js";
 
 const typeDefs = readFileSync(
   new URL("./BuiltinTools.graphql", import.meta.url),
@@ -11,10 +11,9 @@ const instructions = parseBridge(
   readFileSync(new URL("./builtin-tools.bridge", import.meta.url), "utf-8"),
 );
 
-// Extend builtinTools with a custom data source
+// Custom tools merge alongside the std namespace automatically
 const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   tools: {
-    ...builtinTools,
     getEmployees: async () => ({
       employees: [
         { id: 1, name: "Alice", department: "Engineering" },
