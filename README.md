@@ -41,7 +41,7 @@ Access const values in bridges or tools via `with const as c`, then reference as
 
 ### 2. Extend Blocks (`extend`)
 
-Defines the "Where" and the "How." Takes a function (or parent tool) and configures i, giving it a new namet.
+Defines the "Where" and the "How." Takes a function (or parent tool) and configures i, giving it a new name.
 
 ```hcl
 extend <source> as <name>
