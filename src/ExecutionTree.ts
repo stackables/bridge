@@ -1,4 +1,3 @@
-import type { Path } from "graphql/jsutils/Path";
 import { parsePath } from "./bridge-format.js";
 import type {
   Bridge,
@@ -11,6 +10,13 @@ import type {
   Wire,
 } from "./types.js";
 import { SELF_MODULE } from "./types.js";
+
+/** Matches graphql's internal Path type (not part of the public exports map) */
+interface Path {
+  readonly prev: Path | undefined;
+  readonly key: string | number;
+  readonly typename: string | undefined;
+}
 
 type Trunk = { module: string; type: string; field: string; instance?: number };
 

@@ -1,16 +1,12 @@
 {
+    "extends": "@tsconfig/node22/tsconfig.json",
     "compilerOptions": {
-        "target": "ES2022",
-        "module": "NodeNext",
-        "moduleResolution": "NodeNext",
-        "strict": true,
-        "esModuleInterop": true,
-        "resolveJsonModule": true,
-        "declaration": true,
-        "composite": true,
-        "rootDir": "src",
         "outDir": "build",
-        "lib": ["ES2022"]
+        "declaration": true,
+        "strictNullChecks": true,
+        "isolatedModules": true
     },
-    "include": ["src"]
+    "include": [
+        "src"
+    ]
 }

@@ -1024,7 +1024,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     (w) => !pipeWireSet.has(w) && (!("from" in w) || !w.from.element),
   );
 
-  const elementGroups = new Map<string, Wire[]>();
+  const elementGroups = new Map<string, Array<Wire & { from: NodeRef }>>();
   for (const w of elementWires) {
     const parent = w.to.path[0];
     if (!elementGroups.has(parent)) elementGroups.set(parent, []);
