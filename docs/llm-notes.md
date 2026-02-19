@@ -133,9 +133,44 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `<-!` | Forced wire — eagerly schedules the target tool even if no field demands its output. Used for side-effect-only tools (audit logging, analytics, cache warming). Error isolation: a forced tool failure does not break the main response. |
 | `<- h1\|h2\|source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
 | `<-! h1\|h2\|source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
-| `?? <json>` | Wire fallback — appended to any `<-` wire. If the resolution chain fails (tool down, dep failure, missing data), the parsed JSON value is returned instead. Example: `lat <- api.lat ?? 0` |
+| `\|\| <source>` | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained. |
+| `\|\| <json>` | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors. |
+| `?? <json>` | Error-fallback literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values. |
+| `?? <source>` | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression. |
 | `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
 | `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
+
+**Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
+```hcl
+# label <- A || B || C || "literal" ?? errorSource
+label <- api.label || backup.label || transform|api.code || "unknown" ?? up|i.errDefault
+
+# Evaluation order:
+# api.label non-null      → use it (fast, returned immediately)
+# api.label null          → try backup.label
+# backup.label null       → try transform(api.code)  (pipe chain)
+# all null                → "unknown"  (|| json literal)
+# all throw               → up(i.errDefault)  (?? pipe source)
+```
+
+`||` source alternatives desugar to multiple wires with the same target. The engine evaluates all in parallel and returns the first non-null value, so cheaper/faster sources naturally win without a cost model.
+
+### Multi-wire priority (duplicate target)
+Multiple wires pointing to the same target field express **source priority**: the engine evaluates all sources in parallel and returns the first that resolves to a non-null value. Cheaper/local sources (input args) resolve before slower remote tools, so priority is naturally ordered by speed.
+
+```hcl
+# Explicit multi-wire form (equivalent to || inline):
+textPart <- i.textBody             # prefer user-supplied plain text (fast, already in args)
+textPart <- convert|i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
+
+# Inline coalesce form (desugars to the same two wires + literal fallback):
+textPart <- i.textBody || convert|i.htmlBody || "empty" ?? i.errorDefault
+```
+
+- If `i.textBody` is non-null → used immediately, `convert` never runs.
+- If `i.textBody` is null → `convert(htmlBody)` result is used.
+- If all sources are null → `||` literal fires.
+- If all sources throw → `??` source/literal fires.
 
 ### `extend` blocks
 Define a reusable API call configuration. Syntax: `extend <source> as <name>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
@@ -222,8 +257,13 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function
 6. Result stored in state, downstream resolvers pick from it
 
-### Why `Promise.any()`
-Multiple wires can target the same field (e.g. two providers). The engine races them with `Promise.any()` and uses the first successful result. Failed/missing sources are silently ignored unless all fail.
+### Multi-wire null-coalescing (was: `Promise.any()`)
+Multiple wires targeting the same field are evaluated in parallel. The engine returns the **first non-null/non-undefined value**. This means:
+- Cheap sources (input args) win over slow tool calls naturally — they're already in state.
+- If all sources resolve to null → resolves `undefined` (allowing `||` to fire).
+- If all sources throw → rejects with `AggregateError` (allowing `??` to fire).
+
+Before this design, `Promise.any()` was used, which raced on fulfillment — meaning a `null` value from a fast source would win over a real value from a slower one. The current implementation skips null/undefined values and only settles once a real value is found or all options are exhausted.
 
 ---
 
@@ -241,13 +281,22 @@ The engine passes the full GraphQL context to `with context` — no wrapping und
 ### Function-based `InstructionSource` instead of `Record<string, Instruction[]>`
 Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => Instruction[]`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
 
-### Two-layer fallback architecture
-Fault tolerance is split into two independent layers that compose:
+### Three-layer fallback architecture
+Fault tolerance is split into three independent layers that compose, innermost-first:
 
 1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `extend` chains (child overrides parent).
-2. **Wire `??` fallback** — catches any failure in the entire resolution chain (tool down, dep failure, missing field). Placed on the terminal wire. On pipe chains, the `??` sits on the output wire so it catches the full chain.
+2. **Wire `||` null-guard** — catches null/undefined resolution. Fires when the source resolves successfully but the value is absent. Can be a JSON literal or a source reference (handle.path or pipe chain).
+3. **Wire `??` error-guard** — catches any failure in the entire resolution chain (tool down, dep failure). Applied as a `.catch()` wrapping the resolved promise (including the `||` layer). Can be a JSON literal **or a source/pipe expression** — if a source, it is scheduled lazily and only executed when the catch fires.
 
-If both are present, `on error` fires first (tool scope). If the tool fallback itself fails or doesn’t apply, `??` catches the residual.
+Firing order when all three are present: `on error` → `||` → `??`. Each layer only fires if the one inside it did not produce a usable value.
+
+| Scenario | Layer that fires |
+|---|---|
+| Tool fn throws, `on error` present | `on error` (tool scope) |
+| Tool fn throws, no `on error` | `??` (wire scope) |
+| Tool returns `{ label: null }` | `\|\|` |
+| `??` is a source expression, all throw | `??` schedules and calls the source |
+| Tool returns `{ label: "Berlin" }` | none — real value used |
 
 ### Const blocks store raw JSON strings
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.

@@ -106,6 +106,16 @@ type HandleResolution = {
 
 // ── Bridge block parser ─────────────────────────────────────────────────────
 
+/**
+ * Returns true when the token looks like a JSON literal rather than a
+ * source reference (dotted path or pipe chain).
+ * JSON start chars: `"`, `{`, `[`, digit, `-` + digit, `true`, `false`, `null`.
+ */
+function isJsonLiteral(s: string): boolean {
+  return /^["\{\[\d]/.test(s) || /^-\d/.test(s) ||
+    s === "true" || s === "false" || s === "null";
+}
+
 function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   const lines = block.split("\n").map((l) => l.trimEnd());
   const instructions: Instruction[] = [];
@@ -173,6 +183,67 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
 
+  /**
+   * Parse a source expression (`handle.path` or `h1|h2|source`) into bridge
+   * wires, returning the terminal NodeRef.
+   *
+   * For pipe chains: pushes the intermediate `.in <- prev` wires and registers
+   * the fork instances, then returns the fork-root ref. The caller is
+   * responsible for pushing the TERMINAL wire (forkRoot → target).
+   *
+   * For simple refs: returns the resolved NodeRef directly (no wires pushed).
+   *
+   * @param forceOnOutermost  When true, marks the outermost intermediate pipe
+   *                          wire with `force: true` (used for `<-!`).
+   */
+  function buildSourceExpr(sourceStr: string, lineNum: number, forceOnOutermost: boolean): NodeRef {
+    const parts = sourceStr.split("|");
+    if (parts.length === 1) {
+      return resolveAddress(sourceStr, handleRes, bridgeType, bridgeField);
+    }
+
+    // Pipe chain
+    const actualSource = parts[parts.length - 1];
+    const tokenChain = parts.slice(0, -1);
+
+    const parseToken = (t: string) => {
+      const dot = t.indexOf(".");
+      return dot === -1
+        ? { handleName: t, fieldName: "in" }
+        : { handleName: t.substring(0, dot), fieldName: t.substring(dot + 1) };
+    };
+
+    for (const tok of tokenChain) {
+      const { handleName } = parseToken(tok);
+      if (!handleRes.has(handleName)) {
+        throw new Error(
+          `Line ${lineNum}: Undeclared handle in pipe: "${handleName}". Add 'with <tool> as ${handleName}' to the bridge header.`,
+        );
+      }
+    }
+
+    let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField);
+    const reversedTokens = [...tokenChain].reverse();
+    for (let idx = 0; idx < reversedTokens.length; idx++) {
+      const tok = reversedTokens[idx];
+      const { handleName, fieldName } = parseToken(tok);
+      const res = handleRes.get(handleName)!;
+      const forkInstance = 100000 + nextForkSeq++;
+      const forkKey = `${res.module}:${res.type}:${res.field}:${forkInstance}`;
+      pipeHandleEntries.push({
+        key: forkKey,
+        handle: handleName,
+        baseTrunk: { module: res.module, type: res.type, field: res.field, instance: res.instance },
+      });
+      const forkInRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: parsePath(fieldName) };
+      const forkRootRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: [] };
+      const isOutermost = idx === reversedTokens.length - 1;
+      wires.push({ from: prevOutRef, to: forkInRef, pipe: true, ...(forceOnOutermost && isOutermost ? { force: true as const } : {}) });
+      prevOutRef = forkRootRef;
+    }
+    return prevOutRef; // fork-root ref
+  }
+
   for (let i = bodyStartIndex; i < lines.length; i++) {
     const raw = lines[i];
     const line = raw.trim();
@@ -225,107 +296,115 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
       continue;
     }
 
-    // Wire: target <- source  OR  target <-! source (forced)
-    // Optional fallback: target <- source ?? <json_value>
-    const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(\S+(?:\|\S+)*)(?:\s*\?\?\s*(.+))?$/);
+    // ── Wire: target <- A [|| B [|| C]] [|| "nullLiteral"] [?? errorSrc|"errorLiteral"]
+    //
+    // A, B, C are source expressions (handle.path or pipe|chain|src).
+    // `||` separates null-coalescing alternatives — evaluated left to right;
+    //   the last alternative may be a JSON literal (→ nullFallback).
+    // `??` is the error fallback — fires when ALL sources throw.
+    //   Can be a JSON literal (→ fallback) or a source expression (→ fallbackRef).
+    //
+    // Each `||` source becomes a separate wire targeting the same field.
+    // The last source wire carries nullFallback + error-fallback attributes.
+    // Desugars transparently: serializer emits back as multiple wire lines.
+    const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(.+)$/);
     if (arrowMatch) {
-      const [, targetStr, forceFlag, sourceStr, fallbackRaw] = arrowMatch;
+      const [, targetStr, forceFlag, rhs] = arrowMatch;
       const force = forceFlag === "!";
-      const fallback = fallbackRaw?.trim();
-      // Array mapping: target[] <- source[]
-      if (targetStr.endsWith("[]") && sourceStr.endsWith("[]")) {
+      const rhsTrimmed = rhs.trim();
+
+      // ── Array mapping: target[] <- source[]  (no || or ?? here)
+      if (targetStr.endsWith("[]") && /^\S+\[\]$/.test(rhsTrimmed)) {
         const toClean = targetStr.slice(0, -2);
-        const fromClean = sourceStr.slice(0, -2);
-        const fromRef = resolveAddress(
-          fromClean,
-          handleRes,
-          bridgeType,
-          bridgeField,
-        );
-        const toRef = resolveAddress(
-          toClean,
-          handleRes,
-          bridgeType,
-          bridgeField,
-        );
+        const fromClean = rhsTrimmed.slice(0, -2);
+        const fromRef = resolveAddress(fromClean, handleRes, bridgeType, bridgeField);
+        const toRef = resolveAddress(toClean, handleRes, bridgeType, bridgeField);
         wires.push({ from: fromRef, to: toRef });
         currentArrayToPath = toRef.path;
         continue;
       }
 
-      // Pipe chain: target <- tok1|tok2|...|source
-      // Each token is either "handle" (input field defaults to "in") or
-      // "handle.field" (explicit input field name).
-      // Every token creates an INDEPENDENT fork — a fresh tool invocation with
-      // its own instance number — so repeated use of the same handle produces
-      // separate calls.
-      // Execution order: source → tokN → … → tok1 → target (right-to-left).
-      const parts = sourceStr.split("|");
-      if (parts.length > 1) {
-        const actualSource = parts[parts.length - 1];
-        const tokenChain = parts.slice(0, -1); // [tok1, …, tokN] outermost→innermost
-
-        /** Parse "handle" or "handle.field" → {handleName, fieldName} */
-        const parseToken = (t: string) => {
-          const dot = t.indexOf(".");
-          return dot === -1
-            ? { handleName: t, fieldName: "in" }
-            : { handleName: t.substring(0, dot), fieldName: t.substring(dot + 1) };
-        };
-
-        for (const tok of tokenChain) {
-          const { handleName } = parseToken(tok);
-          if (!handleRes.has(handleName)) {
-            throw new Error(
-              `Line ${ln(i)}: Undeclared handle in pipe: "${handleName}". Add 'with <tool> as ${handleName}' to the bridge header.`,
-            );
-          }
+      // ── Strip the ?? tail (last " ?? " wins in case source contains " ?? ")
+      let exprCore = rhsTrimmed;
+      let fallback: string | undefined;
+      let fallbackRefStr: string | undefined;
+      const qqIdx = rhsTrimmed.lastIndexOf(" ?? ");
+      if (qqIdx !== -1) {
+        exprCore = rhsTrimmed.slice(0, qqIdx).trim();
+        const tail = rhsTrimmed.slice(qqIdx + 4).trim();
+        if (isJsonLiteral(tail)) {
+          fallback = tail;
+        } else {
+          fallbackRefStr = tail;
         }
-
-        let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField);
-        const reversedTokens = [...tokenChain].reverse();
-        for (let idx = 0; idx < reversedTokens.length; idx++) {
-          const tok = reversedTokens[idx];
-          const { handleName, fieldName } = parseToken(tok);
-          const res = handleRes.get(handleName)!;
-          // Allocate a unique fork instance (100000+ avoids collision with
-          // regular instances which start at 1).
-          const forkInstance = 100000 + nextForkSeq++;
-          const forkKey = `${res.module}:${res.type}:${res.field}:${forkInstance}`;
-          pipeHandleEntries.push({
-            key: forkKey,
-            handle: handleName,
-            baseTrunk: { module: res.module, type: res.type, field: res.field, instance: res.instance },
-          });
-          const forkInRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: parsePath(fieldName) };
-          const forkRootRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: [] };
-          const isOutermost = idx === reversedTokens.length - 1;
-          wires.push({ from: prevOutRef, to: forkInRef, pipe: true, ...(force && isOutermost ? { force: true } : {}) });
-          prevOutRef = forkRootRef;
-        }
-        const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
-        wires.push({ from: prevOutRef, to: toRef, pipe: true, ...(fallback ? { fallback } : {}) });
-        continue;
       }
 
-      const fromRef = resolveAddress(
-        sourceStr,
-        handleRes,
-        bridgeType,
-        bridgeField,
-      );
-      const toRef = resolveAddress(
-        targetStr,
-        handleRes,
-        bridgeType,
-        bridgeField,
-      );
-      wires.push({
-        from: fromRef,
-        to: toRef,
-        ...(force ? { force: true } : {}),
-        ...(fallback ? { fallback } : {}),
-      });
+      // ── Split on " || " to get coalesce chain parts
+      const orParts = exprCore.split(" || ").map((s) => s.trim());
+
+      // Last part may be a JSON literal → becomes nullFallback on the last source wire
+      let nullFallback: string | undefined;
+      let sourceParts = orParts;
+      if (orParts.length > 1 && isJsonLiteral(orParts[orParts.length - 1])) {
+        nullFallback = orParts[orParts.length - 1];
+        sourceParts = orParts.slice(0, -1);
+      }
+
+      if (sourceParts.length === 0) {
+        throw new Error(`Line ${ln(i)}: Wire has no source expression: ${line}`);
+      }
+
+      // ── Parse the ?? source/pipe into a fallbackRef (if needed)
+      // Wires added by buildSourceExpr for the fallback fork are deferred and
+      // pushed AFTER the source wires so that wire order is stable across
+      // parse → serialize → re-parse cycles.
+      let fallbackRef: NodeRef | undefined;
+      let fallbackInternalWires: Wire[] = [];
+      if (fallbackRefStr) {
+        const preLen = wires.length;
+        fallbackRef = buildSourceExpr(fallbackRefStr, ln(i), false);
+        // Splice out internal wires buildSourceExpr just added; push after sources.
+        fallbackInternalWires = wires.splice(preLen);
+      }
+
+      // ── Build wires for each coalesce part
+      const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
+
+      for (let ci = 0; ci < sourceParts.length; ci++) {
+        const isFirst = ci === 0;
+        const isLast  = ci === sourceParts.length - 1;
+        const srcStr  = sourceParts[ci];
+
+        // Parse source expression; for pipe chains buildSourceExpr pushes
+        // intermediate wires and returns the fork-root ref.
+        const termRef = buildSourceExpr(srcStr, ln(i), force && isFirst);
+        const isPipeFork = termRef.instance != null && termRef.path.length === 0
+          && srcStr.includes("|");
+
+        // attrs carried only on the LAST wire of the coalesce chain
+        const lastAttrs = isLast ? {
+          ...(nullFallback  ? { nullFallback }  : {}),
+          ...(fallback      ? { fallback }      : {}),
+          ...(fallbackRef   ? { fallbackRef }   : {}),
+        } : {};
+
+        if (isPipeFork) {
+          // Terminal pipe wire: fork-root → target  (force only on outermost
+          // intermediate wire, already set inside buildSourceExpr)
+          wires.push({ from: termRef, to: toRef, pipe: true, ...lastAttrs });
+        } else {
+          wires.push({
+            from: termRef,
+            to: toRef,
+            ...(force && isFirst ? { force: true as const } : {}),
+            ...lastAttrs,
+          });
+        }
+      }
+
+      // Push fallbackRef internal wires after all source wires (stable round-trip
+      // order: same position whether parsed inline or from serialized separate lines)
+      wires.push(...fallbackInternalWires);
       continue;
     }
 
@@ -935,6 +1014,62 @@ function serializeToolBlock(tool: ToolDef): string {
   return lines.join("\n");
 }
 
+/**
+ * Serialize a fallback NodeRef as a human-readable source string.
+ *
+ * If the ref is a pipe-fork root, reconstructs the pipe chain by walking
+ * the `toInMap` backward (same logic as the main pipe serializer).
+ * Otherwise delegates to `serializeRef`.
+ *
+ * This is used to emit `?? handle.path` or `?? pipe|source` for wire
+ * `fallbackRef` values.
+ */
+function serializePipeOrRef(
+  ref: NodeRef,
+  pipeHandleTrunkKeys: Set<string>,
+  toInMap: Map<string, Extract<Wire, { from: NodeRef }>>,
+  handleMap: Map<string, string>,
+  bridge: Bridge,
+  inputHandle: string | undefined,
+): string {
+  const refTk = ref.instance != null
+    ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
+    : `${ref.module}:${ref.type}:${ref.field}`;
+
+  if (ref.path.length === 0 && pipeHandleTrunkKeys.has(refTk)) {
+    // Pipe-fork root — walk the chain to reconstruct `pipe|source` notation
+    const handleChain: string[] = [];
+    let currentTk = refTk;
+    let actualSourceRef: NodeRef | null = null;
+
+    for (;;) {
+      const handleName = handleMap.get(currentTk);
+      if (!handleName) break;
+      const inWire = toInMap.get(currentTk);
+      const fieldName = inWire?.to.path[0] ?? "in";
+      const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
+      handleChain.push(token);
+      if (!inWire) break;
+      const fromTk = inWire.from.instance != null
+        ? `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}:${inWire.from.instance}`
+        : `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}`;
+      if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(fromTk)) {
+        currentTk = fromTk;
+      } else {
+        actualSourceRef = inWire.from;
+        break;
+      }
+    }
+
+    if (actualSourceRef && handleChain.length > 0) {
+      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
+      return `${handleChain.join("|") }|${sourceStr}`;
+    }
+  }
+
+  return serializeRef(ref, bridge, handleMap, inputHandle, true);
+}
+
 function serializeBridgeBlock(bridge: Bridge): string {
   const lines: string[] = [];
 
@@ -1066,8 +1201,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const fromStr = serializeRef(w.from, bridge, handleMap, inputHandle, true);
     const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
     const arrow = w.force ? "<-!" : "<-";
-    const fb = w.fallback ? ` ?? ${w.fallback}` : "";
-    lines.push(`${toStr} ${arrow} ${fromStr}${fb}`);
+    const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
+    const errf = w.fallbackRef
+      ? ` ?? ${serializePipeOrRef(w.fallbackRef, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle)}`
+      : w.fallback ? ` ?? ${w.fallback}` : "";
+    lines.push(`${toStr} ${arrow} ${fromStr}${nfb}${errf}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
@@ -1111,8 +1249,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
       const destStr   = serializeRef(outWire.to,     bridge, handleMap, inputHandle, false);
       const arrow = chainForced ? "<-!" : "<-";
-      const fb = outWire.fallback ? ` ?? ${outWire.fallback}` : "";
-      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}${fb}`);
+      const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
+      const errf = outWire.fallbackRef
+        ? ` ?? ${serializePipeOrRef(outWire.fallbackRef, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle)}`
+        : outWire.fallback ? ` ?? ${outWire.fallback}` : "";
+      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}${nfb}${errf}`);
     }
   }
 

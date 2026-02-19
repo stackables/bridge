@@ -31,7 +31,7 @@ export type NodeRef = {
  * back to pipe notation.
  */
 export type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; fallback?: string }
+  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef };
 
 /**

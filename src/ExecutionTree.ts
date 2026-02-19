@@ -396,7 +396,40 @@ export class ExecutionTree {
   }
 
   async pull(refs: NodeRef[]): Promise<any> {
-    return Promise.any(refs.map((ref) => this.pullSingle(ref)));
+    if (refs.length === 1) return this.pullSingle(refs[0]);
+
+    // Multiple sources: all start in parallel.
+    // Return the first that resolves to a non-null/undefined value.
+    // If all resolve to null/undefined → resolve undefined (lets || fire).
+    // If all reject → throw AggregateError (lets ?? fire).
+    return new Promise<any>((resolve, reject) => {
+      let remaining = refs.length;
+      let hasValue = false;
+      const errors: unknown[] = [];
+
+      const settle = () => {
+        if (--remaining === 0 && !hasValue) {
+          if (errors.length === refs.length) {
+            reject(new AggregateError(errors, "All sources failed"));
+          } else {
+            resolve(undefined); // all resolved to null/undefined
+          }
+        }
+      };
+
+      for (const ref of refs) {
+        this.pullSingle(ref).then(
+          (value) => {
+            if (!hasValue && value != null) {
+              hasValue = true;
+              resolve(value);
+            }
+            settle();
+          },
+          (err) => { errors.push(err); settle(); },
+        );
+      }
+    });
   }
 
   push(args: Record<string, any>) {
@@ -425,7 +458,9 @@ export class ExecutionTree {
     }
   }
 
-  /** Resolve a set of matched wires — constants win, then pull from sources.\n   *  If a wire has a `fallback` value and all sources reject, return the fallback. */
+  /** Resolve a set of matched wires — constants win, then pull from sources.
+   *  `||` (nullFallback): fires when all sources resolve to null/undefined.
+   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error). */
   private resolveWires(wires: Wire[]): Promise<any> {
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
@@ -436,18 +471,38 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
     );
 
-    // Collect any fallback value from the wires (first one wins)
-    const fallbackWire = pulls.find((w) => w.fallback != null);
+    // First wire with each fallback kind wins
+    const nullFallbackWire = pulls.find((w) => w.nullFallback != null);
+    // Error fallback: JSON literal (`fallback`) or source/pipe reference (`fallbackRef`)
+    const errorFallbackWire = pulls.find((w) => w.fallback != null || w.fallbackRef != null);
 
-    const result = this.pull(pulls.map((w) => w.from));
-    if (!fallbackWire) return result;
+    let result: Promise<any> = this.pull(pulls.map((w) => w.from));
+
+    // || null-guard: fires when resolution succeeds but value is null/undefined
+    if (nullFallbackWire) {
+      result = result.then((value) => {
+        if (value != null) return value;
+        try {
+          return JSON.parse(nullFallbackWire.nullFallback!);
+        } catch {
+          return nullFallbackWire.nullFallback;
+        }
+      });
+    }
+
+    // ?? error-guard: fires when resolution throws
+    if (!errorFallbackWire) return result;
 
     return result.catch(() => {
+      // Source/pipe reference: schedule it lazily and pull the result
+      if (errorFallbackWire.fallbackRef) {
+        return this.pullSingle(errorFallbackWire.fallbackRef);
+      }
+      // JSON literal
       try {
-        return JSON.parse(fallbackWire.fallback!);
+        return JSON.parse(errorFallbackWire.fallback!);
       } catch {
-        // Not valid JSON — return as raw string
-        return fallbackWire.fallback;
+        return errorFallbackWire.fallback;
       }
     });
   }
