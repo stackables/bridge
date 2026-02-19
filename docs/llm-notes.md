@@ -94,7 +94,9 @@ Three block types, two operators.
 |---|---|
 | `=` | Constant — sets a fixed value |
 | `<-` | Wire — pulls data from a source at runtime |
+| `<-!` | Forced wire — eagerly schedules the target tool even if no field demands its output. Used for side-effect-only tools (audit logging, analytics, cache warming). Error isolation: a forced tool failure does not break the main response. |
 | `<- h1\|h2\|source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
+| `<-! h1\|h2\|source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
 
 ### `tool` blocks
 Define a reusable API call configuration. The first word after the tool name is the **function name** — looked up in the `tools` map at runtime.
@@ -162,10 +164,11 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 
 **Execution flow:**
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree
-2. `response()` finds matching wires for the current path
-3. For each wire source, calls `pullSingle(ref)` which calls `schedule(target)` if not yet in state
-4. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function
-5. Result stored in state, downstream resolvers pick from it
+2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all `force: true` wires and eagerly schedules their target trunks via `schedule()`, with `.catch(() => {})` to suppress unhandled rejections for fire-and-forget tools
+3. `response()` finds matching wires for the current path
+4. For each wire source, calls `pullSingle(ref)` which calls `schedule(target)` if not yet in state
+5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function
+6. Result stored in state, downstream resolvers pick from it
 
 ### Why `Promise.any()`
 Multiple wires can target the same field (e.g. two providers). The engine races them with `Promise.any()` and uses the first successful result. Failed/missing sources are silently ignored unless all fail.
@@ -202,6 +205,8 @@ test/
   email.test.ts           — integration: mutation + response header extraction
   property-search.test.ts — integration: reads from test/property-search.bridge file
   tool-features.test.ts   — integration: missing tool, extends chain, config pull, tool-to-tool deps
+  scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
+  force-wire.test.ts      — forced wire (<-!): parser, serializer roundtrip, end-to-end forced execution
   _gateway.ts             — test helper (not a test file, not picked up by test runner)
   property-search.bridge  — fixture .bridge file used by property-search.test.ts
 ```
@@ -209,7 +214,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**61 tests, 15 suites, all passing.**
+**95 tests, all passing.**
 
 ---
 

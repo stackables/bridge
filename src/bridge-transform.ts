@@ -87,6 +87,11 @@ export function bridgeTransform(
             source.push(args);
           }
 
+          // Kick off forced wires (<-!) at the root entry point
+          if (source instanceof ExecutionTree && !info.path.prev) {
+            source.executeForced();
+          }
+
           if (source instanceof ExecutionTree) {
             return source.response(info.path, array);
           }

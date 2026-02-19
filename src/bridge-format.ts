@@ -222,10 +222,11 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
       continue;
     }
 
-    // Wire: target <- source
-    const arrowMatch = line.match(/^(\S+)\s*<-\s*(\S+)$/);
+    // Wire: target <- source  OR  target <-! source (forced)
+    const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(\S+)$/);
     if (arrowMatch) {
-      const [, targetStr, sourceStr] = arrowMatch;
+      const [, targetStr, forceFlag, sourceStr] = arrowMatch;
+      const force = forceFlag === "!";
 
       // Array mapping: target[] <- source[]
       if (targetStr.endsWith("[]") && sourceStr.endsWith("[]")) {
@@ -278,7 +279,9 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         }
 
         let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField);
-        for (const tok of [...tokenChain].reverse()) {
+        const reversedTokens = [...tokenChain].reverse();
+        for (let idx = 0; idx < reversedTokens.length; idx++) {
+          const tok = reversedTokens[idx];
           const { handleName, fieldName } = parseToken(tok);
           const res = handleRes.get(handleName)!;
           // Allocate a unique fork instance (100000+ avoids collision with
@@ -292,7 +295,8 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
           });
           const forkInRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: parsePath(fieldName) };
           const forkRootRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: [] };
-          wires.push({ from: prevOutRef, to: forkInRef, pipe: true });
+          const isOutermost = idx === reversedTokens.length - 1;
+          wires.push({ from: prevOutRef, to: forkInRef, pipe: true, ...(force && isOutermost ? { force: true } : {}) });
           prevOutRef = forkRootRef;
         }
         const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
@@ -312,7 +316,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         bridgeType,
         bridgeField,
       );
-      wires.push({ from: fromRef, to: toRef });
+      wires.push(force ? { from: fromRef, to: toRef, force: true } : { from: fromRef, to: toRef });
       continue;
     }
 
@@ -856,7 +860,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     // Regular wire
     const fromStr = serializeRef(w.from, bridge, handleMap, inputHandle, true);
     const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
-    lines.push(`${toStr} <- ${fromStr}`);
+    const arrow = w.force ? "<-!" : "<-";
+    lines.push(`${toStr} ${arrow} ${fromStr}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
@@ -873,6 +878,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const handleChain: string[] = [];
     let currentTk = tk;
     let actualSourceRef: NodeRef | null = null;
+    let chainForced = false;
 
     for (;;) {
       const handleName = handleMap.get(currentTk);
@@ -883,6 +889,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
       handleChain.push(token);
       serializedPipeTrunks.add(currentTk);
+      if (inWire?.force) chainForced = true;
       if (!inWire) break;
       const fromTk = refTrunkKey(inWire.from);
       // Inner source is another pipe fork root (empty path) → continue chain
@@ -897,7 +904,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
       const destStr   = serializeRef(outWire.to,     bridge, handleMap, inputHandle, false);
-      lines.push(`${destStr} <- ${handleChain.join("|")}|${sourceStr}`);
+      const arrow = chainForced ? "<-!" : "<-";
+      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}`);
     }
   }
 

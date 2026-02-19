@@ -125,14 +125,45 @@ tools: {
 }
 ```
 
-### 4. Syntax Reference
+### 4. Forced Wires (`<-!`)
 
-| Operator            | Type         | Behavior                                                            |
-| ------------------- | ------------ | ------------------------------------------------------------------- |
-| **`=`**             | **Constant** | Sets a static value (e.g., `method = GET`).                         |
-| **`<-`**            | **Wire**     | Pulls data from a source at runtime.                                |
-| **`[] <- []`**      | **Map**      | Iterates over an array, creating a shadow context for nested wires. |
-| **`<- handle\|…`** | **Pipe**     | Routes data through a tool inline. Each use is an independent call. |
+By default the engine is **pull-based** — a tool only runs when a GraphQL field demands its output. A **forced wire** (`<-!`) overrides this: the target tool is scheduled eagerly as soon as the query begins, even if no field ever reads the result.
+
+This is useful for **side-effect-only tools** like audit logging, analytics, cache warming, or webhook dispatch.
+
+```hcl
+bridge Mutation.checkout
+  with payment.charge as pay
+  with audit.log as audit
+  with input as i
+
+pay.amount <- i.total
+audit.action <-! i.event        # runs even if no field reads audit output
+audit.userId <-! i.userId
+result <- pay.receipt
+```
+
+Key behaviors:
+
+- **Fire-and-forget:** The forced tool runs in parallel with demand-driven tools. The response does not wait for it unless a field explicitly reads its output.
+- **Error isolation:** If a forced tool throws, the main query result is unaffected.
+- **Works with pipes:** `result <-! transform|i.data` forces the entire pipe chain to execute.
+- **Mixes freely with `<-`:** You can wire some inputs as forced and others as regular pulls on the same tool.
+
+```hcl
+# Forced pipe chain — sideEffect tool runs even if 'processed' is not queried
+processed <-! sideEffect|normalize|i.rawData
+```
+
+### 5. Syntax Reference
+
+| Operator            | Type         | Behavior                                                                  |
+| ------------------- | ------------ | ------------------------------------------------------------------------- |
+| **`=`**             | **Constant** | Sets a static value (e.g., `method = GET`).                               |
+| **`<-`**            | **Wire**     | Pulls data from a source at runtime.                                      |
+| **`<-!`**           | **Force**    | Eagerly schedules the target tool, even if no field demands its output.   |
+| **`<- handle\|…`** | **Pipe**     | Routes data through a tool inline. Each use is an independent call.       |
+| **`[] <- []`**      | **Map**      | Iterates over an array, creating a shadow context for nested wires.       |
 
 ---
 
