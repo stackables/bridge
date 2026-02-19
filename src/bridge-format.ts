@@ -184,7 +184,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
 
   /**
-   * Parse a source expression (`handle.path` or `h1|h2|source`) into bridge
+   * Parse a source expression (`handle.path` or `h1:h2:source`) into bridge
    * wires, returning the terminal NodeRef.
    *
    * For pipe chains: pushes the intermediate `.in <- prev` wires and registers
@@ -197,7 +197,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
    *                          wire with `force: true` (used for `<-!`).
    */
   function buildSourceExpr(sourceStr: string, lineNum: number, forceOnOutermost: boolean): NodeRef {
-    const parts = sourceStr.split("|");
+    const parts = sourceStr.split(":");
     if (parts.length === 1) {
       return resolveAddress(sourceStr, handleRes, bridgeType, bridgeField);
     }
@@ -379,7 +379,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         // intermediate wires and returns the fork-root ref.
         const termRef = buildSourceExpr(srcStr, ln(i), force && isFirst);
         const isPipeFork = termRef.instance != null && termRef.path.length === 0
-          && srcStr.includes("|");
+          && srcStr.includes(":");
 
         // attrs carried only on the LAST wire of the coalesce chain
         const lastAttrs = isLast ? {
@@ -1021,7 +1021,7 @@ function serializeToolBlock(tool: ToolDef): string {
  * the `toInMap` backward (same logic as the main pipe serializer).
  * Otherwise delegates to `serializeRef`.
  *
- * This is used to emit `?? handle.path` or `?? pipe|source` for wire
+ * This is used to emit `?? handle.path` or `?? pipe:source` for wire
  * `fallbackRef` values.
  */
 function serializePipeOrRef(
@@ -1037,7 +1037,7 @@ function serializePipeOrRef(
     : `${ref.module}:${ref.type}:${ref.field}`;
 
   if (ref.path.length === 0 && pipeHandleTrunkKeys.has(refTk)) {
-    // Pipe-fork root — walk the chain to reconstruct `pipe|source` notation
+    // Pipe-fork root — walk the chain to reconstruct `pipe:source` notation
     const handleChain: string[] = [];
     let currentTk = refTk;
     let actualSourceRef: NodeRef | null = null;
@@ -1063,7 +1063,7 @@ function serializePipeOrRef(
 
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
-      return `${handleChain.join("|") }|${sourceStr}`;
+      return `${handleChain.join(":")}:${sourceStr}`;
     }
   }
 
@@ -1211,7 +1211,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Pipe wires ───────────────────────────────────────────────────────
   // Find terminal fromOutMap entries — their destination is NOT another
   // pipe handle's .in. Follow the chain backward to reconstruct:
-  //   dest <- h1|h2|…|source
+  //   dest <- h1:h2:…:source
   const serializedPipeTrunks = new Set<string>();
 
   for (const [tk, outWire] of fromOutMap.entries()) {
@@ -1253,7 +1253,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const errf = outWire.fallbackRef
         ? ` ?? ${serializePipeOrRef(outWire.fallbackRef, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle)}`
         : outWire.fallback ? ` ?? ${outWire.fallback}` : "";
-      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}${nfb}${errf}`);
+      lines.push(`${destStr} ${arrow} ${handleChain.join(":")}:${sourceStr}${nfb}${errf}`);
     }
   }
 

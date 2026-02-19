@@ -71,7 +71,7 @@ c.lat <- gc.lat
 c.lng <- gc.lng
 
 # formatGreeting only needs raw input — independent of geocode
-greeting <- fg|i.city
+greeting <- fg:i.city
 
 # output wires
 temp     <- w.temp
@@ -204,8 +204,8 @@ population <- c.population
 // tool calls — not sequential and not deduplicated.
 //
 // Bridge:
-//   doubled.a <- d|i.a     ← fork 1
-//   doubled.b <- d|i.b     ← fork 2 (separate call, same tool fn)
+//   doubled.a <- d:i.a     ← fork 1
+//   doubled.b <- d:i.b     ← fork 2 (separate call, same tool fn)
 
 describe("scheduling: pipe forks run in parallel", () => {
   const typeDefs = /* GraphQL */ `
@@ -227,8 +227,8 @@ bridge Query.doubled
   with double as d
   with input as i
 
-doubled.a <- d|i.a
-doubled.b <- d|i.b
+doubled.a <- d:i.a
+doubled.b <- d:i.b
 `;
 
   test("both pipe forks run in parallel, not sequentially", async () => {
@@ -269,7 +269,7 @@ doubled.b <- d|i.b
 
 // ── Test 3: Chained pipe — sequential but no duplicate calls ─────────────────
 //
-//   result <- normalize|toUpper|i.text
+//   result <- normalize:toUpper:i.text
 //
 // toUpper must run first, then normalize gets toUpper's output.
 // Each tool called exactly once.
@@ -290,7 +290,7 @@ bridge Query.processed
   with toUpper as tu
   with normalize as nm
 
-result <- nm|tu|i.text
+result <- nm:tu:i.text
 `;
 
   test("chain executes right-to-left: source → toUpper → normalize", async () => {
@@ -372,7 +372,7 @@ bridge Query.info
 
 g.q <- i.city
 rawName     <- g.name
-shoutedName <- tu|g.name
+shoutedName <- tu:g.name
 `;
 
   test("geo.lookup called once despite direct + pipe consumption", async () => {

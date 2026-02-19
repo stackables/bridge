@@ -481,7 +481,7 @@ bridge Query.demo
   with transform as t
   with input as i
 
-result <- t|i.text ?? "fallback"
+result <- t:i.text ?? "fallback"
 `) as Bridge[];
 
     // The output wire (pipe=true, from fork root → target) should have the fallback
@@ -532,7 +532,7 @@ bridge Query.demo
   with transform as t
   with input as i
 
-result <- t|i.text ?? "fallback"
+result <- t:i.text ?? "fallback"
 `;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
@@ -770,7 +770,7 @@ bridge Query.format
   with std.upperCase as up
   with input as i
 
-result <- up|i.text || "N/A"
+result <- up:i.text || "N/A"
 `);
     const bridge = instructions[0] as Bridge;
     // Terminal pipe wire (from fork root to result) carries the nullFallback
@@ -811,7 +811,7 @@ name <- a.name || "World" ?? "Error"
   with std.upperCase as up
   with input as i
 
-result <- up|i.text || "N/A"
+result <- up:i.text || "N/A"
 `;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     const original = parseBridge(input);
@@ -962,7 +962,7 @@ bridge Query.email
   with input as i
 
 textPart <- i.textBody
-textPart <- up|i.htmlBody
+textPart <- up:i.htmlBody
 `;
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {});
@@ -981,7 +981,7 @@ bridge Query.email
   with input as i
 
 textPart <- i.textBody
-textPart <- up|i.htmlBody
+textPart <- up:i.htmlBody
 `;
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {});
@@ -1081,7 +1081,7 @@ label <- api.label ?? i.fallbackLabel
     assert.deepEqual(wire.fallbackRef!.path, ["fallbackLabel"]);
   });
 
-  test("?? pipe|source stores fallbackRef pointing to fork root + registers fork", () => {
+  test("?? pipe:source stores fallbackRef pointing to fork root + registers fork", () => {
     const instructions = parseBridge(`
 bridge Query.lookup
   with myApi as api
@@ -1089,7 +1089,7 @@ bridge Query.lookup
   with input as i
 
 api.q <- i.q
-label <- api.label ?? up|i.errorDefault
+label <- api.label ?? up:i.errorDefault
 `);
     const bridge = instructions[0] as Bridge;
     const wire = bridge.wires.find(
@@ -1138,14 +1138,14 @@ label <- api.label ?? i.fallbackLabel
     assert.deepStrictEqual(reparsed, parseBridge(input));
   });
 
-  test("?? pipe|source roundtrips", () => {
+  test("?? pipe:source roundtrips", () => {
     const input = `bridge Query.lookup
   with myApi as api
   with std.upperCase as up
   with input as i
 
 api.q <- i.q
-label <- api.label ?? up|i.errorDefault
+label <- api.label ?? up:i.errorDefault
 `;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     assert.deepStrictEqual(reparsed, parseBridge(input));
@@ -1176,7 +1176,7 @@ label <- p.label || b.label || "default"
 
 api.q <- i.q
 b.q <- i.q
-label <- api.label || b.label || "default" ?? up|i.errorDefault
+label <- api.label || b.label || "default" ?? up:i.errorDefault
 `;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     assert.deepStrictEqual(reparsed, parseBridge(input));
@@ -1294,7 +1294,7 @@ label <- api.label ?? i.defaultLabel
     assert.equal(result.data.lookup.label, "fallback-value");
   });
 
-  test("?? pipe|source: all throw → pipe tool applied to input field", async () => {
+  test("?? pipe:source: all throw → pipe tool applied to input field", async () => {
     const typeDefs = /* GraphQL */ `
       type Query { lookup(q: String!, errorDefault: String!): Result }
       type Result { label: String }
@@ -1306,7 +1306,7 @@ bridge Query.lookup
   with input as i
 
 api.q <- i.q
-label <- api.label ?? up|i.errorDefault
+label <- api.label ?? up:i.errorDefault
 `;
     const tools: Record<string, any> = {
       myApi: async () => { throw new Error("down"); },

@@ -131,8 +131,8 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `=` | Constant — sets a fixed value |
 | `<-` | Wire — pulls data from a source at runtime |
 | `<-!` | Forced wire — eagerly schedules the target tool even if no field demands its output. Used for side-effect-only tools (audit logging, analytics, cache warming). Error isolation: a forced tool failure does not break the main response. |
-| `<- h1\|h2\|source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
-| `<-! h1\|h2\|source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
+| `<- h1:h2:source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
+| `<-! h1:h2:source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
 | `\|\| <source>` | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained. |
 | `\|\| <json>` | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors. |
 | `?? <json>` | Error-fallback literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values. |
@@ -143,7 +143,7 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 **Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
 ```hcl
 # label <- A || B || C || "literal" ?? errorSource
-label <- api.label || backup.label || transform|api.code || "unknown" ?? up|i.errDefault
+label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
 
 # Evaluation order:
 # api.label non-null      → use it (fast, returned immediately)
@@ -161,10 +161,10 @@ Multiple wires pointing to the same target field express **source priority**: th
 ```hcl
 # Explicit multi-wire form (equivalent to || inline):
 textPart <- i.textBody             # prefer user-supplied plain text (fast, already in args)
-textPart <- convert|i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
+textPart <- convert:i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
 
 # Inline coalesce form (desugars to the same two wires + literal fallback):
-textPart <- i.textBody || convert|i.htmlBody || "empty" ?? i.errorDefault
+textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 ```
 
 - If `i.textBody` is non-null → used immediately, `convert` never runs.
@@ -223,8 +223,8 @@ bridge Query.format
   with std.lowerCase as lo
   with input as i
 
-upper <- up|i.text
-lower <- lo|i.text
+upper <- up:i.text
+lower <- lo:i.text
 ```
 
 Multiple bridge blocks can be in one `.bridge` file, separated by `---`.

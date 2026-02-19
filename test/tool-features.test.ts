@@ -299,7 +299,7 @@ value <- m.payload
 
 // ── Pipe operator (end-to-end) ───────────────────────────────────────────────
 //
-// `result <- toolName|source` is shorthand for:
+// `result <- toolName:source` is shorthand for:
 //   (implicit) with toolName as $handle
 //   $handle.in  <- source
 //   result      <- $handle.out
@@ -320,7 +320,7 @@ bridge Query.shout
   with input as i
   with toUpper as tu
 
-loud <- tu|i.text
+loud <- tu:i.text
 `;
 
   test("pipes source through tool and maps result to output", async () => {
@@ -350,7 +350,7 @@ loud <- tu|i.text
 bridge Query.shout
   with input as i
 
-loud <- undeclared|i.text
+loud <- undeclared:i.text
 `;
     assert.throws(
       () => parseBridge(badBridge),
@@ -364,7 +364,7 @@ loud <- undeclared|i.text
     // The declared handle must still appear in the with block
     assert.ok(serialized.includes("with toUpper as tu"), "handle declaration must appear in header");
     // The body should use the pipe operator (not two explicit wires)
-    assert.ok(serialized.includes("tu|"), "serialized output should use pipe operator");
+    assert.ok(serialized.includes("tu:"), "serialized output should use pipe operator");
     assert.ok(!serialized.includes("tu.in"), "expanded in-wire should not appear");
     assert.ok(!serialized.includes("tu.out"), "expanded out-wire should not appear");
     // Parse → serialize → parse should be idempotent
@@ -410,7 +410,7 @@ bridge Query.priceEur
   with convertToEur
   with input as i
 
-priceEur <- convertToEur|i.amount
+priceEur <- convertToEur:i.amount
 
 ---
 
@@ -419,7 +419,7 @@ bridge Query.priceAny
   with input as i
 
 convertToEur.currency <- i.currency
-priceAny <- convertToEur|i.amount
+priceAny <- convertToEur:i.amount
 `;
 
   function makeExecutor() {
@@ -459,9 +459,9 @@ priceAny <- convertToEur|i.amount
 
 // ── Pipe forking ──────────────────────────────────────────────────────────────
 //
-// Each use of `<- handle|source` in a bridge is an INDEPENDENT tool call:
-//   a <- c|i.a
-//   b <- c|i.b
+// Each use of `<- handle:source` in a bridge is an INDEPENDENT tool call:
+//   a <- c:i.a
+//   b <- c:i.b
 // is equivalent to two separate instances of tool `c`, each receiving its own
 // input and producing its own output independently.
 
@@ -488,8 +488,8 @@ bridge Query.doubled
   with double as d
   with input as i
 
-doubled.a <- d|i.a
-doubled.b <- d|i.b
+doubled.a <- d:i.a
+doubled.b <- d:i.b
 `;
 
   function makeExecutor() {
@@ -512,8 +512,8 @@ doubled.b <- d|i.b
   test("pipe forking serializes and round-trips correctly", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("doubled.a <- d|i.a"), "first fork serialized");
-    assert.ok(serialized.includes("doubled.b <- d|i.b"), "second fork serialized");
+    assert.ok(serialized.includes("doubled.a <- d:i.a"), "first fork serialized");
+    assert.ok(serialized.includes("doubled.b <- d:i.b"), "second fork serialized");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
     assert.equal(reserialized, serialized, "should be idempotent");
@@ -522,7 +522,7 @@ doubled.b <- d|i.b
 
 // ── Named pipe input field ────────────────────────────────────────────────────
 //
-// Syntax: `target <- handle.field|source`
+// Syntax: `target <- handle.field:source`
 // The field name after the dot sets the input field on the pipe stage (default
 // is `in`).  This lets you route a value to a specific parameter of the tool.
 
@@ -545,7 +545,7 @@ bridge Query.converted
   with divide as dv
   with input as i
 
-converted <- dv.dividend|i.amount
+converted <- dv.dividend:i.amount
 dv.divisor <- i.rate
 `;
 
@@ -569,7 +569,7 @@ dv.divisor <- i.rate
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(
-      serialized.includes("converted <- dv.dividend|i.amount"),
+      serialized.includes("converted <- dv.dividend:i.amount"),
       "named-field pipe token serialized correctly",
     );
     const reparsed = parseBridge(serialized);

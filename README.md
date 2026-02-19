@@ -67,9 +67,17 @@ bridge <Type.field>
   with input [as <i>]
 
   # Field Mapping
-  <field> <- <source>               # Standard Pull (Lazy)
-  <field> <-! <source>              # Forced Push (Eager/Side-effect)
-  
+  <field> = <json>                  # Constant value
+  <field> <- <source>               # Standard Pull (lazy)
+  <field> <-! <source>              # Forced Push (eager/side-effect)
+
+  # Pipe chain (tool transformation)
+  <field> <- handle:source          # Route source through tool handle
+
+  # Fallbacks
+  <field> <- <source> || <alt> || <alt> # Null-coalesce: use alt if source is null
+  <field> <- <source> ?? <fallback>     # Error-fallback: use fallback if chain throws
+
   # Array Mapping
   <field>[] <- <source>[]
     .<sub_field> <- .<sub_src>      # Relative scoping
@@ -82,15 +90,63 @@ bridge <Type.field>
 
 ### Resiliency
 
-Two layers of fault tolerance prevent a single API failure from crashing the response:
+Each layer handles a different failure mode. They compose freely.
 
-1. **Layer 1 — Tool `on error`**: Catches tool execution failures. Child tools inherit this via `extend`.
-2. **Layer 2 — Wire `??` fallback**: Catches any failure in the resolution chain (missing data, network timeout) as a last resort.
+#### Layer 1 — Tool `on error` (execution errors)
+
+Declared inside the `extend` block. Catches any exception thrown by the tool's `fn(input)`. All tools that `extend` this tool inherit the fallback.
 
 ```hcl
+extend httpCall as geo
+  baseUrl = "https://nominatim.openstreetmap.org"
+  method = GET
+  path = /search
+  on error = { "lat": 0, "lon": 0 }   # tool-level default
+```
+
+#### Layer 2 — Wire `||` (null / absent values)
+
+Fires when a source resolves **successfully but returns `null` or `undefined`**. The fallback can be a JSON literal or another source expression (handle path or pipe chain). Multiple `||` alternatives chain left-to-right like `COALESCE`.
+
+```hcl
+# JSON literal fallback
+lat <- geo.lat || 0.0
+
+# Alternative source fallback
+label <- api.label || backup.label || "unknown"
+
+# Pipe chain as alternative
+textPart <- i.textBody || convert:i.htmlBody || "empty"
+```
+
+#### Layer 3 — Wire `??` (errors and exceptions)
+
+Fires when the **entire resolution chain throws** (network failure, tool down, dependency error). Does not fire on null values — that's `||`'s job. The fallback can be a JSON literal or a source/pipe expression (evaluated lazily, only when the error fires).
+
+```hcl
+# JSON literal error fallback
 lat <- geo.lat ?? 0.0
 
+# Error fallback pulls from another source
+label <- api.label ?? errorHandler:i.fallbackMsg
 ```
+
+#### Full COALESCE — composing all three layers
+
+`||` and `??` compose into a Postgres-style `COALESCE` with an error guard at the end:
+
+```hcl
+# label <- A || B || C || "literal" ?? errorSource
+label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorString
+
+# Evaluation order:
+# api.label non-null     → use it immediately
+# api.label null         → try toolIfNeeded(api.backup.label)
+# that null              → "unknown"  (|| json literal always succeeds)
+# any source throws      → toolIfNeeded(const.errorString)  (?? fires last)
+```
+
+Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
 
 ### Forced Wires (`<-!`)
 
@@ -101,20 +157,19 @@ bridge Mutation.updateUser
   with audit.logger as log
 
   # 'log' runs even if the client doesn't query the 'status' field
-  status <-! log|i.changeData 
-
+  status <-! log:i.changeData
 ```
 
-### The Pipe Operator (`|`)
+### The Pipe Operator (`:`)
 
-Chains data through tools right-to-left: `dest <- tool | source`.
+Routes data right-to-left through one or more tool handles: `dest <- handle:source`.
 
 ```hcl
-# i.rawData -> normalize -> transform -> result
-result <- transform|normalize|i.rawData 
+# i.rawData → normalize → transform → result
+result <- transform:normalize:i.rawData
 ```
 
-Full example with a tool with 2 input parameters.
+Full example with a tool that has 2 input parameters:
 
 ```hcl
 extend currencyConverter as convert
@@ -126,26 +181,27 @@ bridge Query.price
 
 c.currency <- i.currency   # overrides the default per request
 
-# Safe to use repeatedly
-itemPrice <- c|i.itemPrice
-totalPrice <- c|i.totalPrice
+# Safe to use repeatedly — each is an independent tool call
+itemPrice  <- c:i.itemPrice
+totalPrice <- c:i.totalPrice
 ```
 
 ---
 
 ## Syntax Reference
 
-| Operator | Type | Behavior | Notes |
-| --- | --- | --- | --- |
-| **`=`** | **Constant** | Sets a static value. | |
-| **`<-`** | **Wire** | Pulls data from a source at runtime. | |
-| **`<-!`** | **Force** | Eagerly schedules a tool (for side-effects). | |
-| **`\|`** | **Pipe** | Chains data through tools right-to-left. | |
-| **`??`** | **Fallback** | Wire-level default if the resolution chain fails. | |
-| **`on error`** | **Tool Fallback** | Returns a default if the tool's `fn(input)` throws. | |
-| **`extend`** | **Tool Definition** | Configures a function or extends a parent tool. | |
-| **`const`** | **Named Value** | Declares reusable JSON constants. | |
-| **`[] <- []`** | **Map** | Iterates over arrays to create nested wire contexts. | |
+| Operator | Type | Behavior |
+| --- | --- | --- |
+| **`=`** | Constant | Sets a static value. |
+| **`<-`** | Wire | Pulls data from a source at runtime. |
+| **`<-!`** | Force | Eagerly schedules a tool (for side-effects). |
+| **`:`** | Pipe | Chains data through tools right-to-left. |
+| **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
+| **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
+| **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
+| **`extend`** | Tool Definition | Configures a function or extends a parent tool. |
+| **`const`** | Named Value | Declares reusable JSON constants. |
+| **`[] <- []`** | Map | Iterates over arrays to create nested wire contexts. |
 
 ---
 
@@ -209,8 +265,8 @@ bridge Query.format
   with std.lowerCase as lo
   with input as i
 
-upper <- up|i.text
-lower <- lo|i.text
+upper <- up:i.text
+lower <- lo:i.text
 ```
 
 Use an `extend` block when you need to configure defaults:
@@ -224,7 +280,7 @@ bridge Query.onlyResult
   with someApi as api
   with input as i
 
-value <- pf|api.items
+value <- pf:api.items
 ```
 
 ### Adding Custom Tools

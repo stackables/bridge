@@ -176,8 +176,8 @@ bridge Query.greet
   with std.lowerCase as lo
   with input as i
 
-upper <- up|i.name
-lower <- lo|i.name
+upper <- up:i.name
+lower <- lo:i.name
 `;
 
   test("upperCase and lowerCase are available by default", async () => {
@@ -210,7 +210,7 @@ bridge Query.greet
   with std.upperCase as up
   with input as i
 
-upper <- up|i.name
+upper <- up:i.name
 `;
 
   test("overriding std replaces its tools", async () => {
@@ -266,8 +266,8 @@ bridge Query.process
   with reverse as rev
   with input as i
 
-upper <- up|i.text
-custom <- rev|i.text
+upper <- up:i.text
+custom <- rev:i.text
 `;
 
   test("custom tools merge alongside std automatically", async () => {
@@ -360,7 +360,7 @@ bridge Query.shout
   with std.upperCase as up
   with input as i
 
-value <- up|i.text
+value <- up:i.text
 `;
 
   test("pipe through upperCase", async () => {
@@ -393,7 +393,7 @@ bridge Query.first
   with std.pickFirst as pf
   with input as i
 
-value <- pf|i.items
+value <- pf:i.items
 `;
 
   test("picks first element via pipe", async () => {
@@ -475,7 +475,7 @@ bridge Query.normalize
   with std.pickFirst as pf
   with input as i
 
-value <- pf|ta|i.value
+value <- pf:ta:i.value
 `;
 
   test("toArray + pickFirst round-trip via pipe chain", async () => {
@@ -508,7 +508,7 @@ bridge Query.wrap
   with countItems as cnt
   with input as i
 
-cnt.in <- ta|i.value
+cnt.in <- ta:i.value
 count <- cnt.count
 `;
 
@@ -548,8 +548,8 @@ bridge Query.format
   with std.lowerCase as lo
   with input as i
 
-upper <- up|i.text
-lower <- lo|i.text
+upper <- up:i.text
+lower <- lo:i.text
 `;
 
   test("built-in tools work without tool blocks", async () => {

@@ -6,8 +6,8 @@ bridge Query.format
   with input as i
 
 original <- i.text
-upper <- up|i.text
-lower <- lo|i.text
+upper <- up:i.text
+lower <- lo:i.text
 
 bridge Query.findEmployee
   with getEmployees as db

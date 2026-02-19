@@ -79,7 +79,7 @@ bridge Query.demo
   with transform as t
   with input as i
 
-result <-! t|i.text
+result <-! t:i.text
 `) as Bridge[];
 
     // The outermost fork's input wire should have force: true
@@ -101,7 +101,7 @@ bridge Query.demo
   with b as b
   with input as i
 
-result <-! a|b|i.text
+result <-! a:b:i.text
 `) as Bridge[];
 
     // Exactly one wire should have force
@@ -161,7 +161,7 @@ bridge Query.demo
   with transform as t
   with input as i
 
-result <-! t|i.text
+result <-! t:i.text
 `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
@@ -347,7 +347,7 @@ bridge Query.process
 
 m.text <- i.text
 status <- m.status
-transformed <-! se|i.text
+transformed <-! se:i.text
 `;
 
     const tools: Record<string, any> = {
