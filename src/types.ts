@@ -177,3 +177,18 @@ export type ConstDef = {
 
 /** Union of all instruction types */
 export type Instruction = Bridge | ToolDef | ConstDef;
+
+/**
+ * Pluggable cache store for httpCall.
+ *
+ * Default: in-memory Map with TTL eviction.
+ * Override: pass any key-value store (Redis, Memcached, etc.) to `createHttpCall`.
+ *
+ * ```ts
+ * const httpCall = createHttpCall(fetch, myRedisStore);
+ * ```
+ */
+export type CacheStore = {
+  get(key: string): Promise<any | undefined> | any | undefined;
+  set(key: string, value: any, ttlSeconds: number): Promise<void> | void;
+};

@@ -56,9 +56,9 @@ import { bridgeTransform } from "@stackables/bridge";
 // bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
 
 import { builtinTools, std, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
-// builtinTools — namespaced tool bundle: { std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }
+// builtinTools — namespaced tool bundle: { std: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }
 // std — the std namespace object (for spreading into overrides)
-// createHttpCall(fetchFn?): ToolCallFn
+// createHttpCall(fetchFn?, cacheStore?): ToolCallFn
 // upperCase, lowerCase, findObject — individual tool functions (for direct JS use)
 
 // Types
@@ -78,7 +78,7 @@ type BridgeOptions = {
   contextMapper?: (context: any) => Record<string, any>;
 }
 ```
-- `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (upperCase, lowerCase, findObject, pickFirst, toArray) and `httpCall` are always included; user-provided tools are shallow-merged on top. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, upperCase: myFn } }`.
+- `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (httpCall, upperCase, lowerCase, findObject, pickFirst, toArray) is always included; user-provided tools are shallow-merged on top. All `std` tools are callable with or without the `std.` prefix. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, httpCall: createHttpCall(fetch, myCache) } }`.
 - `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
 ### Context access
@@ -253,7 +253,10 @@ If both are present, `on error` fires first (tool scope). If the tool fallback i
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
 ### Namespaced tools and `std` is always bundled
-`builtinTools` is a nested object: `{ std: { upperCase, lowerCase, findObject, pickFirst, toArray }, httpCall }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, reference them as `std.upperCase`, `std.pickFirst`, etc. The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map. `httpCall` stays at root level for use as the function name in `extend` blocks.
+`builtinTools` is a nested object: `{ std: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, all built-in tools are callable with or without the `std.` prefix (e.g. both `httpCall` and `std.httpCall` work). The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map, falling back to `std.*` for unqualified names.
+
+### httpCall caching
+`createHttpCall(fetchFn?, cacheStore?)` accepts an optional `CacheStore` for response caching. When a tool sets `cache = <seconds>`, httpCall caches responses by `method + URL + body` with TTL eviction. Default store: in-memory `Map`. Users can pass Redis or any key-value store implementing `{ get(key): any, set(key, value, ttl): void }` — both sync and async are supported.
 
 ---
 
@@ -262,7 +265,7 @@ If both are present, `on error` fires first (tool scope). If the tool fallback i
 ```
 test/
   bridge-format.test.ts   — parser/serializer unit tests (parseBridge, serializeBridge, parsePath)
-  http-executor.test.ts   — createHttpCall unit tests (mock fetch)
+  http-executor.test.ts   — createHttpCall unit tests + cache tests (mock fetch)
   executeGraph.test.ts    — integration: basic field wiring, array mapping
   chained.test.ts         — integration: tool-to-tool chaining
   email.test.ts           — integration: mutation + response header extraction
@@ -279,7 +282,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**170 tests, all passing.**
+**180 tests, all passing.**
 
 ---
 

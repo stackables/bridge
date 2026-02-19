@@ -5,6 +5,7 @@ extend std.httpCall as geo
   baseUrl = "https://nominatim.openstreetmap.org"
   method = GET
   path = /search
+  cache = 60
   # Required by Nominatim policy
   headers.User-Agent = "TheBridgeDemo/1.0" 
 
@@ -13,6 +14,7 @@ extend std.httpCall as weather
   baseUrl = "https://api.open-meteo.com/v1"
   method = GET
   path = /forecast
+  cache = 60
 
 # Nominatim returns an array — pick the first result
 extend std.pickFirst as first

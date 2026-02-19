@@ -577,3 +577,84 @@ dv.divisor <- i.rate
     assert.equal(reserialized, serialized, "should be idempotent");
   });
 });
+
+// ── httpCall cache (end-to-end) ─────────────────────────────────────────────
+
+describe("httpCall cache", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      lookup(q: String!): Result
+    }
+    type Result {
+      answer: String
+    }
+  `;
+
+  const bridgeText = `
+extend httpCall as api
+  cache = 60
+  baseUrl = "http://mock"
+  method = GET
+  path = /search
+
+bridge Query.lookup
+  with api as a
+  with input as i
+
+a.q <- i.q
+answer <- a.value
+`;
+
+  test("second identical call returns cached response (fetch called once)", async () => {
+    let fetchCount = 0;
+    const mockFetch = async (url: string) => {
+      fetchCount++;
+      return { json: async () => ({ value: "hit-" + fetchCount }) } as Response;
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { httpCall: (await import("../src/tools/http-call.js")).createHttpCall(mockFetch as any) },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const doc = parse(`{ lookup(q: "hello") { answer } }`);
+
+    const r1: any = await executor({ document: doc });
+    assert.equal(r1.data.lookup.answer, "hit-1");
+
+    const r2: any = await executor({ document: doc });
+    assert.equal(r2.data.lookup.answer, "hit-1", "should return cached value");
+    assert.equal(fetchCount, 1, "fetch should only be called once");
+  });
+
+  test("different query params are cached separately", async () => {
+    let fetchCount = 0;
+    const mockFetch = async (url: string) => {
+      fetchCount++;
+      const q = new URL(url).searchParams.get("q");
+      return { json: async () => ({ value: q }) } as Response;
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { httpCall: (await import("../src/tools/http-call.js")).createHttpCall(mockFetch as any) },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const r1: any = await executor({ document: parse(`{ lookup(q: "A") { answer } }`) });
+    const r2: any = await executor({ document: parse(`{ lookup(q: "B") { answer } }`) });
+
+    assert.equal(r1.data.lookup.answer, "A");
+    assert.equal(r2.data.lookup.answer, "B");
+    assert.equal(fetchCount, 2, "different params should each call fetch");
+  });
+
+  test("cache param round-trips through serializer", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("cache = 60"), "cache param should be in serialized output");
+    const reparsed = parseBridge(serialized);
+    const reserialized = serializeBridge(reparsed);
+    assert.equal(reserialized, serialized, "should be idempotent");
+  });
+});

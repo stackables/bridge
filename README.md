@@ -188,16 +188,16 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 ## Built-in Tools
 
-The Bridge ships with built-in tools under the `std` namespace, always available by default. The `httpCall` tool lives at the root level for use in `extend` blocks.
+The Bridge ships with built-in tools under the `std` namespace, always available by default. All tools (including `httpCall`) live under `std` and can be referenced with or without the `std.` prefix.
 
-| Namespace | Tool | Input | Output | Description |
-| --- | --- | --- | --- | --- |
-| *(root)* | `httpCall` | `{ baseUrl, method?, path?, headers?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. |
-| `std` | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
-| `std` | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
-| `std` | `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
-| `std` | `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
-| `std` | `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
+| Tool | Input | Output | Description |
+| --- | --- | --- | --- |
+| `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
+| `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
+| `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
+| `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
+| `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
+| `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
 
 ### Using Built-in Tools
 
@@ -251,6 +251,34 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   tools: {
     std: { ...std, upperCase: myCustomUpperCase },
   },
+});
+```
+
+### Response Caching
+
+Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
+
+```hcl
+extend httpCall as geo
+  cache = 300          # cache for 5 minutes
+  baseUrl = "https://nominatim.openstreetmap.org"
+  method = GET
+  path = /search
+```
+
+The default is an in-memory store. For Redis or other backends, pass a custom `CacheStore` to `createHttpCall`:
+
+```typescript
+import { createHttpCall, std } from "@stackables/bridge";
+import type { CacheStore } from "@stackables/bridge";
+
+const redisCache: CacheStore = {
+  async get(key) { return redis.get(key).then(v => v ? JSON.parse(v) : undefined); },
+  async set(key, value, ttl) { await redis.set(key, JSON.stringify(value), "EX", ttl); },
+};
+
+bridgeTransform(schema, instructions, {
+  tools: { std: { ...std, httpCall: createHttpCall(fetch, redisCache) } },
 });
 ```
 
