@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createHttpCall } from "../src/http-executor.js";
+import { createHttpCall } from "../src/tools/http-call.js";
 
 function mockFetch(expectedUrl: string, expectedOptions: any, response: any) {
   return async (url: string, options: any) => {

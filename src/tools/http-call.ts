@@ -1,4 +1,4 @@
-import type { ToolCallFn } from "./types.js";
+import type { ToolCallFn } from "../types.js";
 
 /**
  * Create an httpCall tool function — the built-in REST API tool.

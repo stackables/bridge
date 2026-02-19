@@ -1,0 +1,21 @@
+# Built-in tools work out of the box — no tool block needed for pipe-like tools.
+
+bridge Query.format
+  with upperCase as up
+  with lowerCase as lo
+  with input as i
+
+original <- i.text
+upper <- up|i.text
+lower <- lo|i.text
+
+bridge Query.findEmployee
+  with getEmployees as db
+  with findObject as find
+  with input as i
+
+find.in <- db.employees
+find.department <- i.department
+id <- find.id
+name <- find.name
+department <- find.department

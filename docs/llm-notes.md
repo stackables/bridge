@@ -29,8 +29,15 @@ src/
   bridge-format.ts    — parser + serializer for .bridge text format
   bridge-transform.ts — GraphQL schema transformer (wraps resolvers)
   ExecutionTree.ts    — pull-based execution engine (core logic)
-  http-executor.ts    — built-in httpCall tool implementation
   types.ts            — all shared types (NodeRef, Wire, Bridge, ToolDef, etc.)
+  tools/
+    index.ts          — builtinTools bundle + re-exports
+    http-call.ts      — createHttpCall (REST API tool)
+    upper-case.ts     — upperCase string tool
+    lower-case.ts     — lowerCase string tool
+    find-object.ts    — findObject array search tool
+    pick-first.ts     — pickFirst array tool (optional strict mode)
+    to-array.ts       — toArray wraps single value in array
 ```
 
 ### What was deleted (do not recreate as library code)
@@ -48,8 +55,10 @@ import { parseBridge } from "@stackables/bridge";
 import { bridgeTransform } from "@stackables/bridge";
 // bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
 
-import { createHttpCall } from "@stackables/bridge";
+import { builtinTools, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
+// builtinTools — default tool bundle: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray }
 // createHttpCall(fetchFn?): ToolCallFn
+// upperCase, lowerCase, findObject — individual tool functions
 
 // Types
 import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef, ConstDef } from "@stackables/bridge";
@@ -68,7 +77,7 @@ type BridgeOptions = {
   contextMapper?: (context: any) => Record<string, any>;
 }
 ```
-- `tools` — register custom tool functions by name. The built-in `httpCall` is always registered; user tools override it.
+- `tools` — tool functions by name. Defaults to `builtinTools` (httpCall, upperCase, lowerCase, findObject, pickFirst, toArray). Providing your own `tools` replaces the defaults entirely — spread `builtinTools` to keep them.
 - `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
 ### Context access
@@ -166,8 +175,19 @@ results[] <- gc.items[]
 ```
 
 **`with input as i`** — binds GraphQL field arguments.  
-**`with <tool> as <handle>`** — binds a tool call result.  
+**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want defaults or `extends`.  
 **`results[] <- gc.items[]`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element.
+
+Example — pipe-like built-in tools need no `tool` block:
+```hcl
+bridge Query.format
+  with upperCase as up
+  with lowerCase as lo
+  with input as i
+
+upper <- up|i.text
+lower <- lo|i.text
+```
 
 Multiple bridge blocks can be in one `.bridge` file, separated by `---`.
 
@@ -230,7 +250,7 @@ If both are present, `on error` fires first (tool scope). If the tool fallback i
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
 ### `httpCall` is always registered as default
-`createHttpCall()` is added to `allTools` before user tools, so users can override it by registering their own `httpCall`. This allows custom logging, tracing, retry logic, etc. without changing the `.bridge` file.
+`builtinTools` is used as the default for `allTools` in `bridge-transform.ts`. If the user provides their own `tools` option, it replaces the defaults entirely. Users who need both built-ins and custom tools should spread `builtinTools` into their tools object.
 
 ---
 
@@ -248,6 +268,7 @@ test/
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
   force-wire.test.ts      — forced wire (<-!): parser, serializer roundtrip, end-to-end forced execution
   resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
+  builtin-tools.test.ts   — built-in tools: unit tests, bundle shape, default/override behaviour, e2e with bridge, inline with syntax
   _gateway.ts             — test helper (not a test file, not picked up by test runner)
   property-search.bridge  — fixture .bridge file used by property-search.test.ts
 ```
@@ -255,7 +276,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**129 tests, all passing.**
+**169 tests, all passing.**
 
 ---
 

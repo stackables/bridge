@@ -6,7 +6,7 @@ import {
   defaultFieldResolver,
 } from "graphql";
 import { ExecutionTree } from "./ExecutionTree.js";
-import { createHttpCall } from "./http-executor.js";
+import { builtinTools } from "./tools/index.js";
 import type { Instruction, ToolCallFn } from "./types.js";
 import { SELF_MODULE } from "./types.js";
 
@@ -65,14 +65,11 @@ export function bridgeTransform(
                 ? instructions(context)
                 : instructions;
 
-            // Built-in tools + user tools (user can override built-ins)
+            // Use user-provided tools or fall back to built-in bundle
             const allTools: Record<
               string,
               ToolCallFn | ((...args: any[]) => any)
-            > = {
-              httpCall: createHttpCall(),
-              ...userTools,
-            };
+            > = userTools ?? { ...builtinTools };
 
             source = new ExecutionTree(
               trunk,

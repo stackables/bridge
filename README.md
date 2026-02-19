@@ -182,6 +182,74 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 ---
 
+## Built-in Tools
+
+The Bridge ships with a set of built-in tools available by default. When no `tools` option is provided, `builtinTools` is used automatically.
+
+| Tool | Input | Output | Description |
+| --- | --- | --- | --- |
+| `httpCall` | `{ baseUrl, method?, path?, headers?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. |
+| `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
+| `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
+| `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
+| `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
+| `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
+
+### Using Built-in Tools
+
+**No `tool` block needed** for pipe-like tools — reference them directly in the `with` header:
+
+```hcl
+bridge Query.format
+  with upperCase as up
+  with lowerCase as lo
+  with input as i
+
+upper <- up|i.text
+lower <- lo|i.text
+```
+
+Use a `tool` block only when you need to configure defaults:
+
+```hcl
+tool pf pickFirst
+  strict = true
+
+bridge Query.onlyResult
+  with pf
+  with someApi as api
+  with input as i
+
+value <- pf|api.items
+```
+
+### Overriding Tools
+
+If you provide a `tools` object it **replaces** the defaults entirely. To keep the built-ins alongside your own tools, spread `builtinTools`:
+
+```typescript
+import { bridgeTransform, builtinTools } from "@stackables/bridge";
+
+const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+  tools: {
+    ...builtinTools,
+    myCustomTool: (input) => ({ result: input.value * 2 }),
+  },
+});
+```
+
+If you only need your own tools and none of the built-ins:
+
+```typescript
+const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+  tools: {
+    myOnlyTool: async (input) => fetchFromMyApi(input),
+  },
+});
+```
+
+---
+
 ## Why The Bridge?
 
 * **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic.
