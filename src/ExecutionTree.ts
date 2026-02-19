@@ -375,6 +375,11 @@ export class ExecutionTree {
 
     let result: any = resolved;
     for (const segment of ref.path) {
+      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
+        console.warn(
+          `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
+        );
+      }
       result = result?.[segment];
     }
     return result;

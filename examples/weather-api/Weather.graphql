@@ -1,0 +1,13 @@
+type Query {
+  # Get weather by city name (e.g., "Paris")
+  getWeatherByName(cityName: String!): WeatherReport
+  getWeatherByCoordinates(lat: String!, lon: String! ): WeatherReport
+}
+
+type WeatherReport {
+  city: String
+  lat: Float
+  lon: Float
+  currentTemp: Float
+  timezone: String
+}

@@ -1,0 +1,58 @@
+# --- Tools ---
+
+# Tool 1: Geocoder (City Name -> Coordinates)
+tool geo httpCall
+  baseUrl = "https://nominatim.openstreetmap.org"
+  method = GET
+  path = /search
+  # Required by Nominatim policy
+  headers.User-Agent = "TheBridgeDemo/1.0" 
+
+# Tool 2: Weather (Coordinates -> Temperature)
+tool weather httpCall
+  baseUrl = "https://api.open-meteo.com/v1"
+  method = GET
+  path = /forecast
+
+# Nominatim returns an array — pick the first result
+tool first std.pickFirst
+
+# --- Bridges ---
+
+# By city name: geocode → pick first → weather
+bridge Query.getWeatherByName
+  with geo as g
+  with first as f
+  with weather as w
+  with input as i
+
+  g.q <- i.cityName
+  g.format = "json"
+
+  f.in <- g
+
+  w.latitude  <- f.lat
+  w.longitude <- f.lon
+  w.current_weather = true
+
+  city        <- i.cityName
+  lat         <- f.lat
+  lon         <- f.lon
+  currentTemp <- w.current_weather.temperature ?? 0.0
+  timezone    <- w.timezone ?? "UTC"
+
+---
+
+# By coordinates: straight to weather API
+bridge Query.getWeatherByCoordinates
+  with weather as w
+  with input as i
+
+  w.latitude  <- i.lat
+  w.longitude <- i.lon
+  w.current_weather = true
+
+  lat         <- i.lat
+  lon         <- i.lon
+  currentTemp <- w.current_weather.temperature ?? 0.0
+  timezone    <- w.timezone ?? "UTC"

@@ -285,13 +285,11 @@ Test runner command: `node --import tsx/esm --test test/*.test.ts`
 
 ```
 examples/
-  yoga-server/      — basic GraphQL Yoga server with hereapi geocoding
-  email/            — mutation example with SendGrid
-  apollo-federation/— Apollo Federation subgraph (uses ApolloServer, not Yoga)
+  yoga-server/      — weather API: chains geocoding + weather, no API keys needed
   builtin-tools/    — std namespace tools (upperCase, lowerCase, findObject) without external APIs
 ```
 
-All examples use `.bridge` files. The apollo-federation example shows how to set context in ApolloServer plugins (`requestDidStart` / `didResolveOperation`).
+All examples use `.bridge` files.
 
 ---
 
