@@ -52,6 +52,8 @@ export class ExecutionTree {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
   private toolDepCache: Map<string, Promise<any>> = new Map();
+  private toolDefCache: Map<string, ToolDef | null> = new Map();
+  private pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]> | undefined;
 
   constructor(
     public trunk: Trunk,
@@ -64,6 +66,11 @@ export class ExecutionTree {
       (i): i is Bridge =>
         i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
     );
+    if (this.bridge?.pipeHandles) {
+      this.pipeHandleMap = new Map(
+        this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
+      );
+    }
     if (config) {
       this.state[
         trunkKey({ module: SELF_MODULE, type: "Config", field: "config" })
@@ -77,13 +84,19 @@ export class ExecutionTree {
     return `${target.module}.${target.field}`;
   }
 
-  /** Resolve a ToolDef by name, merging the extends chain */
+  /** Resolve a ToolDef by name, merging the extends chain (cached) */
   private resolveToolDefByName(name: string): ToolDef | undefined {
+    if (this.toolDefCache.has(name))
+      return this.toolDefCache.get(name) ?? undefined;
+
     const toolDefs = this.instructions.filter(
       (i): i is ToolDef => i.kind === "tool",
     );
     const base = toolDefs.find((t) => t.name === name);
-    if (!base) return undefined;
+    if (!base) {
+      this.toolDefCache.set(name, null);
+      return undefined;
+    }
 
     // Build extends chain: root → ... → leaf
     const chain: ToolDef[] = [base];
@@ -122,6 +135,7 @@ export class ExecutionTree {
       }
     }
 
+    this.toolDefCache.set(name, merged);
     return merged;
   }
 
@@ -130,12 +144,24 @@ export class ExecutionTree {
     toolDef: ToolDef,
     input: Record<string, any>,
   ): Promise<void> {
+    // Constants applied synchronously
     for (const wire of toolDef.wires) {
       if (wire.kind === "constant") {
         setNested(input, parsePath(wire.target), wire.value);
-      } else {
-        const value = await this.resolveToolSource(wire.source, toolDef);
-        setNested(input, parsePath(wire.target), value);
+      }
+    }
+
+    // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
+    const pullWires = toolDef.wires.filter((w) => w.kind === "pull");
+    if (pullWires.length > 0) {
+      const resolved = await Promise.all(
+        pullWires.map(async (wire) => ({
+          target: wire.target,
+          value: await this.resolveToolSource(wire.source, toolDef),
+        })),
+      );
+      for (const { target, value } of resolved) {
+        setNested(input, parsePath(target), value);
       }
     }
   }
@@ -198,9 +224,22 @@ export class ExecutionTree {
     }
 
     return (async () => {
-      // Find all bridge wires whose "to" trunk matches the target
-      const bridgeWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      // If this target is a pipe fork, also apply bridge wires from its base
+      // handle (non-pipe wires, e.g. `c.currency <- i.currency`) as defaults
+      // before the fork-specific pipe wires.
+      const targetKey = trunkKey(target);
+      const pipeFork = this.pipeHandleMap?.get(targetKey);
+      const baseTrunk = pipeFork?.baseTrunk;
+
+      const baseWires = baseTrunk
+        ? (this.bridge?.wires.filter(
+            (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
+          ) ?? [])
+        : [];
+      // Fork-specific wires (pipe wires targeting the fork's own instance)
+      const forkWires = this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      // Merge: base provides defaults, fork overrides
+      const bridgeWires = [...baseWires, ...forkWires];
 
       // Look up ToolDef for this target
       const toolName = this.getToolName(target);
@@ -261,17 +300,18 @@ export class ExecutionTree {
       value = this.state[key];
     }
 
+    // Always await in case the stored value is a Promise (e.g. from schedule()).
+    const resolved = await Promise.resolve(value);
+
     if (!ref.path.length) {
-      return value;
+      return resolved;
     }
 
-    return (async () => {
-      let result: any = await Promise.resolve(value);
-      for (const segment of ref.path) {
-        result = result[segment];
-      }
-      return result;
-    })();
+    let result: any = resolved;
+    for (const segment of ref.path) {
+      result = result?.[segment];
+    }
+    return result;
   }
 
   async pull(refs: NodeRef[]): Promise<any> {

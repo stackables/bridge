@@ -165,6 +165,10 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   // ── Parse wire lines ────────────────────────────────────────────────
   const wires: Wire[] = [];
   let currentArrayToPath: string[] | null = null;
+  /** Monotonically-increasing index; combined with a high base to produce
+   *  fork instances that can never collide with regular handle instances. */
+  let nextForkSeq = 0;
+  const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
 
   for (let i = bodyStartIndex; i < lines.length; i++) {
     const raw = lines[i];
@@ -244,6 +248,58 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         continue;
       }
 
+      // Pipe chain: target <- tok1|tok2|...|source
+      // Each token is either "handle" (input field defaults to "in") or
+      // "handle.field" (explicit input field name).
+      // Every token creates an INDEPENDENT fork — a fresh tool invocation with
+      // its own instance number — so repeated use of the same handle produces
+      // separate calls.
+      // Execution order: source → tokN → … → tok1 → target (right-to-left).
+      const parts = sourceStr.split("|");
+      if (parts.length > 1) {
+        const actualSource = parts[parts.length - 1];
+        const tokenChain = parts.slice(0, -1); // [tok1, …, tokN] outermost→innermost
+
+        /** Parse "handle" or "handle.field" → {handleName, fieldName} */
+        const parseToken = (t: string) => {
+          const dot = t.indexOf(".");
+          return dot === -1
+            ? { handleName: t, fieldName: "in" }
+            : { handleName: t.substring(0, dot), fieldName: t.substring(dot + 1) };
+        };
+
+        for (const tok of tokenChain) {
+          const { handleName } = parseToken(tok);
+          if (!handleRes.has(handleName)) {
+            throw new Error(
+              `Line ${ln(i)}: Undeclared handle in pipe: "${handleName}". Add 'with <tool> as ${handleName}' to the bridge header.`,
+            );
+          }
+        }
+
+        let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField);
+        for (const tok of [...tokenChain].reverse()) {
+          const { handleName, fieldName } = parseToken(tok);
+          const res = handleRes.get(handleName)!;
+          // Allocate a unique fork instance (100000+ avoids collision with
+          // regular instances which start at 1).
+          const forkInstance = 100000 + nextForkSeq++;
+          const forkKey = `${res.module}:${res.type}:${res.field}:${forkInstance}`;
+          pipeHandleEntries.push({
+            key: forkKey,
+            handle: handleName,
+            baseTrunk: { module: res.module, type: res.type, field: res.field, instance: res.instance },
+          });
+          const forkInRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: parsePath(fieldName) };
+          const forkRootRef: NodeRef = { module: res.module, type: res.type, field: res.field, instance: forkInstance, path: [] };
+          wires.push({ from: prevOutRef, to: forkInRef, pipe: true });
+          prevOutRef = forkRootRef;
+        }
+        const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
+        wires.push({ from: prevOutRef, to: toRef, pipe: true });
+        continue;
+      }
+
       const fromRef = resolveAddress(
         sourceStr,
         handleRes,
@@ -269,6 +325,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     field: bridgeField,
     handles: handleBindings,
     wires,
+    pipeHandles: pipeHandleEntries.length > 0 ? pipeHandleEntries : undefined,
   });
 
   return instructions;
@@ -279,6 +336,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
  *
  * Supported forms:
  *   with <name> as <handle>     — tool reference (dotted or simple name)
+ *   with <name>                 — shorthand: handle defaults to last segment of name
  *   with input as <handle>
  *   with config as <handle>
  *   with config                 — shorthand for `with config as config`
@@ -380,6 +438,33 @@ function parseWithDeclaration(
     return;
   }
 
+  // with <name>  — shorthand: handle defaults to the last segment of name
+  // Must come after the `with input` / `with config` guards above.
+  match = line.match(/^with\s+(\S+)$/i);
+  if (match) {
+    const name = match[1];
+    const lastDot = name.lastIndexOf(".");
+    const handle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
+    checkDuplicate(handle);
+
+    if (lastDot !== -1) {
+      const modulePart = name.substring(0, lastDot);
+      const fieldPart  = name.substring(lastDot + 1);
+      const key = `${modulePart}:${fieldPart}`;
+      const instance = (instanceCounters.get(key) ?? 0) + 1;
+      instanceCounters.set(key, instance);
+      handleBindings.push({ handle, kind: "tool", name });
+      handleRes.set(handle, { module: modulePart, type: bridgeType, field: fieldPart, instance });
+    } else {
+      const key = `Tools:${name}`;
+      const instance = (instanceCounters.get(key) ?? 0) + 1;
+      instanceCounters.set(key, instance);
+      handleBindings.push({ handle, kind: "tool", name });
+      handleRes.set(handle, { module: SELF_MODULE, type: "Tools", field: name, instance });
+    }
+    return;
+  }
+
   throw new Error(`Line ${lineNum}: Invalid with declaration: ${line}`);
 }
 
@@ -387,9 +472,10 @@ function parseWithDeclaration(
  * Resolve an address string into a structured NodeRef.
  *
  * Resolution rules:
- *   1. No dot → output field on the bridge trunk
- *   2. Prefix matches a declared handle → resolve via handle binding
- *   3. Otherwise → nested output path (e.g., topPick.address)
+ *   1. No dot, but whole address is a declared handle → handle root (path: [])
+ *   2. No dot, not a handle → output field on the bridge trunk
+ *   3. Prefix matches a declared handle → resolve via handle binding
+ *   4. Otherwise → nested output path (e.g., topPick.address)
  */
 function resolveAddress(
   address: string,
@@ -399,8 +485,20 @@ function resolveAddress(
 ): NodeRef {
   const dotIndex = address.indexOf(".");
 
-  // No dot — output reference on bridge trunk
   if (dotIndex === -1) {
+    // Whole address is a declared handle → resolve to its root (path: [])
+    const resolution = handles.get(address);
+    if (resolution) {
+      const ref: NodeRef = {
+        module: resolution.module,
+        type: resolution.type,
+        field: resolution.field,
+        path: [],
+      };
+      if (resolution.instance != null) ref.instance = resolution.instance;
+      return ref;
+    }
+    // No dot, not a handle — output reference on bridge trunk
     return {
       module: SELF_MODULE,
       type: bridgeType,
@@ -429,6 +527,16 @@ function resolveAddress(
   }
 
   // No handle match — nested local path (e.g., topPick.address)
+  // UNLESS the prefix IS the bridge field itself (e.g., doubled.a when bridge is Query.doubled)
+  // — in that case strip the prefix so path = ["a"], matching the GraphQL resolver path.
+  if (prefix === bridgeField) {
+    return {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+      path: pathParts,
+    };
+  }
   return {
     module: SELF_MODULE,
     type: bridgeType,
@@ -633,9 +741,17 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
   for (const h of bridge.handles) {
     switch (h.kind) {
-      case "tool":
-        lines.push(`  with ${h.name} as ${h.handle}`);
+      case "tool": {
+        // Short form `with <name>` when handle == last segment of name
+        const lastDot = h.name.lastIndexOf(".");
+        const defaultHandle = lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
+        if (h.handle === defaultHandle) {
+          lines.push(`  with ${h.name}`);
+        } else {
+          lines.push(`  with ${h.name} as ${h.handle}`);
+        }
         break;
+      }
       case "input":
         lines.push(`  with input as ${h.handle}`);
         break;
@@ -650,13 +766,53 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Build handle map for reverse resolution ─────────────────────────
   const { handleMap, inputHandle } = buildHandleMap(bridge);
 
+  // ── Pipe fork registry ──────────────────────────────────────────────
+  // Extend handleMap with fork → handle-name entries and build the set of
+  // known fork trunk keys so the wire classifiers below can use it.
+  const pipeHandleTrunkKeys = new Set<string>();
+  for (const ph of bridge.pipeHandles ?? []) {
+    handleMap.set(ph.key, ph.handle);
+    pipeHandleTrunkKeys.add(ph.key);
+  }
+
+  // ── Pipe wire detection ───────────────────────────────────────────────────────
+  // Pipe wires are marked pipe:true.  Classify them into two maps:
+  //   toInMap:    forkTrunkKey → wire feeding the fork's input field
+  //   fromOutMap: forkTrunkKey → wire reading the fork's root result
+  // Terminal out-wires (destination is NOT another fork) are chain anchors.
+  const refTrunkKey = (ref: NodeRef): string =>
+    ref.instance != null
+      ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
+      : `${ref.module}:${ref.type}:${ref.field}`;
+
+  type FW = Extract<Wire, { from: NodeRef }>;
+  const toInMap    = new Map<string, FW>(); // forkTrunkKey → wire with to = fork's input field
+  const fromOutMap = new Map<string, FW>(); // forkTrunkKey → wire with from = fork root (path:[])
+  const pipeWireSet = new Set<Wire>();
+
+  for (const w of bridge.wires) {
+    if (!("from" in w) || !(w as any).pipe) continue;
+    const fw = w as FW;
+    pipeWireSet.add(w);
+    const toTk = refTrunkKey(fw.to);
+    // In-wire: single-segment path targeting a known pipe fork
+    if (fw.to.path.length === 1 && pipeHandleTrunkKeys.has(toTk)) {
+      toInMap.set(toTk, fw);
+    }
+    // Out-wire: empty path from a known pipe fork
+    if (fw.from.path.length === 0 && pipeHandleTrunkKeys.has(refTrunkKey(fw.from))) {
+      fromOutMap.set(refTrunkKey(fw.from), fw);
+    }
+  }
+
   // ── Wires ───────────────────────────────────────────────────────────
   const elementWires = bridge.wires.filter(
     (w): w is Extract<Wire, { from: NodeRef }> =>
       "from" in w && !!w.from.element,
   );
+  // Exclude pipe wires and element wires from the regular loop
   const regularWires = bridge.wires.filter(
-    (w) => !("from" in w) || !w.from.element,
+    (w) => !pipeWireSet.has(w) && (!("from" in w) || !w.from.element),
   );
 
   const elementGroups = new Map<string, Wire[]>();
@@ -701,6 +857,48 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const fromStr = serializeRef(w.from, bridge, handleMap, inputHandle, true);
     const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
     lines.push(`${toStr} <- ${fromStr}`);
+  }
+
+  // ── Pipe wires ───────────────────────────────────────────────────────
+  // Find terminal fromOutMap entries — their destination is NOT another
+  // pipe handle's .in. Follow the chain backward to reconstruct:
+  //   dest <- h1|h2|…|source
+  const serializedPipeTrunks = new Set<string>();
+
+  for (const [tk, outWire] of fromOutMap.entries()) {
+    // Non-terminal: this fork's result feeds another fork's input field
+    if (pipeHandleTrunkKeys.has(refTrunkKey(outWire.to))) continue;
+
+    // Follow chain backward to collect handle names (outermost-first)
+    const handleChain: string[] = [];
+    let currentTk = tk;
+    let actualSourceRef: NodeRef | null = null;
+
+    for (;;) {
+      const handleName = handleMap.get(currentTk);
+      if (!handleName) break;
+      // Token: "handle" when field is "in" (default), otherwise "handle.field"
+      const inWire = toInMap.get(currentTk);
+      const fieldName = inWire?.to.path[0] ?? "in";
+      const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
+      handleChain.push(token);
+      serializedPipeTrunks.add(currentTk);
+      if (!inWire) break;
+      const fromTk = refTrunkKey(inWire.from);
+      // Inner source is another pipe fork root (empty path) → continue chain
+      if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(fromTk)) {
+        currentTk = fromTk;
+      } else {
+        actualSourceRef = inWire.from;
+        break;
+      }
+    }
+
+    if (actualSourceRef && handleChain.length > 0) {
+      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
+      const destStr   = serializeRef(outWire.to,     bridge, handleMap, inputHandle, false);
+      lines.push(`${destStr} <- ${handleChain.join("|")}|${sourceStr}`);
+    }
   }
 
   return lines.join("\n");
@@ -778,7 +976,14 @@ function serializeRef(
       // From side: use input handle (data comes from args)
       return inputHandle + "." + serPath(ref.path);
     }
-    // To side: bare output path
+    // To side: sub-fields of the bridge's own return type are prefixed with the
+    // bridge field name so `path: ["a"]` serializes as `doubled.a` (not bare "a").
+    // This is needed for bridges whose output type has named sub-fields
+    // (e.g. `bridge Query.doubled` with `doubled.a <- ...`).
+    if (!isFrom && ref.path.length > 0) {
+      return bridge.field + "." + serPath(ref.path);
+    }
+    // Bare path (e.g. top-level scalar output, or no-path for the bridge trunk itself)
     return serPath(ref.path);
   }
 
@@ -789,6 +994,8 @@ function serializeRef(
       : `${ref.module}:${ref.type}:${ref.field}`;
   const handle = handleMap.get(trunkStr);
   if (handle) {
+    // Empty path — just the handle name (e.g. pipe result = tool root)
+    if (ref.path.length === 0) return handle;
     return handle + "." + serPath(ref.path);
   }
 

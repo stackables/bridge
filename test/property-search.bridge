@@ -56,6 +56,6 @@ gc.q <- i.location
 rv.lat <- gc.items[0].position.lat
 rv.lng <- gc.items[0].position.lng
 
-# reviews.comments → pluckText → flat string array
-pt.items           <- rv.comments
-propertyComments   <- pt.result
+# reviews.comments piped through pluckText → flat string array
+# pipe shorthand: wires rv.comments → pt.in, pt.out → propertyComments
+propertyComments <- pt|rv.comments

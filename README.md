@@ -63,13 +63,76 @@ results[] <- gc.items[]
 
 ```
 
-### 3. Syntax Reference
+### 3. Pipe Operator (`|`)
 
-| Operator       | Type         | Behavior                                                            |
-| -------------- | ------------ | ------------------------------------------------------------------- |
-| **`=`**        | **Constant** | Sets a static value (e.g., `method = GET`).                         |
-| **`<-`**       | **Wire**     | Pulls data from a source at runtime.                                |
-| **`[] <- []`** | **Map**      | Iterates over an array, creating a shadow context for nested wires. |
+The pipe operator is shorthand for routing data through a tool inline. Instead of explicitly wiring a tool's input and output fields, you write:
+
+```hcl
+# Without pipe (explicit wiring)
+with pluckText as pt
+pt.in <- rv.comments
+result <- pt
+
+# With pipe — same thing, one line
+with pluckText as pt
+result <- pt|rv.comments
+```
+
+Chains execute right-to-left — `source → h2 → h1 → dest`:
+
+```hcl
+with normalize as n
+with pluckText as pt
+result <- pt|n|rv.comments   # rv.comments → n → pt → result
+```
+
+**Each pipe use is an independent call.** Two lines using the same handle produce two separate tool invocations:
+
+```hcl
+with double as d
+doubled.a <- d|i.a   # independent call, input = i.a
+doubled.b <- d|i.b   # independent call, input = i.b
+```
+
+**Named input field** — if the tool's primary input isn't called `in`, specify it with a dot:
+
+```hcl
+with divide as dv
+result <- dv.dividend|i.amount   # wires i.amount → dv.dividend
+dv.divisor <- i.rate             # extra param wired normally
+```
+
+**Extra params** — any non-pipe wires on the handle are applied to every call of that handle:
+
+```hcl
+tool convertToEur currencyConverter
+  currency = EUR   # default baked into the tool
+
+bridge Query.price
+  with convertToEur
+  with input as i
+
+convertToEur.currency <- i.currency   # overrides the default per request
+price <- convertToEur|i.amount
+```
+
+Tool functions used in pipes receive all their inputs as a flat object and return their result directly — no wrapper needed:
+
+```typescript
+tools: {
+  pluckText:         ({ in: items })           => items.map(i => i.text),
+  currencyConverter: ({ in: amount, currency }) => amount / rates[currency],
+}
+```
+
+### 4. Syntax Reference
+
+| Operator            | Type         | Behavior                                                            |
+| ------------------- | ------------ | ------------------------------------------------------------------- |
+| **`=`**             | **Constant** | Sets a static value (e.g., `method = GET`).                         |
+| **`<-`**            | **Wire**     | Pulls data from a source at runtime.                                |
+| **`[] <- []`**      | **Map**      | Iterates over an array, creating a shadow context for nested wires. |
+| **`<- handle\|…`** | **Pipe**     | Routes data through a tool inline. Each use is an independent call. |
 
 ---
 

@@ -94,6 +94,7 @@ Three block types, two operators.
 |---|---|
 | `=` | Constant — sets a fixed value |
 | `<-` | Wire — pulls data from a source at runtime |
+| `<- h1\|h2\|source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
 
 ### `tool` blocks
 Define a reusable API call configuration. The first word after the tool name is the **function name** — looked up in the `tools` map at runtime.

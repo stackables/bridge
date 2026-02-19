@@ -2,7 +2,7 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.js";
+import { parseBridge, serializeBridge } from "../src/bridge-format.js";
 import { createGateway } from "./_gateway.js";
 
 // ── Missing tool error ──────────────────────────────────────────────────────
@@ -294,5 +294,286 @@ value <- m.payload
     assert.ok(mainCall, "main API tool should be called");
     assert.equal(mainCall.input.headers?.Authorization, "tok_abc");
     assert.equal(mainCall.input.id, "x");
+  });
+});
+
+// ── Pipe operator (end-to-end) ───────────────────────────────────────────────
+//
+// `result <- toolName|source` is shorthand for:
+//   (implicit) with toolName as $handle
+//   $handle.in  <- source
+//   result      <- $handle.out
+
+describe("pipe operator", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      shout(text: String!): ShoutResult
+    }
+    type ShoutResult {
+      loud: String
+    }
+  `;
+
+  // The pipe tool receives { in: value } and returns { out: transformed }
+  const bridgeText = `
+bridge Query.shout
+  with input as i
+  with toUpper as tu
+
+loud <- tu|i.text
+`;
+
+  test("pipes source through tool and maps result to output", async () => {
+    let capturedInput: Record<string, any> = {};
+
+    const toUpper = (input: Record<string, any>) => {
+      capturedInput = input;
+      return String(input.in).toUpperCase();
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { toUpper },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ shout(text: "hello world") { loud } }`),
+    });
+
+    assert.equal(result.data.shout.loud, "HELLO WORLD");
+    assert.equal(capturedInput.in, "hello world");
+  });
+
+  test("pipe fails when handle is not declared", () => {
+    const badBridge = `
+bridge Query.shout
+  with input as i
+
+loud <- undeclared|i.text
+`;
+    assert.throws(
+      () => parseBridge(badBridge),
+      /Undeclared handle in pipe: "undeclared"/,
+    );
+  });
+
+  test("serializer round-trips pipe syntax", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    // The declared handle must still appear in the with block
+    assert.ok(serialized.includes("with toUpper as tu"), "handle declaration must appear in header");
+    // The body should use the pipe operator (not two explicit wires)
+    assert.ok(serialized.includes("tu|"), "serialized output should use pipe operator");
+    assert.ok(!serialized.includes("tu.in"), "expanded in-wire should not appear");
+    assert.ok(!serialized.includes("tu.out"), "expanded out-wire should not appear");
+    // Parse → serialize → parse should be idempotent
+    const reparsed = parseBridge(serialized);
+    const reserialized = serializeBridge(reparsed);
+    assert.equal(reserialized, serialized, "parseBridge(serializeBridge(x)) should be idempotent");
+  });
+});
+
+// ── Pipe with extra tool params (end-to-end) ─────────────────────────────────
+//
+// Demonstrates a pipe-stage tool that has additional input fields beyond `in`.
+// Those fields can be:
+//   a) set as constants in the tool definition          → default values
+//   b) wired from bridge input in the bridge body       → per-call override
+//
+// Tool shape:  { in: number, currency: string }  →  { out: number }
+
+describe("pipe with extra tool params", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      priceEur(amount: Float!): Float
+      priceAny(amount: Float!, currency: String!): Float
+    }
+  `;
+
+  // Fictional exchange: divide by 100 for EUR, divide by 90 for GBP
+  const rates: Record<string, number> = { EUR: 100, GBP: 90 };
+
+  const currencyConverter = (input: Record<string, any>) =>
+    input.in / (rates[input.currency] ?? 100);
+
+  // ── Tool block ──────────────────────────────────────────────────────────
+  // `currency = EUR` bakes a default.  The `with convertToEur` shorthand
+  // (no `as`) uses the tool name itself as the handle.
+  const bridgeText = `
+tool convertToEur currencyConverter
+  currency = EUR
+
+---
+
+bridge Query.priceEur
+  with convertToEur
+  with input as i
+
+priceEur <- convertToEur|i.amount
+
+---
+
+bridge Query.priceAny
+  with convertToEur
+  with input as i
+
+convertToEur.currency <- i.currency
+priceAny <- convertToEur|i.amount
+`;
+
+  function makeExecutor() {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { currencyConverter },
+    });
+    return buildHTTPExecutor({ fetch: gateway.fetch as any });
+  }
+
+  test("default currency from tool definition is used when not overridden", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{ priceEur(amount: 500) }`),
+    });
+    assert.equal(result.data.priceEur, 5);       // 500 / 100
+  });
+
+  test("currency override from input takes precedence over tool default", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{ priceAny(amount: 450, currency: "GBP") }`),
+    });
+    assert.equal(result.data.priceAny, 5);       // 450 / 90
+  });
+
+  test("with <name> shorthand round-trips through serializer", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    // Short form must survive the round-trip
+    assert.ok(serialized.includes("  with convertToEur\n"), "short with form should be preserved");
+    const reparsed = parseBridge(serialized);
+    const reserialized = serializeBridge(reparsed);
+    assert.equal(reserialized, serialized, "should be idempotent");
+  });
+});
+
+// ── Pipe forking ──────────────────────────────────────────────────────────────
+//
+// Each use of `<- handle|source` in a bridge is an INDEPENDENT tool call:
+//   a <- c|i.a
+//   b <- c|i.b
+// is equivalent to two separate instances of tool `c`, each receiving its own
+// input and producing its own output independently.
+
+describe("pipe forking", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      doubled(a: Float!, b: Float!): Doubled
+    }
+    type Doubled {
+      a: Float
+      b: Float
+    }
+  `;
+
+  // Simple doubler tool  {in: number} → number
+  const doubler = (input: Record<string, any>) => input.in * 2;
+
+  const bridgeText = `
+tool double doubler
+
+---
+
+bridge Query.doubled
+  with double as d
+  with input as i
+
+doubled.a <- d|i.a
+doubled.b <- d|i.b
+`;
+
+  function makeExecutor() {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { doubler },
+    });
+    return buildHTTPExecutor({ fetch: gateway.fetch as any });
+  }
+
+  test("each pipe use is an independent call — both outputs are doubled", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{ doubled(a: 3, b: 7) { a b } }`),
+    });
+    assert.equal(result.data.doubled.a, 6);   // 3 * 2
+    assert.equal(result.data.doubled.b, 14);  // 7 * 2
+  });
+
+  test("pipe forking serializes and round-trips correctly", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("doubled.a <- d|i.a"), "first fork serialized");
+    assert.ok(serialized.includes("doubled.b <- d|i.b"), "second fork serialized");
+    const reparsed = parseBridge(serialized);
+    const reserialized = serializeBridge(reparsed);
+    assert.equal(reserialized, serialized, "should be idempotent");
+  });
+});
+
+// ── Named pipe input field ────────────────────────────────────────────────────
+//
+// Syntax: `target <- handle.field|source`
+// The field name after the dot sets the input field on the pipe stage (default
+// is `in`).  This lets you route a value to a specific parameter of the tool.
+
+describe("pipe named input field", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      converted(amount: Float!, rate: Float!): Float
+    }
+  `;
+
+  // Divider tool: { dividend: number, divisor: number } → number
+  const divider = (input: Record<string, any>) => input.dividend / input.divisor;
+
+  const bridgeText = `
+tool divide divider
+
+---
+
+bridge Query.converted
+  with divide as dv
+  with input as i
+
+converted <- dv.dividend|i.amount
+dv.divisor <- i.rate
+`;
+
+  function makeExecutor() {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { divider },
+    });
+    return buildHTTPExecutor({ fetch: gateway.fetch as any });
+  }
+
+  test("named input field routes value to correct parameter", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{ converted(amount: 450, rate: 90) }`),
+    });
+    assert.equal(result.data.converted, 5);   // 450 / 90
+  });
+
+  test("named input field round-trips through serializer", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.includes("converted <- dv.dividend|i.amount"),
+      "named-field pipe token serialized correctly",
+    );
+    const reparsed = parseBridge(serialized);
+    const reserialized = serializeBridge(reparsed);
+    assert.equal(reserialized, serialized, "should be idempotent");
   });
 });

@@ -61,9 +61,7 @@ const propertyTools: Record<string, any> = {
     ],
   }),
   centsToUsd: (params: { cents: number }) => ({ dollars: params.cents / 100 }),
-  pluckText: (params: { items: any[] }) => ({
-    result: params.items.map((item: any) => item.text),
-  }),
+  pluckText: (params: { in: any[] }) => params.in.map((item: any) => item.text),
 };
 
 function makeExecutor() {
