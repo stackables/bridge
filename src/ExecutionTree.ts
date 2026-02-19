@@ -60,7 +60,7 @@ export class ExecutionTree {
     public trunk: Trunk,
     private instructions: Instruction[],
     private toolFns?: Record<string, ToolCallFn | ((...args: any[]) => any)>,
-    private config?: Record<string, any>,
+    private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
     this.bridge = instructions.find(
@@ -72,10 +72,10 @@ export class ExecutionTree {
         this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
       );
     }
-    if (config) {
+    if (context) {
       this.state[
-        trunkKey({ module: SELF_MODULE, type: "Config", field: "config" })
-      ] = config;
+        trunkKey({ module: SELF_MODULE, type: "Context", field: "context" })
+      ] = context;
     }
     // Collect const definitions into a single namespace object
     const constObj: Record<string, any> = {};
@@ -202,8 +202,8 @@ export class ExecutionTree {
       throw new Error(`Unknown source "${handle}" in tool "${toolDef.name}"`);
 
     let value: any;
-    if (dep.kind === "config") {
-      value = this.config ?? this.parent?.config;
+    if (dep.kind === "context") {
+      value = this.context ?? this.parent?.context;
     } else if (dep.kind === "const") {
       value = this.state[
         trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })

@@ -58,9 +58,9 @@ describe("extends chain", () => {
   // Bridge wires city from input.
   const bridgeText = `
 tool weatherApi httpCall
-  with config
+  with context
   baseUrl = "https://api.weather.test/v2"
-  headers.apiKey <- config.weather.apiKey
+  headers.apiKey <- context.weather.apiKey
 
 tool weatherApi.current extends weatherApi
   method = GET
@@ -88,7 +88,7 @@ city <- w.location.name
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      config: { weather: { apiKey: "test-key-123" } },
+      context: { weather: { apiKey: "test-key-123" } },
       tools: { httpCall },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -155,9 +155,9 @@ city <- b.location.name
   });
 });
 
-// ── Config pull (end-to-end) ────────────────────────────────────────────────
+// ── Context pull (end-to-end) ───────────────────────────────────────────────
 
-describe("config pull", () => {
+describe("context pull", () => {
   const typeDefs = /* GraphQL */ `
     type Query {
       lookup(q: String!): LookupResult
@@ -169,10 +169,10 @@ describe("config pull", () => {
 
   const bridgeText = `
 tool myapi httpCall
-  with config
+  with context
   baseUrl = "https://api.test"
-  headers.Authorization <- config.myapi.token
-  headers.X-Org <- config.myapi.orgId
+  headers.Authorization <- context.myapi.token
+  headers.X-Org <- context.myapi.orgId
 
 tool myapi.lookup extends myapi
   method = GET
@@ -188,7 +188,7 @@ m.q <- i.q
 answer <- m.result
 `;
 
-  test("config values are pulled into tool headers", async () => {
+  test("context values are pulled into tool headers", async () => {
     let capturedInput: Record<string, any> = {};
 
     const httpCall = async (input: Record<string, any>) => {
@@ -198,7 +198,7 @@ answer <- m.result
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      config: { myapi: { token: "Bearer secret", orgId: "org-99" } },
+      context: { myapi: { token: "Bearer secret", orgId: "org-99" } },
       tools: { httpCall },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -229,15 +229,15 @@ describe("tool-to-tool dependency", () => {
   // authService is called first, its output is used in mainApi's headers
   const bridgeText = `
 tool authService httpCall
-  with config
+  with context
   baseUrl = "https://auth.test"
   method = POST
   path = /token
-  body.clientId <- config.auth.clientId
-  body.secret <- config.auth.secret
+  body.clientId <- context.auth.clientId
+  body.secret <- context.auth.secret
 
 tool mainApi httpCall
-  with config
+  with context
   with authService as auth
   baseUrl = "https://api.test"
   headers.Authorization <- auth.access_token
@@ -271,7 +271,7 @@ value <- m.payload
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      config: { auth: { clientId: "client-1", secret: "s3cret" } },
+      context: { auth: { clientId: "client-1", secret: "s3cret" } },
       tools: { httpCall },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });

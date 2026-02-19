@@ -71,7 +71,7 @@ export type Bridge = {
 export type HandleBinding =
   | { handle: string; kind: "tool"; name: string }
   | { handle: string; kind: "input" }
-  | { handle: string; kind: "config" }
+  | { handle: string; kind: "context" }
   | { handle: string; kind: "const" };
 
 /** Internal module identifier for the bridge's own trunk (input args + output fields) */
@@ -104,11 +104,11 @@ export type ToolDef = {
 /**
  * A dependency declared inside a tool block.
  *
- *   with config                  — brings config into scope
+ *   with context                 — brings the full GraphQL context into scope
  *   with authService as auth     — brings another tool's output into scope
  */
 export type ToolDep =
-  | { kind: "config"; handle: string }
+  | { kind: "context"; handle: string }
   | { kind: "tool"; handle: string; tool: string }
   | { kind: "const"; handle: string };
 
@@ -119,10 +119,10 @@ export type ToolDep =
  * Examples:
  *   baseUrl = "https://api.sendgrid.com/v3"         → constant
  *   method = POST                                     → constant (unquoted)
- *   headers.Authorization <- config.sendgrid.token   → pull from config
+ *   headers.Authorization <- ctx.sendgrid.token      → pull from context
  *   headers.Authorization <- auth.access_token       → pull from tool dep
  *   on error = { "lat": 0, "lon": 0 }               → constant fallback
- *   on error <- config.fallbacks.geo                  → pull fallback from config
+ *   on error <- ctx.fallbacks.geo                     → pull fallback from context
  */
 export type ToolWire =
   | { target: string; kind: "constant"; value: string }

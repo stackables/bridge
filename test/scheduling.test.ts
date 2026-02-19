@@ -501,18 +501,18 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
 
   const bridgeText = `
 tool authService httpCall
-  with config
+  with context
   baseUrl = "https://auth.test"
   method = POST
   path = /token
-  body.clientId <- config.auth.clientId
+  body.clientId <- context.auth.clientId
 
 tool quotaService httpCall
-  with config
+  with context
   baseUrl = "https://quota.test"
   method = GET
   path = /check
-  headers.key <- config.quota.apiKey
+  headers.key <- context.quota.apiKey
 
 tool mainApi httpCall
   with authService as auth
@@ -560,7 +560,7 @@ value <- m.payload
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      config: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } },
+      context: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } },
       tools: { httpCall },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });

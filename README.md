@@ -45,9 +45,9 @@ Defines the "Where" and the "How."
 
 ```hcl
 tool <name> [extends <parent>] [<toolFunction>]
-  [with config]                   # Injects environment secrets
+  [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
-  [on error <- <source>]          # Pull fallback from config/tool
+  [on error <- <source>]          # Pull fallback from context/tool
   
   <param> = <value>               # Constant/Default value
   <param> <- <source>             # Dynamic wire
@@ -81,7 +81,7 @@ bridge <Type.field>
 
 Two layers of fault tolerance prevent a single API failure from crashing the response:
 
-1. **Layer 1 — Tool `on error**`: Catches tool execution failures. Child tools inherit this via `extends`.
+1. **Layer 1 — Tool `on error`**: Catches tool execution failures. Child tools inherit this via `extends`.
 2. **Layer 2 — Wire `??` fallback**: Catches any failure in the resolution chain (missing data, network timeout) as a last resort.
 
 ```hcl
@@ -163,7 +163,7 @@ const schema = bridgeTransform(
 const yoga = createYoga({
   schema,
   context: () => ({
-    config: { api: { key: process.env.API_KEY } },
+    api: { key: process.env.API_KEY },
   }),
 });
 

@@ -351,8 +351,8 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
  *   with <name> as <handle>     — tool reference (dotted or simple name)
  *   with <name>                 — shorthand: handle defaults to last segment of name
  *   with input as <handle>
- *   with config as <handle>
- *   with config                 — shorthand for `with config as config`
+ *   with context as <handle>
+ *   with context                — shorthand for `with context as context`
  */
 function parseWithDeclaration(
   line: string,
@@ -385,30 +385,30 @@ function parseWithDeclaration(
     return;
   }
 
-  // with config as <handle>
-  match = line.match(/^with\s+config\s+as\s+(\w+)$/i);
+  // with context as <handle>
+  match = line.match(/^with\s+context\s+as\s+(\w+)$/i);
   if (match) {
     const handle = match[1];
     checkDuplicate(handle);
-    handleBindings.push({ handle, kind: "config" });
+    handleBindings.push({ handle, kind: "context" });
     handleRes.set(handle, {
       module: SELF_MODULE,
-      type: "Config",
-      field: "config",
+      type: "Context",
+      field: "context",
     });
     return;
   }
 
-  // with config (shorthand — handle defaults to "config")
-  match = line.match(/^with\s+config$/i);
+  // with context (shorthand — handle defaults to "context")
+  match = line.match(/^with\s+context$/i);
   if (match) {
-    const handle = "config";
+    const handle = "context";
     checkDuplicate(handle);
-    handleBindings.push({ handle, kind: "config" });
+    handleBindings.push({ handle, kind: "context" });
     handleRes.set(handle, {
       module: SELF_MODULE,
-      type: "Config",
-      field: "config",
+      type: "Context",
+      field: "context",
     });
     return;
   }
@@ -480,7 +480,7 @@ function parseWithDeclaration(
   }
 
   // with <name>  — shorthand: handle defaults to the last segment of name
-  // Must come after the `with input` / `with config` guards above.
+  // Must come after the `with input` / `with context` guards above.
   match = line.match(/^with\s+(\S+)$/i);
   if (match) {
     const name = match[1];
@@ -662,9 +662,9 @@ function parseConstLines(block: string, lineOffset: number): ConstDef[] {
  *
  * Format (root tool):
  *   tool hereapi httpCall
- *     with config
+ *     with context
  *     baseUrl = "https://geocode.search.hereapi.com/v1"
- *     headers.apiKey <- config.hereapi.apiKey
+ *     headers.apiKey <- context.hereapi.apiKey
  *
  * Format (child tool with extends):
  *   tool hereapi.geocode extends hereapi
@@ -705,11 +705,11 @@ function parseToolBlock(block: string, lineOffset: number): ToolDef {
       throw new Error(`Line ${ln(i)}: Invalid tool declaration: ${line}`);
     }
 
-    // with config or with config as <handle>
-    const configMatch = line.match(/^with\s+config(?:\s+as\s+(\w+))?$/i);
-    if (configMatch) {
-      const handle = configMatch[1] ?? "config";
-      deps.push({ kind: "config", handle });
+    // with context or with context as <handle>
+    const contextMatch = line.match(/^with\s+context(?:\s+as\s+(\w+))?$/i);
+    if (contextMatch) {
+      const handle = contextMatch[1] ?? "context";
+      deps.push({ kind: "context", handle });
       continue;
     }
 
@@ -753,7 +753,7 @@ function parseToolBlock(block: string, lineOffset: number): ToolDef {
       continue;
     }
 
-    // on error <- source (pull fallback from config/dep)
+    // on error <- source (pull fallback from context/dep)
     const onErrorPullMatch = line.match(/^on\s+error\s*<-\s*(\S+)$/i);
     if (onErrorPullMatch) {
       wires.push({ kind: "onError", source: onErrorPullMatch[1] });
@@ -862,11 +862,11 @@ function serializeToolBlock(tool: ToolDef): string {
 
   // Dependencies
   for (const dep of tool.deps) {
-    if (dep.kind === "config") {
-      if (dep.handle === "config") {
-        lines.push(`  with config`);
+    if (dep.kind === "context") {
+      if (dep.handle === "context") {
+        lines.push(`  with context`);
       } else {
-        lines.push(`  with config as ${dep.handle}`);
+        lines.push(`  with context as ${dep.handle}`);
       }
     } else if (dep.kind === "const") {
       if (dep.handle === "const") {
@@ -924,8 +924,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       case "input":
         lines.push(`  with input as ${h.handle}`);
         break;
-      case "config":
-        lines.push(`  with config as ${h.handle}`);
+      case "context":
+        lines.push(`  with context as ${h.handle}`);
         break;
       case "const":
         if (h.handle === "const") {
@@ -1125,8 +1125,8 @@ function buildHandleMap(bridge: Bridge): {
       case "input":
         inputHandle = h.handle;
         break;
-      case "config":
-        handleMap.set(`${SELF_MODULE}:Config:config`, h.handle);
+      case "context":
+        handleMap.set(`${SELF_MODULE}:Context:context`, h.handle);
         break;
       case "const":
         handleMap.set(`${SELF_MODULE}:Const:const`, h.handle);

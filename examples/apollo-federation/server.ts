@@ -82,14 +82,14 @@ const schema = bridgeTransform(baseSchema, instructions, {
 
 const server = new ApolloServer({
   schema,
-  // Apollo Server passes context to resolvers — bridge reads context.config
+  // Apollo Server passes context to resolvers — bridge reads the full context
   plugins: [
     {
       async requestDidStart() {
         return {
           async didResolveOperation(requestContext) {
-            requestContext.contextValue.config = {
-              hereapi: { apiKey: process.env.HEREAPI_KEY ?? "" },
+            requestContext.contextValue.hereapi = {
+              apiKey: process.env.HEREAPI_KEY ?? "",
             };
           },
         };

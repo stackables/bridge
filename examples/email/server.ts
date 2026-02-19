@@ -16,9 +16,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions);
 const yoga = createYoga({
   schema,
   context: () => ({
-    config: {
-      sendgrid: { bearerToken: `Bearer ${process.env.SENDGRID_API_KEY}` },
-    },
+    sendgrid: { bearerToken: `Bearer ${process.env.SENDGRID_API_KEY}` },
   }),
 });
 

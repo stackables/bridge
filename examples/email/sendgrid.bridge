@@ -1,7 +1,7 @@
 tool sendgrid httpCall
-  with config
+  with context
   baseUrl = "https://api.sendgrid.com/v3"
-  headers.Authorization <- config.sendgrid.bearerToken
+  headers.Authorization <- context.sendgrid.bearerToken
 
 tool sendgrid.send extends sendgrid
   method = POST

@@ -4,7 +4,7 @@ import { bridgeTransform } from "../src/bridge-transform.js";
 import type { ToolCallFn } from "../src/types.js";
 
 type GatewayOptions = {
-  config?: Record<string, any>;
+  context?: Record<string, any>;
   tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
 };
 
@@ -20,7 +20,7 @@ export function createGateway(
       tools: options?.tools,
     }),
     context: () => ({
-      config: options?.config ?? {},
+      ...(options?.context ?? {}),
     }),
     graphqlEndpoint: "*",
   });

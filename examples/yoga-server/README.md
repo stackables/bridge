@@ -8,7 +8,7 @@ Standard GraphQL server using [graphql-yoga](https://the-guild.dev/graphql/yoga-
 - `hereapi.bridge` — provider definition + field wiring
 - `server.ts` — spins up the server from the two files
 
-Config (API keys) is passed via GraphQL context — the standard pattern.
+Context (API keys, auth tokens) is passed via GraphQL context — the standard pattern.
 
 ## Run
 

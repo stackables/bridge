@@ -183,15 +183,15 @@ tool myApi httpCall
   test("on error <- source is parsed as onError wire with source", () => {
     const instructions = parseBridge(`
 tool myApi httpCall
-  with config
-  on error <- config.fallbacks.geo
+  with context
+  on error <- context.fallbacks.geo
 `);
     const tool = instructions[0] as ToolDef;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError, "should have an onError wire");
     assert.ok("source" in onError!, "should have a source");
     if ("source" in onError!) {
-      assert.equal(onError.source, "config.fallbacks.geo");
+      assert.equal(onError.source, "context.fallbacks.geo");
     }
   });
 
@@ -241,8 +241,8 @@ tool myApi httpCall
   test("on error <- source roundtrips", () => {
     const input = `
 tool myApi httpCall
-  with config
-  on error <- config.fallbacks.geo
+  with context
+  on error <- context.fallbacks.geo
 `;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
@@ -292,11 +292,11 @@ lon <- api.lon
     assert.equal(result.data.geo.lon, 0);
   });
 
-  test("on error <- config returns config fallback when tool throws", async () => {
+  test("on error <- context returns context fallback when tool throws", async () => {
     const bridgeText = `
 tool flakyApi httpCall
-  with config
-  on error <- config.fallbacks.geo
+  with context
+  on error <- context.fallbacks.geo
 
 ---
 
@@ -316,7 +316,7 @@ lon <- api.lon
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
       tools,
-      config: { fallbacks: { geo: { lat: 52.52, lon: 13.4 } } },
+      context: { fallbacks: { geo: { lat: 52.52, lon: 13.4 } } },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 

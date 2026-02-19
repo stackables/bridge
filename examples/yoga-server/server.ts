@@ -16,9 +16,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions);
 const yoga = createYoga({
   schema,
   context: () => ({
-    config: {
-      hereapi: { apiKey: process.env.HEREAPI_KEY ?? "" },
-    },
+    hereapi: { apiKey: process.env.HEREAPI_KEY ?? "" },
   }),
 });
 

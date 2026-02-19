@@ -278,23 +278,23 @@ b.y <- i.input
     assert.equal(bridges[1].field, "second");
   });
 
-  test("config handle", () => {
+  test("context handle", () => {
     const result = parseBridge(`
 bridge Query.search
   with zillow.find as z
   with input as i
-  with config as c
+  with context as c
 
 z.maxPrice <- c.maxBudget
 z.lat <- i.lat
 `);
     const bridge = result[0] as Bridge;
     assert.equal(bridge.handles.length, 3);
-    assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "config" });
+    assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
     assert.deepStrictEqual(bridge.wires[0].from, {
       module: SELF_MODULE,
-      type: "Config",
-      field: "config",
+      type: "Context",
+      field: "context",
       path: ["maxBudget"],
     });
   });
@@ -480,9 +480,9 @@ describe("parseBridge: tool blocks", () => {
   test("parses a simple GET tool", () => {
     const result = parseBridge(`
 tool hereapi httpCall
-  with config
+  with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- config.hereapi.apiKey
+  headers.apiKey <- context.hereapi.apiKey
 
 tool hereapi.geocode extends hereapi
   method = GET
@@ -500,7 +500,7 @@ gc.q <- i.search
     const root = tools.find((t) => t.name === "hereapi")!;
     assert.equal(root.fn, "httpCall");
     assert.equal(root.extends, undefined);
-    assert.deepStrictEqual(root.deps, [{ kind: "config", handle: "config" }]);
+    assert.deepStrictEqual(root.deps, [{ kind: "context", handle: "context" }]);
     assert.deepStrictEqual(root.wires, [
       {
         target: "baseUrl",
@@ -510,7 +510,7 @@ gc.q <- i.search
       {
         target: "headers.apiKey",
         kind: "pull",
-        source: "config.hereapi.apiKey",
+        source: "context.hereapi.apiKey",
       },
     ]);
 
@@ -526,9 +526,9 @@ gc.q <- i.search
   test("parses POST tool with constant and pull wires", () => {
     const result = parseBridge(`
 tool sendgrid httpCall
-  with config
+  with context
   baseUrl = "https://api.sendgrid.com/v3"
-  headers.Authorization <- config.sendgrid.bearerToken
+  headers.Authorization <- context.sendgrid.bearerToken
   headers.X-Custom = "static-value"
 
 tool sendgrid.send extends sendgrid
@@ -553,7 +553,7 @@ sg.content <- i.body
       {
         target: "headers.Authorization",
         kind: "pull",
-        source: "config.sendgrid.bearerToken",
+        source: "context.sendgrid.bearerToken",
       },
       { target: "headers.X-Custom", kind: "constant", value: "static-value" },
     ]);
@@ -571,14 +571,14 @@ sg.content <- i.body
   test("parses tool with deps (tool-to-tool)", () => {
     const result = parseBridge(`
 tool authService httpCall
-  with config
+  with context
   method = POST
   baseUrl = "https://auth.example.com"
   path = /token
-  body.client_id <- config.auth.clientId
+  body.client_id <- context.auth.clientId
 
 tool serviceB httpCall
-  with config
+  with context
   with authService as auth
   baseUrl = "https://api.serviceb.com"
   headers.Authorization <- auth.access_token
@@ -593,7 +593,7 @@ sb.q <- i.query
       (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
     )!;
     assert.deepStrictEqual(serviceB.deps, [
-      { kind: "config", handle: "config" },
+      { kind: "context", handle: "context" },
       { kind: "tool", handle: "auth", tool: "authService" },
     ]);
     assert.deepStrictEqual(serviceB.wires[1], {
@@ -610,9 +610,9 @@ describe("serializeBridge: tool roundtrip", () => {
   test("GET tool roundtrips", () => {
     const input = `
 tool hereapi httpCall
-  with config
+  with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- config.hereapi.apiKey
+  headers.apiKey <- context.hereapi.apiKey
 
 tool hereapi.geocode extends hereapi
   method = GET
@@ -636,9 +636,9 @@ gc.limit <- i.limit
   test("POST tool roundtrips", () => {
     const input = `
 tool sendgrid httpCall
-  with config
+  with context
   baseUrl = "https://api.sendgrid.com/v3"
-  headers.Authorization <- config.sendgrid.bearerToken
+  headers.Authorization <- context.sendgrid.bearerToken
 
 tool sendgrid.send extends sendgrid
   method = POST
@@ -662,9 +662,9 @@ messageId <- sg.id
   test("serialized tool output is human-readable", () => {
     const input = `
 tool hereapi httpCall
-  with config
+  with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- config.hereapi.apiKey
+  headers.apiKey <- context.hereapi.apiKey
 
 tool hereapi.geocode extends hereapi
   method = GET
@@ -680,7 +680,7 @@ gc.q <- i.search
     assert.ok(output.includes("tool hereapi httpCall"));
     assert.ok(output.includes("tool hereapi.geocode extends hereapi"));
     assert.ok(output.includes("baseUrl = https://geocode.search.hereapi.com/v1"));
-    assert.ok(output.includes("headers.apiKey <- config.hereapi.apiKey"));
+    assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
   });
 });
 
@@ -749,7 +749,7 @@ gc.q <- i.search
         parseBridge(`
 bridge Query.geocode
   with input as h
-  with config as h
+  with context as h
 
 search <- h.q
 `),
@@ -795,16 +795,16 @@ result <- t.output
     assert.notEqual(toolHandle, undefined);
   });
 
-  test("with config keyword is case-insensitive", () => {
+  test("with context keyword is case-insensitive", () => {
     const bridge = parseBridge(`
 Bridge Query.geocode
-  With Config as cfg
+  With Context as cfg
   With Input as i
 
 result <- cfg.apiKey
 `).find((i) => i.kind === "bridge") as Bridge;
     assert.notEqual(
-      bridge.handles.find((h) => h.kind === "config"),
+      bridge.handles.find((h) => h.kind === "context"),
       undefined,
     );
   });

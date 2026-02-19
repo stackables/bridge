@@ -65,21 +65,27 @@ Can be a static array or a **per-request function** for multi-provider routing. 
 ```typescript
 type BridgeOptions = {
   tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
-  configKey?: string; // default: "config"
+  contextMapper?: (context: any) => Record<string, any>;
 }
 ```
 - `tools` — register custom tool functions by name. The built-in `httpCall` is always registered; user tools override it.
-- `configKey` — the key in GraphQL context where config lives. Defaults to `"config"`. Set this if your app already uses `context.config` for something else.
+- `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
-### Config in context
-The engine reads `context[configKey]` (default `context.config`) at request time and passes it to any tool that declares `with config`. This is how API keys / secrets are injected at runtime without hardcoding.
+### Context access
+The engine passes the full GraphQL context to any tool or bridge that declares `with context`. This gives access to auth tokens, config, feature flags — anything on the context.
 
 ```typescript
 // Server setup
 context: () => ({
-  config: {
-    hereapi: { apiKey: process.env.HEREAPI_KEY },
-  },
+  hereapi: { apiKey: process.env.HEREAPI_KEY },
+  auth: { userId: '...' },
+})
+```
+
+To restrict what bridge files can see, use `contextMapper`:
+```typescript
+bridgeTransform(schema, instructions, {
+  contextMapper: (ctx) => ({ hereapi: ctx.hereapi }),
 })
 ```
 
@@ -117,16 +123,16 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `<-! h1\|h2\|source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
 | `?? <json>` | Wire fallback — appended to any `<-` wire. If the resolution chain fails (tool down, dep failure, missing data), the parsed JSON value is returned instead. Example: `lat <- api.lat ?? 0` |
 | `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
-| `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from config or another tool dependency at runtime. |
+| `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
 
 ### `tool` blocks
 Define a reusable API call configuration. The first word after the tool name is the **function name** — looked up in the `tools` map at runtime.
 
 ```hcl
 tool hereapi httpCall
-  with config
+  with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- config.hereapi.apiKey
+  headers.apiKey <- context.hereapi.apiKey
 
 tool hereapi.geocode extends hereapi
   method = GET
@@ -138,10 +144,10 @@ tool hereapi.geocode extends hereapi
 2. Merging wires (child overrides parent by `target` path; `onError` wires merge by kind — child wins)
 3. Merging deps (deduplicated by handle name)
 
-**`with config`** — declares a dep on the config object (injected from context).  
+**`with context`** — declares a dep on the GraphQL context (auth tokens, API keys, feature flags, etc.).  
 **`with <tool> as <handle>`** — declares a tool-to-tool dependency. The dep tool is called first and its result is available as `handle` in wires. Results are cached per request.  
 **`on error = <json>`** — tool-level fallback. If `fn(input)` throws, this JSON value is returned instead. Only catches execution errors, not wire resolution.  
-**`on error <- <source>`** — same but pulls fallback from config/tool at runtime. Example: `on error <- config.fallbacks.geo`.
+**`on error <- <source>`** — same but pulls fallback from context/tool at runtime. Example: `on error <- context.fallbacks.geo`.
 
 ### `bridge` blocks
 Connect a GraphQL field to its tools.
@@ -206,8 +212,8 @@ The old API had a `provider` keyword and a `legacyProviderCall` option. All of t
 ### `gateway.ts` is not public API
 `createGateway()` is a test helper. It wraps graphql-yoga + `bridgeTransform` for convenience in tests. It lives in `test/_gateway.ts`. The library itself has no dependency on graphql-yoga — users bring their own server.
 
-### `context.config` not `context.bridge.config`
-We deliberately avoided forcing a `bridge` namespace onto the user's context. Config lives flat at `context.config` (configurable via `configKey`). No `BridgeContext` type — the engine uses `context: any` and reads only the one key it needs.
+### Full context, not namespaced
+The engine passes the full GraphQL context to `with context` — no wrapping under `context.config` or `context.bridge`. Users control what’s on the context at the server level. To restrict access, pass a `contextMapper` function to `bridgeTransform()`.
 
 ### Function-based `InstructionSource` instead of `Record<string, Instruction[]>`
 Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => Instruction[]`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
@@ -215,7 +221,7 @@ Multi-provider routing was first implemented with a `Record<string, Instruction[
 ### Two-layer fallback architecture
 Fault tolerance is split into two independent layers that compose:
 
-1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from config. Inherited through `extends` chains (child overrides parent).
+1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `extends` chains (child overrides parent).
 2. **Wire `??` fallback** — catches any failure in the entire resolution chain (tool down, dep failure, missing field). Placed on the terminal wire. On pipe chains, the `??` sits on the output wire so it catches the full chain.
 
 If both are present, `on error` fires first (tool scope). If the tool fallback itself fails or doesn’t apply, `??` catches the residual.

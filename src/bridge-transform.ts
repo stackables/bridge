@@ -13,8 +13,9 @@ import { SELF_MODULE } from "./types.js";
 export type BridgeOptions = {
   /** Tool functions available to the engine (e.g. { httpCall, centsToUsd, "hereapi.geocode": fn }) */
   tools?: Record<string, ToolCallFn | ((...args: any[]) => any)>;
-  /** Context key to read config from (default: "config") */
-  configKey?: string;
+  /** Optional function to reshape/restrict the GQL context before it reaches bridge files.
+   *  By default the full context is exposed via `with context`. */
+  contextMapper?: (context: any) => Record<string, any>;
 };
 
 /** Instructions can be a static array or a function that selects per-request */
@@ -28,7 +29,7 @@ export function bridgeTransform(
   options?: BridgeOptions,
 ): GraphQLSchema {
   const userTools = options?.tools;
-  const configKey = options?.configKey ?? "config";
+  const contextMapper = options?.contextMapper;
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -55,7 +56,9 @@ export function bridgeTransform(
         ) {
           // Start execution tree at query/mutation root
           if (!source && !info.path.prev) {
-            const config = context?.[configKey] ?? {};
+            const bridgeContext = contextMapper
+              ? contextMapper(context)
+              : (context ?? {});
 
             const activeInstructions =
               typeof instructions === "function"
@@ -75,7 +78,7 @@ export function bridgeTransform(
               trunk,
               activeInstructions,
               allTools,
-              config,
+              bridgeContext,
             );
           }
 
