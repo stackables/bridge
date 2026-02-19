@@ -5,8 +5,14 @@ Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, 
 
 ```bash
 npm install @stackables/bridge
-
 ```
+
+> **Developer Preview**  
+> The Bridge v1.x is a public preview and is not recommended for production use.
+>  - Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
+>  - Versioning: We follow strict SemVer starting from v2.0.0.
+>
+> Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
 ---
 
