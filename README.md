@@ -46,7 +46,7 @@ Defines the "Where" and the "How."
 ```hcl
 tool <name> [extends <parent>] [<toolFunction>]
   [with config]                   # Injects environment secrets
-  [on error = <json_fallback>]    # Fallback value if fn(input) throws
+  [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from config/tool
   
   <param> = <value>               # Constant/Default value
@@ -64,8 +64,8 @@ bridge <Type.field>
   with input [as <i>]
 
   # Field Mapping
-  <field> <- <source> [when <cond>] # Standard Pull (Optional condition)
-  <field> <-! <source>              # Forced Push (Eager execution)
+  <field> <- <source>               # Standard Pull (Lazy)
+  <field> <-! <source>              # Forced Push (Eager/Side-effect)
   
   # Array Mapping
   <field>[] <- <source>[]
@@ -79,33 +79,15 @@ bridge <Type.field>
 
 ### Resiliency
 
-Two layers of fault tolerance prevent a single API failure from crashing the entire response.
+Two layers of fault tolerance prevent a single API failure from crashing the response:
 
-**Layer 1 — Tool `on error`:** Catches `fn(input)` throws and returns a fallback value scoped to that tool. Child tools inherit the parent's `on error` through `extends`.
-
-```hcl
-tool geo httpCall
-  on error = { "lat": 0, "lon": 0 }
-
-tool geo.v2 extends geo
-  path = /v2/geocode          # inherits on error from parent
-```
-
-**Layer 2 — Wire `??` fallback:** Catches any failure in the resolution chain (tool down, missing data, dep failure) and returns a default.
+1. **Layer 1 — Tool `on error**`: Catches tool execution failures. Child tools inherit this via `extends`.
+2. **Layer 2 — Wire `??` fallback**: Catches any failure in the resolution chain (missing data, network timeout) as a last resort.
 
 ```hcl
-bridge Query.search
-  with geo
-  with input as i
+lat <- geo.lat ?? 0.0
 
-geo.q <- i.q
-lat <- geo.lat ?? 0
-name <- geo.name ?? "unknown"
 ```
-
-Both layers compose: if a tool has `on error` and a wire has `??`, the tool fallback fires first. The wire `??` acts as a last resort if the entire chain still fails.
-
-
 
 ### Forced Wires (`<-!`)
 
@@ -113,12 +95,10 @@ By default, the engine is **lazy**. Use `<-!` to force execution regardless of d
 
 ```hcl
 bridge Mutation.updateUser
-  with db.update as update
   with audit.logger as log
-  
-  # 'log' runs even if the client doesn't query the audit result
+
+  # 'log' runs even if the client doesn't query the 'status' field
   status <-! log|i.changeData 
-  result <- update|i.userData
 
 ```
 
@@ -161,7 +141,6 @@ totalPrice <- c|i.totalPrice
 | **`??`** | **Fallback** | Wire-level default if the resolution chain fails. | |
 | **`on error`** | **Tool Fallback** | Returns a default if the tool's `fn(input)` throws. | |
 | **`const`** | **Named Value** | Declares reusable JSON constants. | |
-| **`when`** | **Guard** | Only executes the wire if the condition is true. | idea |
 | **`[] <- []`** | **Map** | Iterates over arrays to create nested wire contexts. | |
 
 ---
@@ -205,7 +184,6 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 ## Why The Bridge?
 
-* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic 50 times.
-* **Provider Agnostic:** Swap implementations (e.g., `mailjet.bridge` vs `sendgrid.bridge`) at the request level.
-* **LLM-Friendly:** Declarative metaphors that modern AI models understand natively.
+* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic.
+* **Provider Agnostic:** Swap implementations (e.g., SendGrid vs Postmark) at the request level.
 * **Edge-Ready:** Small footprint; works in Node, Bun, and Cloudflare Workers.
