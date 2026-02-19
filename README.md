@@ -50,14 +50,14 @@ Access const values in bridges or tools via `with const as c`, then reference as
 Defines the "Where" and the "How." Takes a function (or parent tool) and configures i, giving it a new name.
 
 ```hcl
-extend <source> as <name>
+extend <source> as <name> {
   [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from context/tool
   
   <param> = <value>               # Constant/Default value
   <param> <- <source>             # Dynamic wire
-
+}
 ```
 
 When `<source>` is a function name (e.g. `httpCall`), a new tool is created.
@@ -68,7 +68,7 @@ When `<source>` is an existing tool name, the new tool inherits its configuratio
 The resolver logic connecting GraphQL schema fields to your tools.
 
 ```hcl
-bridge <Type.field>
+bridge <Type.field> {
   with <tool> [as <alias>]
   with input [as <i>]
 
@@ -87,7 +87,7 @@ bridge <Type.field>
   # Array Mapping
   <field>[] <- <source>[]
     .<sub_field> <- .<sub_src>      # Relative scoping
-
+}
 ```
 
 ---
@@ -103,11 +103,12 @@ Each layer handles a different failure mode. They compose freely.
 Declared inside the `extend` block. Catches any exception thrown by the tool's `fn(input)`. All tools that `extend` this tool inherit the fallback.
 
 ```hcl
-extend httpCall as geo
+extend httpCall as geo {
   baseUrl = "https://nominatim.openstreetmap.org"
   method = GET
   path = /search
   on error = { "lat": 0, "lon": 0 }   # tool-level default
+}
 ```
 
 #### Layer 2 — Wire `||` (null / absent values)
@@ -159,11 +160,12 @@ Multiple `||` sources desugar to **parallel wires** — all sources are evaluate
 By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
 
 ```hcl
-bridge Mutation.updateUser
+bridge Mutation.updateUser {
   with audit.logger as log
 
   # 'log' runs even if the client doesn't query the 'status' field
   status <-! log:i.changeData
+}
 ```
 
 ### The Pipe Operator (`:`)
@@ -178,18 +180,20 @@ result <- transform:normalize:i.rawData
 Full example with a tool that has 2 input parameters:
 
 ```hcl
-extend currencyConverter as convert
+extend currencyConverter as convert {
   currency = EUR   # default currency
+}
 
-bridge Query.price
+bridge Query.price {
   with convert as c
   with input as i
 
-c.currency <- i.currency   # overrides the default per request
+  c.currency <- i.currency   # overrides the default per request
 
-# Safe to use repeatedly — each is an independent tool call
-itemPrice  <- c:i.itemPrice
-totalPrice <- c:i.totalPrice
+  # Safe to use repeatedly — each is an independent tool call
+  itemPrice  <- c:i.itemPrice
+  totalPrice <- c:i.totalPrice
+}
 ```
 
 ---
@@ -266,27 +270,30 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 **No `extend` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
 
 ```hcl
-bridge Query.format
+bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
 
-upper <- up:i.text
-lower <- lo:i.text
+  upper <- up:i.text
+  lower <- lo:i.text
+}
 ```
 
 Use an `extend` block when you need to configure defaults:
 
 ```hcl
-extend std.pickFirst as pf
+extend std.pickFirst as pf {
   strict = true
+}
 
-bridge Query.onlyResult
+bridge Query.onlyResult {
   with pf
   with someApi as api
   with input as i
 
-value <- pf:api.items
+  value <- pf:api.items
+}
 ```
 
 ### Adding Custom Tools
@@ -321,11 +328,12 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
 
 ```hcl
-extend httpCall as geo
+extend httpCall as geo {
   cache = 300          # cache for 5 minutes
   baseUrl = "https://nominatim.openstreetmap.org"
   method = GET
   path = /search
+}
 ```
 
 The default is an in-memory store. For Redis or other backends, pass a custom `CacheStore` to `createHttpCall`:

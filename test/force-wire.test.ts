@@ -12,13 +12,14 @@ import { createGateway } from "./_gateway.js";
 describe("parseBridge: force wire (<-!)", () => {
   test("regular pull wire has no force flag", () => {
     const [bridge] = parseBridge(`
-bridge Query.demo
+bridge Query.demo {
   with myTool as t
   with input as i
 
 t.action <- i.name
 result <- t.output
-`) as Bridge[];
+
+}`) as Bridge[];
 
     // Wire targeting tool input
     const toolWire = bridge.wires.find(
@@ -34,12 +35,13 @@ result <- t.output
 
   test("<-! sets force: true on pull wire", () => {
     const [bridge] = parseBridge(`
-bridge Mutation.audit
+bridge Mutation.audit {
   with logger.log as lg
   with input as i
 
 lg.action <-! i.event
-`) as Bridge[];
+
+}`) as Bridge[];
 
     const forcedWire = bridge.wires.find(
       (w) => "from" in w && w.to.module === "logger",
@@ -53,7 +55,7 @@ lg.action <-! i.event
 
   test("<-! and <- can coexist on the same bridge", () => {
     const [bridge] = parseBridge(`
-bridge Query.demo
+bridge Query.demo {
   with mainApi as m
   with audit.log as audit
   with input as i
@@ -61,7 +63,8 @@ bridge Query.demo
 m.q <- i.query
 audit.action <-! i.query
 result <- m.data
-`) as Bridge[];
+
+}`) as Bridge[];
 
     const regularWires = bridge.wires.filter(
       (w) => "from" in w && !w.force,
@@ -75,12 +78,13 @@ result <- m.data
 
   test("<-! on pipe chain sets force on outermost fork", () => {
     const [bridge] = parseBridge(`
-bridge Query.demo
+bridge Query.demo {
   with transform as t
   with input as i
 
 result <-! t:i.text
-`) as Bridge[];
+
+}`) as Bridge[];
 
     // The outermost fork's input wire should have force: true
     const forcedWire = bridge.wires.find(
@@ -96,13 +100,14 @@ result <-! t:i.text
 
   test("<-! on multi-handle pipe chain sets force only on outermost fork", () => {
     const [bridge] = parseBridge(`
-bridge Query.demo
+bridge Query.demo {
   with a as a
   with b as b
   with input as i
 
 result <-! a:b:i.text
-`) as Bridge[];
+
+}`) as Bridge[];
 
     // Exactly one wire should have force
     const forcedWires = bridge.wires.filter(
@@ -125,13 +130,14 @@ result <-! a:b:i.text
 describe("serializeBridge: force wire roundtrip", () => {
   test("regular force wire roundtrips", () => {
     const input = `
-bridge Mutation.audit
+bridge Mutation.audit {
   with logger.log as lg
   with input as i
 
 lg.action <-! i.event
 lg.userId <-! i.userId
-`;
+
+}`;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -140,7 +146,7 @@ lg.userId <-! i.userId
 
   test("mixed force and regular wires roundtrip", () => {
     const input = `
-bridge Query.demo
+bridge Query.demo {
   with mainApi as m
   with audit.log as audit
   with input as i
@@ -148,7 +154,8 @@ bridge Query.demo
 m.q <- i.query
 audit.action <-! i.query
 result <- m.data
-`;
+
+}`;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -157,12 +164,13 @@ result <- m.data
 
   test("force pipe chain roundtrips", () => {
     const input = `
-bridge Query.demo
+bridge Query.demo {
   with transform as t
   with input as i
 
 result <-! t:i.text
-`;
+
+}`;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -171,12 +179,13 @@ result <-! t:i.text
 
   test("serialized output contains <-! syntax", () => {
     const input = `
-bridge Mutation.audit
+bridge Mutation.audit {
   with logger.log as lg
   with input as i
 
 lg.action <-! i.event
-`;
+
+}`;
     const output = serializeBridge(parseBridge(input));
     assert.ok(output.includes("<-!"), "serialized output should contain <-!");
   });
@@ -199,7 +208,7 @@ describe("forced wire: end-to-end execution", () => {
     let auditInput: any = null;
 
     const bridgeText = `
-bridge Query.search
+bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
@@ -207,7 +216,8 @@ bridge Query.search
 m.q <- i.q
 audit.action <-! i.q
 title <- m.title
-`;
+
+}`;
 
     const tools: Record<string, any> = {
       mainApi: async (input: any) => {
@@ -247,7 +257,7 @@ title <- m.title
     `;
 
     const bridgeText = `
-bridge Mutation.createUser
+bridge Mutation.createUser {
   with userApi.create as u
   with audit.log as audit
   with input as i
@@ -256,7 +266,8 @@ u.name <- i.name
 audit.action = "createUser"
 audit.userName <-! i.name
 id <- u.id
-`;
+
+}`;
 
     const tools: Record<string, any> = {
       "userApi.create": async (input: any) => ({ id: "usr_123" }),
@@ -286,7 +297,7 @@ id <- u.id
     const t0 = performance.now();
 
     const bridgeText = `
-bridge Query.search
+bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
@@ -294,7 +305,8 @@ bridge Query.search
 m.q <- i.q
 audit.action <-! i.q
 title <- m.title
-`;
+
+}`;
 
     const tools: Record<string, any> = {
       mainApi: async (input: any) => {
@@ -340,7 +352,7 @@ title <- m.title
     `;
 
     const bridgeText = `
-bridge Query.process
+bridge Query.process {
   with mainWork as m
   with sideEffect as se
   with input as i
@@ -348,7 +360,8 @@ bridge Query.process
 m.text <- i.text
 status <- m.status
 transformed <-! se:i.text
-`;
+
+}`;
 
     const tools: Record<string, any> = {
       mainWork: async (input: any) => {
@@ -377,7 +390,7 @@ transformed <-! se:i.text
 
   test("forced tool error does not break demand-driven response", async () => {
     const bridgeText = `
-bridge Query.search
+bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
@@ -385,7 +398,8 @@ bridge Query.search
 m.q <- i.q
 audit.action <-! i.q
 title <- m.title
-`;
+
+}`;
 
     const tools: Record<string, any> = {
       mainApi: async () => ({ title: "OK" }),

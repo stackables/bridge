@@ -21,7 +21,7 @@ const typeDefs = /* GraphQL */ `
 `;
 
 const bridgeText = `
-bridge Query.geocode
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
@@ -32,7 +32,8 @@ results[] <- gc.items[]
   .name <- .title
   .lat  <- .position.lat
   .lon  <- .position.lng
-`;
+
+}`;
 
 const cache: Record<string, any> = {
   "Berlin|10": {

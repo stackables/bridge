@@ -103,7 +103,7 @@ bridgeTransform(schema, instructions, {
 
 ## The .bridge Language
 
-Three block types, multiple operators.
+Three block types, multiple operators. **Braces are mandatory** for `bridge` and `extend`/`tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body extends like `extend std.pickFirst as first` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
 
 ### Block types
 | Block | Purpose |
@@ -176,14 +176,16 @@ textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 Define a reusable API call configuration. Syntax: `extend <source> as <name>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
 
 ```hcl
-extend httpCall as hereapi
+extend httpCall as hereapi {
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
+}
 
-extend hereapi as hereapi.geocode
+extend hereapi as hereapi.geocode {
   method = GET
   path = /geocode
+}
 ```
 
 When extending a parent tool, the engine merges wires from the parent chain by:
@@ -200,16 +202,17 @@ When extending a parent tool, the engine merges wires from the parent chain by:
 Connect a GraphQL field to its tools.
 
 ```hcl
-bridge Query.geocode
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
-gc.q <- i.search
+  gc.q <- i.search
 
-results[] <- gc.items[]
-  .name <- .title
-  .lat  <- .position.lat
-  .lon  <- .position.lng
+  results[] <- gc.items[]
+    .name <- .title
+    .lat  <- .position.lat
+    .lon  <- .position.lng
+}
 ```
 
 **`with input as i`** — binds GraphQL field arguments.  
@@ -218,16 +221,17 @@ results[] <- gc.items[]
 
 Example — pipe-like built-in tools need no `extend` block:
 ```hcl
-bridge Query.format
+bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
 
-upper <- up:i.text
-lower <- lo:i.text
+  upper <- up:i.text
+  lower <- lo:i.text
+}
 ```
 
-Multiple bridge blocks can be in one `.bridge` file, separated by `---`.
+Multiple bridge blocks can be in one `.bridge` file.
 
 ---
 
@@ -331,7 +335,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**180 tests, all passing.**
+**225 tests, all passing.**
 
 ---
 

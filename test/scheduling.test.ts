@@ -52,7 +52,7 @@ describe("scheduling: diamond dependency dedup + parallelism", () => {
   `;
 
   const bridgeText = `
-bridge Query.dashboard
+bridge Query.dashboard {
   with geo.code as gc
   with weather.get as w
   with census.get as c
@@ -77,7 +77,8 @@ greeting <- fg:i.city
 temp     <- w.temp
 humidity <- w.humidity
 population <- c.population
-`;
+
+}`;
 
   function makeExecutorWithLog() {
     const calls: CallRecord[] = [];
@@ -221,15 +222,15 @@ describe("scheduling: pipe forks run in parallel", () => {
   const bridgeText = `
 extend slowDoubler as double
 
----
 
-bridge Query.doubled
+bridge Query.doubled {
   with double as d
   with input as i
 
 doubled.a <- d:i.a
 doubled.b <- d:i.b
-`;
+
+}`;
 
   test("both pipe forks run in parallel, not sequentially", async () => {
     const calls: CallRecord[] = [];
@@ -285,13 +286,14 @@ describe("scheduling: chained pipes execute in correct order", () => {
   `;
 
   const bridgeText = `
-bridge Query.processed
+bridge Query.processed {
   with input as i
   with toUpper as tu
   with normalize as nm
 
 result <- nm:tu:i.text
-`;
+
+}`;
 
   test("chain executes right-to-left: source → toUpper → normalize", async () => {
     const callOrder: string[] = [];
@@ -365,7 +367,7 @@ describe("scheduling: shared tool dedup across pipe and direct consumers", () =>
   `;
 
   const bridgeText = `
-bridge Query.info
+bridge Query.info {
   with geo.lookup as g
   with toUpper as tu
   with input as i
@@ -373,7 +375,8 @@ bridge Query.info
 g.q <- i.city
 rawName     <- g.name
 shoutedName <- tu:g.name
-`;
+
+}`;
 
   test("geo.lookup called once despite direct + pipe consumption", async () => {
     const callCounts: Record<string, number> = {};
@@ -426,7 +429,7 @@ describe("scheduling: independent tools execute with true parallelism", () => {
   `;
 
   const bridgeText = `
-bridge Query.trio
+bridge Query.trio {
   with svc.a as sa
   with svc.b as sb
   with svc.c as sc
@@ -438,7 +441,8 @@ sc.x <- i.x
 a <- sa.result
 b <- sb.result
 c <- sc.result
-`;
+
+}`;
 
   test("three 60ms tools complete in ≈60ms, not 180ms", async () => {
     const tools: Record<string, any> = {
@@ -500,40 +504,44 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
   `;
 
   const bridgeText = `
-extend httpCall as authService
+extend httpCall as authService {
   with context
   baseUrl = "https://auth.test"
   method = POST
   path = /token
   body.clientId <- context.auth.clientId
 
-extend httpCall as quotaService
+}
+extend httpCall as quotaService {
   with context
   baseUrl = "https://quota.test"
   method = GET
   path = /check
   headers.key <- context.quota.apiKey
 
-extend httpCall as mainApi
+}
+extend httpCall as mainApi {
   with authService as auth
   with quotaService as quota
   baseUrl = "https://api.test"
   headers.Authorization <- auth.access_token
   headers.X-Quota <- quota.token
 
-extend mainApi as mainApi.getData
+}
+extend mainApi as mainApi.getData {
   method = GET
   path = /data
 
----
+}
 
-bridge Query.secure
+bridge Query.secure {
   with mainApi.getData as m
   with input as i
 
 m.id <- i.id
 value <- m.payload
-`;
+
+}`;
 
   test("two independent tool deps (auth + quota) resolve in parallel, not sequentially", async () => {
     const calls: CallRecord[] = [];

@@ -18,13 +18,14 @@ describe("missing tool", () => {
   `;
 
   const bridgeText = `
-bridge Query.hello
+bridge Query.hello {
   with unknown.api as u
   with input as i
 
 u.name <- i.name
 message <- u.greeting
-`;
+
+}`;
 
   test("throws when tool is not registered", async () => {
     const instructions = parseBridge(bridgeText);
@@ -57,25 +58,27 @@ describe("extends chain", () => {
   // Child inherits those and adds method + path.
   // Bridge wires city from input.
   const bridgeText = `
-extend httpCall as weatherApi
+extend httpCall as weatherApi {
   with context
   baseUrl = "https://api.weather.test/v2"
   headers.apiKey <- context.weather.apiKey
 
-extend weatherApi as weatherApi.current
+}
+extend weatherApi as weatherApi.current {
   method = GET
   path = /current
 
----
+}
 
-bridge Query.weather
+bridge Query.weather {
   with weatherApi.current as w
   with input as i
 
 w.city <- i.city
 temp <- w.temperature
 city <- w.location.name
-`;
+
+}`;
 
   test("child inherits parent wires and calls httpCall", async () => {
     let capturedInput: Record<string, any> = {};
@@ -113,24 +116,26 @@ city <- w.location.name
     let capturedInput: Record<string, any> = {};
 
     const bridgeWithOverride = `
-extend httpCall as base
+extend httpCall as base {
   method = GET
   baseUrl = "https://default.test"
 
-extend base as base.special
+}
+extend base as base.special {
   baseUrl = "https://override.test"
   path = /data
 
----
+}
 
-bridge Query.weather
+bridge Query.weather {
   with base.special as b
   with input as i
 
 b.city <- i.city
 temp <- b.temperature
 city <- b.location.name
-`;
+
+}`;
 
     const httpCall = async (input: Record<string, any>) => {
       capturedInput = input;
@@ -168,25 +173,27 @@ describe("context pull", () => {
   `;
 
   const bridgeText = `
-extend httpCall as myapi
+extend httpCall as myapi {
   with context
   baseUrl = "https://api.test"
   headers.Authorization <- context.myapi.token
   headers.X-Org <- context.myapi.orgId
 
-extend myapi as myapi.lookup
+}
+extend myapi as myapi.lookup {
   method = GET
   path = /lookup
 
----
+}
 
-bridge Query.lookup
+bridge Query.lookup {
   with myapi.lookup as m
   with input as i
 
 m.q <- i.q
 answer <- m.result
-`;
+
+}`;
 
   test("context values are pulled into tool headers", async () => {
     let capturedInput: Record<string, any> = {};
@@ -228,7 +235,7 @@ describe("tool-to-tool dependency", () => {
 
   // authService is called first, its output is used in mainApi's headers
   const bridgeText = `
-extend httpCall as authService
+extend httpCall as authService {
   with context
   baseUrl = "https://auth.test"
   method = POST
@@ -236,25 +243,28 @@ extend httpCall as authService
   body.clientId <- context.auth.clientId
   body.secret <- context.auth.secret
 
-extend httpCall as mainApi
+}
+extend httpCall as mainApi {
   with context
   with authService as auth
   baseUrl = "https://api.test"
   headers.Authorization <- auth.access_token
 
-extend mainApi as mainApi.getData
+}
+extend mainApi as mainApi.getData {
   method = GET
   path = /data
 
----
+}
 
-bridge Query.data
+bridge Query.data {
   with mainApi.getData as m
   with input as i
 
 m.id <- i.id
 value <- m.payload
-`;
+
+}`;
 
   test("auth tool is called before main API, token injected", async () => {
     const calls: { name: string; input: Record<string, any> }[] = [];
@@ -316,12 +326,13 @@ describe("pipe operator", () => {
 
   // The pipe tool receives { in: value } and returns { out: transformed }
   const bridgeText = `
-bridge Query.shout
+bridge Query.shout {
   with input as i
   with toUpper as tu
 
 loud <- tu:i.text
-`;
+
+}`;
 
   test("pipes source through tool and maps result to output", async () => {
     let capturedInput: Record<string, any> = {};
@@ -347,11 +358,12 @@ loud <- tu:i.text
 
   test("pipe fails when handle is not declared", () => {
     const badBridge = `
-bridge Query.shout
+bridge Query.shout {
   with input as i
 
 loud <- undeclared:i.text
-`;
+
+}`;
     assert.throws(
       () => parseBridge(badBridge),
       /Undeclared handle in pipe: "undeclared"/,
@@ -401,26 +413,27 @@ describe("pipe with extra tool params", () => {
   // `currency = EUR` bakes a default.  The `with convertToEur` shorthand
   // (no `as`) uses the tool name itself as the handle.
   const bridgeText = `
-extend currencyConverter as convertToEur
+extend currencyConverter as convertToEur {
   currency = EUR
 
----
+}
 
-bridge Query.priceEur
+bridge Query.priceEur {
   with convertToEur
   with input as i
 
 priceEur <- convertToEur:i.amount
 
----
+}
 
-bridge Query.priceAny
+bridge Query.priceAny {
   with convertToEur
   with input as i
 
 convertToEur.currency <- i.currency
 priceAny <- convertToEur:i.amount
-`;
+
+}`;
 
   function makeExecutor() {
     const instructions = parseBridge(bridgeText);
@@ -482,15 +495,15 @@ describe("pipe forking", () => {
   const bridgeText = `
 extend doubler as double
 
----
 
-bridge Query.doubled
+bridge Query.doubled {
   with double as d
   with input as i
 
 doubled.a <- d:i.a
 doubled.b <- d:i.b
-`;
+
+}`;
 
   function makeExecutor() {
     const instructions = parseBridge(bridgeText);
@@ -539,15 +552,15 @@ describe("pipe named input field", () => {
   const bridgeText = `
 extend divider as divide
 
----
 
-bridge Query.converted
+bridge Query.converted {
   with divide as dv
   with input as i
 
 converted <- dv.dividend:i.amount
 dv.divisor <- i.rate
-`;
+
+}`;
 
   function makeExecutor() {
     const instructions = parseBridge(bridgeText);
@@ -591,19 +604,21 @@ describe("httpCall cache", () => {
   `;
 
   const bridgeText = `
-extend httpCall as api
+extend httpCall as api {
   cache = 60
   baseUrl = "http://mock"
   method = GET
   path = /search
 
-bridge Query.lookup
+}
+bridge Query.lookup {
   with api as a
   with input as i
 
 a.q <- i.q
 answer <- a.value
-`;
+
+}`;
 
   test("second identical call returns cached response (fetch called once)", async () => {
     let fetchCount = 0;

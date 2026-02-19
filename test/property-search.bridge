@@ -3,7 +3,7 @@
 # Resolves backwards from demand:
 #   listings/topPick ← zillow ← hereapi ← user input
 
-bridge Query.propertySearch
+bridge Query.propertySearch {
   with hereapi.geocode as gc
   with zillow.search as z
   with input as i
@@ -37,13 +37,13 @@ listings[] <- z.properties[]
   .bedrooms <- .beds
   .city     <- .location.city
 
----
+}
 
 # Property comments — chained providers + scalar array via tool
 #
 # Resolves: comments ← pluckText ← reviews ← hereapi ← user input
 
-bridge Query.propertyComments
+bridge Query.propertyComments {
   with hereapi.geocode as gc
   with reviews.getByLocation as rv
   with input as i
@@ -59,3 +59,5 @@ rv.lng <- gc.items[0].position.lng
 # reviews.comments piped through pluckText → flat string array
 # pipe shorthand: wires rv.comments → pt.in, pt.out → propertyComments
 propertyComments <- pt:rv.comments
+
+}

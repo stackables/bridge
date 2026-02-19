@@ -23,7 +23,7 @@ const typeDefs = /* GraphQL */ `
 `;
 
 const bridgeText = `
-bridge Mutation.sendEmail
+bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
 
@@ -32,7 +32,8 @@ sg.from <- i.from
 sg.subject <- i.subject
 sg.content <- i.body
 messageId <- sg.headers.x-message-id
-`;
+
+}`;
 
 const fakeEmailTool = async (_params: Record<string, any>) => ({
   statusCode: 202,

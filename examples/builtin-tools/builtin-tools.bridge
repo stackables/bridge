@@ -1,6 +1,6 @@
 # Built-in tools live under the std namespace — no tool block needed for pipe-like tools.
 
-bridge Query.format
+bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
@@ -9,7 +9,9 @@ original <- i.text
 upper <- up:i.text
 lower <- lo:i.text
 
-bridge Query.findEmployee
+}
+
+bridge Query.findEmployee {
   with getEmployees as db
   with std.findObject as find
   with input as i
@@ -19,3 +21,5 @@ find.department <- i.department
 id <- find.id
 name <- find.name
 department <- find.department
+
+}

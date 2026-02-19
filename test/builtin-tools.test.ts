@@ -171,14 +171,15 @@ describe("default tools (no tools option)", () => {
   `;
 
   const bridgeText = `
-bridge Query.greet
+bridge Query.greet {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
 
 upper <- up:i.name
 lower <- lo:i.name
-`;
+
+}`;
 
   test("upperCase and lowerCase are available by default", async () => {
     const instructions = parseBridge(bridgeText);
@@ -206,12 +207,13 @@ describe("user can override std namespace", () => {
   `;
 
   const bridgeText = `
-bridge Query.greet
+bridge Query.greet {
   with std.upperCase as up
   with input as i
 
 upper <- up:i.name
-`;
+
+}`;
 
   test("overriding std replaces its tools", async () => {
     const instructions = parseBridge(bridgeText);
@@ -261,14 +263,15 @@ describe("user can add custom tools alongside std", () => {
   `;
 
   const bridgeText = `
-bridge Query.process
+bridge Query.process {
   with std.upperCase as up
   with reverse as rev
   with input as i
 
 upper <- up:i.text
 custom <- rev:i.text
-`;
+
+}`;
 
   test("custom tools merge alongside std automatically", async () => {
     const instructions = parseBridge(bridgeText);
@@ -304,7 +307,7 @@ describe("findObject through bridge", () => {
   `;
 
   const bridgeText = `
-bridge Query.findUser
+bridge Query.findUser {
   with getUsers as db
   with std.findObject as find
   with input as i
@@ -314,7 +317,8 @@ find.role <- i.role
 id <- find.id
 name <- find.name
 role <- find.role
-`;
+
+}`;
 
   test("finds object in array returned by another tool", async () => {
     const instructions = parseBridge(bridgeText);
@@ -356,12 +360,13 @@ describe("pipe with built-in tools", () => {
   `;
 
   const bridgeText = `
-bridge Query.shout
+bridge Query.shout {
   with std.upperCase as up
   with input as i
 
 value <- up:i.text
-`;
+
+}`;
 
   test("pipe through upperCase", async () => {
     const instructions = parseBridge(bridgeText);
@@ -389,12 +394,13 @@ describe("pickFirst through bridge", () => {
   `;
 
   const bridgeText = `
-bridge Query.first
+bridge Query.first {
   with std.pickFirst as pf
   with input as i
 
 value <- pf:i.items
-`;
+
+}`;
 
   test("picks first element via pipe", async () => {
     const instructions = parseBridge(bridgeText);
@@ -420,16 +426,18 @@ describe("pickFirst strict through bridge", () => {
   `;
 
   const bridgeText = `
-extend std.pickFirst as pf
+extend std.pickFirst as pf {
   strict = true
 
-bridge Query.onlyOne
+}
+bridge Query.onlyOne {
   with pf
   with input as i
 
 pf.in <- i.items
 value <- pf
-`;
+
+}`;
 
   test("strict mode passes with one element", async () => {
     const instructions = parseBridge(bridgeText);
@@ -470,13 +478,14 @@ describe("toArray through bridge", () => {
 
   // Round-trip: wrap single value in array → pick first element back out
   const bridgeText = `
-bridge Query.normalize
+bridge Query.normalize {
   with std.toArray as ta
   with std.pickFirst as pf
   with input as i
 
 value <- pf:ta:i.value
-`;
+
+}`;
 
   test("toArray + pickFirst round-trip via pipe chain", async () => {
     const instructions = parseBridge(bridgeText);
@@ -503,14 +512,15 @@ describe("toArray as tool input normalizer", () => {
 
   // Use toArray to wrap a scalar, then pass to a custom tool that counts items
   const bridgeText = `
-bridge Query.wrap
+bridge Query.wrap {
   with std.toArray as ta
   with countItems as cnt
   with input as i
 
 cnt.in <- ta:i.value
 count <- cnt.count
-`;
+
+}`;
 
   test("toArray normalizes scalar into array for downstream tool", async () => {
     const instructions = parseBridge(bridgeText);
@@ -543,14 +553,15 @@ describe("inline with — no tool block", () => {
   `;
 
   const bridgeText = `
-bridge Query.format
+bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
 
 upper <- up:i.text
 lower <- lo:i.text
-`;
+
+}`;
 
   test("built-in tools work without tool blocks", async () => {
     const instructions = parseBridge(bridgeText);

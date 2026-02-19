@@ -117,7 +117,27 @@ function isJsonLiteral(s: string): boolean {
 }
 
 function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
-  const lines = block.split("\n").map((l) => l.trimEnd());
+  // Validate mandatory braces: `bridge Foo.bar {` ... `}`
+  const rawLines = block.split("\n");
+  const keywordIdx = rawLines.findIndex((l) => /^bridge\s/i.test(l.trim()));
+  if (keywordIdx !== -1) {
+    const kw = rawLines[keywordIdx].trim();
+    if (!kw.endsWith("{")) {
+      throw new Error(`Line ${lineOffset + keywordIdx + 1}: bridge block must use braces: bridge Type.field {`);
+    }
+    const hasClose = rawLines.some((l) => l.trimEnd() === "}");
+    if (!hasClose) {
+      throw new Error(`Line ${lineOffset + keywordIdx + 1}: bridge block missing closing }`);
+    }
+  }
+
+  // Strip braces for internal parsing
+  const lines = rawLines.map((l) => {
+    const trimmed = l.trimEnd();
+    if (trimmed === "}") return "";
+    if (/^bridge\s/i.test(trimmed) && trimmed.endsWith("{")) return trimmed.replace(/\s*\{\s*$/, "");
+    return trimmed;
+  });
   const instructions: Instruction[] = [];
 
   /** 1-based global line number for error messages */
@@ -764,7 +784,34 @@ function parseConstLines(block: string, lineOffset: number): ConstDef[] {
  * is treated as a function name.
  */
 function parseToolBlock(block: string, lineOffset: number, previousInstructions?: Instruction[]): ToolDef {
-  const lines = block.split("\n").map((l) => l.trimEnd());
+  // Validate mandatory braces for blocks that have a body (deps / wires)
+  const rawLines = block.split("\n");
+  const keywordIdx = rawLines.findIndex((l) => /^(tool|extend)\s/i.test(l.trim()));
+  if (keywordIdx !== -1) {
+    // Check if there are non-blank, non-comment body lines after the keyword
+    const bodyLines = rawLines.slice(keywordIdx + 1).filter((l) => {
+      const t = l.trim();
+      return t !== "" && !t.startsWith("#") && t !== "}";
+    });
+    const kw = rawLines[keywordIdx].trim();
+    if (bodyLines.length > 0) {
+      if (!kw.endsWith("{")) {
+        throw new Error(`Line ${lineOffset + keywordIdx + 1}: extend/tool block with body must use braces: extend Foo as bar {`);
+      }
+      const hasClose = rawLines.some((l) => l.trimEnd() === "}");
+      if (!hasClose) {
+        throw new Error(`Line ${lineOffset + keywordIdx + 1}: extend/tool block missing closing }`);
+      }
+    }
+  }
+
+  // Strip braces for internal parsing
+  const lines = rawLines.map((l) => {
+    const trimmed = l.trimEnd();
+    if (trimmed === "}") return "";
+    if (/^(tool|extend)\s/i.test(trimmed) && trimmed.endsWith("{")) return trimmed.replace(/\s*\{\s*$/, "");
+    return trimmed;
+  });
 
   /** 1-based global line number for error messages */
   const ln = (i: number) => lineOffset + i + 1;
@@ -959,17 +1006,18 @@ export function serializeBridge(instructions: Instruction[]): string {
     blocks.push(serializeBridgeBlock(bridge));
   }
 
-  return blocks.join("\n\n---\n\n") + "\n";
+  return blocks.join("\n\n") + "\n";
 }
 
 function serializeToolBlock(tool: ToolDef): string {
   const lines: string[] = [];
+  const hasBody = tool.deps.length > 0 || tool.wires.length > 0;
 
   // Declaration line — use `extend` format
   if (tool.extends) {
-    lines.push(`extend ${tool.extends} as ${tool.name}`);
+    lines.push(hasBody ? `extend ${tool.extends} as ${tool.name} {` : `extend ${tool.extends} as ${tool.name}`);
   } else {
-    lines.push(`extend ${tool.fn} as ${tool.name}`);
+    lines.push(hasBody ? `extend ${tool.fn} as ${tool.name} {` : `extend ${tool.fn} as ${tool.name}`);
   }
 
   // Dependencies
@@ -1010,6 +1058,8 @@ function serializeToolBlock(tool: ToolDef): string {
       lines.push(`  ${wire.target} <- ${wire.source}`);
     }
   }
+
+  if (hasBody) lines.push(`}`);
 
   return lines.join("\n");
 }
@@ -1074,7 +1124,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   const lines: string[] = [];
 
   // ── Header ──────────────────────────────────────────────────────────
-  lines.push(`bridge ${bridge.type}.${bridge.field}`);
+  lines.push(`bridge ${bridge.type}.${bridge.field} {`);
 
   for (const h of bridge.handles) {
     switch (h.kind) {
@@ -1106,6 +1156,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
   }
 
   lines.push("");
+
+  // Mark where the wire body starts — everything after this gets 2-space indent
+  const wireBodyStart = lines.length;
 
   // ── Build handle map for reverse resolution ─────────────────────────
   const { handleMap, inputHandle } = buildHandleMap(bridge);
@@ -1257,11 +1310,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
+  // Indent wire body lines and close the block
+  for (let i = wireBodyStart; i < lines.length; i++) {
+    if (lines[i] !== "") lines[i] = `  ${lines[i]}`;
+  }
+  lines.push(`}`);
+
   return lines.join("\n");
 }
 
 /**
- * Build a reverse lookup: trunk key → handle name.
  * Recomputes instance numbers from handle bindings in declaration order.
  */
 function buildHandleMap(bridge: Bridge): {

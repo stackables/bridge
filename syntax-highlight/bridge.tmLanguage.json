@@ -5,6 +5,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#block-headers" },
+    { "include": "#block-braces" },
     { "include": "#wire-lines" },
     { "include": "#const-lines" },
     { "include": "#strings" },
@@ -12,6 +13,14 @@
     { "include": "#booleans" }
   ],
   "repository": {
+
+    "block-braces": {
+      "comment": "Optional block delimiters { }",
+      "patterns": [{
+        "name": "punctuation.definition.block.bridge",
+        "match": "[{}]"
+      }]
+    },
 
     "comments": {
       "patterns": [{

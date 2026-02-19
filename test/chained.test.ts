@@ -15,7 +15,7 @@ const typeDefs = /* GraphQL */ `
 `;
 
 const bridgeText = `
-bridge Query.livingStandard
+bridge Query.livingStandard {
   with hereapi.geocode as gc
   with companyX.getLivingStandard as cx
   with input as i
@@ -26,7 +26,8 @@ cx.x <- gc.lat
 cx.y <- gc.lon
 ti.value <- cx.lifeExpectancy
 lifeExpectancy <- ti.result
-`;
+
+}`;
 
 const chainedTools: Record<string, any> = {
   "hereapi.geocode": async (params: any) => {

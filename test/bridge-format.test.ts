@@ -45,13 +45,14 @@ describe("parsePath", () => {
 describe("parseBridge", () => {
   test("simple bridge with input handle", () => {
     const result = parseBridge(`
-bridge Query.geocode
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 search <- i.search
 gc.q <- i.search
-`);
+
+}`);
     assert.equal(result.length, 1);
     const bridge = result[0] as Bridge;
     assert.equal(bridge.kind, "bridge");
@@ -99,13 +100,14 @@ gc.q <- i.search
 
   test("tool wires", () => {
     const result = parseBridge(`
-bridge Query.health
+bridge Query.health {
   with api.data as a
   with toInt as ti
 
 ti.value <- a.raw
 output <- ti.result
-`);
+
+}`);
     assert.equal(result.length, 1);
 
     const bridge = result[0] as Bridge;
@@ -145,12 +147,13 @@ output <- ti.result
 
   test("nested output paths", () => {
     const result = parseBridge(`
-bridge Query.search
+bridge Query.search {
   with zillow.find as z
 
 topPick.address <- z.properties[0].streetAddress
 topPick.city    <- z.properties[0].location.city
-`);
+
+}`);
     const bridge = result[0] as Bridge;
     assert.deepStrictEqual(bridge.wires[0].from, {
       module: "zillow",
@@ -176,13 +179,14 @@ topPick.city    <- z.properties[0].location.city
 
   test("array mapping with element wires", () => {
     const result = parseBridge(`
-bridge Query.search
+bridge Query.search {
   with provider.list as p
 
 results[] <- p.items[]
   .name    <- .title
   .lat     <- .position.lat
-`);
+
+}`);
     const bridge = result[0] as Bridge;
     assert.equal(bridge.wires.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
@@ -234,13 +238,14 @@ results[] <- p.items[]
 
   test("Mutation type", () => {
     const result = parseBridge(`
-bridge Mutation.sendEmail
+bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
 
 sg.content <- i.body
 messageId <- sg.headers.x-message-id
-`);
+
+}`);
     const bridge = result[0] as Bridge;
     assert.equal(bridge.type, "Mutation");
     assert.deepStrictEqual(bridge.wires[0].to, {
@@ -258,20 +263,21 @@ messageId <- sg.headers.x-message-id
 
   test("multiple bridges separated by ---", () => {
     const result = parseBridge(`
-bridge Query.first
+bridge Query.first {
   with a.one as a
   with input as i
 
 a.x <- i.input
 
----
+}
 
-bridge Query.second
+bridge Query.second {
   with b.two as b
   with input as i
 
 b.y <- i.input
-`);
+
+}`);
     const bridges = result.filter((i): i is Bridge => i.kind === "bridge");
     assert.equal(bridges.length, 2);
     assert.equal(bridges[0].field, "first");
@@ -280,14 +286,15 @@ b.y <- i.input
 
   test("context handle", () => {
     const result = parseBridge(`
-bridge Query.search
+bridge Query.search {
   with zillow.find as z
   with input as i
   with context as c
 
 z.maxPrice <- c.maxBudget
 z.lat <- i.lat
-`);
+
+}`);
     const bridge = result[0] as Bridge;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
@@ -305,13 +312,14 @@ z.lat <- i.lat
 describe("serializeBridge", () => {
   test("simple bridge roundtrip", () => {
     const input = `
-bridge Query.geocode
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 search <- i.search
 gc.q <- i.search
-`;
+
+}`;
     const instructions = parseBridge(input);
     const output = serializeBridge(instructions);
     assert.deepStrictEqual(parseBridge(output), instructions);
@@ -319,7 +327,7 @@ gc.q <- i.search
 
   test("tool bridge roundtrip", () => {
     const input = `
-bridge Query.health
+bridge Query.health {
   with hereapi.getCoordinates as geo
   with companyX.getLivingStandard as cx
   with input as i
@@ -330,7 +338,8 @@ cx.x <- geo.lat
 cx.y <- geo.lon
 ti.value <- cx.lifeExpectancy
 lifeExpectancy <- ti.result
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -340,14 +349,15 @@ lifeExpectancy <- ti.result
 
   test("array mapping roundtrip", () => {
     const input = `
-bridge Query.search
+bridge Query.search {
   with hereapi.geocode as gc
 
 results[] <- gc.items[]
   .name <- .title
   .lat <- .position.lat
   .lon <- .position.lng
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -357,7 +367,7 @@ results[] <- gc.items[]
 
   test("Mutation with hyphenated path roundtrip", () => {
     const input = `
-bridge Mutation.sendEmail
+bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
 
@@ -365,7 +375,8 @@ sg.to <- i.to
 sg.from <- i.from
 sg.content <- i.body
 messageId <- sg.headers.x-message-id
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -375,7 +386,7 @@ messageId <- sg.headers.x-message-id
 
   test("multi-bridge roundtrip", () => {
     const input = `
-bridge Query.propertySearch
+bridge Query.propertySearch {
   with hereapi.geocode as gc
   with zillow.search as z
   with input as i
@@ -397,9 +408,9 @@ listings[] <- z.properties[]
   .bedrooms <- .beds
   .city <- .location.city
 
----
+}
 
-bridge Query.propertyComments
+bridge Query.propertyComments {
   with hereapi.geocode as gc
   with reviews.getByLocation as rv
   with input as i
@@ -410,7 +421,8 @@ rv.lat <- gc.items[0].position.lat
 rv.lng <- gc.items[0].position.lng
 pt.items <- rv.comments
 propertyComments <- pt.result
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -479,21 +491,24 @@ propertyComments <- pt.result
 describe("parseBridge: tool blocks", () => {
   test("parses a simple GET tool", () => {
     const result = parseBridge(`
-extend httpCall as hereapi
+extend httpCall as hereapi {
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-extend hereapi as hereapi.geocode
+}
+extend hereapi as hereapi.geocode {
   method = GET
   path = /geocode
 
-bridge Query.geocode
+}
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 gc.q <- i.search
-`);
+
+}`);
     const tools = result.filter((i): i is ToolDef => i.kind === "tool");
     assert.equal(tools.length, 2);
 
@@ -525,22 +540,25 @@ gc.q <- i.search
 
   test("parses POST tool with constant and pull wires", () => {
     const result = parseBridge(`
-extend httpCall as sendgrid
+extend httpCall as sendgrid {
   with context
   baseUrl = "https://api.sendgrid.com/v3"
   headers.Authorization <- context.sendgrid.bearerToken
   headers.X-Custom = "static-value"
 
-extend sendgrid as sendgrid.send
+}
+extend sendgrid as sendgrid.send {
   method = POST
   path = /mail/send
 
-bridge Mutation.sendEmail
+}
+bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
 
 sg.content <- i.body
-`);
+
+}`);
     const root = result.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
@@ -570,25 +588,28 @@ sg.content <- i.body
 
   test("parses tool with deps (tool-to-tool)", () => {
     const result = parseBridge(`
-extend httpCall as authService
+extend httpCall as authService {
   with context
   method = POST
   baseUrl = "https://auth.example.com"
   path = /token
   body.client_id <- context.auth.clientId
 
-extend httpCall as serviceB
+}
+extend httpCall as serviceB {
   with context
   with authService as auth
   baseUrl = "https://api.serviceb.com"
   headers.Authorization <- auth.access_token
 
-bridge Query.data
+}
+bridge Query.data {
   with serviceB as sb
   with input as i
 
 sb.q <- i.query
-`);
+
+}`);
     const serviceB = result.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
     )!;
@@ -609,23 +630,26 @@ sb.q <- i.query
 describe("serializeBridge: tool roundtrip", () => {
   test("GET tool roundtrips", () => {
     const input = `
-extend httpCall as hereapi
+extend httpCall as hereapi {
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-extend hereapi as hereapi.geocode
+}
+extend hereapi as hereapi.geocode {
   method = GET
   path = /geocode
 
-bridge Query.geocode
+}
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 search <- i.search
 gc.q <- i.search
 gc.limit <- i.limit
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -635,23 +659,26 @@ gc.limit <- i.limit
 
   test("POST tool roundtrips", () => {
     const input = `
-extend httpCall as sendgrid
+extend httpCall as sendgrid {
   with context
   baseUrl = "https://api.sendgrid.com/v3"
   headers.Authorization <- context.sendgrid.bearerToken
 
-extend sendgrid as sendgrid.send
+}
+extend sendgrid as sendgrid.send {
   method = POST
   path = /mail/send
 
-bridge Mutation.sendEmail
+}
+bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
 
 sg.to <- i.to
 sg.content <- i.body
 messageId <- sg.id
-`;
+
+}`;
     const instructions = parseBridge(input);
     assert.deepStrictEqual(
       parseBridge(serializeBridge(instructions)),
@@ -661,21 +688,24 @@ messageId <- sg.id
 
   test("serialized tool output is human-readable", () => {
     const input = `
-extend httpCall as hereapi
+extend httpCall as hereapi {
   with context
   baseUrl = "https://geocode.search.hereapi.com/v1"
   headers.apiKey <- context.hereapi.apiKey
 
-extend hereapi as hereapi.geocode
+}
+extend hereapi as hereapi.geocode {
   method = GET
   path = /geocode
 
-bridge Query.geocode
+}
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 gc.q <- i.search
-`;
+
+}`;
     const output = serializeBridge(parseBridge(input));
     assert.ok(output.includes("extend httpCall as hereapi"));
     assert.ok(output.includes("extend hereapi as hereapi.geocode"));
@@ -689,7 +719,7 @@ gc.q <- i.search
 describe("parser robustness", () => {
   test("CRLF line endings are handled", () => {
     const result = parseBridge(
-      "bridge Query.geocode\r\nwith input as i\r\n\r\nsearch <- i.q\r\n",
+      "bridge Query.geocode {\r\n  with input as i\r\n\r\nsearch <- i.q\r\n}\r\n",
     );
     assert.equal(result.length, 1);
     assert.equal(result[0].kind, "bridge");
@@ -697,58 +727,63 @@ describe("parser robustness", () => {
 
   test("tabs are treated as spaces", () => {
     const result = parseBridge(
-      "bridge Query.geocode\n\twith input as i\n\nsearch <- i.q\n",
+      "bridge Query.geocode {\n\twith input as i\n\nsearch <- i.q\n}\n",
     );
     assert.equal(result.length, 1);
   });
 
   test("keywords are case-insensitive", () => {
     const bridge = parseBridge(`
-Bridge Query.geocode
+Bridge Query.geocode {
   With hereapi.geocode as gc
   With Input as i
 
 gc.q <- i.search
-`)[0] as Bridge;
+
+}`)[0] as Bridge;
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
   });
 
   test("extend keyword is case-insensitive", () => {
     const tool = parseBridge(`
-Extend httpCall as hereapi
+Extend httpCall as hereapi {
   baseUrl = "https://example.com"
-`)[0] as ToolDef;
+
+}`)[0] as ToolDef;
     assert.equal(tool.name, "hereapi");
     assert.equal(tool.fn, "httpCall");
   });
 
   test("tool keyword backward compatibility", () => {
     const tool = parseBridge(`
-tool hereapi httpCall
+tool hereapi httpCall {
   baseUrl = "https://example.com"
-`)[0] as ToolDef;
+
+}`)[0] as ToolDef;
     assert.equal(tool.name, "hereapi");
     assert.equal(tool.fn, "httpCall");
   });
 
   test("--- separator with surrounding whitespace", () => {
     const result = parseBridge(`
-extend httpCall as hereapi
+extend httpCall as hereapi {
   baseUrl = "https://example.com"
 
-extend hereapi as hereapi.geocode
+}
+extend hereapi as hereapi.geocode {
   method = GET
   path = /geocode
 
-  ---  
+}
 
-bridge Query.geocode
+bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
 
 gc.q <- i.search
-`);
+
+}`);
     assert.equal(result.length, 3);
   });
 
@@ -756,12 +791,13 @@ gc.q <- i.search
     assert.throws(
       () =>
         parseBridge(`
-bridge Query.geocode
+bridge Query.geocode {
   with input as h
   with context as h
 
 search <- h.q
-`),
+
+}`),
       /[Ll]ine 4.*[Dd]uplicate handle.*"h"/,
     );
   });
@@ -770,10 +806,11 @@ search <- h.q
     assert.throws(
       () =>
         parseBridge(`with input as i
-bridge Query.geocode
+bridge Query.geocode {
 
 search <- i.q
-`),
+
+}`),
       /[Ll]ine 1.*Expected "tool".*"bridge"/,
     );
   });
@@ -782,23 +819,24 @@ search <- i.q
     assert.throws(
       () =>
         parseBridge(`
-bridge Query.geocode
+bridge Query.geocode {
   with input as i
 
 not a valid line
-`),
+}`),
       /[Ll]ine 5/,
     );
   });
 
   test("with tool keyword is case-insensitive", () => {
     const result = parseBridge(`
-Bridge Query.geocode
+Bridge Query.geocode {
   With myTool as t
   With Input as i
 
 result <- t.output
-`);
+
+}`);
     const bridge = result.find((i) => i.kind === "bridge") as Bridge;
     const toolHandle = bridge.handles.find((h) => h.kind === "tool");
     assert.notEqual(toolHandle, undefined);
@@ -806,12 +844,13 @@ result <- t.output
 
   test("with context keyword is case-insensitive", () => {
     const bridge = parseBridge(`
-Bridge Query.geocode
+Bridge Query.geocode {
   With Context as cfg
   With Input as i
 
 result <- cfg.apiKey
-`).find((i) => i.kind === "bridge") as Bridge;
+
+}`).find((i) => i.kind === "bridge") as Bridge;
     assert.notEqual(
       bridge.handles.find((h) => h.kind === "context"),
       undefined,
@@ -820,11 +859,82 @@ result <- cfg.apiKey
 
   test("element mapping works with tab indentation", () => {
     const bridge = parseBridge(
-      "bridge Query.search\n\twith hereapi.geocode as gc\n\twith input as i\n\ngc.q <- i.search\nresults[] <- gc.items[]\n\t.lat <- .position.lat\n\t.lng <- .position.lng\n",
+      "bridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\ngc.q <- i.search\nresults[] <- gc.items[]\n\t.lat <- .position.lat\n\t.lng <- .position.lng\n}\n",
     ).find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
       bridge.wires.filter((w) => "from" in w && w.from.element).length,
       2,
     );
+  });
+});
+
+// ── Brace block syntax ──────────────────────────────────────────────────────
+
+describe("brace block syntax", () => {
+  test("bridge block with braces parses identically to indented style", () => {
+    const brace = parseBridge(`
+bridge Query.demo {
+  with myApi as api
+  with input as i
+
+  result <- api.value
+}`);
+    const indent = parseBridge(`
+bridge Query.demo {
+  with myApi as api
+  with input as i
+
+result <- api.value
+
+}`);
+    assert.deepStrictEqual(brace, indent);
+  });
+
+  test("extend block with braces parses identically to indented style", () => {
+    const brace = parseBridge(`
+extend httpCall as myApi {
+  baseUrl = "https://example.com"
+  method = GET
+}`);
+    const indent = parseBridge(`
+extend httpCall as myApi {
+  baseUrl = "https://example.com"
+  method = GET
+
+}`);
+    assert.deepStrictEqual(brace, indent);
+  });
+
+  test("indented } inside on error value is not stripped", () => {
+    const result = parseBridge(`
+extend httpCall as myApi {
+  on error = {
+    "lat": 0,
+    "lon": 0
+  }
+}`);
+    const tool = result[0] as ToolDef;
+    const onError = tool.wires.find((w) => w.kind === "onError");
+    assert.ok(onError && "value" in onError);
+    if ("value" in onError!) {
+      assert.deepStrictEqual(JSON.parse(onError.value), { lat: 0, lon: 0 });
+    }
+  });
+
+  test("mixed brace and indent blocks in same file", () => {
+    const result = parseBridge(`
+extend httpCall as api {
+  baseUrl = "https://example.com"
+}
+
+bridge Query.demo {
+  with api
+  with input as i
+
+result <- api.value
+
+}`);
+    assert.equal(result.filter((i) => i.kind === "tool").length, 1);
+    assert.equal(result.filter((i) => i.kind === "bridge").length, 1);
   });
 });
