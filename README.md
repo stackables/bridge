@@ -286,6 +286,6 @@ bridgeTransform(schema, instructions, {
 
 ## Why The Bridge?
 
-* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic.
-* **Provider Agnostic:** Swap implementations (e.g., SendGrid vs Postmark) at the request level.
-* **Edge-Ready:** Small footprint; works in Node, Bun, and Cloudflare Workers.
+* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic
+* **Provider Agnostic:** Swap implementations (e.g., SendGrid vs Postmark) at the request level
+* **Edge-Ready:** Small footprint; works in Node, Bun, and Cloudflare Workers
