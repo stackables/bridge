@@ -1,5 +1,6 @@
 import type {
     Bridge,
+    ConstDef,
     HandleBinding,
     Instruction,
     NodeRef,
@@ -53,7 +54,7 @@ export function parseBridge(text: string): Instruction[] {
 
     for (let i = 0; i < blockLines.length; i++) {
       const trimmed = blockLines[i].trim();
-      if (/^(tool|bridge)\s/i.test(trimmed) && currentLines.length > 0) {
+      if (/^(tool|bridge|const)\s/i.test(trimmed) && currentLines.length > 0) {
         // Check if any non-blank content exists
         if (currentLines.some((l) => l.trim())) {
           subBlocks.push({ startOffset: currentOffset, lines: currentLines });
@@ -81,9 +82,11 @@ export function parseBridge(text: string): Instruction[] {
         instructions.push(parseToolBlock(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && /^bridge\s/i.test(firstLine)) {
         instructions.push(...parseBridgeBlock(subText, sub.startOffset + firstContentLine));
+      } else if (firstLine && /^const\s/i.test(firstLine)) {
+        instructions.push(...parseConstLines(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && !firstLine.startsWith("#")) {
         throw new Error(
-          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool" or "bridge" declaration, got: ${firstLine}`,
+          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool", "bridge", or "const" declaration, got: ${firstLine}`,
         );
       }
     }
@@ -223,11 +226,12 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     }
 
     // Wire: target <- source  OR  target <-! source (forced)
-    const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(\S+)$/);
+    // Optional fallback: target <- source ?? <json_value>
+    const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(\S+(?:\|\S+)*)(?:\s*\?\?\s*(.+))?$/);
     if (arrowMatch) {
-      const [, targetStr, forceFlag, sourceStr] = arrowMatch;
+      const [, targetStr, forceFlag, sourceStr, fallbackRaw] = arrowMatch;
       const force = forceFlag === "!";
-
+      const fallback = fallbackRaw?.trim();
       // Array mapping: target[] <- source[]
       if (targetStr.endsWith("[]") && sourceStr.endsWith("[]")) {
         const toClean = targetStr.slice(0, -2);
@@ -300,7 +304,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
           prevOutRef = forkRootRef;
         }
         const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
-        wires.push({ from: prevOutRef, to: toRef, pipe: true });
+        wires.push({ from: prevOutRef, to: toRef, pipe: true, ...(fallback ? { fallback } : {}) });
         continue;
       }
 
@@ -316,7 +320,12 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         bridgeType,
         bridgeField,
       );
-      wires.push(force ? { from: fromRef, to: toRef, force: true } : { from: fromRef, to: toRef });
+      wires.push({
+        from: fromRef,
+        to: toRef,
+        ...(force ? { force: true } : {}),
+        ...(fallback ? { fallback } : {}),
+      });
       continue;
     }
 
@@ -400,6 +409,34 @@ function parseWithDeclaration(
       module: SELF_MODULE,
       type: "Config",
       field: "config",
+    });
+    return;
+  }
+
+  // with const as <handle>
+  match = line.match(/^with\s+const\s+as\s+(\w+)$/i);
+  if (match) {
+    const handle = match[1];
+    checkDuplicate(handle);
+    handleBindings.push({ handle, kind: "const" });
+    handleRes.set(handle, {
+      module: SELF_MODULE,
+      type: "Const",
+      field: "const",
+    });
+    return;
+  }
+
+  // with const (shorthand — handle defaults to "const")
+  match = line.match(/^with\s+const$/i);
+  if (match) {
+    const handle = "const";
+    checkDuplicate(handle);
+    handleBindings.push({ handle, kind: "const" });
+    handleRes.set(handle, {
+      module: SELF_MODULE,
+      type: "Const",
+      field: "const",
     });
     return;
   }
@@ -549,6 +586,75 @@ function resolveAddress(
   };
 }
 
+// ── Const block parser ──────────────────────────────────────────────────────
+
+/**
+ * Parse `const` declarations into ConstDef instructions.
+ *
+ * Supports single-line and multi-line JSON values:
+ *   const fallbackGeo = { "lat": 0, "lon": 0 }
+ *   const bigConfig = {
+ *     "timeout": 5000,
+ *     "retries": 3
+ *   }
+ *   const defaultCurrency = "EUR"
+ *   const limit = 10
+ */
+function parseConstLines(block: string, lineOffset: number): ConstDef[] {
+  const lines = block.split("\n");
+  const results: ConstDef[] = [];
+
+  const ln = (i: number) => lineOffset + i + 1;
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith("#")) { i++; continue; }
+
+    const constMatch = line.match(/^const\s+(\w+)\s*=\s*(.*)/i);
+    if (!constMatch) {
+      throw new Error(`Line ${ln(i)}: Expected const declaration, got: ${line}`);
+    }
+
+    const name = constMatch[1];
+    let valuePart = constMatch[2].trim();
+
+    // Multi-line: if value starts with { or [ and isn't balanced, read more lines
+    if (/^[{[]/.test(valuePart)) {
+      let depth = 0;
+      for (const ch of valuePart) {
+        if (ch === "{" || ch === "[") depth++;
+        if (ch === "}" || ch === "]") depth--;
+      }
+      while (depth > 0 && i + 1 < lines.length) {
+        i++;
+        const nextLine = lines[i];
+        valuePart += "\n" + nextLine;
+        for (const ch of nextLine) {
+          if (ch === "{" || ch === "[") depth++;
+          if (ch === "}" || ch === "]") depth--;
+        }
+      }
+      if (depth !== 0) {
+        throw new Error(`Line ${ln(i)}: Unbalanced brackets in const "${name}"`);
+      }
+    }
+
+    // Validate the value is parseable JSON
+    const jsonValue = valuePart.trim();
+    try {
+      JSON.parse(jsonValue);
+    } catch {
+      throw new Error(`Line ${ln(i)}: Invalid JSON value for const "${name}": ${jsonValue}`);
+    }
+
+    results.push({ kind: "const", name, value: jsonValue });
+    i++;
+  }
+
+  return results;
+}
+
 // ── Tool block parser ───────────────────────────────────────────────────────
 
 /**
@@ -607,10 +713,50 @@ function parseToolBlock(block: string, lineOffset: number): ToolDef {
       continue;
     }
 
+    // with const or with const as <handle>
+    const constDepMatch = line.match(/^with\s+const(?:\s+as\s+(\w+))?$/i);
+    if (constDepMatch) {
+      const handle = constDepMatch[1] ?? "const";
+      deps.push({ kind: "const", handle });
+      continue;
+    }
+
     // with <tool> as <handle>
     const toolDepMatch = line.match(/^with\s+(\S+)\s+as\s+(\w+)$/i);
     if (toolDepMatch) {
       deps.push({ kind: "tool", handle: toolDepMatch[2], tool: toolDepMatch[1] });
+      continue;
+    }
+
+    // on error = <json> (constant fallback)
+    const onErrorConstMatch = line.match(/^on\s+error\s*=\s*(.+)$/i);
+    if (onErrorConstMatch) {
+      let valuePart = onErrorConstMatch[1].trim();
+      // Multi-line JSON: if starts with { or [ and isn't balanced, read more lines
+      if (/^[{[]/.test(valuePart)) {
+        let depth = 0;
+        for (const ch of valuePart) {
+          if (ch === "{" || ch === "[") depth++;
+          if (ch === "}" || ch === "]") depth--;
+        }
+        while (depth > 0 && i + 1 < lines.length) {
+          i++;
+          const nextLine = lines[i];
+          valuePart += "\n" + nextLine;
+          for (const ch of nextLine) {
+            if (ch === "{" || ch === "[") depth++;
+            if (ch === "}" || ch === "]") depth--;
+          }
+        }
+      }
+      wires.push({ kind: "onError", value: valuePart.trim() });
+      continue;
+    }
+
+    // on error <- source (pull fallback from config/dep)
+    const onErrorPullMatch = line.match(/^on\s+error\s*<-\s*(\S+)$/i);
+    if (onErrorPullMatch) {
+      wires.push({ kind: "onError", source: onErrorPullMatch[1] });
       continue;
     }
 
@@ -683,10 +829,17 @@ export function serializeBridge(instructions: Instruction[]): string {
   const tools = instructions.filter(
     (i): i is ToolDef => i.kind === "tool",
   );
-  if (bridges.length === 0 && tools.length === 0) return "";
+  const consts = instructions.filter(
+    (i): i is ConstDef => i.kind === "const",
+  );
+  if (bridges.length === 0 && tools.length === 0 && consts.length === 0) return "";
 
   const blocks: string[] = [];
 
+  // Group const declarations into a single block
+  if (consts.length > 0) {
+    blocks.push(consts.map((c) => `const ${c.name} = ${c.value}`).join("\n"));
+  }
   for (const tool of tools) {
     blocks.push(serializeToolBlock(tool));
   }
@@ -715,6 +868,12 @@ function serializeToolBlock(tool: ToolDef): string {
       } else {
         lines.push(`  with config as ${dep.handle}`);
       }
+    } else if (dep.kind === "const") {
+      if (dep.handle === "const") {
+        lines.push(`  with const`);
+      } else {
+        lines.push(`  with const as ${dep.handle}`);
+      }
     } else {
       lines.push(`  with ${dep.tool} as ${dep.handle}`);
     }
@@ -722,7 +881,13 @@ function serializeToolBlock(tool: ToolDef): string {
 
   // Wires
   for (const wire of tool.wires) {
-    if (wire.kind === "constant") {
+    if (wire.kind === "onError") {
+      if ("value" in wire) {
+        lines.push(`  on error = ${wire.value}`);
+      } else {
+        lines.push(`  on error <- ${wire.source}`);
+      }
+    } else if (wire.kind === "constant") {
       // Use quoted form if value contains spaces or special chars, unquoted otherwise
       if (/\s/.test(wire.value) || wire.value === "") {
         lines.push(`  ${wire.target} = "${wire.value}"`);
@@ -761,6 +926,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
         break;
       case "config":
         lines.push(`  with config as ${h.handle}`);
+        break;
+      case "const":
+        if (h.handle === "const") {
+          lines.push(`  with const`);
+        } else {
+          lines.push(`  with const as ${h.handle}`);
+        }
         break;
     }
   }
@@ -861,7 +1033,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const fromStr = serializeRef(w.from, bridge, handleMap, inputHandle, true);
     const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
     const arrow = w.force ? "<-!" : "<-";
-    lines.push(`${toStr} ${arrow} ${fromStr}`);
+    const fb = w.fallback ? ` ?? ${w.fallback}` : "";
+    lines.push(`${toStr} ${arrow} ${fromStr}${fb}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
@@ -905,7 +1078,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
       const destStr   = serializeRef(outWire.to,     bridge, handleMap, inputHandle, false);
       const arrow = chainForced ? "<-!" : "<-";
-      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}`);
+      const fb = outWire.fallback ? ` ?? ${outWire.fallback}` : "";
+      lines.push(`${destStr} ${arrow} ${handleChain.join("|")}|${sourceStr}${fb}`);
     }
   }
 
@@ -953,6 +1127,9 @@ function buildHandleMap(bridge: Bridge): {
         break;
       case "config":
         handleMap.set(`${SELF_MODULE}:Config:config`, h.handle);
+        break;
+      case "const":
+        handleMap.set(`${SELF_MODULE}:Const:const`, h.handle);
         break;
     }
   }

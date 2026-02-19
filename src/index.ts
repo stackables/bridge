@@ -5,5 +5,5 @@ export type {
     InstructionSource
 } from "./bridge-transform.js";
 export { createHttpCall } from "./http-executor.js";
-export type { Instruction, ToolCallFn, ToolDef } from "./types.js";
+export type { ConstDef, Instruction, ToolCallFn, ToolDef } from "./types.js";
 

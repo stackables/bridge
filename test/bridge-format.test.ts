@@ -765,7 +765,7 @@ bridge Query.geocode
 
 search <- i.q
 `),
-      /[Ll]ine 1.*Expected "tool" or "bridge"/,
+      /[Ll]ine 1.*Expected "tool".*"bridge"/,
     );
   });
 

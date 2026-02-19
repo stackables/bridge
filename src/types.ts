@@ -31,7 +31,7 @@ export type NodeRef = {
  * back to pipe notation.
  */
 export type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true }
+  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; fallback?: string }
   | { value: string; to: NodeRef };
 
 /**
@@ -71,7 +71,8 @@ export type Bridge = {
 export type HandleBinding =
   | { handle: string; kind: "tool"; name: string }
   | { handle: string; kind: "input" }
-  | { handle: string; kind: "config" };
+  | { handle: string; kind: "config" }
+  | { handle: string; kind: "const" };
 
 /** Internal module identifier for the bridge's own trunk (input args + output fields) */
 export const SELF_MODULE = "_";
@@ -108,20 +109,26 @@ export type ToolDef = {
  */
 export type ToolDep =
   | { kind: "config"; handle: string }
-  | { kind: "tool"; handle: string; tool: string };
+  | { kind: "tool"; handle: string; tool: string }
+  | { kind: "const"; handle: string };
 
 /**
- * A wire in a tool block — either a constant value or a pull from a dependency.
+ * A wire in a tool block — either a constant value, a pull from a dependency,
+ * or an error fallback.
  *
  * Examples:
  *   baseUrl = "https://api.sendgrid.com/v3"         → constant
  *   method = POST                                     → constant (unquoted)
  *   headers.Authorization <- config.sendgrid.token   → pull from config
  *   headers.Authorization <- auth.access_token       → pull from tool dep
+ *   on error = { "lat": 0, "lon": 0 }               → constant fallback
+ *   on error <- config.fallbacks.geo                  → pull fallback from config
  */
 export type ToolWire =
   | { target: string; kind: "constant"; value: string }
-  | { target: string; kind: "pull"; source: string };
+  | { target: string; kind: "pull"; source: string }
+  | { kind: "onError"; value: string }
+  | { kind: "onError"; source: string };
 
 /**
  * Tool call function — the signature for registered tool functions.
@@ -137,5 +144,24 @@ export type ToolCallFn = (
   input: Record<string, any>,
 ) => Promise<Record<string, any>>;
 
+/**
+ * Named constant definition — a reusable value defined in the bridge file.
+ *
+ * Constants are available in bridge blocks via `with const as c` and in tool
+ * blocks via `with const`. The engine collects all ConstDef instructions into
+ * a single namespace object keyed by name.
+ *
+ * Examples:
+ *   const fallbackGeo = { "lat": 0, "lon": 0 }
+ *   const defaultCurrency = "EUR"
+ */
+export type ConstDef = {
+  kind: "const";
+  /** Constant name — used as the key in the const namespace */
+  name: string;
+  /** Raw JSON string — parsed at runtime when accessed */
+  value: string;
+};
+
 /** Union of all instruction types */
-export type Instruction = Bridge | ToolDef;
+export type Instruction = Bridge | ToolDef | ConstDef;

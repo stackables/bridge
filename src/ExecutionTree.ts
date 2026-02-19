@@ -2,6 +2,7 @@ import type { Path } from "graphql/jsutils/Path";
 import { parsePath } from "./bridge-format.js";
 import type {
   Bridge,
+  ConstDef,
   Instruction,
   NodeRef,
   ToolCallFn,
@@ -76,6 +77,18 @@ export class ExecutionTree {
         trunkKey({ module: SELF_MODULE, type: "Config", field: "config" })
       ] = config;
     }
+    // Collect const definitions into a single namespace object
+    const constObj: Record<string, any> = {};
+    for (const inst of instructions) {
+      if (inst.kind === "const") {
+        constObj[inst.name] = JSON.parse(inst.value);
+      }
+    }
+    if (Object.keys(constObj).length > 0) {
+      this.state[
+        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
+      ] = constObj;
+    }
   }
 
   /** Derive tool name from a trunk */
@@ -127,11 +140,19 @@ export class ExecutionTree {
           merged.deps.push(dep);
         }
       }
-      // Merge wires (child overrides parent by target)
+      // Merge wires (child overrides parent by target; onError replaces onError)
       for (const wire of def.wires) {
-        const idx = merged.wires.findIndex((w) => w.target === wire.target);
-        if (idx >= 0) merged.wires[idx] = wire;
-        else merged.wires.push(wire);
+        if (wire.kind === "onError") {
+          const idx = merged.wires.findIndex((w) => w.kind === "onError");
+          if (idx >= 0) merged.wires[idx] = wire;
+          else merged.wires.push(wire);
+        } else {
+          const idx = merged.wires.findIndex(
+            (w) => "target" in w && w.target === wire.target,
+          );
+          if (idx >= 0) merged.wires[idx] = wire;
+          else merged.wires.push(wire);
+        }
       }
     }
 
@@ -183,6 +204,12 @@ export class ExecutionTree {
     let value: any;
     if (dep.kind === "config") {
       value = this.config ?? this.parent?.config;
+    } else if (dep.kind === "const") {
+      value = this.state[
+        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
+      ] ?? this.parent?.state[
+        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
+      ];
     } else if (dep.kind === "tool") {
       value = await this.resolveToolDep(dep.tool);
     }
@@ -210,7 +237,16 @@ export class ExecutionTree {
 
       const fn = this.toolFns?.[toolDef.fn!];
       if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
-      return fn(input);
+
+      // on error: wrap the tool call with fallback from onError wire
+      const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+      try {
+        return await fn(input);
+      } catch (err) {
+        if (!onErrorWire) throw err;
+        if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
+        return this.resolveToolSource(onErrorWire.source, toolDef);
+      }
     })();
 
     this.toolDepCache.set(toolName, promise);
@@ -268,7 +304,16 @@ export class ExecutionTree {
         const fn = this.toolFns?.[toolDef.fn!];
         if (!fn)
           throw new Error(`Tool function "${toolDef.fn}" not registered`);
-        return fn(input);
+
+        // on error: wrap the tool call with fallback from onError wire
+        const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+        try {
+          return await fn(input);
+        } catch (err) {
+          if (!onErrorWire) throw err;
+          if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
+          return this.resolveToolSource(onErrorWire.source, toolDef);
+        }
       }
 
       // Direct tool function lookup by name (simple or dotted)
@@ -344,7 +389,7 @@ export class ExecutionTree {
     }
   }
 
-  /** Resolve a set of matched wires — constants win, then pull from sources */
+  /** Resolve a set of matched wires — constants win, then pull from sources.\n   *  If a wire has a `fallback` value and all sources reject, return the fallback. */
   private resolveWires(wires: Wire[]): Promise<any> {
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
@@ -354,7 +399,21 @@ export class ExecutionTree {
     const pulls = wires.filter(
       (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
     );
-    return this.pull(pulls.map((w) => w.from));
+
+    // Collect any fallback value from the wires (first one wins)
+    const fallbackWire = pulls.find((w) => w.fallback != null);
+
+    const result = this.pull(pulls.map((w) => w.from));
+    if (!fallbackWire) return result;
+
+    return result.catch(() => {
+      try {
+        return JSON.parse(fallbackWire.fallback!);
+      } catch {
+        // Not valid JSON — return as raw string
+        return fallbackWire.fallback;
+      }
+    });
   }
 
   async response(ipath: Path, array: boolean): Promise<any> {

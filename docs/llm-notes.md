@@ -52,7 +52,7 @@ import { createHttpCall } from "@stackables/bridge";
 // createHttpCall(fetchFn?): ToolCallFn
 
 // Types
-import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef } from "@stackables/bridge";
+import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef, ConstDef } from "@stackables/bridge";
 ```
 
 ### `InstructionSource`
@@ -87,7 +87,25 @@ context: () => ({
 
 ## The .bridge Language
 
-Three block types, two operators.
+Three block types, multiple operators.
+
+### Block types
+| Block | Purpose |
+|---|---|
+| `tool` | Configures an API call — URL, headers, params |
+| `bridge` | Connects a GraphQL field to tools |
+| `const` | Declares named JSON constants reusable across tools and bridges |
+
+### `const` blocks
+Declare named values as raw JSON. Multiple consts can exist in one file.
+
+```hcl
+const fallbackGeo = { "lat": 0, "lon": 0 }
+const defaultCurrency = "EUR"
+const maxRetries = 3
+```
+
+Consts are accessed via `with const as c` in tool or bridge blocks, then referenced as `c.<name>` or `c.<name>.<path>`. Multi-line JSON (objects and arrays) is supported — the parser tracks brace/bracket depth. Values are stored as raw JSON strings and parsed at runtime.
 
 ### Operators
 | Operator | Meaning |
@@ -97,6 +115,9 @@ Three block types, two operators.
 | `<-!` | Forced wire — eagerly schedules the target tool even if no field demands its output. Used for side-effect-only tools (audit logging, analytics, cache warming). Error isolation: a forced tool failure does not break the main response. |
 | `<- h1\|h2\|source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
 | `<-! h1\|h2\|source` | Forced pipe chain — same as pipe but eagerly scheduled. The force flag is placed on the outermost fork. |
+| `?? <json>` | Wire fallback — appended to any `<-` wire. If the resolution chain fails (tool down, dep failure, missing data), the parsed JSON value is returned instead. Example: `lat <- api.lat ?? 0` |
+| `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
+| `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from config or another tool dependency at runtime. |
 
 ### `tool` blocks
 Define a reusable API call configuration. The first word after the tool name is the **function name** — looked up in the `tools` map at runtime.
@@ -114,11 +135,13 @@ tool hereapi.geocode extends hereapi
 
 **`extends`** merges wires from the parent chain. The engine builds the deepest child's input by:
 1. Walking the `extends` chain from root to leaf
-2. Merging wires (child overrides parent by `target` path)
+2. Merging wires (child overrides parent by `target` path; `onError` wires merge by kind — child wins)
 3. Merging deps (deduplicated by handle name)
 
 **`with config`** — declares a dep on the config object (injected from context).  
-**`with <tool> as <handle>`** — declares a tool-to-tool dependency. The dep tool is called first and its result is available as `handle` in wires. Results are cached per request.
+**`with <tool> as <handle>`** — declares a tool-to-tool dependency. The dep tool is called first and its result is available as `handle` in wires. Results are cached per request.  
+**`on error = <json>`** — tool-level fallback. If `fn(input)` throws, this JSON value is returned instead. Only catches execution errors, not wire resolution.  
+**`on error <- <source>`** — same but pulls fallback from config/tool at runtime. Example: `on error <- config.fallbacks.geo`.
 
 ### `bridge` blocks
 Connect a GraphQL field to its tools.
@@ -189,6 +212,17 @@ We deliberately avoided forcing a `bridge` namespace onto the user's context. Co
 ### Function-based `InstructionSource` instead of `Record<string, Instruction[]>`
 Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => Instruction[]`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
 
+### Two-layer fallback architecture
+Fault tolerance is split into two independent layers that compose:
+
+1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from config. Inherited through `extends` chains (child overrides parent).
+2. **Wire `??` fallback** — catches any failure in the entire resolution chain (tool down, dep failure, missing field). Placed on the terminal wire. On pipe chains, the `??` sits on the output wire so it catches the full chain.
+
+If both are present, `on error` fires first (tool scope). If the tool fallback itself fails or doesn’t apply, `??` catches the residual.
+
+### Const blocks store raw JSON strings
+`ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
+
 ### `httpCall` is always registered as default
 `createHttpCall()` is added to `allTools` before user tools, so users can override it by registering their own `httpCall`. This allows custom logging, tracing, retry logic, etc. without changing the `.bridge` file.
 
@@ -207,6 +241,7 @@ test/
   tool-features.test.ts   — integration: missing tool, extends chain, config pull, tool-to-tool deps
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
   force-wire.test.ts      — forced wire (<-!): parser, serializer roundtrip, end-to-end forced execution
+  resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
   _gateway.ts             — test helper (not a test file, not picked up by test runner)
   property-search.bridge  — fixture .bridge file used by property-search.test.ts
 ```
@@ -214,7 +249,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**95 tests, all passing.**
+**129 tests, all passing.**
 
 ---
 

@@ -27,21 +27,34 @@ The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your app
 
 ## The Language
 
-### 1. Tool Blocks (`tool`)
+### 1. Const Blocks (`const`)
+
+Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments.
+
+```hcl
+const fallbackGeo = { "lat": 0, "lon": 0 }
+const defaultCurrency = "EUR"
+const maxRetries = 3
+```
+
+Access const values in bridges or tools via `with const as c`, then reference as `c.<name>.<path>`.
+
+### 2. Tool Blocks (`tool`)
 
 Defines the "Where" and the "How."
 
 ```hcl
 tool <name> [extends <parent>] [<toolFunction>]
   [with config]                   # Injects environment secrets
-  [on error = <json_fallback>]    # Global fallback if the tool fails
+  [on error = <json_fallback>]    # Fallback value if fn(input) throws
+  [on error <- <source>]          # Pull fallback from config/tool
   
   <param> = <value>               # Constant/Default value
   <param> <- <source>             # Dynamic wire
 
 ```
 
-### 2. Bridge Blocks (`bridge`)
+### 3. Bridge Blocks (`bridge`)
 
 The resolver logic connecting GraphQL schema fields to your tools.
 
@@ -64,14 +77,33 @@ bridge <Type.field>
 
 ## Key Features
 
-### Resiliency & Conditionals
+### Resiliency
 
-* **Conditionals (`when`):** Wires only activate if the condition is met.
-* `email <- source.email when i.isAdmin == true`
+Two layers of fault tolerance prevent a single API failure from crashing the entire response.
 
+**Layer 1 — Tool `on error`:** Catches `fn(input)` throws and returns a fallback value scoped to that tool. Child tools inherit the parent's `on error` through `extends`.
 
-* **Fallbacks (`on error`):** Prevents a single API failure from crashing the entire GraphQL request.
-* `on error = { lat: 0, lon: 0 }`
+```hcl
+tool geo httpCall
+  on error = { "lat": 0, "lon": 0 }
+
+tool geo.v2 extends geo
+  path = /v2/geocode          # inherits on error from parent
+```
+
+**Layer 2 — Wire `??` fallback:** Catches any failure in the resolution chain (tool down, missing data, dep failure) and returns a default.
+
+```hcl
+bridge Query.search
+  with geo
+  with input as i
+
+geo.q <- i.q
+lat <- geo.lat ?? 0
+name <- geo.name ?? "unknown"
+```
+
+Both layers compose: if a tool has `on error` and a wire has `??`, the tool fallback fires first. The wire `??` acts as a last resort if the entire chain still fails.
 
 
 
@@ -125,8 +157,11 @@ totalPrice <- c|i.totalPrice
 | **`=`** | **Constant** | Sets a static value. | |
 | **`<-`** | **Wire** | Pulls data from a source at runtime. | |
 | **`<-!`** | **Force** | Eagerly schedules a tool (for side-effects). | |
+| **`\|`** | **Pipe** | Chains data through tools right-to-left. | |
+| **`??`** | **Fallback** | Wire-level default if the resolution chain fails. | |
+| **`on error`** | **Tool Fallback** | Returns a default if the tool's `fn(input)` throws. | |
+| **`const`** | **Named Value** | Declares reusable JSON constants. | |
 | **`when`** | **Guard** | Only executes the wire if the condition is true. | idea |
-| **`on error`** | **Fallback** | Provides a default value if a tool call fails. | planned |
 | **`[] <- []`** | **Map** | Iterates over arrays to create nested wire contexts. | |
 
 ---
