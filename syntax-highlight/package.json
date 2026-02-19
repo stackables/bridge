@@ -1,0 +1,20 @@
+{
+  "name": "bridge-highlighting",
+  "displayName": "The Bridge Highlighter",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": { "vscode": "^1.0.0" },
+  "contributes": {
+    "languages": [{
+      "id": "bridge",
+      "aliases": ["The Bridge", "bridge"],
+      "extensions": [".bridge"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "bridge",
+      "scopeName": "source.bridge",
+      "path": "./bridge.tmLanguage.json"
+    }]
+  }
+}

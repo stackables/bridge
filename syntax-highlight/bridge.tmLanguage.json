@@ -1,0 +1,148 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "The Bridge",
+  "scopeName": "source.bridge",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#block-headers" },
+    { "include": "#wire-lines" },
+    { "include": "#const-lines" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#booleans" }
+  ],
+  "repository": {
+
+    "comments": {
+      "patterns": [{
+        "name": "comment.line.number-sign.bridge",
+        "match": "#.*$"
+      }]
+    },
+
+    "block-headers": {
+      "comment": "Lines starting with bridge/extend/const/tool keywords",
+      "patterns": [
+        {
+          "comment": "bridge Type.field",
+          "match": "^\\s*(bridge)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.type.bridge" },
+            "3": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "extend <source> as <name>",
+          "match": "^\\s*(extend)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" },
+            "3": { "name": "keyword.control.bridge" },
+            "4": { "name": "variable.other.handle.bridge" }
+          }
+        },
+        {
+          "comment": "extend <source>  (no alias)",
+          "match": "^\\s*(extend)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "const name = ...",
+          "match": "^\\s*(const)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "variable.other.constant.bridge" }
+          }
+        },
+        {
+          "comment": "with <tool> as <handle>  /  with input as i",
+          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" },
+            "3": { "name": "keyword.control.bridge" },
+            "4": { "name": "variable.other.handle.bridge" }
+          }
+        },
+        {
+          "comment": "with <tool>  (no alias)",
+          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "on error = value  /  on error <- source",
+          "match": "^\\s*(on error)\\s*(<-|=)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "keyword.operator.wire.bridge" }
+          }
+        }
+      ]
+    },
+
+    "wire-lines": {
+      "comment": "Wire line: target <- source [|| …] [?? …]",
+      "begin": "^(\\s*)([A-Za-z_][A-Za-z0-9_.]*)\\s*(<-!|<-)",
+      "end": "$",
+      "beginCaptures": {
+        "2": { "name": "variable.other.target.bridge" },
+        "3": { "name": "keyword.operator.wire.bridge" }
+      },
+      "patterns": [
+        {
+          "comment": "Pipe separator: colon between identifiers (lookahead only — no lookbehind)",
+          "match": ":(?=[A-Za-z_])",
+          "name": "keyword.operator.pipe.bridge"
+        },
+        {
+          "comment": "|| null-coalesce",
+          "match": "\\|\\|",
+          "name": "keyword.operator.null-coalesce.bridge"
+        },
+        {
+          "comment": "?? error-fallback",
+          "match": "\\?\\?",
+          "name": "keyword.operator.error-fallback.bridge"
+        },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#booleans" }
+      ]
+    },
+
+    "const-lines": {
+      "comment": "Param = value assignments inside blocks",
+      "patterns": [{
+        "match": "^\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(=)\\s*",
+        "captures": {
+          "1": { "name": "variable.other.property.bridge" },
+          "2": { "name": "keyword.operator.assignment.bridge" }
+        }
+      }]
+    },
+
+    "strings": {
+      "name": "string.quoted.double.bridge",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "name": "constant.character.escape.bridge", "match": "\\\\." }]
+    },
+
+    "numbers": {
+      "name": "constant.numeric.bridge",
+      "match": "-?\\b\\d+(\\.\\d+)?\\b"
+    },
+
+    "booleans": {
+      "name": "constant.language.bridge",
+      "match": "\\b(true|false|null)\\b"
+    }
+  }
+}
