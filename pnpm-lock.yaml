@@ -9,13 +9,13 @@ importers:
   .:
     dependencies:
       '@graphql-tools/utils':
-        specifier: ^11.0.0
+        specifier: ^11
         version: 11.0.0(graphql@16.12.0)
       graphql:
-        specifier: ^16.12.0
+        specifier: ^16
         version: 16.12.0
       lru-cache:
-        specifier: ^11.2.6
+        specifier: ^11
         version: 11.2.6
     devDependencies:
       '@graphql-tools/executor-http':
