@@ -1,7 +1,7 @@
-version 1.3
+version 1.4
 
 # Tool 1: Geocoder (City Name -> Coordinates)
-extend std.httpCall as geo {
+tool geo from std.httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET
   .path = /search
@@ -11,7 +11,7 @@ extend std.httpCall as geo {
 }
 
 # Tool 2: Weather (Coordinates -> Temperature)
-extend std.httpCall as weather {
+tool weather from std.httpCall {
   .baseUrl = "https://api.open-meteo.com/v1"
   .method = GET
   .path = /forecast
@@ -19,34 +19,9 @@ extend std.httpCall as weather {
 }
 
 # Nominatim returns an array — pick the first result
-extend std.pickFirst as first
+tool first from std.pickFirst
 
-# By city name: geocode → pick first → weather
-bridge Query.getWeatherByName {
-  with geo as g
-  with first as f
-  with weather as w
-  with input as i
-  with output as o
-
-  g.q <- i.cityName
-  g.format = "json"
-
-  f.in <- g
-
-  w.latitude  <- f.lat
-  w.longitude <- f.lon
-  w.current_weather = true
-
-  o.city        <- i.cityName
-  o.lat         <- f.lat
-  o.lon         <- f.lon
-  o.currentTemp <- w.current_weather.temperature ?? 0.0
-  o.timezone    <- w.timezone ?? "UTC"
-}
-
-# By coordinates: straight to weather API
-bridge Query.getWeatherByCoordinates {
+define weatherByCoordinates {
   with weather as w
   with input as i
   with output as o
@@ -60,3 +35,25 @@ bridge Query.getWeatherByCoordinates {
   o.currentTemp <- w.current_weather.temperature ?? 0.0
   o.timezone    <- w.timezone ?? "UTC"
 }
+
+# By city name: geocode → pick first → weather
+bridge Query.getWeatherByName {
+  with geo as g
+  with weatherByCoordinates as w
+  with first as f
+  with input as i
+  with output as o
+
+  g.q <- i.cityName
+  g.format = "json"
+
+  f.in <- g
+
+  w.lat  <- f.lat
+  w.lon <- f.lon
+
+  o <- w
+}
+
+# By coordinates: straight to weather API
+bridge Query.getWeatherByCoordinates with weatherByCoordinates

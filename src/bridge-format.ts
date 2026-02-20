@@ -1,6 +1,7 @@
 import type {
     Bridge,
     ConstDef,
+    DefineDef,
     HandleBinding,
     Instruction,
     NodeRef,
@@ -23,11 +24,11 @@ import { SELF_MODULE } from "./types.js";
  * @param text - Bridge definition text
  * @returns Array of instructions (Bridge, ToolDef)
  */
-const BRIDGE_VERSION = "1.3";
+const BRIDGE_VERSION = "1.4";
 
 // Keywords that cannot be used as tool names, aliases, or const names
-const RESERVED_KEYWORDS = new Set(["bridge", "with", "as", "extend", "const", "tool", "version"]);
-// Source identifiers reserved for their special meaning inside bridge/extend blocks
+const RESERVED_KEYWORDS = new Set(["bridge", "with", "as", "from", "const", "tool", "version", "define"]);
+// Source identifiers reserved for their special meaning inside bridge/tool blocks
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
 function assertNotReserved(name: string, lineNum: number, label: string) {
@@ -44,7 +45,7 @@ export function parseBridge(text: string): Instruction[] {
   const normalized = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
   const allLines = normalized.split("\n");
 
-  // Version check — first non-blank, non-comment line must be `version 1.3`
+  // Version check — first non-blank, non-comment line must be `version 1.4`
   const firstContentIdx = allLines.findIndex(
     (l) => l.trim() !== "" && !l.trim().startsWith("#"),
   );
@@ -88,7 +89,7 @@ export function parseBridge(text: string): Instruction[] {
 
     for (let i = 0; i < blockLines.length; i++) {
       const trimmed = blockLines[i].trim();
-      if (/^(tool|bridge|const|extend)\s/i.test(trimmed) && currentLines.length > 0) {
+      if (/^(tool|bridge|const|define)\s/i.test(trimmed) && currentLines.length > 0) {
         // Check if any non-blank content exists
         if (currentLines.some((l) => l.trim())) {
           subBlocks.push({ startOffset: currentOffset, lines: currentLines });
@@ -112,15 +113,17 @@ export function parseBridge(text: string): Instruction[] {
         firstContentLine++;
 
       const firstLine = sub.lines[firstContentLine]?.trim();
-      if (firstLine && /^(tool|extend)\s/i.test(firstLine)) {
+      if (firstLine && /^tool\s/i.test(firstLine)) {
         instructions.push(parseToolBlock(subText, sub.startOffset + firstContentLine, instructions));
+      } else if (firstLine && /^define\s/i.test(firstLine)) {
+        instructions.push(parseDefineBlock(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && /^bridge\s/i.test(firstLine)) {
-        instructions.push(...parseBridgeBlock(subText, sub.startOffset + firstContentLine));
+        instructions.push(...parseBridgeBlock(subText, sub.startOffset + firstContentLine, instructions));
       } else if (firstLine && /^const\s/i.test(firstLine)) {
         instructions.push(...parseConstLines(subText, sub.startOffset + firstContentLine));
       } else if (firstLine && !firstLine.startsWith("#")) {
         throw new Error(
-          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool", "extend", "bridge", or "const" declaration, got: ${firstLine}`,
+          `Line ${sub.startOffset + firstContentLine + 1}: Expected "tool", "define", "bridge", or "const" declaration, got: ${firstLine}`,
         );
       }
     }
@@ -150,7 +153,30 @@ function isJsonLiteral(s: string): boolean {
     s === "true" || s === "false" || s === "null";
 }
 
-function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
+function parseBridgeBlock(block: string, lineOffset: number, previousInstructions?: Instruction[]): Instruction[] {
+  // ── Passthrough shorthand: `bridge Type.field with <name>` ──────────
+  // Expands into a full bridge that wires all input through the named
+  // handle (typically a define) and returns its output directly.
+  const shorthandMatch = block.match(/^bridge\s+(\w+)\.(\w+)\s+with\s+(\S+)\s*$/im);
+  if (shorthandMatch) {
+    const [, sType, sField, sName] = shorthandMatch;
+    const sHandle = sName.includes(".") ? sName.substring(sName.lastIndexOf(".") + 1) : sName;
+    const expanded = [
+      `bridge ${sType}.${sField} {`,
+      `  with ${sName} as ${sHandle}`,
+      `  with input`,
+      `  with output as __out`,
+      `  ${sHandle} <- input`,
+      `  __out <- ${sHandle}`,
+      `}`,
+    ].join("\n");
+    const result = parseBridgeBlock(expanded, lineOffset, previousInstructions);
+    // Tag the bridge instruction with the passthrough name for serialization
+    const bridgeInst = result.find((i): i is Bridge => i.kind === "bridge");
+    if (bridgeInst) bridgeInst.passthrough = sName;
+    return result;
+  }
+
   // Validate mandatory braces: `bridge Foo.bar {` ... `}`
   const rawLines = block.split("\n");
   const keywordIdx = rawLines.findIndex((l) => /^bridge\s/i.test(l.trim()));
@@ -214,7 +240,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         handleRes,
         handleBindings,
         instanceCounters,
-        instructions,
+        previousInstructions ?? [],
         ln(i),
       );
       continue;
@@ -550,6 +576,29 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     throw new Error(`Line ${ln(i)}: Unrecognized line: ${line}`);
   }
 
+  // ── Inline define invocations ───────────────────────────────────────
+  const nextForkSeqRef = { value: nextForkSeq };
+  for (const hb of handleBindings) {
+    if (hb.kind !== "define") continue;
+    const def = previousInstructions?.find(
+      (inst): inst is DefineDef => inst.kind === "define" && inst.name === hb.name,
+    );
+    if (!def) {
+      throw new Error(`Define "${hb.name}" referenced by handle "${hb.handle}" not found`);
+    }
+    inlineDefine(
+      hb.handle,
+      def,
+      bridgeType,
+      bridgeField,
+      wires,
+      pipeHandleEntries,
+      handleBindings,
+      instanceCounters,
+      nextForkSeqRef,
+    );
+  }
+
   instructions.unshift({
     kind: "bridge",
     type: bridgeType,
@@ -594,6 +643,20 @@ function parseWithDeclaration(
   let match = line.match(/^with\s+input\s+as\s+(\w+)$/i);
   if (match) {
     const handle = match[1];
+    checkDuplicate(handle);
+    handleBindings.push({ handle, kind: "input" });
+    handleRes.set(handle, {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+    });
+    return;
+  }
+
+  // with input (shorthand — handle defaults to "input")
+  match = line.match(/^with\s+input$/i);
+  if (match) {
+    const handle = "input";
     checkDuplicate(handle);
     handleBindings.push({ handle, kind: "input" });
     handleRes.set(handle, {
@@ -688,13 +751,28 @@ function parseWithDeclaration(
     return;
   }
 
-  // with <name> as <handle> — tool reference (covers dotted names like hereapi.geocode)
+  // with <name> as <handle> — check for define invocation first
   match = line.match(/^with\s+(\S+)\s+as\s+(\w+)$/i);
   if (match) {
     const name = match[1];
     const handle = match[2];
     checkDuplicate(handle);
     assertNotReserved(handle, lineNum, "handle alias");
+
+    // Check if name matches a known define
+    const defineDef = instructions.find(
+      (inst): inst is DefineDef => inst.kind === "define" && inst.name === name,
+    );
+    if (defineDef) {
+      handleBindings.push({ handle, kind: "define", name });
+      handleRes.set(handle, {
+        module: `__define_${handle}`,
+        type: bridgeType,
+        field: bridgeField,
+      });
+      return;
+    }
+
     const lastDot = name.lastIndexOf(".");
     if (lastDot !== -1) {
       const modulePart = name.substring(0, lastDot);
@@ -734,6 +812,20 @@ function parseWithDeclaration(
     const handle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
     checkDuplicate(handle);
 
+    // Check if name matches a known define
+    const defineDef = instructions.find(
+      (inst): inst is DefineDef => inst.kind === "define" && inst.name === name,
+    );
+    if (defineDef) {
+      handleBindings.push({ handle, kind: "define", name });
+      handleRes.set(handle, {
+        module: `__define_${handle}`,
+        type: bridgeType,
+        field: bridgeField,
+      });
+      return;
+    }
+
     if (lastDot !== -1) {
       const modulePart = name.substring(0, lastDot);
       const fieldPart  = name.substring(lastDot + 1);
@@ -753,6 +845,189 @@ function parseWithDeclaration(
   }
 
   throw new Error(`Line ${lineNum}: Invalid with declaration: ${line}`);
+}
+
+// ── Define inlining ─────────────────────────────────────────────────────────
+
+/**
+ * Inline a define invocation into a bridge's wires.
+ *
+ * Splits the define handle into separate input/output synthetic trunks,
+ * clones the define's internal wires with remapped references, and adds
+ * them to the bridge. Tool instances are remapped to avoid collisions.
+ *
+ * The executor treats synthetic trunks (module starting with `__define_`)
+ * as pass-through data containers — no tool function is called.
+ */
+function inlineDefine(
+  defineHandle: string,
+  defineDef: DefineDef,
+  bridgeType: string,
+  bridgeField: string,
+  wires: Wire[],
+  pipeHandleEntries: NonNullable<Bridge["pipeHandles"]>,
+  handleBindings: HandleBinding[],
+  instanceCounters: Map<string, number>,
+  nextForkSeqRef: { value: number },
+): void {
+  const genericModule = `__define_${defineHandle}`;
+  const inModule = `__define_in_${defineHandle}`;
+  const outModule = `__define_out_${defineHandle}`;
+
+  // The define was parsed as synthetic `bridge Define.<name>`, so its
+  // internal refs use type="Define", field=defineName for I/O, and
+  // standard tool resolutions for tools.
+  const defType = "Define";
+  const defField = defineDef.name;
+
+  // ── 1. Build trunk remapping for define's tool handles ──────────────
+
+  // Replay define's instance counter to determine original instances
+  const defCounters = new Map<string, number>();
+  const trunkRemap = new Map<string, { module: string; type: string; field: string; instance: number }>();
+
+  for (const hb of defineDef.handles) {
+    if (hb.kind === "input" || hb.kind === "output" || hb.kind === "context" || hb.kind === "const") continue;
+    if (hb.kind === "define") continue; // nested defines — future
+
+    const name = hb.kind === "tool" ? hb.name : "";
+    if (!name) continue;
+
+    const lastDot = name.lastIndexOf(".");
+    let oldModule: string, oldType: string, oldField: string, instanceKey: string, bridgeKey: string;
+
+    if (lastDot !== -1) {
+      oldModule = name.substring(0, lastDot);
+      oldType = defType;
+      oldField = name.substring(lastDot + 1);
+      instanceKey = `${oldModule}:${oldField}`;
+      bridgeKey = instanceKey;
+    } else {
+      oldModule = SELF_MODULE;
+      oldType = "Tools";
+      oldField = name;
+      instanceKey = `Tools:${name}`;
+      bridgeKey = instanceKey;
+    }
+
+    // Old instance (from define's isolated counter)
+    const oldInstance = (defCounters.get(instanceKey) ?? 0) + 1;
+    defCounters.set(instanceKey, oldInstance);
+
+    // New instance (from bridge's counter)
+    const newInstance = (instanceCounters.get(bridgeKey) ?? 0) + 1;
+    instanceCounters.set(bridgeKey, newInstance);
+
+    const oldKey = `${oldModule}:${oldType}:${oldField}:${oldInstance}`;
+    trunkRemap.set(oldKey, { module: oldModule, type: oldType, field: oldField, instance: newInstance });
+
+    // Add internal tool handle to bridge's handle bindings (namespaced)
+    handleBindings.push({ handle: `${defineHandle}$${hb.handle}`, kind: "tool", name });
+  }
+
+  // ── 2. Remap bridge wires involving the define handle ───────────────
+
+  for (const wire of wires) {
+    if ("from" in wire) {
+      if (wire.to.module === genericModule) {
+        wire.to = { ...wire.to, module: inModule };
+      }
+      if (wire.from.module === genericModule) {
+        wire.from = { ...wire.from, module: outModule };
+      }
+      if (wire.fallbackRef?.module === genericModule) {
+        wire.fallbackRef = { ...wire.fallbackRef, module: outModule };
+      }
+    }
+    if ("value" in wire && wire.to.module === genericModule) {
+      wire.to = { ...wire.to, module: inModule };
+    }
+  }
+
+  // ── 3. Clone, remap, and add define's wires ────────────────────────
+
+  // Compute fork instance offset (define's fork instances start at 100000,
+  // bridge's may overlap — offset them to avoid collision)
+  const forkOffset = nextForkSeqRef.value;
+  let maxDefForkSeq = 0;
+
+  function remapRef(ref: NodeRef, side: "from" | "to"): NodeRef {
+    // Define I/O trunk → split into input/output synthetic trunks
+    if (ref.module === SELF_MODULE && ref.type === defType && ref.field === defField) {
+      const targetModule = side === "from" ? inModule : outModule;
+      return { ...ref, module: targetModule, type: bridgeType, field: bridgeField };
+    }
+
+    // Tool trunk → remap instance
+    const key = `${ref.module}:${ref.type}:${ref.field}:${ref.instance ?? ""}`;
+    const newTrunk = trunkRemap.get(key);
+    if (newTrunk) {
+      return { ...ref, module: newTrunk.module, type: newTrunk.type, field: newTrunk.field, instance: newTrunk.instance };
+    }
+
+    // Fork instance → offset (fork instances are >= 100000)
+    if (ref.instance != null && ref.instance >= 100000) {
+      const defSeq = ref.instance - 100000;
+      if (defSeq + 1 > maxDefForkSeq) maxDefForkSeq = defSeq + 1;
+      return { ...ref, instance: ref.instance + forkOffset };
+    }
+
+    return ref;
+  }
+
+  for (const wire of defineDef.wires) {
+    const cloned: Wire = JSON.parse(JSON.stringify(wire));
+
+    if ("from" in cloned) {
+      cloned.from = remapRef(cloned.from, "from");
+      cloned.to = remapRef(cloned.to, "to");
+      if (cloned.fallbackRef) {
+        cloned.fallbackRef = remapRef(cloned.fallbackRef, "from");
+      }
+    } else {
+      // Constant wire
+      cloned.to = remapRef(cloned.to, "to");
+    }
+
+    wires.push(cloned);
+  }
+
+  // Advance bridge's fork counter past define's forks
+  nextForkSeqRef.value += maxDefForkSeq;
+
+  // ── 4. Remap and merge pipe handles ─────────────────────────────────
+
+  if (defineDef.pipeHandles) {
+    for (const ph of defineDef.pipeHandles) {
+      const parts = ph.key.split(":");
+      // key format: "module:type:field:instance"
+      const phInstance = parseInt(parts[parts.length - 1]);
+      let newKey = ph.key;
+      if (phInstance >= 100000) {
+        const newInst = phInstance + forkOffset;
+        parts[parts.length - 1] = String(newInst);
+        newKey = parts.join(":");
+      }
+
+      // Remap baseTrunk
+      const bt = ph.baseTrunk;
+      const btKey = `${bt.module}:${defType}:${bt.field}:${bt.instance ?? ""}`;
+      const newBt = trunkRemap.get(btKey);
+
+      // Also try with Tools type for simple names
+      const btKey2 = `${bt.module}:Tools:${bt.field}:${bt.instance ?? ""}`;
+      const newBt2 = trunkRemap.get(btKey2);
+      const resolvedBt = newBt ?? newBt2;
+
+      pipeHandleEntries.push({
+        key: newKey,
+        handle: `${defineHandle}$${ph.handle}`,
+        baseTrunk: resolvedBt
+          ? { module: resolvedBt.module, type: resolvedBt.type, field: resolvedBt.field, instance: resolvedBt.instance }
+          : ph.baseTrunk,
+      });
+    }
+  }
 }
 
 /**
@@ -889,39 +1164,100 @@ function parseConstLines(block: string, lineOffset: number): ConstDef[] {
   return results;
 }
 
+// ── Define block parser ─────────────────────────────────────────────────────
+
+/**
+ * Parse a `define` block into a DefineDef instruction.
+ *
+ * Delegates to parseBridgeBlock with a synthetic `bridge Define.<name>` header,
+ * then converts the resulting Bridge to a DefineDef template.
+ *
+ * Example:
+ *   define secureProfile {
+ *     with userApi as api
+ *     with input as i
+ *     with output as o
+ *     api.id <- i.userId
+ *     o.name <- api.login
+ *   }
+ */
+function parseDefineBlock(block: string, lineOffset: number): DefineDef {
+  const rawLines = block.split("\n");
+
+  // Find the define header line
+  let headerIdx = -1;
+  let defineName = "";
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = line.match(/^define\s+(\w+)\s*\{?\s*$/i);
+    if (!m) {
+      throw new Error(`Line ${lineOffset + i + 1}: Expected define declaration: define <name> {. Got: ${line}`);
+    }
+    defineName = m[1];
+    assertNotReserved(defineName, lineOffset + i + 1, "define name");
+    headerIdx = i;
+    break;
+  }
+
+  if (!defineName) {
+    throw new Error(`Line ${lineOffset + 1}: Missing define declaration`);
+  }
+
+  // Validate braces
+  const kw = rawLines[headerIdx].trim();
+  if (!kw.endsWith("{")) {
+    throw new Error(`Line ${lineOffset + headerIdx + 1}: define block must use braces: define ${defineName} {`);
+  }
+  const hasClose = rawLines.some((l) => l.trimEnd() === "}");
+  if (!hasClose) {
+    throw new Error(`Line ${lineOffset + headerIdx + 1}: define block missing closing }`);
+  }
+
+  // Rewrite header to a synthetic bridge: `bridge Define.<name> {`
+  const syntheticLines = [...rawLines];
+  syntheticLines[headerIdx] = rawLines[headerIdx]
+    .replace(/^(\s*)define\s+\w+/i, `$1bridge Define.${defineName}`);
+
+  const syntheticBlock = syntheticLines.join("\n");
+  const results = parseBridgeBlock(syntheticBlock, lineOffset);
+  const bridge = results[0] as Bridge;
+
+  return {
+    kind: "define",
+    name: defineName,
+    handles: bridge.handles,
+    wires: bridge.wires,
+    ...(bridge.arrayIterators ? { arrayIterators: bridge.arrayIterators } : {}),
+    ...(bridge.pipeHandles ? { pipeHandles: bridge.pipeHandles } : {}),
+  };
+}
+
 // ── Tool block parser ───────────────────────────────────────────────────────
 
 /**
- * Parse a `tool` or `extend` block into a ToolDef instruction.
+ * Parse a `tool` block into a ToolDef instruction.
  *
- * Legacy format (root tool):
- *   tool hereapi httpCall
+ * Format:
+ *   tool hereapi from httpCall {
  *     with context
- *     baseUrl = "https://geocode.search.hereapi.com/v1"
- *     headers.apiKey <- context.hereapi.apiKey
+ *     .baseUrl = "https://geocode.search.hereapi.com/v1"
+ *     .headers.apiKey <- context.hereapi.apiKey
+ *   }
  *
- * Legacy format (child tool with extends):
- *   tool hereapi.geocode extends hereapi
- *     method = GET
- *     path = /geocode
+ *   tool hereapi.geocode from hereapi {
+ *     .method = GET
+ *     .path = /geocode
+ *   }
  *
- * New format (extend):
- *   extend httpCall as hereapi
- *     with context
- *     baseUrl = "https://geocode.search.hereapi.com/v1"
- *
- *   extend hereapi as hereapi.geocode
- *     method = GET
- *     path = /geocode
- *
- * When using `extend`, if the source matches a previously-defined tool name,
- * it's treated as an extends (child inherits parent). Otherwise the source
+ * When the source matches a previously-defined tool name,
+ * it's treated as inheritance (child inherits parent). Otherwise the source
  * is treated as a function name.
  */
 function parseToolBlock(block: string, lineOffset: number, previousInstructions?: Instruction[]): ToolDef {
   // Validate mandatory braces for blocks that have a body (deps / wires)
   const rawLines = block.split("\n");
-  const keywordIdx = rawLines.findIndex((l) => /^(tool|extend)\s/i.test(l.trim()));
+  const keywordIdx = rawLines.findIndex((l) => /^tool\s/i.test(l.trim()));
   if (keywordIdx !== -1) {
     // Check if there are non-blank, non-comment body lines after the keyword
     const bodyLines = rawLines.slice(keywordIdx + 1).filter((l) => {
@@ -931,11 +1267,11 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
     const kw = rawLines[keywordIdx].trim();
     if (bodyLines.length > 0) {
       if (!kw.endsWith("{")) {
-        throw new Error(`Line ${lineOffset + keywordIdx + 1}: extend/tool block with body must use braces: extend Foo as bar {`);
+        throw new Error(`Line ${lineOffset + keywordIdx + 1}: tool block with body must use braces: tool foo from bar {`);
       }
       const hasClose = rawLines.some((l) => l.trimEnd() === "}");
       if (!hasClose) {
-        throw new Error(`Line ${lineOffset + keywordIdx + 1}: extend/tool block missing closing }`);
+        throw new Error(`Line ${lineOffset + keywordIdx + 1}: tool block missing closing }`);
       }
     }
   }
@@ -944,7 +1280,7 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
   const lines = rawLines.map((l) => {
     const trimmed = l.trimEnd();
     if (trimmed === "}") return "";
-    if (/^(tool|extend)\s/i.test(trimmed) && trimmed.endsWith("{")) return trimmed.replace(/\s*\{\s*$/, "");
+    if (/^tool\s/i.test(trimmed) && trimmed.endsWith("{")) return trimmed.replace(/\s*\{\s*$/, "");
     return trimmed;
   });
 
@@ -962,33 +1298,16 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
 
-    // Tool declaration: tool <name> <fn> or tool <name> extends <parent>
+    // Tool declaration: tool <name> from <source>
     if (/^tool\s/i.test(line)) {
-      const extendsMatch = line.match(/^tool\s+(\S+)\s+extends\s+(\S+)$/i);
-      if (extendsMatch) {
-        toolName = extendsMatch[1];
-        toolExtends = extendsMatch[2];
-        continue;
+      const toolMatch = line.match(/^tool\s+(\S+)\s+from\s+(\S+)$/i);
+      if (!toolMatch) {
+        throw new Error(`Line ${ln(i)}: Invalid tool declaration: ${line}. Expected: tool <name> from <source>`);
       }
-      const fnMatch = line.match(/^tool\s+(\S+)\s+(\S+)$/i);
-      if (fnMatch) {
-        toolName = fnMatch[1];
-        toolFn = fnMatch[2];
-        continue;
-      }
-      throw new Error(`Line ${ln(i)}: Invalid tool declaration: ${line}`);
-    }
-
-    // Extend declaration: extend <source> as <name>
-    if (/^extend\s/i.test(line)) {
-      const extendMatch = line.match(/^extend\s+(\S+)\s+as\s+(\S+)$/i);
-      if (!extendMatch) {
-        throw new Error(`Line ${ln(i)}: Invalid extend declaration: ${line}. Expected: extend <source> as <name>`);
-      }
-      const source = extendMatch[1];
-      toolName = extendMatch[2];
+      toolName = toolMatch[1];
+      const source = toolMatch[2];
       assertNotReserved(toolName, ln(i), "tool name");
-      // If source matches a previously-defined tool, it's an extends; otherwise it's a function name
+      // If source matches a previously-defined tool, it's inheritance; otherwise it's a function name
       const isKnownTool = previousInstructions?.some(
         (inst) => inst.kind === "tool" && inst.name === source,
       );
@@ -1132,7 +1451,10 @@ export function serializeBridge(instructions: Instruction[]): string {
   const consts = instructions.filter(
     (i): i is ConstDef => i.kind === "const",
   );
-  if (bridges.length === 0 && tools.length === 0 && consts.length === 0) return "";
+  const defines = instructions.filter(
+    (i): i is DefineDef => i.kind === "define",
+  );
+  if (bridges.length === 0 && tools.length === 0 && consts.length === 0 && defines.length === 0) return "";
 
   const blocks: string[] = [];
 
@@ -1142,6 +1464,9 @@ export function serializeBridge(instructions: Instruction[]): string {
   }
   for (const tool of tools) {
     blocks.push(serializeToolBlock(tool));
+  }
+  for (const def of defines) {
+    blocks.push(serializeDefineBlock(def));
   }
   for (const bridge of bridges) {
     blocks.push(serializeBridgeBlock(bridge));
@@ -1154,12 +1479,9 @@ function serializeToolBlock(tool: ToolDef): string {
   const lines: string[] = [];
   const hasBody = tool.deps.length > 0 || tool.wires.length > 0;
 
-  // Declaration line — use `extend` format
-  if (tool.extends) {
-    lines.push(hasBody ? `extend ${tool.extends} as ${tool.name} {` : `extend ${tool.extends} as ${tool.name}`);
-  } else {
-    lines.push(hasBody ? `extend ${tool.fn} as ${tool.name} {` : `extend ${tool.fn} as ${tool.name}`);
-  }
+  // Declaration line — use `tool <name> from <source>` format
+  const source = tool.extends ?? tool.fn;
+  lines.push(hasBody ? `tool ${tool.name} from ${source} {` : `tool ${tool.name} from ${source}`);
 
   // Dependencies
   for (const dep of tool.deps) {
@@ -1262,7 +1584,33 @@ function serializePipeOrRef(
   return serializeRef(ref, bridge, handleMap, inputHandle, outputHandle, true);
 }
 
+/**
+ * Serialize a DefineDef into its textual form.
+ *
+ * Delegates to serializeBridgeBlock with a synthetic Bridge, then replaces
+ * the `bridge Define.<name>` header with `define <name>`.
+ */
+function serializeDefineBlock(def: DefineDef): string {
+  const syntheticBridge: Bridge = {
+    kind: "bridge",
+    type: "Define",
+    field: def.name,
+    handles: def.handles,
+    wires: def.wires,
+    arrayIterators: def.arrayIterators,
+    pipeHandles: def.pipeHandles,
+  };
+  const bridgeText = serializeBridgeBlock(syntheticBridge);
+  // Replace "bridge Define.<name>" → "define <name>"
+  return bridgeText.replace(/^bridge Define\.(\w+)/, "define $1");
+}
+
 function serializeBridgeBlock(bridge: Bridge): string {
+  // ── Passthrough shorthand ───────────────────────────────────────────
+  if (bridge.passthrough) {
+    return `bridge ${bridge.type}.${bridge.field} with ${bridge.passthrough}`;
+  }
+
   const lines: string[] = [];
 
   // ── Header ──────────────────────────────────────────────────────────
@@ -1282,7 +1630,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
         break;
       }
       case "input":
-        lines.push(`  with input as ${h.handle}`);
+        if (h.handle === "input") {
+          lines.push(`  with input`);
+        } else {
+          lines.push(`  with input as ${h.handle}`);
+        }
         break;
       case "output":
         if (h.handle === "output") {
@@ -1300,6 +1652,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
         } else {
           lines.push(`  with const as ${h.handle}`);
         }
+        break;
+      case "define":
+        lines.push(`  with ${h.name} as ${h.handle}`);
         break;
     }
   }
@@ -1534,6 +1889,9 @@ function buildHandleMap(bridge: Bridge): {
         break;
       case "const":
         handleMap.set(`${SELF_MODULE}:Const:const`, h.handle);
+        break;
+      case "define":
+        handleMap.set(`__define_${h.handle}:${bridge.type}:${bridge.field}`, h.handle);
         break;
     }
   }

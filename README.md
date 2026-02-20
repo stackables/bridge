@@ -30,6 +30,24 @@ The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your app
 * **Use it to:** Morph external API shapes, enforce single exit points for security, and swap providers (e.g., SendGrid to Postmark) without changing app code.
 * **Don't use it for:** Complex business logic or database transactions. Keep the "intelligence" in your Tools; keep the "connectivity" in your Bridge.
 
+### Wiring, not Programming
+
+The Bridge is not a programming language. It is a Data Topology Language.
+
+Unlike Python or JavaScript, where you write a list of instructions for a computer to execute in order, a .bridge file describes a static circuit. There is no "execution pointer" that moves from the top of the file to the bottom.
+
+No Sequential Logic: Shuffling the lines inside a define or bridge block changes nothing. The engine doesn't "run" your file; it uses your file to understand how your GraphQL fields are physically wired to your tools.
+
+Pull, Don't Push: In a normal language, you "push" data into variables. In The Bridge, the GraphQL query "pulls" data through the wires. If a client doesn't ask for a field, the wire is "dead"—no code runs, and no API is called.
+
+Declarative Connections: When you write o.name <- api.name, you aren't commanding a copy operation; you are soldering a permanent link between two points in your graph.
+
+**Don't think in scripts. Think in schematics.**
+
+### Portability & Performance
+
+While the reference engine is implemented in TypeScript, the Bridge language itself is a simple, high-level specification for data flow. Because it describes intent rather than execution, it is architecturally "runtime-blind." It can be interpreted by any high-performance engines written in Rust, Go, or C++ without changing a single line of your .bridge files.
+
 ---
 
 ## The Language
@@ -37,7 +55,7 @@ The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your app
 Every `.bridge` file must begin with a version declaration.
 
 ```hcl
-version 1.3
+version 1.4
 ```
 
 This is the first non-blank, non-comment line. Everything else follows after it.
@@ -54,12 +72,12 @@ const maxRetries = 3
 
 Access const values in bridges or tools via `with const as c`, then reference as `c.<name>.<path>`.
 
-### 2. Extend Blocks (`extend`)
+### 2. Tool Blocks (`tool ... from`)
 
 Defines the "Where" and the "How." Takes a function (or parent tool) and configures it, giving it a new name.
 
 ```hcl
-extend <source> as <name> {
+tool <name> from <source> {
   [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from context/tool
@@ -74,7 +92,51 @@ Param lines use a `.` prefix — the dot means "this tool's own field". `with` a
 When `<source>` is a function name (e.g. `httpCall`), a new tool is created.
 When `<source>` is an existing tool name, the new tool inherits its configuration.
 
-### 3. Bridge Blocks (`bridge`)
+### 3. Define Blocks (`define`)
+
+Reusable named subgraphs — compose tools and wires into a pipeline, then invoke it from any bridge.
+
+```hcl
+define <name> {
+  with <tool> as <handle>     # Tools used inside the pipeline
+  with input as <handle>      # Inputs provided by the caller
+  with output as <handle>     # Outputs returned to the caller
+
+  <handle>.<param> <- <source>  # Wiring (same syntax as bridge)
+  <handle>.<param> = <value>    # Constants
+}
+```
+
+Use a define in a bridge with `with <define> as <handle>`:
+
+```hcl
+define geocode {
+  with std.httpCall as geo
+  with input as i
+  with output as o
+
+  geo.baseUrl = "https://nominatim.openstreetmap.org"
+  geo.method = GET
+  geo.path = /search
+  geo.q <- i.city
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}
+
+bridge Query.location {
+  with geocode as g
+  with input as i
+  with output as o
+
+  g.city <- i.city
+  o.lat <- g.lat
+  o.lon <- g.lon
+}
+```
+
+Each invocation is fully isolated — calling the same define twice creates independent tool instances with no namespace collisions.
+
+### 4. Bridge Blocks (`bridge`)
 
 The resolver logic connecting GraphQL schema fields to your tools.
 
@@ -104,6 +166,16 @@ bridge <Type.field> {
 }
 ```
 
+Bridge can be fully implemented in the defined pipeline.
+
+```
+define namedOperation {
+  ....
+}
+
+bridge <Type.field> with namedOperation
+```
+
 ---
 
 ## Key Features
@@ -112,9 +184,9 @@ bridge <Type.field> {
 
 **Keywords** — cannot be used as tool names, handle aliases, or const names:
 
-> `bridge` `with` `as` `extend` `const` `tool` `version`
+> `bridge` `with` `as` `from` `const` `tool` `version` `define`
 
-**Source identifiers** — reserved for their specific role inside `bridge` and `extend` blocks:
+**Source identifiers** — reserved for their specific role inside `bridge` and `tool` blocks:
 
 > `input` `output` `context`
 
@@ -122,7 +194,7 @@ A parse error is thrown immediately if any of these appear where a user-defined 
 
 ### Scope Rules
 
-Bridge uses explicit scoping. Any entity referenced inside a `bridge` or `extend` block must first be introduced into scope using a `with` clause.
+Bridge uses explicit scoping. Any entity referenced inside a `bridge` or `tool` block must first be introduced into scope using a `with` clause.
 
 This includes:
 
@@ -134,10 +206,10 @@ This includes:
 
 The `input` and `output` handles represents GraphQL field arguments and output type. They exists **only inside `bridge` blocks**.
 
-Because `extend` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input` or `output`.
+Because `tool` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input` or `output`.
 
 > **Rule of thumb:**
-> `extend` defines tools, `bridge` executes the graph.
+> `tool ... from` defines tools, `bridge` executes the graph.
 > Since `input` and `output` belong to GraphQL execution, they only exist inside bridges.
 
 ### Resiliency
@@ -146,10 +218,10 @@ Each layer handles a different failure mode. They compose freely.
 
 #### Layer 1 — Tool `on error` (execution errors)
 
-Declared inside the `extend` block. Catches any exception thrown by the tool's `fn(input)`. All tools that `extend` this tool inherit the fallback.
+Declared inside the `tool` block. Catches any exception thrown by the tool's `fn(input)`. All tools that inherit from this tool inherit the fallback.
 
 ```hcl
-extend httpCall as geo {
+tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET
   .path = /search
@@ -236,8 +308,8 @@ o.result <- transform:normalize:i.rawData
 Full example with a tool that has 2 input parameters:
 
 ```hcl
-extend currencyConverter as convert {
-  currency = EUR   # default currency
+tool convert from currencyConverter {
+  .currency = EUR   # default currency
 }
 
 # example with pipe syntax
@@ -254,8 +326,8 @@ bridge Query.price {
 }
 
 # same without the pipe syntax
-extend convert as c1
-extend convert as c2
+tool c1 from convert
+tool c2 from convert
 
 bridge Query.price {
   with c1
@@ -288,7 +360,8 @@ bridge Query.price {
 | **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
-| **`extend`** | Tool Definition | Configures a function or extends a parent tool. |
+| **`tool ... from`** | Tool Definition | Configures a function or inherits from a parent tool. |
+| **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
 | **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
 
@@ -346,7 +419,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 
 ### Using Built-in Tools
 
-**No `extend` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
+**No `tool` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
 
 ```hcl
 bridge Query.format {
@@ -360,10 +433,10 @@ bridge Query.format {
 }
 ```
 
-Use an `extend` block when you need to configure defaults:
+Use a `tool` block when you need to configure defaults:
 
 ```hcl
-extend std.pickFirst as pf {
+tool pf from std.pickFirst {
   .strict = true
 }
 
@@ -409,7 +482,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
 
 ```hcl
-extend httpCall as geo {
+tool geo from httpCall {
   .cache = 300          # cache for 5 minutes
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET

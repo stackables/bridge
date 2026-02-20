@@ -20,7 +20,7 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridgeText = `version 1.3
+const bridgeText = `version 1.4
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i

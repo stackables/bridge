@@ -1,4 +1,4 @@
-version 1.3
+version 1.4
 
 # Built-in tools live under the std namespace — no tool block needed for pipe-like tools.
 

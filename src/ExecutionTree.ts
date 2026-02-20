@@ -327,7 +327,11 @@ export class ExecutionTree {
         }),
       );
       for (const [path, value] of resolved) {
-        setNested(input, path, value);
+        if (path.length === 0 && value != null && typeof value === "object") {
+          Object.assign(input, value);
+        } else {
+          setNested(input, path, value);
+        }
       }
 
       // Call ToolDef-backed tool function
@@ -351,6 +355,12 @@ export class ExecutionTree {
       const directFn = this.lookupToolFn(toolName);
       if (directFn) {
         return directFn(input);
+      }
+
+      // Define pass-through: synthetic trunks created by define inlining
+      // act as data containers — bridge wires set their values, no tool needed.
+      if (target.module.startsWith("__define_")) {
+        return input;
       }
 
       throw new Error(`No tool found for "${toolName}"`);

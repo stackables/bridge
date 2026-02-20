@@ -51,7 +51,7 @@ describe("scheduling: diamond dependency dedup + parallelism", () => {
     }
   `;
 
-  const bridgeText = `version 1.3
+  const bridgeText = `version 1.4
 bridge Query.dashboard {
   with geo.code as gc
   with weather.get as w
@@ -220,8 +220,8 @@ describe("scheduling: pipe forks run in parallel", () => {
     }
   `;
 
-  const bridgeText = `version 1.3
-extend slowDoubler as double
+  const bridgeText = `version 1.4
+tool double from slowDoubler
 
 
 bridge Query.doubled {
@@ -287,7 +287,7 @@ describe("scheduling: chained pipes execute in correct order", () => {
     }
   `;
 
-  const bridgeText = `version 1.3
+  const bridgeText = `version 1.4
 bridge Query.processed {
   with input as i
   with toUpper as tu
@@ -369,7 +369,7 @@ describe("scheduling: shared tool dedup across pipe and direct consumers", () =>
     }
   `;
 
-  const bridgeText = `version 1.3
+  const bridgeText = `version 1.4
 bridge Query.info {
   with geo.lookup as g
   with toUpper as tu
@@ -432,7 +432,7 @@ describe("scheduling: independent tools execute with true parallelism", () => {
     }
   `;
 
-  const bridgeText = `version 1.3
+  const bridgeText = `version 1.4
 bridge Query.trio {
   with svc.a as sa
   with svc.b as sb
@@ -508,8 +508,8 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
     }
   `;
 
-  const bridgeText = `version 1.3
-extend httpCall as authService {
+  const bridgeText = `version 1.4
+tool authService from httpCall {
   with context
   .baseUrl = "https://auth.test"
   .method = POST
@@ -517,7 +517,7 @@ extend httpCall as authService {
   .body.clientId <- context.auth.clientId
 
 }
-extend httpCall as quotaService {
+tool quotaService from httpCall {
   with context
   .baseUrl = "https://quota.test"
   .method = GET
@@ -525,7 +525,7 @@ extend httpCall as quotaService {
   .headers.key <- context.quota.apiKey
 
 }
-extend httpCall as mainApi {
+tool mainApi from httpCall {
   with authService as auth
   with quotaService as quota
   .baseUrl = "https://api.test"
@@ -533,7 +533,7 @@ extend httpCall as mainApi {
   .headers.X-Quota <- quota.token
 
 }
-extend mainApi as mainApi.getData {
+tool mainApi.getData from mainApi {
   .method = GET
   .path = /data
 

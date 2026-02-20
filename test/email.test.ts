@@ -22,7 +22,7 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridgeText = `version 1.3
+const bridgeText = `version 1.4
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i

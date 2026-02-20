@@ -67,6 +67,11 @@ export type Bridge = {
      *  applied to every fork before the fork-specific pipe wires. */
     baseTrunk: { module: string; type: string; field: string; instance?: number };
   }>;
+  /**
+   * When set, this bridge was declared with the passthrough shorthand:
+   * `bridge Type.field with <name>`. The value is the define/tool name.
+   */
+  passthrough?: string;
 };
 
 /**
@@ -79,7 +84,8 @@ export type HandleBinding =
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }
-  | { handle: string; kind: "const" };
+  | { handle: string; kind: "const" }
+  | { handle: string; kind: "define"; name: string };
 
 /** Internal module identifier for the bridge's own trunk (input args + output fields) */
 export const SELF_MODULE = "_";
@@ -183,7 +189,37 @@ export type ConstDef = {
 };
 
 /** Union of all instruction types */
-export type Instruction = Bridge | ToolDef | ConstDef;
+export type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
+
+/**
+ * Define block — a reusable named subgraph (pipeline / macro).
+ *
+ * At parse time a define is stored as a template.  When a bridge declares
+ * `with <define> as <handle>`, the define's handles and wires are inlined
+ * into the bridge with namespaced identifiers for isolation.
+ *
+ * Example:
+ *   define secureProfile {
+ *     with userApi as api
+ *     with input as i
+ *     with output as o
+ *     api.id <- i.userId
+ *     o.name <- api.login
+ *   }
+ */
+export type DefineDef = {
+  kind: "define";
+  /** Define name — referenced in bridge `with` declarations */
+  name: string;
+  /** Declared handles (tools, input, output, etc.) */
+  handles: HandleBinding[];
+  /** Connection wires (same format as Bridge wires) */
+  wires: Wire[];
+  /** Array iterators (same as Bridge) */
+  arrayIterators?: Record<string, string>;
+  /** Pipe fork registry (same as Bridge) */
+  pipeHandles?: Bridge["pipeHandles"];
+};
 
 /**
  * Pluggable cache store for httpCall.

@@ -106,33 +106,34 @@ bridgeTransform(schema, instructions, {
 Every `.bridge` file must begin with a version declaration — the parser rejects anything without it:
 
 ```hcl
-version 1.3
+version 1.4
 ```
 
-This must be the first non-blank, non-comment line. The current parser accepts only `1.3`; any other version string is a hard error.
+This must be the first non-blank, non-comment line. The current parser accepts only `1.4`; any other version string is a hard error.
 
 ### Reserved Words
 
 **Keywords** — cannot be used as tool names, handle aliases, or const names:
 
-> `bridge` `with` `as` `extend` `const` `tool` `version`
+> `bridge` `with` `as` `from` `const` `tool` `version` `define`
 
-**Source identifiers** — reserved for their specific role in `bridge`/`extend` blocks:
+**Source identifiers** — reserved for their specific role in `bridge`/`tool` blocks:
 
 > `input` `output` `context`
 
 The parser throws immediately if any of these appear where a user-defined name is expected.
 
-Three block types, multiple operators. **Braces are mandatory** for `bridge` and `extend`/`tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body extends like `extend std.pickFirst as first` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
+Three block types, multiple operators. **Braces are mandatory** for `bridge` and `tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body tools like `tool first from std.pickFirst` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
 
 ### Block types
 | Block | Purpose |
 |---|---|
-| `extend` | Configures a function or extends a parent tool — URL, headers, params |
+| `tool ... from` | Configures a function or inherits from a parent tool — URL, headers, params |
+| `define` | Declares a reusable subgraph (pipeline) invocable from bridges |
 | `bridge` | Connects a GraphQL field to tools |
 | `const` | Declares named JSON constants reusable across tools and bridges |
 
-> `tool` keyword is still accepted for backward compatibility but `extend` is the canonical syntax.
+`tool <name> from <source>` is the only syntax for tool definitions.
 
 ### `const` blocks
 Declare named values as raw JSON. Multiple consts can exist in one file.
@@ -193,17 +194,17 @@ o.textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 - If all sources are null → `||` literal fires.
 - If all sources throw → `??` source/literal fires.
 
-### `extend` blocks
-Define a reusable API call configuration. Syntax: `extend <source> as <name>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
+### `tool` blocks
+Define a reusable API call configuration. Syntax: `tool <name> from <source>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
 
 ```hcl
-extend httpCall as hereapi {
+tool hereapi from httpCall {
   with context
   .baseUrl = "https://geocode.search.hereapi.com/v1"
   .headers.apiKey <- context.hereapi.apiKey
 }
 
-extend hereapi as hereapi.geocode {
+tool hereapi.geocode from hereapi {
   .method = GET
   .path = /geocode
 }
@@ -211,8 +212,8 @@ extend hereapi as hereapi.geocode {
 
 Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines are control flow and do not take a dot prefix.
 
-When extending a parent tool, the engine merges wires from the parent chain by:
-1. Walking the `extends` chain from root to leaf
+When inheriting from a parent tool, the engine merges wires from the parent chain by:
+1. Walking the inheritance chain from root to leaf
 2. Merging wires (child overrides parent by `target` path; `onError` wires merge by kind — child wins)
 3. Merging deps (deduplicated by handle name)
 
@@ -220,6 +221,40 @@ When extending a parent tool, the engine merges wires from the parent chain by:
 **`with <tool> as <handle>`** — declares a tool-to-tool dependency. The dep tool is called first and its result is available as `handle` in wires. Results are cached per request.  
 **`on error = <json>`** — tool-level fallback. If `fn(input)` throws, this JSON value is returned instead. Only catches execution errors, not wire resolution.  
 **`on error <- <source>`** — same but pulls fallback from context/tool at runtime. Example: `on error <- context.fallbacks.geo`.
+
+### `define` blocks
+Declare a reusable named subgraph (pipeline). Syntax: `define <name> { ... }`. The body uses the same wire syntax as bridge blocks, with `with input as i` and `with output as o` declaring the pipeline's interface.
+
+```hcl
+define geocode {
+  with std.httpCall as geo
+  with input as i
+  with output as o
+
+  geo.baseUrl = "https://nominatim.openstreetmap.org"
+  geo.method = GET
+  geo.path = /search
+  geo.q <- i.city
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}
+```
+
+Use in a bridge with `with <define> as <handle>`. The define's inputs are written via `<handle>.<input>` and outputs are read via `<handle>.<output>`:
+
+```hcl
+bridge Query.location {
+  with geocode as g
+  with input as i
+  with output as o
+
+  g.city <- i.city
+  o.lat <- g.lat
+  o.lon <- g.lon
+}
+```
+
+Each invocation is fully isolated — calling the same define twice creates independent tool instances. Inlining happens at parse time; the executor treats the expanded wires identically to hand-written ones.
 
 ### `bridge` blocks
 Connect a GraphQL field to its tools.
@@ -242,10 +277,11 @@ bridge Query.geocode {
 
 **`with input as i`** — binds GraphQL field arguments.  
 **`with output as o`** — declares the output handle. **Required in every `bridge` block.** All output field assignments must go through this handle: `o.<field> <- source`. Tool input wires (`<tool>.<param> <- ...`) do not use the output handle.  
-**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `extend` block is required. An `extend` block is only needed when you want to configure defaults or extend a parent tool.  
+**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want to configure defaults or inherit from a parent tool.  
+**`with <define> as <handle>`** — invokes a define block. The define's inputs are written as `<handle>.<input>` and outputs read as `<handle>.<output>`.  
 **`o.results <- gc.items[] as item { ... }`** — array mapping. Creates a shadow tree per element. The iterator `item` references the current element — `item.field` accesses element data. The `{ }` block can also include element constants (`.field = "value"`).
 
-Example — pipe-like built-in tools need no `extend` block:
+Example — pipe-like built-in tools need no `tool` block:
 ```hcl
 bridge Query.format {
   with std.upperCase as up
@@ -301,7 +337,7 @@ Before this design, `Promise.any()` was used, which raced on fulfillment — mea
 ## Design Decisions Made (and why)
 
 ### No backward compat / no `provider` keyword
-The old API had a `provider` keyword and a `legacyProviderCall` option. All of this was removed. The `extend` keyword is the canonical syntax; `tool` is kept for backward compatibility.
+The old API had a `provider` keyword and a `legacyProviderCall` option. All of this was removed. The `tool <name> from <source>` keyword is the canonical syntax for tool definitions.
 
 ### `gateway.ts` is not public API
 `createGateway()` is a test helper. It wraps graphql-yoga + `bridgeTransform` for convenience in tests. It lives in `test/_gateway.ts`. The library itself has no dependency on graphql-yoga — users bring their own server.
@@ -315,7 +351,7 @@ Multi-provider routing was first implemented with a `Record<string, Instruction[
 ### Three-layer fallback architecture
 Fault tolerance is split into three independent layers that compose, innermost-first:
 
-1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `extend` chains (child overrides parent).
+1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `tool ... from` chains (child overrides parent).
 2. **Wire `||` null-guard** — catches null/undefined resolution. Fires when the source resolves successfully but the value is absent. Can be a JSON literal or a source reference (handle.path or pipe chain).
 3. **Wire `??` error-guard** — catches any failure in the entire resolution chain (tool down, dep failure). Applied as a `.catch()` wrapping the resolved promise (including the `||` layer). Can be a JSON literal **or a source/pipe expression** — if a source, it is scheduled lazily and only executed when the catch fires.
 
@@ -350,7 +386,7 @@ test/
   chained.test.ts         — integration: tool-to-tool chaining
   email.test.ts           — integration: mutation + response header extraction
   property-search.test.ts — integration: reads from test/property-search.bridge file
-  tool-features.test.ts   — integration: missing tool, extends chain, config pull, tool-to-tool deps
+  tool-features.test.ts   — integration: missing tool, inheritance chain, config pull, tool-to-tool deps
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
   force-wire.test.ts      — forced wire (<-!): parser, serializer roundtrip, end-to-end forced execution
   resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
@@ -362,7 +398,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**225 tests, all passing.**
+**224 tests, all passing.**
 
 ---
 
