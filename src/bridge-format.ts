@@ -232,6 +232,8 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   // ── Parse wire lines ────────────────────────────────────────────────
   const wires: Wire[] = [];
   let currentArrayToPath: string[] | null = null;
+  let currentIterHandle: string | null = null;
+  const arrayIterators: Record<string, string> = {};
   /** Monotonically-increasing index; combined with a high base to produce
    *  fork instances that can never collide with regular handle instances. */
   let nextForkSeq = 0;
@@ -313,6 +315,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     if (line === "}") {
       if (inElementBlock) {
         currentArrayToPath = null;
+        currentIterHandle = null;
         inElementBlock = false;
         continue;
       }
@@ -343,11 +346,12 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         continue;
       }
 
-      // Relative pull: .target <- .source (element-relative)
-      const elemRelMatch = line.match(/^\.(\S+)\s*<-\s*\.(\S+)$/);
-      if (elemRelMatch) {
+      // Simple pull: .target <- <iter>.source (element-relative, no fallbacks)
+      const iterPfx = `${currentIterHandle!}.`;
+      const elemRelMatch = line.match(/^\.(\S+)\s*<-\s*(\S+)$/);
+      if (elemRelMatch && elemRelMatch[2].startsWith(iterPfx)) {
         const toPath = [...currentArrayToPath, ...parsePath(elemRelMatch[1])];
-        const fromPath = parsePath(elemRelMatch[2]);
+        const fromPath = parsePath(elemRelMatch[2].slice(iterPfx.length));
         wires.push({
           from: {
             module: SELF_MODULE,
@@ -406,16 +410,19 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
           const srcStr = sourceParts[ci];
           const isLast = ci === sourceParts.length - 1;
 
-          // Relative element source: starts with "."
+          // Element-relative source: starts with "<iter>."
+          const iterPrefix = `${currentIterHandle!}.`;
           let fromRef: NodeRef;
-          if (srcStr.startsWith(".")) {
+          if (srcStr.startsWith(iterPrefix)) {
             fromRef = {
               module: SELF_MODULE,
               type: bridgeType,
               field: bridgeField,
               element: true,
-              path: parsePath(srcStr.slice(1)),
+              path: parsePath(srcStr.slice(iterPrefix.length)),
             };
+          } else if (srcStr.startsWith(".")) {
+            throw new Error(`Line ${ln(i)}: Use "${currentIterHandle!}.field" to reference element fields, not ".field"`);
           } else {
             fromRef = buildSourceExpr(srcStr, ln(i), false);
           }
@@ -452,15 +459,19 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
       const force = forceFlag === "!";
       const rhsTrimmed = rhs.trim();
 
-      // ── Array mapping: target <- source[] {
+      // ── Array mapping: target <- source[] as <iter> {
       //    Opens a brace-delimited element block.
-      const arrayBraceMatch = rhsTrimmed.match(/^(\S+)\[\]\s*\{\s*$/);
+      const arrayBraceMatch = rhsTrimmed.match(/^(\S+)\[\]\s+as\s+(\w+)\s*\{\s*$/);
       if (arrayBraceMatch) {
         const fromClean = arrayBraceMatch[1];
+        const iterHandle = arrayBraceMatch[2];
+        assertNotReserved(iterHandle, ln(i), "iterator handle");
         const fromRef = resolveAddress(fromClean, handleRes, bridgeType, bridgeField, ln(i));
         const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
         wires.push({ from: fromRef, to: toRef });
         currentArrayToPath = toRef.path;
+        currentIterHandle = iterHandle;
+        arrayIterators[toRef.path[0]] = iterHandle;
         inElementBlock = true;
         continue;
       }
@@ -545,6 +556,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     field: bridgeField,
     handles: handleBindings,
     wires,
+    arrayIterators: Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
     pipeHandles: pipeHandleEntries.length > 0 ? pipeHandleEntries : undefined,
   });
 
@@ -1386,9 +1398,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const arrayKey = w.to.path.length === 1 ? w.to.path[0] : null;
     if (arrayKey && allElementKeys.has(arrayKey) && !serializedArrays.has(arrayKey)) {
       serializedArrays.add(arrayKey);
+      const iterName = bridge.arrayIterators?.[arrayKey] ?? "item";
       const fromStr = sRef(w.from, true) + "[]";
       const toStr   = sRef(w.to, false);
-      lines.push(`${toStr} <- ${fromStr} {`);
+      lines.push(`${toStr} <- ${fromStr} as ${iterName} {`);
 
       // Element constant wires (e.g. .provider = "RENFE")
       for (const ew of elementConstGroups.get(arrayKey) ?? []) {
@@ -1396,10 +1409,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const elemTo = "." + serPath(fieldPath);
         lines.push(`  ${elemTo} = "${ew.value}"`);
       }
-      // Element pull wires (e.g. .name <- .title)
+      // Element pull wires (e.g. .name <- iter.title)
       for (const ew of elementPullGroups.get(arrayKey) ?? []) {
         const fromPart = ew.from.element
-          ? "." + serPath(ew.from.path)
+          ? iterName + "." + serPath(ew.from.path)
           : sRef(ew.from, true);
         const elemTo = "." + serPath(ew.to.path.slice(1));
 
@@ -1537,7 +1550,9 @@ function serializeRef(
   isFrom: boolean,
 ): string {
   if (ref.element) {
-    return "." + serPath(ref.path);
+    // Element refs are only serialized inside brace blocks (using the iterator name).
+    // This path should not be reached in normal serialization.
+    return "item." + serPath(ref.path);
   }
 
   // Bridge's own trunk (no instance, no element)

@@ -97,8 +97,8 @@ bridge <Type.field> {
   o.<field> <- <source> ?? <fallback>     # Error-fallback: use fallback if chain throws
 
   # Array Mapping (brace block per element)
-  o.<field> <- <source>[] {
-    .<sub_field> <- .<sub_src>          # Relative to current element
+  o.<field> <- <source>[] as <iter> {
+    .<sub_field> <- <iter>.<sub_src>    # Element field via iterator
     .<sub_field> = "constant"           # Element constant
   }
 }
@@ -268,7 +268,7 @@ bridge Query.price {
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
 | **`extend`** | Tool Definition | Configures a function or extends a parent tool. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
-| **`<- src[] { }`** | Map | Iterates over source array; each element mapped in a `{ }` block with relative `.field` refs. |
+| **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
 
 ---
 

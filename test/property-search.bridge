@@ -34,11 +34,11 @@ usd.cents <- z.properties[0].priceInCents
 o.topPick.price    <- usd.dollars
 
 # listings: array mapping with per-element rename + nested drill
-o.listings <- z.properties[] {
-  .address  <- .streetAddress
-  .price    <- .priceInCents
-  .bedrooms <- .beds
-  .city     <- .location.city
+o.listings <- z.properties[] as prop {
+  .address  <- prop.streetAddress
+  .price    <- prop.priceInCents
+  .bedrooms <- prop.beds
+  .city     <- prop.location.city
 }
 
 }

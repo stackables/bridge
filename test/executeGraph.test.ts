@@ -29,10 +29,10 @@ bridge Query.geocode {
 o.search <- i.search
 gc.q <- i.search
 gc.limit <- i.limit
-o.results <- gc.items[] {
-  .name <- .title
-  .lat  <- .position.lat
-  .lon  <- .position.lng
+o.results <- gc.items[] as item {
+  .name <- item.title
+  .lat  <- item.position.lat
+  .lon  <- item.position.lng
 }
 
 }`;

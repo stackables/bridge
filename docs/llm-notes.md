@@ -159,7 +159,7 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `?? <source>` | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression. |
 | `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
 | `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
-| `o.field <- src[] { ... }` | Array mapping — iterates source array; each element is mapped in a brace block. Relative `.field` refs are scoped to the current element. `.field = "value"` inside the block sets an element constant. |
+| `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant. |
 
 **Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
 ```hcl
@@ -232,10 +232,10 @@ bridge Query.geocode {
 
   gc.q <- i.search
 
-  o.results <- gc.items[] {
-    .name <- .title
-    .lat  <- .position.lat
-    .lon  <- .position.lng
+  o.results <- gc.items[] as item {
+    .name <- item.title
+    .lat  <- item.position.lat
+    .lon  <- item.position.lng
   }
 }
 ```
@@ -243,7 +243,7 @@ bridge Query.geocode {
 **`with input as i`** — binds GraphQL field arguments.  
 **`with output as o`** — declares the output handle. **Required in every `bridge` block.** All output field assignments must go through this handle: `o.<field> <- source`. Tool input wires (`<tool>.<param> <- ...`) do not use the output handle.  
 **`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `extend` block is required. An `extend` block is only needed when you want to configure defaults or extend a parent tool.  
-**`o.results <- gc.items[] { ... }`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element. The `{ }` block can also include element constants (`.field = "value"`).
+**`o.results <- gc.items[] as item { ... }`** — array mapping. Creates a shadow tree per element. The iterator `item` references the current element — `item.field` accesses element data. The `{ }` block can also include element constants (`.field = "value"`).
 
 Example — pipe-like built-in tools need no `extend` block:
 ```hcl
@@ -278,7 +278,7 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 ```
 `module` is the dotted tool name (e.g. `"hereapi"`, `"hereapi.geocode"`) or `SELF_MODULE = "_"` for the bridge's own input/output.
 
-**Shadow trees** — when an array mapping is encountered (`o.results <- gc.items[] { ... }`), a shadow `ExecutionTree` is created per array element. Shadow trees delegate `schedule()` and `resolveToolDep()` to their parent, but have their own `state` for element-scoped data.
+**Shadow trees** — when an array mapping is encountered (`o.results <- gc.items[] as item { ... }`), a shadow `ExecutionTree` is created per array element. Shadow trees delegate `schedule()` and `resolveToolDep()` to their parent, but have their own `state` for element-scoped data.
 
 **Execution flow:**
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree

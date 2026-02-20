@@ -191,9 +191,9 @@ bridge Query.search {
   with provider.list as p
   with output as o
 
-o.results <- p.items[] {
-  .name    <- .title
-  .lat     <- .position.lat
+o.results <- p.items[] as item {
+  .name    <- item.title
+  .lat     <- item.position.lat
 }
 
 }`);
@@ -369,10 +369,10 @@ bridge Query.search {
   with hereapi.geocode as gc
   with output as o
 
-o.results <- gc.items[] {
-  .name <- .title
-  .lat <- .position.lat
-  .lon <- .position.lng
+o.results <- gc.items[] as item {
+  .name <- item.title
+  .lat <- item.position.lat
+  .lon <- item.position.lng
 }
 
 }`;
@@ -422,11 +422,11 @@ usd.cents <- z.properties[0].priceInCents
 o.topPick.price <- usd.dollars
 o.topPick.bedrooms <- z.properties[0].beds
 o.topPick.city <- z.properties[0].location.city
-o.listings <- z.properties[] {
-  .address <- .streetAddress
-  .price <- .priceInCents
-  .bedrooms <- .beds
-  .city <- .location.city
+o.listings <- z.properties[] as prop {
+  .address <- prop.streetAddress
+  .price <- prop.priceInCents
+  .bedrooms <- prop.beds
+  .city <- prop.location.city
 }
 
 }
@@ -898,7 +898,7 @@ o.result <- cfg.apiKey
 
   test("element mapping works with tab indentation", () => {
     const bridge = parseBridge(
-      "version 1.3\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] {\n\t.lat <- .position.lat\n\t.lng <- .position.lng\n}\n}\n",
+      "version 1.3\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
     ).find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
       bridge.wires.filter((w) => "from" in w && w.from.element).length,

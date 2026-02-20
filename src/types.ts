@@ -48,6 +48,12 @@ export type Bridge = {
   /** Connection wires */
   wires: Wire[];
   /**
+   * Iterator handle names for array mapping blocks.
+   * Key: the array destination field name (first path component of `to`).
+   * Value: the iterator handle alias declared with `[] as <iter> { }`.
+   */
+  arrayIterators?: Record<string, string>;
+  /**
    * Pipe fork registry — one entry per pipe use.
    * Maps the fork's trunk key to the originating handle name and the base
    * trunk (used by the executor to inherit non-pipe bridge wires).
