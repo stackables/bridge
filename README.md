@@ -7,10 +7,11 @@ Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, 
 npm install @stackables/bridge
 ```
 
-> **Developer Preview**  
+> **Developer Preview**
 > The Bridge v1.x is a public preview and is not recommended for production use.
->  - Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
->  - Versioning: We follow strict SemVer starting from v2.0.0.
+>
+> * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
+> * Versioning: We follow strict SemVer starting from v2.0.0.
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
@@ -93,6 +94,25 @@ bridge <Type.field> {
 ---
 
 ## Key Features
+
+### Scope Rules
+
+Bridge uses explicit scoping. Any entity referenced inside a `bridge` or `extend` block must first be introduced into scope using a `with` clause.
+
+This includes:
+
+* `tools`
+* `input`
+* `context`
+* `tool aliases`
+
+The `input` handle represents GraphQL field arguments and exists **only inside `bridge` blocks**.
+
+Because `extend` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input`.
+
+> **Rule of thumb:**
+> `extend` defines tools, `bridge` executes the graph.
+> Since `input` belongs to GraphQL execution, it only exists inside bridges.
 
 ### Resiliency
 
