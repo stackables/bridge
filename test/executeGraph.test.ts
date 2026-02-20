@@ -24,14 +24,16 @@ const bridgeText = `
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
+  with output as o
 
-search <- i.search
+o.search <- i.search
 gc.q <- i.search
 gc.limit <- i.limit
-results[] <- gc.items[]
+o.results <- gc.items[] {
   .name <- .title
   .lat  <- .position.lat
   .lon  <- .position.lng
+}
 
 }`;
 

@@ -48,8 +48,9 @@ describe("parseBridge", () => {
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
+  with output as o
 
-search <- i.search
+o.search <- i.search
 gc.q <- i.search
 
 }`);
@@ -58,13 +59,14 @@ gc.q <- i.search
     assert.equal(bridge.kind, "bridge");
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
-    assert.equal(bridge.handles.length, 2);
+    assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.handles[0], {
       handle: "gc",
       kind: "tool",
       name: "hereapi.geocode",
     });
     assert.deepStrictEqual(bridge.handles[1], { handle: "i", kind: "input" });
+    assert.deepStrictEqual(bridge.handles[2], { handle: "o", kind: "output" });
     assert.equal(bridge.wires.length, 2);
 
     assert.deepStrictEqual(bridge.wires[0], {
@@ -103,15 +105,16 @@ gc.q <- i.search
 bridge Query.health {
   with api.data as a
   with toInt as ti
+  with output as o
 
 ti.value <- a.raw
-output <- ti.result
+o.output <- ti.result
 
 }`);
     assert.equal(result.length, 1);
 
     const bridge = result[0] as Bridge;
-    assert.equal(bridge.handles.length, 2);
+    assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
       from: {
         module: "api",
@@ -149,9 +152,10 @@ output <- ti.result
     const result = parseBridge(`
 bridge Query.search {
   with zillow.find as z
+  with output as o
 
-topPick.address <- z.properties[0].streetAddress
-topPick.city    <- z.properties[0].location.city
+o.topPick.address <- z.properties[0].streetAddress
+o.topPick.city    <- z.properties[0].location.city
 
 }`);
     const bridge = result[0] as Bridge;
@@ -181,10 +185,12 @@ topPick.city    <- z.properties[0].location.city
     const result = parseBridge(`
 bridge Query.search {
   with provider.list as p
+  with output as o
 
-results[] <- p.items[]
+o.results <- p.items[] {
   .name    <- .title
   .lat     <- .position.lat
+}
 
 }`);
     const bridge = result[0] as Bridge;
@@ -241,9 +247,10 @@ results[] <- p.items[]
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
+  with output as o
 
 sg.content <- i.body
-messageId <- sg.headers.x-message-id
+o.messageId <- sg.headers.x-message-id
 
 }`);
     const bridge = result[0] as Bridge;
@@ -315,8 +322,9 @@ describe("serializeBridge", () => {
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
+  with output as o
 
-search <- i.search
+o.search <- i.search
 gc.q <- i.search
 
 }`;
@@ -332,12 +340,13 @@ bridge Query.health {
   with companyX.getLivingStandard as cx
   with input as i
   with toInt as ti
+  with output as o
 
 geo.location <- i.q
 cx.x <- geo.lat
 cx.y <- geo.lon
 ti.value <- cx.lifeExpectancy
-lifeExpectancy <- ti.result
+o.lifeExpectancy <- ti.result
 
 }`;
     const instructions = parseBridge(input);
@@ -351,11 +360,13 @@ lifeExpectancy <- ti.result
     const input = `
 bridge Query.search {
   with hereapi.geocode as gc
+  with output as o
 
-results[] <- gc.items[]
+o.results <- gc.items[] {
   .name <- .title
   .lat <- .position.lat
   .lon <- .position.lng
+}
 
 }`;
     const instructions = parseBridge(input);
@@ -370,11 +381,12 @@ results[] <- gc.items[]
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
+  with output as o
 
 sg.to <- i.to
 sg.from <- i.from
 sg.content <- i.body
-messageId <- sg.headers.x-message-id
+o.messageId <- sg.headers.x-message-id
 
 }`;
     const instructions = parseBridge(input);
@@ -391,22 +403,24 @@ bridge Query.propertySearch {
   with zillow.search as z
   with input as i
   with centsToUsd as usd
+  with output as o
 
-location <- i.location
+o.location <- i.location
 gc.q <- i.location
 z.latitude <- gc.items[0].position.lat
 z.longitude <- gc.items[0].position.lng
 z.maxPrice <- i.budget
-topPick.address <- z.properties[0].streetAddress
+o.topPick.address <- z.properties[0].streetAddress
 usd.cents <- z.properties[0].priceInCents
-topPick.price <- usd.dollars
-topPick.bedrooms <- z.properties[0].beds
-topPick.city <- z.properties[0].location.city
-listings[] <- z.properties[]
+o.topPick.price <- usd.dollars
+o.topPick.bedrooms <- z.properties[0].beds
+o.topPick.city <- z.properties[0].location.city
+o.listings <- z.properties[] {
   .address <- .streetAddress
   .price <- .priceInCents
   .bedrooms <- .beds
   .city <- .location.city
+}
 
 }
 
@@ -415,12 +429,13 @@ bridge Query.propertyComments {
   with reviews.getByLocation as rv
   with input as i
   with pluckText as pt
+  with output as o
 
 gc.q <- i.location
 rv.lat <- gc.items[0].position.lat
 rv.lng <- gc.items[0].position.lng
 pt.items <- rv.comments
-propertyComments <- pt.result
+o.propertyComments <- pt.result
 
 }`;
     const instructions = parseBridge(input);
@@ -443,6 +458,7 @@ propertyComments <- pt.result
             name: "sendgrid.send",
           },
           { handle: "i", kind: "input" },
+          { handle: "o", kind: "output" },
         ],
         wires: [
           {
@@ -482,7 +498,7 @@ propertyComments <- pt.result
     assert.ok(output.includes("bridge Mutation.sendEmail"));
     assert.ok(output.includes("with sendgrid.send as sg"));
     assert.ok(output.includes("sg.content <- i.body"));
-    assert.ok(output.includes("messageId <- sg.headers.x-message-id"));
+    assert.ok(output.includes("o.messageId <- sg.headers.x-message-id"));
   });
 });
 
@@ -644,8 +660,9 @@ extend hereapi as hereapi.geocode {
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
+  with output as o
 
-search <- i.search
+o.search <- i.search
 gc.q <- i.search
 gc.limit <- i.limit
 
@@ -673,10 +690,11 @@ extend sendgrid as sendgrid.send {
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
+  with output as o
 
 sg.to <- i.to
 sg.content <- i.body
-messageId <- sg.id
+o.messageId <- sg.id
 
 }`;
     const instructions = parseBridge(input);
@@ -719,7 +737,7 @@ gc.q <- i.search
 describe("parser robustness", () => {
   test("CRLF line endings are handled", () => {
     const result = parseBridge(
-      "bridge Query.geocode {\r\n  with input as i\r\n\r\nsearch <- i.q\r\n}\r\n",
+      "bridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
     );
     assert.equal(result.length, 1);
     assert.equal(result[0].kind, "bridge");
@@ -727,7 +745,7 @@ describe("parser robustness", () => {
 
   test("tabs are treated as spaces", () => {
     const result = parseBridge(
-      "bridge Query.geocode {\n\twith input as i\n\nsearch <- i.q\n}\n",
+      "bridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
     );
     assert.equal(result.length, 1);
   });
@@ -833,8 +851,9 @@ not a valid line
 Bridge Query.geocode {
   With myTool as t
   With Input as i
+  With Output as o
 
-result <- t.output
+o.result <- t.output
 
 }`);
     const bridge = result.find((i) => i.kind === "bridge") as Bridge;
@@ -847,8 +866,9 @@ result <- t.output
 Bridge Query.geocode {
   With Context as cfg
   With Input as i
+  With Output as o
 
-result <- cfg.apiKey
+o.result <- cfg.apiKey
 
 }`).find((i) => i.kind === "bridge") as Bridge;
     assert.notEqual(
@@ -859,7 +879,7 @@ result <- cfg.apiKey
 
   test("element mapping works with tab indentation", () => {
     const bridge = parseBridge(
-      "bridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\ngc.q <- i.search\nresults[] <- gc.items[]\n\t.lat <- .position.lat\n\t.lng <- .position.lng\n}\n",
+      "bridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] {\n\t.lat <- .position.lat\n\t.lng <- .position.lng\n}\n}\n",
     ).find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
       bridge.wires.filter((w) => "from" in w && w.from.element).length,
@@ -876,15 +896,17 @@ describe("brace block syntax", () => {
 bridge Query.demo {
   with myApi as api
   with input as i
+  with output as o
 
-  result <- api.value
+  o.result <- api.value
 }`);
     const indent = parseBridge(`
 bridge Query.demo {
   with myApi as api
   with input as i
+  with output as o
 
-result <- api.value
+o.result <- api.value
 
 }`);
     assert.deepStrictEqual(brace, indent);
@@ -930,8 +952,9 @@ extend httpCall as api {
 bridge Query.demo {
   with api
   with input as i
+  with output as o
 
-result <- api.value
+o.result <- api.value
 
 }`);
     assert.equal(result.filter((i) => i.kind === "tool").length, 1);

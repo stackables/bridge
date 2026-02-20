@@ -25,6 +25,7 @@ bridge Query.getWeatherByName {
   with first as f
   with weather as w
   with input as i
+  with output as o
 
   g.q <- i.cityName
   g.format = "json"
@@ -35,24 +36,25 @@ bridge Query.getWeatherByName {
   w.longitude <- f.lon
   w.current_weather = true
 
-  city        <- i.cityName
-  lat         <- f.lat
-  lon         <- f.lon
-  currentTemp <- w.current_weather.temperature ?? 0.0
-  timezone    <- w.timezone ?? "UTC"
+  o.city        <- i.cityName
+  o.lat         <- f.lat
+  o.lon         <- f.lon
+  o.currentTemp <- w.current_weather.temperature ?? 0.0
+  o.timezone    <- w.timezone ?? "UTC"
 }
 
 # By coordinates: straight to weather API
 bridge Query.getWeatherByCoordinates {
   with weather as w
   with input as i
+  with output as o
 
   w.latitude  <- i.lat
   w.longitude <- i.lon
   w.current_weather = true
 
-  lat         <- i.lat
-  lon         <- i.lon
-  currentTemp <- w.current_weather.temperature ?? 0.0
-  timezone    <- w.timezone ?? "UTC"
+  o.lat         <- i.lat
+  o.lon         <- i.lon
+  o.currentTemp <- w.current_weather.temperature ?? 0.0
+  o.timezone    <- w.timezone ?? "UTC"
 }

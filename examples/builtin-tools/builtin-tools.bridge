@@ -4,10 +4,11 @@ bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
+  with output as o
 
-original <- i.text
-upper <- up:i.text
-lower <- lo:i.text
+o.original <- i.text
+o.upper <- up:i.text
+o.lower <- lo:i.text
 
 }
 
@@ -15,11 +16,12 @@ bridge Query.findEmployee {
   with getEmployees as db
   with std.findObject as find
   with input as i
+  with output as o
 
 find.in <- db.employees
 find.department <- i.department
-id <- find.id
-name <- find.name
-department <- find.department
+o.id <- find.id
+o.name <- find.name
+o.department <- find.department
 
 }

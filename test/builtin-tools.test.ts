@@ -175,9 +175,10 @@ bridge Query.greet {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
+  with output as o
 
-upper <- up:i.name
-lower <- lo:i.name
+o.upper <- up:i.name
+o.lower <- lo:i.name
 
 }`;
 
@@ -210,8 +211,9 @@ describe("user can override std namespace", () => {
 bridge Query.greet {
   with std.upperCase as up
   with input as i
+  with output as o
 
-upper <- up:i.name
+o.upper <- up:i.name
 
 }`;
 
@@ -267,9 +269,10 @@ bridge Query.process {
   with std.upperCase as up
   with reverse as rev
   with input as i
+  with output as o
 
-upper <- up:i.text
-custom <- rev:i.text
+o.upper <- up:i.text
+o.custom <- rev:i.text
 
 }`;
 
@@ -311,12 +314,13 @@ bridge Query.findUser {
   with getUsers as db
   with std.findObject as find
   with input as i
+  with output as o
 
 find.in <- db.users
 find.role <- i.role
-id <- find.id
-name <- find.name
-role <- find.role
+o.id <- find.id
+o.name <- find.name
+o.role <- find.role
 
 }`;
 
@@ -363,8 +367,9 @@ describe("pipe with built-in tools", () => {
 bridge Query.shout {
   with std.upperCase as up
   with input as i
+  with output as o
 
-value <- up:i.text
+o.value <- up:i.text
 
 }`;
 
@@ -397,8 +402,9 @@ describe("pickFirst through bridge", () => {
 bridge Query.first {
   with std.pickFirst as pf
   with input as i
+  with output as o
 
-value <- pf:i.items
+o.value <- pf:i.items
 
 }`;
 
@@ -433,9 +439,10 @@ extend std.pickFirst as pf {
 bridge Query.onlyOne {
   with pf
   with input as i
+  with output as o
 
 pf.in <- i.items
-value <- pf
+o.value <- pf
 
 }`;
 
@@ -482,8 +489,9 @@ bridge Query.normalize {
   with std.toArray as ta
   with std.pickFirst as pf
   with input as i
+  with output as o
 
-value <- pf:ta:i.value
+o.value <- pf:ta:i.value
 
 }`;
 
@@ -516,9 +524,10 @@ bridge Query.wrap {
   with std.toArray as ta
   with countItems as cnt
   with input as i
+  with output as o
 
 cnt.in <- ta:i.value
-count <- cnt.count
+o.count <- cnt.count
 
 }`;
 
@@ -557,9 +566,10 @@ bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
+  with output as o
 
-upper <- up:i.text
-lower <- lo:i.text
+o.upper <- up:i.text
+o.lower <- lo:i.text
 
 }`;
 

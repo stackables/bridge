@@ -219,7 +219,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
   function buildSourceExpr(sourceStr: string, lineNum: number, forceOnOutermost: boolean): NodeRef {
     const parts = sourceStr.split(":");
     if (parts.length === 1) {
-      return resolveAddress(sourceStr, handleRes, bridgeType, bridgeField);
+      return resolveAddress(sourceStr, handleRes, bridgeType, bridgeField, lineNum);
     }
 
     // Pipe chain
@@ -242,7 +242,7 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
       }
     }
 
-    let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField);
+    let prevOutRef = resolveAddress(actualSource, handleRes, bridgeType, bridgeField, lineNum);
     const reversedTokens = [...tokenChain].reverse();
     for (let idx = 0; idx < reversedTokens.length; idx++) {
       const tok = reversedTokens[idx];
@@ -264,6 +264,9 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
     return prevOutRef; // fork-root ref
   }
 
+  // ── Whether we are inside an element-mapping brace block
+  let inElementBlock = false;
+
   for (let i = bodyStartIndex; i < lines.length; i++) {
     const raw = lines[i];
     const line = raw.trim();
@@ -272,75 +275,159 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
       continue;
     }
 
-    // Element mapping: indented line starting with "."
-    const indent = raw.search(/\S/);
-    if (indent >= 2 && line.startsWith(".") && currentArrayToPath) {
-      const match = line.match(/^\.(\S+)\s*<-\s*\.(\S+)$/);
-      if (!match)
-        throw new Error(`Line ${ln(i)}: Invalid element mapping: ${line}`);
-      const toPath = [...currentArrayToPath, ...parsePath(match[1])];
-      const fromPath = parsePath(match[2]);
-      wires.push({
-        from: {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
-          element: true,
-          path: fromPath,
-        },
-        to: {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
-          path: toPath,
-        },
-      });
-      continue;
+    // Closing brace of an element mapping block `{ ... }`
+    if (line === "}") {
+      if (inElementBlock) {
+        currentArrayToPath = null;
+        inElementBlock = false;
+        continue;
+      }
+      throw new Error(`Line ${ln(i)}: Unexpected "}" — not inside an element block`);
     }
 
-    // End of array mapping block
-    currentArrayToPath = null;
+    // Element mapping lines (inside a brace block)
+    if (inElementBlock && currentArrayToPath) {
+      if (!line.startsWith(".")) {
+        throw new Error(`Line ${ln(i)}: Element mapping lines must start with ".": ${line}`);
+      }
+
+      // Constant: .target = "value" or .target = value
+      const elemConstMatch = line.match(/^\.(\S+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
+      if (elemConstMatch) {
+        const [, fieldName, quotedValue, unquotedValue] = elemConstMatch;
+        const value = quotedValue ?? unquotedValue;
+        wires.push({
+          value,
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: [...currentArrayToPath, ...parsePath(fieldName)],
+          },
+        });
+        continue;
+      }
+
+      // Relative pull: .target <- .source (element-relative)
+      const elemRelMatch = line.match(/^\.(\S+)\s*<-\s*\.(\S+)$/);
+      if (elemRelMatch) {
+        const toPath = [...currentArrayToPath, ...parsePath(elemRelMatch[1])];
+        const fromPath = parsePath(elemRelMatch[2]);
+        wires.push({
+          from: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: fromPath,
+          },
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            path: toPath,
+          },
+        });
+        continue;
+      }
+
+      // Pull with fallbacks: .target <- source || "fallback" ?? errorSrc (relative or handle path)
+      const elemArrowMatch = line.match(/^\.(\S+)\s*<-\s*(.+)$/);
+      if (elemArrowMatch) {
+        const [, toField, rhs] = elemArrowMatch;
+        const toPath = [...currentArrayToPath, ...parsePath(toField)];
+        const toRef: NodeRef = { module: SELF_MODULE, type: bridgeType, field: bridgeField, path: toPath };
+
+        // Strip ?? tail
+        let exprCore = rhs.trim();
+        let fallback: string | undefined;
+        let fallbackRefStr: string | undefined;
+        const qqIdx = exprCore.lastIndexOf(" ?? ");
+        if (qqIdx !== -1) {
+          const tail = exprCore.slice(qqIdx + 4).trim();
+          exprCore = exprCore.slice(0, qqIdx).trim();
+          if (isJsonLiteral(tail)) fallback = tail;
+          else fallbackRefStr = tail;
+        }
+
+        // Split on || — last may be JSON literal (nullFallback)
+        const orParts = exprCore.split(" || ").map((s) => s.trim());
+        let nullFallback: string | undefined;
+        let sourceParts = orParts;
+        if (orParts.length > 1 && isJsonLiteral(orParts[orParts.length - 1])) {
+          nullFallback = orParts[orParts.length - 1];
+          sourceParts = orParts.slice(0, -1);
+        }
+
+        let fallbackRef: NodeRef | undefined;
+        let fallbackInternalWires: Wire[] = [];
+        if (fallbackRefStr) {
+          const preLen = wires.length;
+          fallbackRef = buildSourceExpr(fallbackRefStr, ln(i), false);
+          fallbackInternalWires = wires.splice(preLen);
+        }
+
+        for (let ci = 0; ci < sourceParts.length; ci++) {
+          const srcStr = sourceParts[ci];
+          const isLast = ci === sourceParts.length - 1;
+
+          // Relative element source: starts with "."
+          let fromRef: NodeRef;
+          if (srcStr.startsWith(".")) {
+            fromRef = {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: parsePath(srcStr.slice(1)),
+            };
+          } else {
+            fromRef = buildSourceExpr(srcStr, ln(i), false);
+          }
+
+          const lastAttrs = isLast ? {
+            ...(nullFallback ? { nullFallback } : {}),
+            ...(fallback     ? { fallback }     : {}),
+            ...(fallbackRef  ? { fallbackRef }  : {}),
+          } : {};
+
+          wires.push({ from: fromRef, to: toRef, ...lastAttrs });
+        }
+        wires.push(...fallbackInternalWires);
+        continue;
+      }
+
+      throw new Error(`Line ${ln(i)}: Invalid element mapping line: ${line}`);
+    }
 
     // Constant wire: target = "value" or target = value (unquoted)
     const constantMatch = line.match(/^(\S+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
     if (constantMatch) {
       const [, targetStr, quotedValue, unquotedValue] = constantMatch;
       const value = quotedValue ?? unquotedValue;
-      const toRef = resolveAddress(
-        targetStr,
-        handleRes,
-        bridgeType,
-        bridgeField,
-      );
+      const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
       wires.push({ value, to: toRef });
       continue;
     }
 
     // ── Wire: target <- A [|| B [|| C]] [|| "nullLiteral"] [?? errorSrc|"errorLiteral"]
-    //
-    // A, B, C are source expressions (handle.path or pipe|chain|src).
-    // `||` separates null-coalescing alternatives — evaluated left to right;
-    //   the last alternative may be a JSON literal (→ nullFallback).
-    // `??` is the error fallback — fires when ALL sources throw.
-    //   Can be a JSON literal (→ fallback) or a source expression (→ fallbackRef).
-    //
-    // Each `||` source becomes a separate wire targeting the same field.
-    // The last source wire carries nullFallback + error-fallback attributes.
-    // Desugars transparently: serializer emits back as multiple wire lines.
     const arrowMatch = line.match(/^(\S+)\s*<-(!?)\s*(.+)$/);
     if (arrowMatch) {
       const [, targetStr, forceFlag, rhs] = arrowMatch;
       const force = forceFlag === "!";
       const rhsTrimmed = rhs.trim();
 
-      // ── Array mapping: target[] <- source[]  (no || or ?? here)
-      if (targetStr.endsWith("[]") && /^\S+\[\]$/.test(rhsTrimmed)) {
-        const toClean = targetStr.slice(0, -2);
-        const fromClean = rhsTrimmed.slice(0, -2);
-        const fromRef = resolveAddress(fromClean, handleRes, bridgeType, bridgeField);
-        const toRef = resolveAddress(toClean, handleRes, bridgeType, bridgeField);
+      // ── Array mapping: target <- source[] {
+      //    Opens a brace-delimited element block.
+      const arrayBraceMatch = rhsTrimmed.match(/^(\S+)\[\]\s*\{\s*$/);
+      if (arrayBraceMatch) {
+        const fromClean = arrayBraceMatch[1];
+        const fromRef = resolveAddress(fromClean, handleRes, bridgeType, bridgeField, ln(i));
+        const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
         wires.push({ from: fromRef, to: toRef });
         currentArrayToPath = toRef.path;
+        inElementBlock = true;
         continue;
       }
 
@@ -374,34 +461,25 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         throw new Error(`Line ${ln(i)}: Wire has no source expression: ${line}`);
       }
 
-      // ── Parse the ?? source/pipe into a fallbackRef (if needed)
-      // Wires added by buildSourceExpr for the fallback fork are deferred and
-      // pushed AFTER the source wires so that wire order is stable across
-      // parse → serialize → re-parse cycles.
       let fallbackRef: NodeRef | undefined;
       let fallbackInternalWires: Wire[] = [];
       if (fallbackRefStr) {
         const preLen = wires.length;
         fallbackRef = buildSourceExpr(fallbackRefStr, ln(i), false);
-        // Splice out internal wires buildSourceExpr just added; push after sources.
         fallbackInternalWires = wires.splice(preLen);
       }
 
-      // ── Build wires for each coalesce part
-      const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField);
+      const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
 
       for (let ci = 0; ci < sourceParts.length; ci++) {
         const isFirst = ci === 0;
         const isLast  = ci === sourceParts.length - 1;
         const srcStr  = sourceParts[ci];
 
-        // Parse source expression; for pipe chains buildSourceExpr pushes
-        // intermediate wires and returns the fork-root ref.
         const termRef = buildSourceExpr(srcStr, ln(i), force && isFirst);
         const isPipeFork = termRef.instance != null && termRef.path.length === 0
           && srcStr.includes(":");
 
-        // attrs carried only on the LAST wire of the coalesce chain
         const lastAttrs = isLast ? {
           ...(nullFallback  ? { nullFallback }  : {}),
           ...(fallback      ? { fallback }      : {}),
@@ -409,8 +487,6 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         } : {};
 
         if (isPipeFork) {
-          // Terminal pipe wire: fork-root → target  (force only on outermost
-          // intermediate wire, already set inside buildSourceExpr)
           wires.push({ from: termRef, to: toRef, pipe: true, ...lastAttrs });
         } else {
           wires.push({
@@ -422,8 +498,6 @@ function parseBridgeBlock(block: string, lineOffset: number): Instruction[] {
         }
       }
 
-      // Push fallbackRef internal wires after all source wires (stable round-trip
-      // order: same position whether parsed inline or from serialized separate lines)
       wires.push(...fallbackInternalWires);
       continue;
     }
@@ -476,6 +550,34 @@ function parseWithDeclaration(
     const handle = match[1];
     checkDuplicate(handle);
     handleBindings.push({ handle, kind: "input" });
+    handleRes.set(handle, {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+    });
+    return;
+  }
+
+  // with output as <handle>
+  match = line.match(/^with\s+output\s+as\s+(\w+)$/i);
+  if (match) {
+    const handle = match[1];
+    checkDuplicate(handle);
+    handleBindings.push({ handle, kind: "output" });
+    handleRes.set(handle, {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+    });
+    return;
+  }
+
+  // with output (shorthand — handle defaults to "output")
+  match = line.match(/^with\s+output$/i);
+  if (match) {
+    const handle = "output";
+    checkDuplicate(handle);
+    handleBindings.push({ handle, kind: "output" });
     handleRes.set(handle, {
       module: SELF_MODULE,
       type: bridgeType,
@@ -622,6 +724,7 @@ function resolveAddress(
   handles: Map<string, HandleResolution>,
   bridgeType: string,
   bridgeField: string,
+  lineNum?: number,
 ): NodeRef {
   const dotIndex = address.indexOf(".");
 
@@ -638,13 +741,11 @@ function resolveAddress(
       if (resolution.instance != null) ref.instance = resolution.instance;
       return ref;
     }
-    // No dot, not a handle — output reference on bridge trunk
-    return {
-      module: SELF_MODULE,
-      type: bridgeType,
-      field: bridgeField,
-      path: parsePath(address),
-    };
+    // Strict scoping: every reference must go through a declared handle.
+    throw new Error(
+      `${lineNum != null ? `Line ${lineNum}: ` : ""}Undeclared reference "${address}". ` +
+      `Add 'with output as o' for output fields, or 'with ${address}' for a tool.`,
+    );
   }
 
   const prefix = address.substring(0, dotIndex);
@@ -666,23 +767,11 @@ function resolveAddress(
     return ref;
   }
 
-  // No handle match — nested local path (e.g., topPick.address)
-  // UNLESS the prefix IS the bridge field itself (e.g., doubled.a when bridge is Query.doubled)
-  // — in that case strip the prefix so path = ["a"], matching the GraphQL resolver path.
-  if (prefix === bridgeField) {
-    return {
-      module: SELF_MODULE,
-      type: bridgeType,
-      field: bridgeField,
-      path: pathParts,
-    };
-  }
-  return {
-    module: SELF_MODULE,
-    type: bridgeType,
-    field: bridgeField,
-    path: [prefix, ...pathParts],
-  };
+  // Strict scoping: prefix must be a known handle.
+  throw new Error(
+    `${lineNum != null ? `Line ${lineNum}: ` : ""}Undeclared handle "${prefix}". ` +
+    `Add 'with ${prefix}' or 'with ${prefix} as ${prefix}' to the bridge header.`,
+  );
 }
 
 // ── Const block parser ──────────────────────────────────────────────────────
@@ -1081,6 +1170,7 @@ function serializePipeOrRef(
   handleMap: Map<string, string>,
   bridge: Bridge,
   inputHandle: string | undefined,
+  outputHandle: string | undefined,
 ): string {
   const refTk = ref.instance != null
     ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
@@ -1112,12 +1202,12 @@ function serializePipeOrRef(
     }
 
     if (actualSourceRef && handleChain.length > 0) {
-      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
+      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, outputHandle, true);
       return `${handleChain.join(":")}:${sourceStr}`;
     }
   }
 
-  return serializeRef(ref, bridge, handleMap, inputHandle, true);
+  return serializeRef(ref, bridge, handleMap, inputHandle, outputHandle, true);
 }
 
 function serializeBridgeBlock(bridge: Bridge): string {
@@ -1142,6 +1232,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
       case "input":
         lines.push(`  with input as ${h.handle}`);
         break;
+      case "output":
+        if (h.handle === "output") {
+          lines.push(`  with output`);
+        } else {
+          lines.push(`  with output as ${h.handle}`);
+        }
+        break;
       case "context":
         lines.push(`  with context as ${h.handle}`);
         break;
@@ -1161,30 +1258,24 @@ function serializeBridgeBlock(bridge: Bridge): string {
   const wireBodyStart = lines.length;
 
   // ── Build handle map for reverse resolution ─────────────────────────
-  const { handleMap, inputHandle } = buildHandleMap(bridge);
+  const { handleMap, inputHandle, outputHandle } = buildHandleMap(bridge);
 
   // ── Pipe fork registry ──────────────────────────────────────────────
-  // Extend handleMap with fork → handle-name entries and build the set of
-  // known fork trunk keys so the wire classifiers below can use it.
   const pipeHandleTrunkKeys = new Set<string>();
   for (const ph of bridge.pipeHandles ?? []) {
     handleMap.set(ph.key, ph.handle);
     pipeHandleTrunkKeys.add(ph.key);
   }
 
-  // ── Pipe wire detection ───────────────────────────────────────────────────────
-  // Pipe wires are marked pipe:true.  Classify them into two maps:
-  //   toInMap:    forkTrunkKey → wire feeding the fork's input field
-  //   fromOutMap: forkTrunkKey → wire reading the fork's root result
-  // Terminal out-wires (destination is NOT another fork) are chain anchors.
+  // ── Pipe wire detection ─────────────────────────────────────────────
   const refTrunkKey = (ref: NodeRef): string =>
     ref.instance != null
       ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
       : `${ref.module}:${ref.type}:${ref.field}`;
 
   type FW = Extract<Wire, { from: NodeRef }>;
-  const toInMap    = new Map<string, FW>(); // forkTrunkKey → wire with to = fork's input field
-  const fromOutMap = new Map<string, FW>(); // forkTrunkKey → wire with from = fork root (path:[])
+  const toInMap    = new Map<string, FW>();
+  const fromOutMap = new Map<string, FW>();
   const pipeWireSet = new Set<Wire>();
 
   for (const w of bridge.wires) {
@@ -1192,86 +1283,112 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const fw = w as FW;
     pipeWireSet.add(w);
     const toTk = refTrunkKey(fw.to);
-    // In-wire: single-segment path targeting a known pipe fork
     if (fw.to.path.length === 1 && pipeHandleTrunkKeys.has(toTk)) {
       toInMap.set(toTk, fw);
     }
-    // Out-wire: empty path from a known pipe fork
     if (fw.from.path.length === 0 && pipeHandleTrunkKeys.has(refTrunkKey(fw.from))) {
       fromOutMap.set(refTrunkKey(fw.from), fw);
     }
   }
 
-  // ── Wires ───────────────────────────────────────────────────────────
-  const elementWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { from: NodeRef }> =>
-      "from" in w && !!w.from.element,
+  // ── Group element wires by array-destination field ──────────────────
+  // Pull wires: from.element=true
+  const elementPullWires = bridge.wires.filter(
+    (w): w is Extract<Wire, { from: NodeRef }> => "from" in w && !!w.from.element,
   );
-  // Exclude pipe wires and element wires from the regular loop
-  const regularWires = bridge.wires.filter(
-    (w) => !pipeWireSet.has(w) && (!("from" in w) || !w.from.element),
+  // Constant wires: "value" in w && to.element=true
+  const elementConstWires = bridge.wires.filter(
+    (w): w is Extract<Wire, { value: string }> => "value" in w && !!w.to.element,
   );
 
-  const elementGroups = new Map<string, Array<Wire & { from: NodeRef }>>();
-  for (const w of elementWires) {
-    const parent = w.to.path[0];
-    if (!elementGroups.has(parent)) elementGroups.set(parent, []);
-    elementGroups.get(parent)!.push(w);
+  // Build grouped maps keyed by the array-destination field name (to.path[0])
+  const elementPullGroups  = new Map<string, Array<Extract<Wire, { from: NodeRef }>>>();
+  const elementConstGroups = new Map<string, Array<Extract<Wire, { value: string }>>>();
+  for (const w of elementPullWires) {
+    const key = w.to.path[0];
+    if (!elementPullGroups.has(key)) elementPullGroups.set(key, []);
+    elementPullGroups.get(key)!.push(w);
+  }
+  for (const w of elementConstWires) {
+    const key = w.to.path[0];
+    if (!elementConstGroups.has(key)) elementConstGroups.set(key, []);
+    elementConstGroups.get(key)!.push(w);
   }
 
+  // Union of keys that have any element wire (pull or constant)
+  const allElementKeys = new Set([...elementPullGroups.keys(), ...elementConstGroups.keys()]);
+
+  // ── Exclude pipe, element-pull, and element-const wires from main loop
+  const regularWires = bridge.wires.filter(
+    (w) =>
+      !pipeWireSet.has(w) &&
+      (!("from" in w) || !w.from.element) &&
+      (!("value" in w) || !w.to.element),
+  );
+
   const serializedArrays = new Set<string>();
+
+  // ── Helper: serialize a reference (forward outputHandle) ─────────────
+  const sRef = (ref: NodeRef, isFrom: boolean) =>
+    serializeRef(ref, bridge, handleMap, inputHandle, outputHandle, isFrom);
+  const sPipeOrRef = (ref: NodeRef) =>
+    serializePipeOrRef(ref, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle, outputHandle);
 
   for (const w of regularWires) {
     // Constant wire
     if ("value" in w) {
-      const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
+      const toStr = sRef(w.to, false);
       lines.push(`${toStr} = "${w.value}"`);
       continue;
     }
 
-    // Array mapping
+    // Array mapping — emit brace-delimited element block
     const arrayKey = w.to.path.length === 1 ? w.to.path[0] : null;
-    if (
-      arrayKey &&
-      elementGroups.has(arrayKey) &&
-      !serializedArrays.has(arrayKey)
-    ) {
+    if (arrayKey && allElementKeys.has(arrayKey) && !serializedArrays.has(arrayKey)) {
       serializedArrays.add(arrayKey);
-      const fromStr =
-        serializeRef(w.from, bridge, handleMap, inputHandle, true) + "[]";
-      const toStr =
-        serializeRef(w.to, bridge, handleMap, inputHandle, false) + "[]";
-      lines.push(`${toStr} <- ${fromStr}`);
-      for (const ew of elementGroups.get(arrayKey)!) {
-        const elemFrom = "." + serPath(ew.from.path);
-        const elemTo = "." + serPath(ew.to.path.slice(1));
-        lines.push(`  ${elemTo} <- ${elemFrom}`);
+      const fromStr = sRef(w.from, true) + "[]";
+      const toStr   = sRef(w.to, false);
+      lines.push(`${toStr} <- ${fromStr} {`);
+
+      // Element constant wires (e.g. .provider = "RENFE")
+      for (const ew of elementConstGroups.get(arrayKey) ?? []) {
+        const fieldPath = ew.to.path.slice(1); // strip arrayKey prefix
+        const elemTo = "." + serPath(fieldPath);
+        lines.push(`  ${elemTo} = "${ew.value}"`);
       }
+      // Element pull wires (e.g. .name <- .title)
+      for (const ew of elementPullGroups.get(arrayKey) ?? []) {
+        const fromPart = ew.from.element
+          ? "." + serPath(ew.from.path)
+          : sRef(ew.from, true);
+        const elemTo = "." + serPath(ew.to.path.slice(1));
+
+        // Handle fallbacks on element pull wires
+        const nfb = "nullFallback" in ew && ew.nullFallback ? ` || ${ew.nullFallback}` : "";
+        const errf = "fallbackRef" in ew && ew.fallbackRef
+          ? ` ?? ${sPipeOrRef(ew.fallbackRef)}`
+          : "fallback" in ew && ew.fallback ? ` ?? ${ew.fallback}` : "";
+        lines.push(`  ${elemTo} <- ${fromPart}${nfb}${errf}`);
+      }
+      lines.push(`}`);
       continue;
     }
 
     // Regular wire
-    const fromStr = serializeRef(w.from, bridge, handleMap, inputHandle, true);
-    const toStr = serializeRef(w.to, bridge, handleMap, inputHandle, false);
+    const fromStr = sRef(w.from, true);
+    const toStr   = sRef(w.to, false);
     const arrow = w.force ? "<-!" : "<-";
     const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
     const errf = w.fallbackRef
-      ? ` ?? ${serializePipeOrRef(w.fallbackRef, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle)}`
+      ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
       : w.fallback ? ` ?? ${w.fallback}` : "";
     lines.push(`${toStr} ${arrow} ${fromStr}${nfb}${errf}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
-  // Find terminal fromOutMap entries — their destination is NOT another
-  // pipe handle's .in. Follow the chain backward to reconstruct:
-  //   dest <- h1:h2:…:source
-  const serializedPipeTrunks = new Set<string>();
-
   for (const [tk, outWire] of fromOutMap.entries()) {
-    // Non-terminal: this fork's result feeds another fork's input field
     if (pipeHandleTrunkKeys.has(refTrunkKey(outWire.to))) continue;
 
-    // Follow chain backward to collect handle names (outermost-first)
     const handleChain: string[] = [];
     let currentTk = tk;
     let actualSourceRef: NodeRef | null = null;
@@ -1280,16 +1397,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
     for (;;) {
       const handleName = handleMap.get(currentTk);
       if (!handleName) break;
-      // Token: "handle" when field is "in" (default), otherwise "handle.field"
       const inWire = toInMap.get(currentTk);
       const fieldName = inWire?.to.path[0] ?? "in";
       const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
       handleChain.push(token);
-      serializedPipeTrunks.add(currentTk);
       if (inWire?.force) chainForced = true;
       if (!inWire) break;
       const fromTk = refTrunkKey(inWire.from);
-      // Inner source is another pipe fork root (empty path) → continue chain
       if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(fromTk)) {
         currentTk = fromTk;
       } else {
@@ -1299,12 +1413,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     if (actualSourceRef && handleChain.length > 0) {
-      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, true);
-      const destStr   = serializeRef(outWire.to,     bridge, handleMap, inputHandle, false);
+      const sourceStr = sRef(actualSourceRef, true);
+      const destStr   = sRef(outWire.to, false);
       const arrow = chainForced ? "<-!" : "<-";
       const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
       const errf = outWire.fallbackRef
-        ? ` ?? ${serializePipeOrRef(outWire.fallbackRef, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle)}`
+        ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
         : outWire.fallback ? ` ?? ${outWire.fallback}` : "";
       lines.push(`${destStr} ${arrow} ${handleChain.join(":")}:${sourceStr}${nfb}${errf}`);
     }
@@ -1325,10 +1439,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
 function buildHandleMap(bridge: Bridge): {
   handleMap: Map<string, string>;
   inputHandle?: string;
+  outputHandle?: string;
 } {
   const handleMap = new Map<string, string>();
   const instanceCounters = new Map<string, number>();
   let inputHandle: string | undefined;
+  let outputHandle: string | undefined;
 
   for (const h of bridge.handles) {
     switch (h.kind) {
@@ -1357,6 +1473,9 @@ function buildHandleMap(bridge: Bridge): {
       case "input":
         inputHandle = h.handle;
         break;
+      case "output":
+        outputHandle = h.handle;
+        break;
       case "context":
         handleMap.set(`${SELF_MODULE}:Context:context`, h.handle);
         break;
@@ -1366,7 +1485,7 @@ function buildHandleMap(bridge: Bridge): {
     }
   }
 
-  return { handleMap, inputHandle };
+  return { handleMap, inputHandle, outputHandle };
 }
 
 function serializeRef(
@@ -1374,6 +1493,7 @@ function serializeRef(
   bridge: Bridge,
   handleMap: Map<string, string>,
   inputHandle: string | undefined,
+  outputHandle: string | undefined,
   isFrom: boolean,
 ): string {
   if (ref.element) {
@@ -1391,16 +1511,17 @@ function serializeRef(
   if (isBridgeTrunk) {
     if (isFrom && inputHandle) {
       // From side: use input handle (data comes from args)
-      return inputHandle + "." + serPath(ref.path);
+      return ref.path.length > 0
+        ? inputHandle + "." + serPath(ref.path)
+        : inputHandle;
     }
-    // To side: sub-fields of the bridge's own return type are prefixed with the
-    // bridge field name so `path: ["a"]` serializes as `doubled.a` (not bare "a").
-    // This is needed for bridges whose output type has named sub-fields
-    // (e.g. `bridge Query.doubled` with `doubled.a <- ...`).
-    if (!isFrom && ref.path.length > 0) {
-      return bridge.field + "." + serPath(ref.path);
+    if (!isFrom && outputHandle) {
+      // To side: use output handle
+      return ref.path.length > 0
+        ? outputHandle + "." + serPath(ref.path)
+        : outputHandle;
     }
-    // Bare path (e.g. top-level scalar output, or no-path for the bridge trunk itself)
+    // Fallback (no handle declared — legacy/serializer-only path)
     return serPath(ref.path);
   }
 
@@ -1411,7 +1532,6 @@ function serializeRef(
       : `${ref.module}:${ref.type}:${ref.field}`;
   const handle = handleMap.get(trunkStr);
   if (handle) {
-    // Empty path — just the handle name (e.g. pipe result = tool root)
     if (ref.path.length === 0) return handle;
     return handle + "." + serPath(ref.path);
   }

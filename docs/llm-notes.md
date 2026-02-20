@@ -139,11 +139,12 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `?? <source>` | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression. |
 | `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
 | `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
+| `o.field <- src[] { ... }` | Array mapping — iterates source array; each element is mapped in a brace block. Relative `.field` refs are scoped to the current element. `.field = "value"` inside the block sets an element constant. |
 
 **Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
 ```hcl
-# label <- A || B || C || "literal" ?? errorSource
-label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
+# o.label <- A || B || C || "literal" ?? errorSource
+o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
 
 # Evaluation order:
 # api.label non-null      → use it (fast, returned immediately)
@@ -160,11 +161,11 @@ Multiple wires pointing to the same target field express **source priority**: th
 
 ```hcl
 # Explicit multi-wire form (equivalent to || inline):
-textPart <- i.textBody             # prefer user-supplied plain text (fast, already in args)
-textPart <- convert:i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
+o.textPart <- i.textBody             # prefer user-supplied plain text (fast, already in args)
+o.textPart <- convert:i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
 
 # Inline coalesce form (desugars to the same two wires + literal fallback):
-textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
+o.textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 ```
 
 - If `i.textBody` is non-null → used immediately, `convert` never runs.
@@ -205,19 +206,22 @@ Connect a GraphQL field to its tools.
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
+  with output as o
 
   gc.q <- i.search
 
-  results[] <- gc.items[]
+  o.results <- gc.items[] {
     .name <- .title
     .lat  <- .position.lat
     .lon  <- .position.lng
+  }
 }
 ```
 
 **`with input as i`** — binds GraphQL field arguments.  
+**`with output as o`** — declares the output handle. **Required in every `bridge` block.** All output field assignments must go through this handle: `o.<field> <- source`. Tool input wires (`<tool>.<param> <- ...`) do not use the output handle.  
 **`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `extend` block is required. An `extend` block is only needed when you want to configure defaults or extend a parent tool.  
-**`results[] <- gc.items[]`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element.
+**`o.results <- gc.items[] { ... }`** — array mapping. Creates a shadow tree per element. Nested wires starting with `.` are relative to the current element. The `{ }` block can also include element constants (`.field = "value"`).
 
 Example — pipe-like built-in tools need no `extend` block:
 ```hcl
@@ -225,9 +229,10 @@ bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
+  with output as o
 
-  upper <- up:i.text
-  lower <- lo:i.text
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
 }
 ```
 
@@ -251,7 +256,7 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 ```
 `module` is the dotted tool name (e.g. `"hereapi"`, `"hereapi.geocode"`) or `SELF_MODULE = "_"` for the bridge's own input/output.
 
-**Shadow trees** — when an array mapping is encountered (`results[] <- gc.items[]`), a shadow `ExecutionTree` is created per array element. Shadow trees delegate `schedule()` and `resolveToolDep()` to their parent, but have their own `state` for element-scoped data.
+**Shadow trees** — when an array mapping is encountered (`o.results <- gc.items[] { ... }`), a shadow `ExecutionTree` is created per array element. Shadow trees delegate `schedule()` and `resolveToolDep()` to their parent, but have their own `state` for element-scoped data.
 
 **Execution flow:**
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree

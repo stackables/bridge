@@ -58,6 +58,7 @@ bridge Query.dashboard {
   with census.get as c
   with formatGreeting as fg
   with input as i
+  with output as o
 
 # geocode from input
 gc.city <- i.city
@@ -71,12 +72,12 @@ c.lat <- gc.lat
 c.lng <- gc.lng
 
 # formatGreeting only needs raw input — independent of geocode
-greeting <- fg:i.city
+o.greeting <- fg:i.city
 
 # output wires
-temp     <- w.temp
-humidity <- w.humidity
-population <- c.population
+o.temp     <- w.temp
+o.humidity <- w.humidity
+o.population <- c.population
 
 }`;
 
@@ -226,9 +227,10 @@ extend slowDoubler as double
 bridge Query.doubled {
   with double as d
   with input as i
+  with output as o
 
-doubled.a <- d:i.a
-doubled.b <- d:i.b
+o.a <- d:i.a
+o.b <- d:i.b
 
 }`;
 
@@ -290,8 +292,9 @@ bridge Query.processed {
   with input as i
   with toUpper as tu
   with normalize as nm
+  with output as o
 
-result <- nm:tu:i.text
+o.result <- nm:tu:i.text
 
 }`;
 
@@ -371,10 +374,11 @@ bridge Query.info {
   with geo.lookup as g
   with toUpper as tu
   with input as i
+  with output as o
 
 g.q <- i.city
-rawName     <- g.name
-shoutedName <- tu:g.name
+o.rawName     <- g.name
+o.shoutedName <- tu:g.name
 
 }`;
 
@@ -434,13 +438,14 @@ bridge Query.trio {
   with svc.b as sb
   with svc.c as sc
   with input as i
+  with output as o
 
 sa.x <- i.x
 sb.x <- i.x
 sc.x <- i.x
-a <- sa.result
-b <- sb.result
-c <- sc.result
+o.a <- sa.result
+o.b <- sb.result
+o.c <- sc.result
 
 }`;
 
@@ -537,9 +542,10 @@ extend mainApi as mainApi.getData {
 bridge Query.secure {
   with mainApi.getData as m
   with input as i
+  with output as o
 
 m.id <- i.id
-value <- m.payload
+o.value <- m.payload
 
 }`;
 

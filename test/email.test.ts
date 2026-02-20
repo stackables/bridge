@@ -26,12 +26,13 @@ const bridgeText = `
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
+  with output as o
 
 sg.to <- i.to
 sg.from <- i.from
 sg.subject <- i.subject
 sg.content <- i.body
-messageId <- sg.headers.x-message-id
+o.messageId <- sg.headers.x-message-id
 
 }`;
 

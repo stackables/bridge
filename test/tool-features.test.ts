@@ -21,9 +21,10 @@ describe("missing tool", () => {
 bridge Query.hello {
   with unknown.api as u
   with input as i
+  with output as o
 
 u.name <- i.name
-message <- u.greeting
+o.message <- u.greeting
 
 }`;
 
@@ -73,10 +74,11 @@ extend weatherApi as weatherApi.current {
 bridge Query.weather {
   with weatherApi.current as w
   with input as i
+  with output as o
 
 w.city <- i.city
-temp <- w.temperature
-city <- w.location.name
+o.temp <- w.temperature
+o.city <- w.location.name
 
 }`;
 
@@ -130,10 +132,11 @@ extend base as base.special {
 bridge Query.weather {
   with base.special as b
   with input as i
+  with output as o
 
 b.city <- i.city
-temp <- b.temperature
-city <- b.location.name
+o.temp <- b.temperature
+o.city <- b.location.name
 
 }`;
 
@@ -189,9 +192,10 @@ extend myapi as myapi.lookup {
 bridge Query.lookup {
   with myapi.lookup as m
   with input as i
+  with output as o
 
 m.q <- i.q
-answer <- m.result
+o.answer <- m.result
 
 }`;
 
@@ -260,9 +264,10 @@ extend mainApi as mainApi.getData {
 bridge Query.data {
   with mainApi.getData as m
   with input as i
+  with output as o
 
 m.id <- i.id
-value <- m.payload
+o.value <- m.payload
 
 }`;
 
@@ -329,8 +334,9 @@ describe("pipe operator", () => {
 bridge Query.shout {
   with input as i
   with toUpper as tu
+  with output as o
 
-loud <- tu:i.text
+o.loud <- tu:i.text
 
 }`;
 
@@ -360,8 +366,9 @@ loud <- tu:i.text
     const badBridge = `
 bridge Query.shout {
   with input as i
+  with output as o
 
-loud <- undeclared:i.text
+o.loud <- undeclared:i.text
 
 }`;
     assert.throws(
@@ -421,17 +428,19 @@ extend currencyConverter as convertToEur {
 bridge Query.priceEur {
   with convertToEur
   with input as i
+  with output as o
 
-priceEur <- convertToEur:i.amount
+o.priceEur <- convertToEur:i.amount
 
 }
 
 bridge Query.priceAny {
   with convertToEur
   with input as i
+  with output as o
 
 convertToEur.currency <- i.currency
-priceAny <- convertToEur:i.amount
+o.priceAny <- convertToEur:i.amount
 
 }`;
 
@@ -499,9 +508,10 @@ extend doubler as double
 bridge Query.doubled {
   with double as d
   with input as i
+  with output as o
 
-doubled.a <- d:i.a
-doubled.b <- d:i.b
+o.a <- d:i.a
+o.b <- d:i.b
 
 }`;
 
@@ -525,8 +535,8 @@ doubled.b <- d:i.b
   test("pipe forking serializes and round-trips correctly", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("doubled.a <- d:i.a"), "first fork serialized");
-    assert.ok(serialized.includes("doubled.b <- d:i.b"), "second fork serialized");
+    assert.ok(serialized.includes("o.a <- d:i.a"), "first fork serialized");
+    assert.ok(serialized.includes("o.b <- d:i.b"), "second fork serialized");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
     assert.equal(reserialized, serialized, "should be idempotent");
@@ -556,8 +566,9 @@ extend divider as divide
 bridge Query.converted {
   with divide as dv
   with input as i
+  with output as o
 
-converted <- dv.dividend:i.amount
+o.converted <- dv.dividend:i.amount
 dv.divisor <- i.rate
 
 }`;
@@ -614,9 +625,10 @@ extend httpCall as api {
 bridge Query.lookup {
   with api as a
   with input as i
+  with output as o
 
 a.q <- i.q
-answer <- a.value
+o.answer <- a.value
 
 }`;
 

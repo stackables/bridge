@@ -15,9 +15,10 @@ describe("parseBridge: force wire (<-!)", () => {
 bridge Query.demo {
   with myTool as t
   with input as i
+  with output as o
 
 t.action <- i.name
-result <- t.output
+o.result <- t.output
 
 }`) as Bridge[];
 
@@ -59,10 +60,11 @@ bridge Query.demo {
   with mainApi as m
   with audit.log as audit
   with input as i
+  with output as o
 
 m.q <- i.query
 audit.action <-! i.query
-result <- m.data
+o.result <- m.data
 
 }`) as Bridge[];
 
@@ -81,8 +83,9 @@ result <- m.data
 bridge Query.demo {
   with transform as t
   with input as i
+  with output as o
 
-result <-! t:i.text
+o.result <-! t:i.text
 
 }`) as Bridge[];
 
@@ -104,8 +107,9 @@ bridge Query.demo {
   with a as a
   with b as b
   with input as i
+  with output as o
 
-result <-! a:b:i.text
+o.result <-! a:b:i.text
 
 }`) as Bridge[];
 
@@ -150,10 +154,11 @@ bridge Query.demo {
   with mainApi as m
   with audit.log as audit
   with input as i
+  with output as o
 
 m.q <- i.query
 audit.action <-! i.query
-result <- m.data
+o.result <- m.data
 
 }`;
     const instructions = parseBridge(input);
@@ -167,8 +172,9 @@ result <- m.data
 bridge Query.demo {
   with transform as t
   with input as i
+  with output as o
 
-result <-! t:i.text
+o.result <-! t:i.text
 
 }`;
     const instructions = parseBridge(input);
@@ -212,10 +218,11 @@ bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
+  with output as o
 
 m.q <- i.q
 audit.action <-! i.q
-title <- m.title
+o.title <- m.title
 
 }`;
 
@@ -261,11 +268,12 @@ bridge Mutation.createUser {
   with userApi.create as u
   with audit.log as audit
   with input as i
+  with output as o
 
 u.name <- i.name
 audit.action = "createUser"
 audit.userName <-! i.name
-id <- u.id
+o.id <- u.id
 
 }`;
 
@@ -301,10 +309,11 @@ bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
+  with output as o
 
 m.q <- i.q
 audit.action <-! i.q
-title <- m.title
+o.title <- m.title
 
 }`;
 
@@ -356,10 +365,11 @@ bridge Query.process {
   with mainWork as m
   with sideEffect as se
   with input as i
+  with output as o
 
 m.text <- i.text
-status <- m.status
-transformed <-! se:i.text
+o.status <- m.status
+o.transformed <-! se:i.text
 
 }`;
 
@@ -394,10 +404,11 @@ bridge Query.search {
   with mainApi as m
   with audit.log as audit
   with input as i
+  with output as o
 
 m.q <- i.q
 audit.action <-! i.q
-title <- m.title
+o.title <- m.title
 
 }`;
 

@@ -8,9 +8,10 @@ bridge Query.propertySearch {
   with zillow.search as z
   with input as i
   with centsToUsd as usd
+  with output as o
 
 # passthrough: explicit input → output
-location <- i.location
+o.location <- i.location
 
 # user input → hereapi (rename: location → q)
 gc.q <- i.location
@@ -23,19 +24,20 @@ z.longitude <- gc.items[0].position.lng
 z.maxPrice <- i.budget
 
 # topPick: first result, nested drill + rename + tool
-topPick.address  <- z.properties[0].streetAddress
-topPick.bedrooms <- z.properties[0].beds
-topPick.city     <- z.properties[0].location.city
+o.topPick.address  <- z.properties[0].streetAddress
+o.topPick.bedrooms <- z.properties[0].beds
+o.topPick.city     <- z.properties[0].location.city
 
 usd.cents <- z.properties[0].priceInCents
-topPick.price    <- usd.dollars
+o.topPick.price    <- usd.dollars
 
 # listings: array mapping with per-element rename + nested drill
-listings[] <- z.properties[]
+o.listings <- z.properties[] {
   .address  <- .streetAddress
   .price    <- .priceInCents
   .bedrooms <- .beds
   .city     <- .location.city
+}
 
 }
 
@@ -48,6 +50,7 @@ bridge Query.propertyComments {
   with reviews.getByLocation as rv
   with input as i
   with pluckText as pt
+  with output as o
 
 # user input → hereapi
 gc.q <- i.location
@@ -58,6 +61,6 @@ rv.lng <- gc.items[0].position.lng
 
 # reviews.comments piped through pluckText → flat string array
 # pipe shorthand: wires rv.comments → pt.in, pt.out → propertyComments
-propertyComments <- pt:rv.comments
+o.propertyComments <- pt:rv.comments
 
 }

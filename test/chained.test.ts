@@ -20,12 +20,13 @@ bridge Query.livingStandard {
   with companyX.getLivingStandard as cx
   with input as i
   with toInt as ti
+  with output as out
 
 gc.q <- i.location
 cx.x <- gc.lat
 cx.y <- gc.lon
 ti.value <- cx.lifeExpectancy
-lifeExpectancy <- ti.result
+out.lifeExpectancy <- ti.result
 
 }`;
 

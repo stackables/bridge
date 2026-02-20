@@ -80,8 +80,9 @@ extend httpCall as myApi {
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
-result <- a.data
+o.result <- a.data
 
 }`);
     const consts = instructions.filter((i) => i.kind === "const");
@@ -109,8 +110,9 @@ const currency = "EUR"
 
 bridge Query.demo {
   with input as i
+  with output as o
 
-result <- i.q
+o.result <- i.q
 
 }`;
     const instructions = parseBridge(input);
@@ -142,9 +144,10 @@ const defaults = { "currency": "EUR", "maxItems": 100 }
 
 bridge Query.info {
   with const as c
+  with output as o
 
-currency <- c.defaults.currency
-maxItems <- c.defaults.maxItems
+o.currency <- c.defaults.currency
+o.maxItems <- c.defaults.maxItems
 
 }`;
 
@@ -277,10 +280,11 @@ extend httpCall as flakyApi {
 bridge Query.geo {
   with flakyApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat
-lon <- api.lon
+o.lat <- api.lat
+o.lon <- api.lon
 
 }`;
 
@@ -311,10 +315,11 @@ extend httpCall as flakyApi {
 bridge Query.geo {
   with flakyApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat
-lon <- api.lon
+o.lat <- api.lat
+o.lon <- api.lon
 
 }`;
 
@@ -347,10 +352,11 @@ extend httpCall as api {
 bridge Query.geo {
   with api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat
-lon <- api.lon
+o.lat <- api.lat
+o.lon <- api.lon
 
 }`;
 
@@ -385,10 +391,11 @@ extend base as base.child {
 bridge Query.geo {
   with base.child as api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat
-lon <- api.lon
+o.lat <- api.lat
+o.lon <- api.lon
 
 }`;
 
@@ -419,9 +426,10 @@ describe("parseBridge: wire fallback (??)", () => {
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
 a.q <- i.q
-lat <- a.lat ?? 0
+o.lat <- a.lat ?? 0
 
 }`) as Bridge[];
 
@@ -439,8 +447,9 @@ lat <- a.lat ?? 0
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
-result <- a.data ?? {"default":true}
+o.result <- a.data ?? {"default":true}
 
 }`) as Bridge[];
 
@@ -458,8 +467,9 @@ result <- a.data ?? {"default":true}
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
-name <- a.name ?? "unknown"
+o.name <- a.name ?? "unknown"
 
 }`) as Bridge[];
 
@@ -477,8 +487,9 @@ name <- a.name ?? "unknown"
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
-name <- a.name ?? null
+o.name <- a.name ?? null
 
 }`) as Bridge[];
 
@@ -496,8 +507,9 @@ name <- a.name ?? null
 bridge Query.demo {
   with transform as t
   with input as i
+  with output as o
 
-result <- t:i.text ?? "fallback"
+o.result <- t:i.text ?? "fallback"
 
 }`) as Bridge[];
 
@@ -516,9 +528,10 @@ result <- t:i.text ?? "fallback"
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
 a.q <- i.q
-result <- a.data
+o.result <- a.data
 
 }`) as Bridge[];
 
@@ -536,9 +549,10 @@ describe("serializeBridge: wire fallback roundtrip", () => {
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
 a.q <- i.q
-lat <- a.lat ?? 0
+o.lat <- a.lat ?? 0
 
 }`;
     const instructions = parseBridge(input);
@@ -550,8 +564,9 @@ lat <- a.lat ?? 0
 bridge Query.demo {
   with transform as t
   with input as i
+  with output as o
 
-result <- t:i.text ?? "fallback"
+o.result <- t:i.text ?? "fallback"
 
 }`;
     const instructions = parseBridge(input);
@@ -563,8 +578,9 @@ result <- t:i.text ?? "fallback"
 bridge Query.demo {
   with myApi as a
   with input as i
+  with output as o
 
-lat <- a.lat ?? 0
+o.lat <- a.lat ?? 0
 
 }`;
     const output = serializeBridge(parseBridge(input));
@@ -588,10 +604,11 @@ describe("wire fallback: end-to-end", () => {
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat ?? 0
-name <- api.name ?? "unknown"
+o.lat <- api.lat ?? 0
+o.name <- api.name ?? "unknown"
 
 }`;
 
@@ -616,10 +633,11 @@ name <- api.name ?? "unknown"
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-lat <- api.lat ?? 0
-name <- api.name ?? "unknown"
+o.lat <- api.lat ?? 0
+o.name <- api.name ?? "unknown"
 
 }`;
 
@@ -649,10 +667,11 @@ extend httpCall as flakyGeo {
 bridge Query.lookup {
   with flakyGeo as geo
   with input as i
+  with output as o
 
 geo.q <- i.q
-lat <- geo.lat ?? -999
-name <- geo.name ?? "N/A"
+o.lat <- geo.lat ?? -999
+o.name <- geo.name ?? "N/A"
 
 }`;
 
@@ -702,12 +721,13 @@ bridge Query.search {
   with geo
   with badApi as bad
   with input as i
+  with output as o
 
 geo.q <- i.q
-lat <- geo.lat
-lon <- geo.lon
+o.lat <- geo.lat
+o.lon <- geo.lon
 bad.q <- i.q
-extra <- bad.data ?? "none"
+o.extra <- bad.data ?? "none"
 
 }`;
 
@@ -741,8 +761,9 @@ describe("parseBridge: wire || null-fallback", () => {
     const instructions = parseBridge(`
 bridge Query.greet {
   with input as i
+  with output as o
 
-name <- i.name || "World"
+o.name <- i.name || "World"
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -755,8 +776,9 @@ name <- i.name || "World"
     const instructions = parseBridge(`
 bridge Query.greet {
   with input as i
+  with output as o
 
-name <- i.name || "World" ?? "Error"
+o.name <- i.name || "World" ?? "Error"
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -770,9 +792,10 @@ name <- i.name || "World" ?? "Error"
 bridge Query.geo {
   with api as a
   with input as i
+  with output as o
 
 a.q <- i.q
-result <- a.data || {"lat":0,"lon":0}
+o.result <- a.data || {"lat":0,"lon":0}
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -784,8 +807,9 @@ result <- a.data || {"lat":0,"lon":0}
     const instructions = parseBridge(`
 bridge Query.greet {
   with input as i
+  with output as o
 
-name <- i.name
+o.name <- i.name
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -798,8 +822,9 @@ name <- i.name
 bridge Query.format {
   with std.upperCase as up
   with input as i
+  with output as o
 
-result <- up:i.text || "N/A"
+o.result <- up:i.text || "N/A"
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -815,8 +840,9 @@ describe("serializeBridge: || null-fallback roundtrip", () => {
   test("|| string literal roundtrips", () => {
     const input = `bridge Query.greet {
   with input as i
+  with output as o
 
-name <- i.name || "World"
+o.name <- i.name || "World"
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -828,9 +854,10 @@ name <- i.name || "World"
     const input = `bridge Query.greet {
   with myApi as a
   with input as i
+  with output as o
 
 a.q <- i.q
-name <- a.name || "World" ?? "Error"
+o.name <- a.name || "World" ?? "Error"
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -842,8 +869,9 @@ name <- a.name || "World" ?? "Error"
     const input = `bridge Query.format {
   with std.upperCase as up
   with input as i
+  with output as o
 
-result <- up:i.text || "N/A"
+o.result <- up:i.text || "N/A"
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -866,8 +894,9 @@ describe("wire || null-fallback: end-to-end", () => {
     const bridgeText = `
 bridge Query.greet {
   with input as i
+  with output as o
 
-message <- i.name || "World"
+o.message <- i.name || "World"
 
 }`;
     const instructions = parseBridge(bridgeText);
@@ -885,8 +914,9 @@ message <- i.name || "World"
     const bridgeText = `
 bridge Query.greet {
   with input as i
+  with output as o
 
-message <- i.name || "World"
+o.message <- i.name || "World"
 
 }`;
     const instructions = parseBridge(bridgeText);
@@ -913,10 +943,11 @@ message <- i.name || "World"
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label || "unknown"
-score <- api.score || 0
+o.label <- api.label || "unknown"
+o.score <- api.score || 0
 
 }`;
     const tools: Record<string, any> = {
@@ -947,10 +978,11 @@ score <- api.score || 0
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
 api.fail <- i.fail
-label <- api.label || "null-default" ?? "error-default"
+o.label <- api.label || "null-default" ?? "error-default"
 
 }`;
     const tools: Record<string, any> = {
@@ -997,9 +1029,10 @@ describe("multi-wire null-coalescing: end-to-end", () => {
 bridge Query.email {
   with std.upperCase as up
   with input as i
+  with output as o
 
-textPart <- i.textBody
-textPart <- up:i.htmlBody
+o.textPart <- i.textBody
+o.textPart <- up:i.htmlBody
 
 }`;
     const instructions = parseBridge(bridgeText);
@@ -1017,9 +1050,10 @@ textPart <- up:i.htmlBody
 bridge Query.email {
   with std.upperCase as up
   with input as i
+  with output as o
 
-textPart <- i.textBody
-textPart <- up:i.htmlBody
+o.textPart <- i.textBody
+o.textPart <- up:i.htmlBody
 
 }`;
     const instructions = parseBridge(bridgeText);
@@ -1037,9 +1071,10 @@ textPart <- up:i.htmlBody
     const bridgeText = `
 bridge Query.email {
   with input as i
+  with output as o
 
-textPart <- i.textBody
-textPart <- i.htmlBody || "empty"
+o.textPart <- i.textBody
+o.textPart <- i.htmlBody || "empty"
 
 }`;
     const instructions = parseBridge(bridgeText);
@@ -1065,10 +1100,11 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label
+o.label <- p.label || b.label
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -1088,10 +1124,11 @@ bridge Query.lookup {
   with a as a
   with b as b
   with input as i
+  with output as o
 
 a.q <- i.q
 b.q <- i.q
-label <- a.label || b.label || "default"
+o.label <- a.label || b.label || "default"
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -1110,9 +1147,10 @@ describe("parseBridge: ?? source/pipe references", () => {
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? i.fallbackLabel
+o.label <- api.label ?? i.fallbackLabel
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -1130,9 +1168,10 @@ bridge Query.lookup {
   with myApi as api
   with std.upperCase as up
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? up:i.errorDefault
+o.label <- api.label ?? up:i.errorDefault
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -1152,10 +1191,11 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label || "default" ?? i.errorLabel
+o.label <- p.label || b.label || "default" ?? i.errorLabel
 
 }`);
     const bridge = instructions[0] as Bridge;
@@ -1175,9 +1215,10 @@ describe("serializeBridge: ?? source/pipe roundtrip", () => {
     const input = `bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? i.fallbackLabel
+o.label <- api.label ?? i.fallbackLabel
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -1189,9 +1230,10 @@ label <- api.label ?? i.fallbackLabel
   with myApi as api
   with std.upperCase as up
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? up:i.errorDefault
+o.label <- api.label ?? up:i.errorDefault
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -1205,10 +1247,11 @@ label <- api.label ?? up:i.errorDefault
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label || "default"
+o.label <- p.label || b.label || "default"
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -1221,10 +1264,11 @@ label <- p.label || b.label || "default"
   with backup as b
   with std.upperCase as up
   with input as i
+  with output as o
 
 api.q <- i.q
 b.q <- i.q
-label <- api.label || b.label || "default" ?? up:i.errorDefault
+o.label <- api.label || b.label || "default" ?? up:i.errorDefault
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
@@ -1243,10 +1287,11 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label
+o.label <- p.label || b.label
 
 }`;
     const tools: Record<string, any> = {
@@ -1271,10 +1316,11 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label
+o.label <- p.label || b.label
 
 }`;
     let backupCalled = false;
@@ -1302,10 +1348,11 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 b.q <- i.q
-label <- p.label || b.label || "nothing found"
+o.label <- p.label || b.label || "nothing found"
 
 }`;
     const tools: Record<string, any> = {
@@ -1329,9 +1376,10 @@ label <- p.label || b.label || "nothing found"
 bridge Query.lookup {
   with myApi as api
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? i.defaultLabel
+o.label <- api.label ?? i.defaultLabel
 
 }`;
     const tools: Record<string, any> = {
@@ -1357,9 +1405,10 @@ bridge Query.lookup {
   with myApi as api
   with std.upperCase as up
   with input as i
+  with output as o
 
 api.q <- i.q
-label <- api.label ?? up:i.errorDefault
+o.label <- api.label ?? up:i.errorDefault
 
 }`;
     const tools: Record<string, any> = {
@@ -1388,12 +1437,13 @@ bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
+  with output as o
 
 p.q <- i.q
 p.fail <- i.fail
 b.q <- i.q
 b.fail <- i.fail
-label <- p.label || b.label || "nothing" ?? i.defaultLabel
+o.label <- p.label || b.label || "nothing" ?? i.defaultLabel
 
 }`;
     const tools: Record<string, any> = {

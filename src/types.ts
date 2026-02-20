@@ -71,6 +71,7 @@ export type Bridge = {
 export type HandleBinding =
   | { handle: string; kind: "tool"; name: string }
   | { handle: string; kind: "input" }
+  | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }
   | { handle: string; kind: "const" };
 

@@ -71,23 +71,26 @@ The resolver logic connecting GraphQL schema fields to your tools.
 ```hcl
 bridge <Type.field> {
   with <tool> [as <alias>]
-  with input [as <i>]
+  with input as i
+  with output as o
 
   # Field Mapping
-  <field> = <json>                  # Constant value
-  <field> <- <source>               # Standard Pull (lazy)
-  <field> <-! <source>              # Forced Push (eager/side-effect)
+  o.<field> = <json>                    # Constant output value
+  o.<field> <- <source>                 # Standard Pull (lazy)
+  o.<field> <-! <source>               # Forced Push (eager/side-effect)
 
   # Pipe chain (tool transformation)
-  <field> <- handle:source          # Route source through tool handle
+  o.<field> <- handle:source            # Route source through tool handle
 
   # Fallbacks
-  <field> <- <source> || <alt> || <alt> # Null-coalesce: use alt if source is null
-  <field> <- <source> ?? <fallback>     # Error-fallback: use fallback if chain throws
+  o.<field> <- <source> || <alt> || <alt> # Null-coalesce: use alt if source is null
+  o.<field> <- <source> ?? <fallback>     # Error-fallback: use fallback if chain throws
 
-  # Array Mapping
-  <field>[] <- <source>[]
-    .<sub_field> <- .<sub_src>      # Relative scoping
+  # Array Mapping (brace block per element)
+  o.<field> <- <source>[] {
+    .<sub_field> <- .<sub_src>          # Relative to current element
+    .<sub_field> = "constant"           # Element constant
+  }
 }
 ```
 
@@ -103,16 +106,17 @@ This includes:
 
 * `tools`
 * `input`
+* `output`
 * `context`
 * `tool aliases`
 
-The `input` handle represents GraphQL field arguments and exists **only inside `bridge` blocks**.
+The `input` and `output` handles represents GraphQL field arguments and output type. They exists **only inside `bridge` blocks**.
 
-Because `extend` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input`.
+Because `extend` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input` or `output`.
 
 > **Rule of thumb:**
 > `extend` defines tools, `bridge` executes the graph.
-> Since `input` belongs to GraphQL execution, it only exists inside bridges.
+> Since `input` and `output` belong to GraphQL execution, they only exist inside bridges.
 
 ### Resiliency
 
@@ -136,14 +140,16 @@ extend httpCall as geo {
 Fires when a source resolves **successfully but returns `null` or `undefined`**. The fallback can be a JSON literal or another source expression (handle path or pipe chain). Multiple `||` alternatives chain left-to-right like `COALESCE`.
 
 ```hcl
+with output as o
+
 # JSON literal fallback
-lat <- geo.lat || 0.0
+o.lat <- geo.lat || 0.0
 
 # Alternative source fallback
-label <- api.label || backup.label || "unknown"
+o.label <- api.label || backup.label || "unknown"
 
 # Pipe chain as alternative
-textPart <- i.textBody || convert:i.htmlBody || "empty"
+o.textPart <- i.textBody || convert:i.htmlBody || "empty"
 ```
 
 #### Layer 3 — Wire `??` (errors and exceptions)
@@ -151,11 +157,13 @@ textPart <- i.textBody || convert:i.htmlBody || "empty"
 Fires when the **entire resolution chain throws** (network failure, tool down, dependency error). Does not fire on null values — that's `||`'s job. The fallback can be a JSON literal or a source/pipe expression (evaluated lazily, only when the error fires).
 
 ```hcl
+with output as o
+
 # JSON literal error fallback
-lat <- geo.lat ?? 0.0
+o.lat <- geo.lat ?? 0.0
 
 # Error fallback pulls from another source
-label <- api.label ?? errorHandler:i.fallbackMsg
+o.label <- api.label ?? errorHandler:i.fallbackMsg
 ```
 
 #### Full COALESCE — composing all three layers
@@ -163,8 +171,10 @@ label <- api.label ?? errorHandler:i.fallbackMsg
 `||` and `??` compose into a Postgres-style `COALESCE` with an error guard at the end:
 
 ```hcl
-# label <- A || B || C || "literal" ?? errorSource
-label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorString
+with output as o
+
+# o.label <- A || B || C || "literal" ?? errorSource
+o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorString
 
 # Evaluation order:
 # api.label non-null     → use it immediately
@@ -182,9 +192,11 @@ By default, the engine is **lazy**. Use `<-!` to force execution regardless of d
 ```hcl
 bridge Mutation.updateUser {
   with audit.logger as log
+  with input as in
+  with output as out
 
   # 'log' runs even if the client doesn't query the 'status' field
-  status <-! log:i.changeData
+  out.status <-! log:in.changeData
 }
 ```
 
@@ -193,8 +205,10 @@ bridge Mutation.updateUser {
 Routes data right-to-left through one or more tool handles: `dest <- handle:source`.
 
 ```hcl
+with output as o
+
 # i.rawData → normalize → transform → result
-result <- transform:normalize:i.rawData
+o.result <- transform:normalize:i.rawData
 ```
 
 Full example with a tool that has 2 input parameters:
@@ -207,12 +221,13 @@ extend currencyConverter as convert {
 bridge Query.price {
   with convert as c
   with input as i
+  with output as o
 
   c.currency <- i.currency   # overrides the default per request
 
   # Safe to use repeatedly — each is an independent tool call
-  itemPrice  <- c:i.itemPrice
-  totalPrice <- c:i.totalPrice
+  o.itemPrice  <- c:i.itemPrice
+  o.totalPrice <- c:i.totalPrice
 }
 ```
 
@@ -231,7 +246,7 @@ bridge Query.price {
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
 | **`extend`** | Tool Definition | Configures a function or extends a parent tool. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
-| **`[] <- []`** | Map | Iterates over arrays to create nested wire contexts. |
+| **`<- src[] { }`** | Map | Iterates over source array; each element mapped in a `{ }` block with relative `.field` refs. |
 
 ---
 
@@ -294,9 +309,10 @@ bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo
   with input as i
+  with output as o
 
-  upper <- up:i.text
-  lower <- lo:i.text
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
 }
 ```
 
@@ -311,8 +327,9 @@ bridge Query.onlyResult {
   with pf
   with someApi as api
   with input as i
+  with output as o
 
-  value <- pf:api.items
+  o.value <- pf:api.items
 }
 ```
 

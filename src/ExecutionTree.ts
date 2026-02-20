@@ -537,7 +537,7 @@ export class ExecutionTree {
     const matches =
       this.bridge?.wires.filter(
         (w) =>
-          !w.to.element &&
+          (w.to.element ? !!this.parent : true) &&
           sameTrunk(w.to, this.trunk) &&
           pathEquals(w.to.path, cleanPath),
       ) ?? [];
