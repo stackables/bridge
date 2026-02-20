@@ -51,6 +51,12 @@ Declarative Connections: When you write o.name <- api.name, you aren't commandin
 
 While the reference engine is implemented in TypeScript, the Bridge language itself is a simple, high-level specification for data flow. Because it describes intent rather than execution, it is architecturally "runtime-blind." It can be interpreted by any high-performance engines written in Rust, Go, or C++ without changing a single line of your .bridge files.
 
+### Usage with LLMs
+
+The Bridge language is deliberately designed to be simple for LLMs to generate and visually easy for humans to review. It supports inline documentation and works well with Git or other source control systems.
+
+Most of the time, it’s enough to give your LLM this README and the GraphQL schema file. Based on that, the LLM can generate the mapping for any API it knows. For non-public or undocumented APIs, you should provide the LLM with the JSON schema or API documentation to avoid hallucinations.
+
 ---
 
 ## The Workflow
