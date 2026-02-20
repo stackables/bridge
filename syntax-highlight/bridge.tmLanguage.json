@@ -4,15 +4,27 @@
   "scopeName": "source.bridge",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#version-line" },
     { "include": "#block-headers" },
     { "include": "#block-braces" },
     { "include": "#wire-lines" },
     { "include": "#const-lines" },
     { "include": "#strings" },
     { "include": "#numbers" },
-    { "include": "#booleans" }
+    { "include": "#booleans" },
+    { "include": "#http-methods" },
+    { "include": "#path-values" }
   ],
   "repository": {
+
+    "version-line": {
+      "comment": "version 1.4",
+      "match": "^\\s*(version)\\s+(\\d+\\.\\d+)",
+      "captures": {
+        "1": { "name": "keyword.other.version.bridge" },
+        "2": { "name": "constant.numeric.version.bridge" }
+      }
+    },
 
     "block-braces": {
       "comment": "Optional block delimiters { }",
@@ -29,16 +41,57 @@
       }]
     },
 
+    "http-methods": {
+      "comment": "HTTP method constants used as bare values",
+      "match": "\\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\b",
+      "name": "constant.language.http-method.bridge"
+    },
+
+    "path-values": {
+      "comment": "Unquoted slash-prefixed URL paths used as values (e.g. /search, /forecast)",
+      "match": "(?<==\\s*)/[A-Za-z0-9_/-]*",
+      "name": "string.unquoted.path.bridge"
+    },
+
     "block-headers": {
-      "comment": "Lines starting with bridge/extend/const/tool keywords",
+      "comment": "Lines starting with bridge/define/tool/extend/const/with keywords",
       "patterns": [
         {
-          "comment": "bridge Type.field",
+          "comment": "bridge Type.field with <target>  (inline composition, no braces)",
+          "match": "^\\s*(bridge)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)(\\s+with\\s+)([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.type.bridge" },
+            "3": { "name": "entity.name.function.bridge" },
+            "4": { "name": "keyword.control.bridge" },
+            "5": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "bridge Type.field  (block form)",
           "match": "^\\s*(bridge)\\s+([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
             "2": { "name": "entity.name.type.bridge" },
             "3": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "define <name>  (reusable sub-graph)",
+          "match": "^\\s*(define)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" }
+          }
+        },
+        {
+          "comment": "tool <name> from <std.source>",
+          "match": "^\\s*(tool)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s+from\\s+)([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "variable.other.handle.bridge" },
+            "3": { "name": "keyword.control.bridge" },
+            "4": { "name": "entity.name.function.bridge" }
           }
         },
         {
@@ -97,8 +150,8 @@
     },
 
     "wire-lines": {
-      "comment": "Wire line: target <- source [|| …] [?? …]",
-      "begin": "^(\\s*)([A-Za-z_][A-Za-z0-9_.]*)\\s*(<-!|<-)",
+      "comment": "Wire line: target <- source [|| …] [?? …]  — target may be dot-prefixed (.field) inside array-map blocks",
+      "begin": "^(\\s*)(\\.?[A-Za-z_][A-Za-z0-9_.]*)\\s*(<-!|<-)",
       "end": "$",
       "beginCaptures": {
         "2": { "name": "variable.other.target.bridge" },
@@ -106,7 +159,21 @@
       },
       "patterns": [
         {
-          "comment": "Pipe separator: colon between identifiers (lookahead only — no lookbehind)",
+          "comment": "Array mapping: source[] as <alias>",
+          "match": "(\\[\\])(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.operator.array-map.bridge" },
+            "2": { "name": "keyword.control.bridge" },
+            "3": { "name": "variable.other.handle.bridge" }
+          }
+        },
+        {
+          "comment": "Array index [N]",
+          "match": "\\[\\d+\\]",
+          "name": "keyword.operator.index.bridge"
+        },
+        {
+          "comment": "Pipe separator: colon between identifiers",
           "match": ":(?=[A-Za-z_])",
           "name": "keyword.operator.pipe.bridge"
         },
@@ -127,14 +194,33 @@
     },
 
     "const-lines": {
-      "comment": "Param = value assignments inside blocks",
-      "patterns": [{
-        "match": "^\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(=)\\s*",
-        "captures": {
-          "1": { "name": "variable.other.property.bridge" },
-          "2": { "name": "keyword.operator.assignment.bridge" }
+      "comment": "Property/param assignments: .name = value  or  name = value. Hyphens allowed in path segments (e.g. .headers.User-Agent).",
+      "patterns": [
+        {
+          "comment": "Dot-prefixed config param: .property[.segment]* = value (hyphens allowed in segments)",
+          "begin": "^\\s*(\\.[A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(=)\\s*",
+          "end": "$",
+          "beginCaptures": {
+            "1": { "name": "variable.other.property.bridge" },
+            "2": { "name": "keyword.operator.assignment.bridge" }
+          },
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#booleans" },
+            { "include": "#http-methods" },
+            { "include": "#path-values" }
+          ]
+        },
+        {
+          "comment": "Regular param: property = value",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(=)\\s*",
+          "captures": {
+            "1": { "name": "variable.other.property.bridge" },
+            "2": { "name": "keyword.operator.assignment.bridge" }
+          }
         }
-      }]
+      ]
     },
 
     "strings": {

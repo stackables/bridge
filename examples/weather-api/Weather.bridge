@@ -21,6 +21,7 @@ tool weather from std.httpCall {
 # Nominatim returns an array — pick the first result
 tool first from std.pickFirst
 
+# Reusable definition to get weather by coordinates
 define weatherByCoordinates {
   with weather as w
   with input as i
