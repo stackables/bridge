@@ -24,10 +24,12 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   },
 });
 
-const yoga = createYoga({ schema, graphqlEndpoint: "*" });
+export const yoga = createYoga({ schema, graphqlEndpoint: "*" });
 
-createServer(yoga).listen(4000, () => {
-  console.log("Built-in tools example running at http://localhost:4000/graphql");
-  console.log("Try: { format(text: \"Hello World\") { original upper lower } }");
-  console.log("Try: { findEmployee(department: \"Engineering\") { id name } }");
-});
+if (process.argv[1] === import.meta.filename) {
+  createServer(yoga).listen(4000, () => {
+    console.log("Built-in tools example running at http://localhost:4000/graphql");
+    console.log("Try: { format(text: \"Hello World\") { original upper lower } }");
+    console.log("Try: { findEmployee(department: \"Engineering\") { id name } }");
+  });
+}

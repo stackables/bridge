@@ -13,11 +13,10 @@ const instructions = parseBridge(
 
 const schema = bridgeTransform(createSchema({ typeDefs }), instructions);
 
-const yoga = createYoga({
-  schema,
-  
-});
+export const yoga = createYoga({ schema, graphqlEndpoint: "*" });
 
-createServer(yoga).listen(4000, () => {
-  console.log("Weather server running at http://localhost:4000/graphql");
-});
+if (process.argv[1] === import.meta.filename) {
+  createServer(yoga).listen(4000, () => {
+    console.log("Weather server running at http://localhost:4000/graphql");
+  });
+}
