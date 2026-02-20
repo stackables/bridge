@@ -21,6 +21,8 @@ npm install @stackables/bridge
 
 Most GraphQL backends are just plumbing: take input, call an API, rename fields, and return. **The Bridge** turns that manual labor into a declarative graph of intent.
 
+Every .bridge file maps GraphQL schema fields to tools and external APIs.
+
 The engine resolves **backwards from demand**: when a GraphQL query requests `results[0].lat`, the engine traces the wire back to the `position.lat` of a specific API response. Only the data required to satisfy the query is ever fetched or executed.
 
 ### What it is (and isn't)
@@ -29,6 +31,7 @@ The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your app
 
 * **Use it to:** Morph external API shapes, enforce single exit points for security, and swap providers (e.g., SendGrid to Postmark) without changing app code.
 * **Don't use it for:** Complex business logic or database transactions. Keep the "intelligence" in your Tools; keep the "connectivity" in your Bridge.
+* Bridge is a declarative dataflow layer for GraphQL, **not a standalone API.**
 
 ### Wiring, not Programming
 
@@ -47,6 +50,79 @@ Declarative Connections: When you write o.name <- api.name, you aren't commandin
 ### Portability & Performance
 
 While the reference engine is implemented in TypeScript, the Bridge language itself is a simple, high-level specification for data flow. Because it describes intent rather than execution, it is architecturally "runtime-blind." It can be interpreted by any high-performance engines written in Rust, Go, or C++ without changing a single line of your .bridge files.
+
+---
+
+You are absolutely right. Because The Bridge is a "Smart Proxy," it doesn't exist in a vacuum—it needs a GraphQL schema to "wrap." If the README doesn't show the `typeDefs`, the user can't see how the `bridge Query.location` block connects to the actual API surface.
+
+We should add a section called **"The Workflow"** or **"Start with the Schema"** to show the 1:1 relationship between the GraphQL types and the Bridge definitions.
+
+Here is a paragraph and an example you can slot in before the **"Language"** section:
+
+---
+
+## The Workflow
+
+The Bridge doesn't replace your GraphQL schema; it implements it. You define your **Types** in standard GraphQL SDL, then use `.bridge` files to wire those types to your data sources.
+
+### 1. Define your Schema
+
+Start with a standard `schema.graphql` file. This is your "Interface."
+
+```graphql
+type Location {
+  lat: Float
+  lon: Float
+}
+
+type Query {
+  location(city: String!): Location
+}
+
+```
+
+### 2. Wire the Bridge
+
+Create your `logic.bridge` file to implement the resolver for that specific field. This is your "Implementation."
+
+```hcl
+version 1.4
+
+tool geo from httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .path = "/search"
+}
+
+bridge Query.location {
+  with geo
+  with input as i
+  with output as o
+
+  # 'i.city' comes from the GraphQL argument
+  # 'o.lat' maps to the 'lat' field in the Location type
+  geo.q <- i.city
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}
+```
+
+### 3. Initialize the Engine
+
+The Bridge takes your existing schema and automatically attaches the logic.
+
+```typescript
+import { bridgeTransform, parseBridge } from "@stackables/bridge";
+import { createSchema } from "graphql-yoga";
+
+const typeDefs = /* load your schema.graphql */;
+const bridgeFile = /* load your logic.bridge */;
+
+const schema = bridgeTransform(
+  createSchema({ typeDefs }), 
+  parseBridge(bridgeFile)
+);
+
+```
 
 ---
 
