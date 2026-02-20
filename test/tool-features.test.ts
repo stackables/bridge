@@ -17,7 +17,7 @@ describe("missing tool", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.hello {
   with unknown.api as u
   with input as i
@@ -58,7 +58,7 @@ describe("extends chain", () => {
   // Parent tool sets baseUrl + auth header.
   // Child inherits those and adds method + path.
   // Bridge wires city from input.
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend httpCall as weatherApi {
   with context
   baseUrl = "https://api.weather.test/v2"
@@ -117,7 +117,7 @@ o.city <- w.location.name
   test("child can override parent wire", async () => {
     let capturedInput: Record<string, any> = {};
 
-    const bridgeWithOverride = `
+    const bridgeWithOverride = `version 1.3
 extend httpCall as base {
   method = GET
   baseUrl = "https://default.test"
@@ -175,7 +175,7 @@ describe("context pull", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend httpCall as myapi {
   with context
   baseUrl = "https://api.test"
@@ -238,7 +238,7 @@ describe("tool-to-tool dependency", () => {
   `;
 
   // authService is called first, its output is used in mainApi's headers
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend httpCall as authService {
   with context
   baseUrl = "https://auth.test"
@@ -330,7 +330,7 @@ describe("pipe operator", () => {
   `;
 
   // The pipe tool receives { in: value } and returns { out: transformed }
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.shout {
   with input as i
   with toUpper as tu
@@ -363,7 +363,7 @@ o.loud <- tu:i.text
   });
 
   test("pipe fails when handle is not declared", () => {
-    const badBridge = `
+    const badBridge = `version 1.3
 bridge Query.shout {
   with input as i
   with output as o
@@ -419,7 +419,7 @@ describe("pipe with extra tool params", () => {
   // ── Tool block ──────────────────────────────────────────────────────────
   // `currency = EUR` bakes a default.  The `with convertToEur` shorthand
   // (no `as`) uses the tool name itself as the handle.
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend currencyConverter as convertToEur {
   currency = EUR
 
@@ -501,7 +501,7 @@ describe("pipe forking", () => {
   // Simple doubler tool  {in: number} → number
   const doubler = (input: Record<string, any>) => input.in * 2;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend doubler as double
 
 
@@ -559,7 +559,7 @@ describe("pipe named input field", () => {
   // Divider tool: { dividend: number, divisor: number } → number
   const divider = (input: Record<string, any>) => input.dividend / input.divisor;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend divider as divide
 
 
@@ -614,7 +614,7 @@ describe("httpCall cache", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend httpCall as api {
   cache = 60
   baseUrl = "http://mock"

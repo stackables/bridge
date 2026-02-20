@@ -23,10 +23,30 @@ import { SELF_MODULE } from "./types.js";
  * @param text - Bridge definition text
  * @returns Array of instructions (Bridge, ToolDef)
  */
+const BRIDGE_VERSION = "1.3";
+
 export function parseBridge(text: string): Instruction[] {
   // Normalize: CRLF → LF, tabs → 2 spaces
   const normalized = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
   const allLines = normalized.split("\n");
+
+  // Version check — first non-blank, non-comment line must be `version 1.3`
+  const firstContentIdx = allLines.findIndex(
+    (l) => l.trim() !== "" && !l.trim().startsWith("#"),
+  );
+  if (firstContentIdx === -1 || !/^version\s+/.test(allLines[firstContentIdx].trim())) {
+    throw new Error(
+      `Missing version declaration. Bridge files must begin with: version ${BRIDGE_VERSION}`,
+    );
+  }
+  const versionToken = allLines[firstContentIdx].trim().replace(/^version\s+/, "");
+  if (versionToken !== BRIDGE_VERSION) {
+    throw new Error(
+      `Unsupported bridge version "${versionToken}". This parser requires: version ${BRIDGE_VERSION}`,
+    );
+  }
+  // Blank out the version line so block-splitting ignores it
+  allLines[firstContentIdx] = "";
 
   // Find separator lines (--- with optional surrounding whitespace)
   const isSep = (line: string) => /^\s*---\s*$/.test(line);
@@ -1095,7 +1115,7 @@ export function serializeBridge(instructions: Instruction[]): string {
     blocks.push(serializeBridgeBlock(bridge));
   }
 
-  return blocks.join("\n\n") + "\n";
+  return `version ${BRIDGE_VERSION}\n\n` + blocks.join("\n\n") + "\n";
 }
 
 function serializeToolBlock(tool: ToolDef): string {

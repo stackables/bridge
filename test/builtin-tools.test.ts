@@ -170,7 +170,7 @@ describe("default tools (no tools option)", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.greet {
   with std.upperCase as up
   with std.lowerCase as lo
@@ -207,7 +207,7 @@ describe("user can override std namespace", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.greet {
   with std.upperCase as up
   with input as i
@@ -264,7 +264,7 @@ describe("user can add custom tools alongside std", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.process {
   with std.upperCase as up
   with reverse as rev
@@ -309,7 +309,7 @@ describe("findObject through bridge", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.findUser {
   with getUsers as db
   with std.findObject as find
@@ -363,7 +363,7 @@ describe("pipe with built-in tools", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.shout {
   with std.upperCase as up
   with input as i
@@ -398,7 +398,7 @@ describe("pickFirst through bridge", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.first {
   with std.pickFirst as pf
   with input as i
@@ -431,7 +431,7 @@ describe("pickFirst strict through bridge", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 extend std.pickFirst as pf {
   strict = true
 
@@ -484,7 +484,7 @@ describe("toArray through bridge", () => {
   `;
 
   // Round-trip: wrap single value in array → pick first element back out
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.normalize {
   with std.toArray as ta
   with std.pickFirst as pf
@@ -519,7 +519,7 @@ describe("toArray as tool input normalizer", () => {
   `;
 
   // Use toArray to wrap a scalar, then pass to a custom tool that counts items
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.wrap {
   with std.toArray as ta
   with countItems as cnt
@@ -561,7 +561,7 @@ describe("inline with — no tool block", () => {
     }
   `;
 
-  const bridgeText = `
+  const bridgeText = `version 1.3
 bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo

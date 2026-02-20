@@ -103,6 +103,14 @@ bridgeTransform(schema, instructions, {
 
 ## The .bridge Language
 
+Every `.bridge` file must begin with a version declaration — the parser rejects anything without it:
+
+```hcl
+version 1.3
+```
+
+This must be the first non-blank, non-comment line. The current parser accepts only `1.3`; any other version string is a hard error.
+
 Three block types, multiple operators. **Braces are mandatory** for `bridge` and `extend`/`tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body extends like `extend std.pickFirst as first` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
 
 ### Block types

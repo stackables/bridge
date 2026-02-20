@@ -34,6 +34,14 @@ The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your app
 
 ## The Language
 
+Every `.bridge` file must begin with a version declaration.
+
+```hcl
+version 1.3
+```
+
+This is the first non-blank, non-comment line. Everything else follows after it.
+
 ### 1. Const Blocks (`const`)
 
 Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments.

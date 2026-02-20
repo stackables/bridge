@@ -1,3 +1,5 @@
+version 1.3
+
 # Tool 1: Geocoder (City Name -> Coordinates)
 extend std.httpCall as geo {
   baseUrl = "https://nominatim.openstreetmap.org"

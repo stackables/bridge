@@ -13,7 +13,8 @@ import { createGateway } from "./_gateway.js";
 
 describe("parseBridge: const blocks", () => {
   test("single const with object value", () => {
-    const instructions = parseBridge(`const fallbackGeo = { "lat": 0, "lon": 0 }`);
+    const instructions = parseBridge(`version 1.3
+const fallbackGeo = { "lat": 0, "lon": 0 }`);
     assert.equal(instructions.length, 1);
     const c = instructions[0] as ConstDef;
     assert.equal(c.kind, "const");
@@ -22,24 +23,28 @@ describe("parseBridge: const blocks", () => {
   });
 
   test("single const with string value", () => {
-    const [c] = parseBridge(`const currency = "EUR"`) as ConstDef[];
+    const [c] = parseBridge(`version 1.3
+const currency = "EUR"`) as ConstDef[];
     assert.equal(c.name, "currency");
     assert.equal(JSON.parse(c.value), "EUR");
   });
 
   test("single const with number value", () => {
-    const [c] = parseBridge(`const limit = 10`) as ConstDef[];
+    const [c] = parseBridge(`version 1.3
+const limit = 10`) as ConstDef[];
     assert.equal(c.name, "limit");
     assert.equal(JSON.parse(c.value), 10);
   });
 
   test("single const with null", () => {
-    const [c] = parseBridge(`const empty = null`) as ConstDef[];
+    const [c] = parseBridge(`version 1.3
+const empty = null`) as ConstDef[];
     assert.equal(JSON.parse(c.value), null);
   });
 
   test("multiple const declarations in one block", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 const fallbackGeo = { "lat": 0, "lon": 0 }
 const defaultCurrency = "EUR"
 const maxRetries = 3
@@ -51,7 +56,8 @@ const maxRetries = 3
   });
 
   test("multi-line JSON object", () => {
-    const [c] = parseBridge(`const geo = {
+    const [c] = parseBridge(`version 1.3
+const geo = {
   "lat": 0,
   "lon": 0
 }`) as ConstDef[];
@@ -59,7 +65,8 @@ const maxRetries = 3
   });
 
   test("multi-line JSON array", () => {
-    const [c] = parseBridge(`const items = [
+    const [c] = parseBridge(`version 1.3
+const items = [
   "a",
   "b",
   "c"
@@ -68,7 +75,8 @@ const maxRetries = 3
   });
 
   test("const coexists with tool and bridge blocks", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 const fallback = { "lat": 0 }
 
 
@@ -95,7 +103,8 @@ o.result <- a.data
 
   test("invalid JSON throws", () => {
     assert.throws(
-      () => parseBridge(`const bad = { not valid json }`),
+      () => parseBridge(`version 1.3
+const bad = { not valid json }`),
       /[Ii]nvalid JSON/,
     );
   });
@@ -103,7 +112,7 @@ o.result <- a.data
 
 describe("serializeBridge: const roundtrip", () => {
   test("const definitions roundtrip", () => {
-    const input = `
+    const input = `version 1.3
 const fallbackGeo = {"lat":0,"lon":0}
 const currency = "EUR"
 
@@ -138,7 +147,7 @@ describe("const in bridge: end-to-end", () => {
   `;
 
   test("bridge can read const values", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 const defaults = { "currency": "EUR", "maxItems": 100 }
 
 
@@ -170,7 +179,8 @@ o.maxItems <- c.defaults.maxItems
 
 describe("parseBridge: tool on error", () => {
   test("on error = <json> is parsed as onError wire with value", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 extend httpCall as myApi {
   on error = { "lat": 0, "lon": 0 }
 
@@ -185,7 +195,8 @@ extend httpCall as myApi {
   });
 
   test("on error <- source is parsed as onError wire with source", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 extend httpCall as myApi {
   with context
   on error <- context.fallbacks.geo
@@ -201,7 +212,8 @@ extend httpCall as myApi {
   });
 
   test("on error multi-line JSON", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 extend httpCall as myApi {
   on error = {
     "lat": 0,
@@ -218,7 +230,8 @@ extend httpCall as myApi {
   });
 
   test("child tool inherits parent on error", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 extend httpCall as base {
   on error = { "fallback": true }
 
@@ -238,7 +251,7 @@ extend base as base.child {
 
 describe("serializeBridge: tool on error roundtrip", () => {
   test("on error = <json> roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 extend httpCall as myApi {
   on error = {"lat":0,"lon":0}
 
@@ -248,7 +261,7 @@ extend httpCall as myApi {
   });
 
   test("on error <- source roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 extend httpCall as myApi {
   with context
   on error <- context.fallbacks.geo
@@ -271,7 +284,7 @@ describe("tool on error: end-to-end", () => {
   `;
 
   test("on error = <json> returns fallback when tool throws", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as flakyApi {
   on error = { "lat": 0, "lon": 0 }
 
@@ -305,7 +318,7 @@ o.lon <- api.lon
   });
 
   test("on error <- context returns context fallback when tool throws", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as flakyApi {
   with context
   on error <- context.fallbacks.geo
@@ -343,7 +356,7 @@ o.lon <- api.lon
   });
 
   test("on error is NOT used when tool succeeds", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as api {
   on error = { "lat": 0, "lon": 0 }
 
@@ -377,7 +390,7 @@ o.lon <- api.lon
   });
 
   test("child inherits parent on error through extends chain", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as base {
   on error = { "lat": 0, "lon": 0 }
 
@@ -422,7 +435,8 @@ o.lon <- api.lon
 
 describe("parseBridge: wire fallback (??)", () => {
   test("?? adds fallback to pull wire", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -443,7 +457,8 @@ o.lat <- a.lat ?? 0
   });
 
   test("?? with JSON object fallback", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -463,7 +478,8 @@ o.result <- a.data ?? {"default":true}
   });
 
   test("?? with string fallback", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -483,7 +499,8 @@ o.name <- a.name ?? "unknown"
   });
 
   test("?? with null fallback", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -503,7 +520,8 @@ o.name <- a.name ?? null
   });
 
   test("?? on pipe chain attaches to output wire", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with transform as t
   with input as i
@@ -524,7 +542,8 @@ o.result <- t:i.text ?? "fallback"
   });
 
   test("wires without ?? have no fallback property", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -545,7 +564,7 @@ o.result <- a.data
 
 describe("serializeBridge: wire fallback roundtrip", () => {
   test("?? on regular wire roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -560,7 +579,7 @@ o.lat <- a.lat ?? 0
   });
 
   test("?? on pipe chain roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 bridge Query.demo {
   with transform as t
   with input as i
@@ -574,7 +593,7 @@ o.result <- t:i.text ?? "fallback"
   });
 
   test("serialized output contains ??", () => {
-    const input = `
+    const input = `version 1.3
 bridge Query.demo {
   with myApi as a
   with input as i
@@ -600,7 +619,7 @@ describe("wire fallback: end-to-end", () => {
   `;
 
   test("?? returns fallback when entire chain fails", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -629,7 +648,7 @@ o.name <- api.name ?? "unknown"
   });
 
   test("?? is NOT used when source succeeds", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -658,7 +677,7 @@ o.name <- api.name ?? "unknown"
   });
 
   test("?? catches chain failure (dep tool fails)", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as flakyGeo {
   baseUrl = "https://broken.test"
 
@@ -711,7 +730,7 @@ describe("combined: on error + ?? + const", () => {
 
     // Tool has on error, so lat/lon come from there.
     // 'extra' has no tool fallback but has wire ??
-    const bridgeText = `
+    const bridgeText = `version 1.3
 extend httpCall as geo {
   on error = { "lat": 0, "lon": 0 }
 
@@ -758,7 +777,8 @@ o.extra <- bad.data ?? "none"
 
 describe("parseBridge: wire || null-fallback", () => {
   test("simple wire with || string literal", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.greet {
   with input as i
   with output as o
@@ -773,7 +793,8 @@ o.name <- i.name || "World"
   });
 
   test("wire with both || and ??", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.greet {
   with input as i
   with output as o
@@ -788,7 +809,8 @@ o.name <- i.name || "World" ?? "Error"
   });
 
   test("wire with || JSON object literal", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.geo {
   with api as a
   with input as i
@@ -804,7 +826,8 @@ o.result <- a.data || {"lat":0,"lon":0}
   });
 
   test("wire without || has no nullFallback", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.greet {
   with input as i
   with output as o
@@ -818,7 +841,8 @@ o.name <- i.name
   });
 
   test("pipe wire with || null-fallback", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.format {
   with std.upperCase as up
   with input as i
@@ -838,7 +862,8 @@ o.result <- up:i.text || "N/A"
 
 describe("serializeBridge: || null-fallback roundtrip", () => {
   test("|| string literal roundtrips", () => {
-    const input = `bridge Query.greet {
+    const input = `version 1.3
+bridge Query.greet {
   with input as i
   with output as o
 
@@ -851,7 +876,8 @@ o.name <- i.name || "World"
   });
 
   test("|| and ?? together roundtrip", () => {
-    const input = `bridge Query.greet {
+    const input = `version 1.3
+bridge Query.greet {
   with myApi as a
   with input as i
   with output as o
@@ -866,7 +892,8 @@ o.name <- a.name || "World" ?? "Error"
   });
 
   test("pipe wire with || roundtrips", () => {
-    const input = `bridge Query.format {
+    const input = `version 1.3
+bridge Query.format {
   with std.upperCase as up
   with input as i
   with output as o
@@ -891,7 +918,7 @@ describe("wire || null-fallback: end-to-end", () => {
   `;
 
   test("|| returns literal when field is null", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.greet {
   with input as i
   with output as o
@@ -911,7 +938,7 @@ o.message <- i.name || "World"
   });
 
   test("|| is skipped when field has a value", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.greet {
   with input as i
   with output as o
@@ -939,7 +966,7 @@ o.message <- i.name || "World"
         score: Float
       }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -974,7 +1001,7 @@ o.score <- api.score || 0
         label: String
       }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -1025,7 +1052,7 @@ describe("multi-wire null-coalescing: end-to-end", () => {
   `;
 
   test("first wire wins when it has a value", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.email {
   with std.upperCase as up
   with input as i
@@ -1046,7 +1073,7 @@ o.textPart <- up:i.htmlBody
   });
 
   test("second wire used when first is null", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.email {
   with std.upperCase as up
   with input as i
@@ -1068,7 +1095,7 @@ o.textPart <- up:i.htmlBody
   });
 
   test("multi-wire + || terminal literal as last resort", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.email {
   with input as i
   with output as o
@@ -1095,7 +1122,8 @@ o.textPart <- i.htmlBody || "empty"
 
 describe("parseBridge: || source references", () => {
   test("|| source desugars to two wires with same target", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -1119,7 +1147,8 @@ o.label <- p.label || b.label
   });
 
   test("|| source || source || literal — last literal is nullFallback on last source wire", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.lookup {
   with a as a
   with b as b
@@ -1143,7 +1172,8 @@ o.label <- a.label || b.label || "default"
 
 describe("parseBridge: ?? source/pipe references", () => {
   test("?? source.path stores a fallbackRef NodeRef", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -1163,7 +1193,8 @@ o.label <- api.label ?? i.fallbackLabel
   });
 
   test("?? pipe:source stores fallbackRef pointing to fork root + registers fork", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.lookup {
   with myApi as api
   with std.upperCase as up
@@ -1186,7 +1217,8 @@ o.label <- api.label ?? up:i.errorDefault
   });
 
   test("full chain: A || B || literal ?? source — wires + fallbackRef", () => {
-    const instructions = parseBridge(`
+    const instructions = parseBridge(`version 1.3
+
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -1212,7 +1244,8 @@ o.label <- p.label || b.label || "default" ?? i.errorLabel
 
 describe("serializeBridge: ?? source/pipe roundtrip", () => {
   test("?? source.path roundtrips", () => {
-    const input = `bridge Query.lookup {
+    const input = `version 1.3
+bridge Query.lookup {
   with myApi as api
   with input as i
   with output as o
@@ -1226,7 +1259,8 @@ o.label <- api.label ?? i.fallbackLabel
   });
 
   test("?? pipe:source roundtrips", () => {
-    const input = `bridge Query.lookup {
+    const input = `version 1.3
+bridge Query.lookup {
   with myApi as api
   with std.upperCase as up
   with input as i
@@ -1243,7 +1277,8 @@ o.label <- api.label ?? up:i.errorDefault
   test("|| source || source roundtrips (desugars to multi-wire)", () => {
     // The || source chain desugars to multiple wires; serializer emits them
     // on separate lines, which re-parses to the same structure.
-    const input = `bridge Query.lookup {
+    const input = `version 1.3
+bridge Query.lookup {
   with primary as p
   with backup as b
   with input as i
@@ -1259,7 +1294,8 @@ o.label <- p.label || b.label || "default"
   });
 
   test("full chain: || source || literal ?? pipe roundtrips", () => {
-    const input = `bridge Query.lookup {
+    const input = `version 1.3
+bridge Query.lookup {
   with myApi as api
   with backup as b
   with std.upperCase as up
@@ -1282,7 +1318,7 @@ describe("|| source + ?? source: end-to-end", () => {
       type Query { lookup(q: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -1311,7 +1347,7 @@ o.label <- p.label || b.label
       type Query { lookup(q: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -1343,7 +1379,7 @@ o.label <- p.label || b.label
       type Query { lookup(q: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -1372,7 +1408,7 @@ o.label <- p.label || b.label || "nothing found"
       type Query { lookup(q: String!, defaultLabel: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -1400,7 +1436,7 @@ o.label <- api.label ?? i.defaultLabel
       type Query { lookup(q: String!, errorDefault: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with myApi as api
   with std.upperCase as up
@@ -1432,7 +1468,7 @@ o.label <- api.label ?? up:i.errorDefault
       }
       type Result { label: String }
     `;
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.lookup {
   with primary as p
   with backup as b

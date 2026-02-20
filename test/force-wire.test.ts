@@ -11,7 +11,8 @@ import { createGateway } from "./_gateway.js";
 
 describe("parseBridge: force wire (<-!)", () => {
   test("regular pull wire has no force flag", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with myTool as t
   with input as i
@@ -35,7 +36,8 @@ o.result <- t.output
   });
 
   test("<-! sets force: true on pull wire", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
@@ -55,7 +57,8 @@ lg.action <-! i.event
   });
 
   test("<-! and <- can coexist on the same bridge", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with mainApi as m
   with audit.log as audit
@@ -79,7 +82,8 @@ o.result <- m.data
   });
 
   test("<-! on pipe chain sets force on outermost fork", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with transform as t
   with input as i
@@ -102,7 +106,8 @@ o.result <-! t:i.text
   });
 
   test("<-! on multi-handle pipe chain sets force only on outermost fork", () => {
-    const [bridge] = parseBridge(`
+    const [bridge] = parseBridge(`version 1.3
+
 bridge Query.demo {
   with a as a
   with b as b
@@ -133,7 +138,7 @@ o.result <-! a:b:i.text
 
 describe("serializeBridge: force wire roundtrip", () => {
   test("regular force wire roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
@@ -149,7 +154,7 @@ lg.userId <-! i.userId
   });
 
   test("mixed force and regular wires roundtrip", () => {
-    const input = `
+    const input = `version 1.3
 bridge Query.demo {
   with mainApi as m
   with audit.log as audit
@@ -168,7 +173,7 @@ o.result <- m.data
   });
 
   test("force pipe chain roundtrips", () => {
-    const input = `
+    const input = `version 1.3
 bridge Query.demo {
   with transform as t
   with input as i
@@ -184,7 +189,7 @@ o.result <-! t:i.text
   });
 
   test("serialized output contains <-! syntax", () => {
-    const input = `
+    const input = `version 1.3
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
@@ -213,7 +218,7 @@ describe("forced wire: end-to-end execution", () => {
     let auditCalled = false;
     let auditInput: any = null;
 
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
@@ -263,7 +268,7 @@ o.title <- m.title
       }
     `;
 
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Mutation.createUser {
   with userApi.create as u
   with audit.log as audit
@@ -304,7 +309,7 @@ o.id <- u.id
     let auditStart = 0;
     const t0 = performance.now();
 
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
@@ -360,7 +365,7 @@ o.title <- m.title
       }
     `;
 
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.process {
   with mainWork as m
   with sideEffect as se
@@ -399,7 +404,7 @@ o.transformed <-! se:i.text
   });
 
   test("forced tool error does not break demand-driven response", async () => {
-    const bridgeText = `
+    const bridgeText = `version 1.3
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
