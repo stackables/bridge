@@ -61,13 +61,13 @@ describe("extends chain", () => {
   const bridgeText = `version 1.3
 extend httpCall as weatherApi {
   with context
-  baseUrl = "https://api.weather.test/v2"
-  headers.apiKey <- context.weather.apiKey
+  .baseUrl = "https://api.weather.test/v2"
+  .headers.apiKey <- context.weather.apiKey
 
 }
 extend weatherApi as weatherApi.current {
-  method = GET
-  path = /current
+  .method = GET
+  .path = /current
 
 }
 
@@ -119,13 +119,13 @@ o.city <- w.location.name
 
     const bridgeWithOverride = `version 1.3
 extend httpCall as base {
-  method = GET
-  baseUrl = "https://default.test"
+  .method = GET
+  .baseUrl = "https://default.test"
 
 }
 extend base as base.special {
-  baseUrl = "https://override.test"
-  path = /data
+  .baseUrl = "https://override.test"
+  .path = /data
 
 }
 
@@ -178,14 +178,14 @@ describe("context pull", () => {
   const bridgeText = `version 1.3
 extend httpCall as myapi {
   with context
-  baseUrl = "https://api.test"
-  headers.Authorization <- context.myapi.token
-  headers.X-Org <- context.myapi.orgId
+  .baseUrl = "https://api.test"
+  .headers.Authorization <- context.myapi.token
+  .headers.X-Org <- context.myapi.orgId
 
 }
 extend myapi as myapi.lookup {
-  method = GET
-  path = /lookup
+  .method = GET
+  .path = /lookup
 
 }
 
@@ -241,23 +241,23 @@ describe("tool-to-tool dependency", () => {
   const bridgeText = `version 1.3
 extend httpCall as authService {
   with context
-  baseUrl = "https://auth.test"
-  method = POST
-  path = /token
-  body.clientId <- context.auth.clientId
-  body.secret <- context.auth.secret
+  .baseUrl = "https://auth.test"
+  .method = POST
+  .path = /token
+  .body.clientId <- context.auth.clientId
+  .body.secret <- context.auth.secret
 
 }
 extend httpCall as mainApi {
   with context
   with authService as auth
-  baseUrl = "https://api.test"
-  headers.Authorization <- auth.access_token
+  .baseUrl = "https://api.test"
+  .headers.Authorization <- auth.access_token
 
 }
 extend mainApi as mainApi.getData {
-  method = GET
-  path = /data
+  .method = GET
+  .path = /data
 
 }
 
@@ -421,7 +421,7 @@ describe("pipe with extra tool params", () => {
   // (no `as`) uses the tool name itself as the handle.
   const bridgeText = `version 1.3
 extend currencyConverter as convertToEur {
-  currency = EUR
+  .currency = EUR
 
 }
 
@@ -616,10 +616,10 @@ describe("httpCall cache", () => {
 
   const bridgeText = `version 1.3
 extend httpCall as api {
-  cache = 60
-  baseUrl = "http://mock"
-  method = GET
-  path = /search
+  .cache = 60
+  .baseUrl = "http://mock"
+  .method = GET
+  .path = /search
 
 }
 bridge Query.lookup {

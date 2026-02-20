@@ -433,7 +433,7 @@ describe("pickFirst strict through bridge", () => {
 
   const bridgeText = `version 1.3
 extend std.pickFirst as pf {
-  strict = true
+  .strict = true
 
 }
 bridge Query.onlyOne {

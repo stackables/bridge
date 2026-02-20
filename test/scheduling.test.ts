@@ -511,31 +511,31 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
   const bridgeText = `version 1.3
 extend httpCall as authService {
   with context
-  baseUrl = "https://auth.test"
-  method = POST
-  path = /token
-  body.clientId <- context.auth.clientId
+  .baseUrl = "https://auth.test"
+  .method = POST
+  .path = /token
+  .body.clientId <- context.auth.clientId
 
 }
 extend httpCall as quotaService {
   with context
-  baseUrl = "https://quota.test"
-  method = GET
-  path = /check
-  headers.key <- context.quota.apiKey
+  .baseUrl = "https://quota.test"
+  .method = GET
+  .path = /check
+  .headers.key <- context.quota.apiKey
 
 }
 extend httpCall as mainApi {
   with authService as auth
   with quotaService as quota
-  baseUrl = "https://api.test"
-  headers.Authorization <- auth.access_token
-  headers.X-Quota <- quota.token
+  .baseUrl = "https://api.test"
+  .headers.Authorization <- auth.access_token
+  .headers.X-Quota <- quota.token
 
 }
 extend mainApi as mainApi.getData {
-  method = GET
-  path = /data
+  .method = GET
+  .path = /data
 
 }
 

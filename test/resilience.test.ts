@@ -81,7 +81,7 @@ const fallback = { "lat": 0 }
 
 
 extend httpCall as myApi {
-  baseUrl = "https://example.com"
+  .baseUrl = "https://example.com"
 
 }
 
@@ -237,7 +237,7 @@ extend httpCall as base {
 
 }
 extend base as base.child {
-  method = GET
+  .method = GET
 
 }`);
     // The engine resolves extends chains at runtime, so we just verify
@@ -396,8 +396,8 @@ extend httpCall as base {
 
 }
 extend base as base.child {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 
 }
 
@@ -679,7 +679,7 @@ o.name <- api.name ?? "unknown"
   test("?? catches chain failure (dep tool fails)", async () => {
     const bridgeText = `version 1.3
 extend httpCall as flakyGeo {
-  baseUrl = "https://broken.test"
+  .baseUrl = "https://broken.test"
 
 }
 

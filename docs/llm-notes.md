@@ -111,6 +111,18 @@ version 1.3
 
 This must be the first non-blank, non-comment line. The current parser accepts only `1.3`; any other version string is a hard error.
 
+### Reserved Words
+
+**Keywords** — cannot be used as tool names, handle aliases, or const names:
+
+> `bridge` `with` `as` `extend` `const` `tool` `version`
+
+**Source identifiers** — reserved for their specific role in `bridge`/`extend` blocks:
+
+> `input` `output` `context`
+
+The parser throws immediately if any of these appear where a user-defined name is expected.
+
 Three block types, multiple operators. **Braces are mandatory** for `bridge` and `extend`/`tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body extends like `extend std.pickFirst as first` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
 
 ### Block types
@@ -187,15 +199,17 @@ Define a reusable API call configuration. Syntax: `extend <source> as <name>`. W
 ```hcl
 extend httpCall as hereapi {
   with context
-  baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- context.hereapi.apiKey
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
 }
 
 extend hereapi as hereapi.geocode {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 }
 ```
+
+Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines are control flow and do not take a dot prefix.
 
 When extending a parent tool, the engine merges wires from the parent chain by:
 1. Walking the `extends` chain from root to leaf

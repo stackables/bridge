@@ -517,13 +517,13 @@ describe("parseBridge: tool blocks", () => {
 
 extend httpCall as hereapi {
   with context
-  baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- context.hereapi.apiKey
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
 
 }
 extend hereapi as hereapi.geocode {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 
 }
 bridge Query.geocode {
@@ -567,14 +567,14 @@ gc.q <- i.search
 
 extend httpCall as sendgrid {
   with context
-  baseUrl = "https://api.sendgrid.com/v3"
-  headers.Authorization <- context.sendgrid.bearerToken
-  headers.X-Custom = "static-value"
+  .baseUrl = "https://api.sendgrid.com/v3"
+  .headers.Authorization <- context.sendgrid.bearerToken
+  .headers.X-Custom = "static-value"
 
 }
 extend sendgrid as sendgrid.send {
-  method = POST
-  path = /mail/send
+  .method = POST
+  .path = /mail/send
 
 }
 bridge Mutation.sendEmail {
@@ -616,17 +616,17 @@ sg.content <- i.body
 
 extend httpCall as authService {
   with context
-  method = POST
-  baseUrl = "https://auth.example.com"
-  path = /token
-  body.client_id <- context.auth.clientId
+  .method = POST
+  .baseUrl = "https://auth.example.com"
+  .path = /token
+  .body.client_id <- context.auth.clientId
 
 }
 extend httpCall as serviceB {
   with context
   with authService as auth
-  baseUrl = "https://api.serviceb.com"
-  headers.Authorization <- auth.access_token
+  .baseUrl = "https://api.serviceb.com"
+  .headers.Authorization <- auth.access_token
 
 }
 bridge Query.data {
@@ -658,13 +658,13 @@ describe("serializeBridge: tool roundtrip", () => {
     const input = `version 1.3
 extend httpCall as hereapi {
   with context
-  baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- context.hereapi.apiKey
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
 
 }
 extend hereapi as hereapi.geocode {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 
 }
 bridge Query.geocode {
@@ -688,13 +688,13 @@ gc.limit <- i.limit
     const input = `version 1.3
 extend httpCall as sendgrid {
   with context
-  baseUrl = "https://api.sendgrid.com/v3"
-  headers.Authorization <- context.sendgrid.bearerToken
+  .baseUrl = "https://api.sendgrid.com/v3"
+  .headers.Authorization <- context.sendgrid.bearerToken
 
 }
 extend sendgrid as sendgrid.send {
-  method = POST
-  path = /mail/send
+  .method = POST
+  .path = /mail/send
 
 }
 bridge Mutation.sendEmail {
@@ -718,13 +718,13 @@ o.messageId <- sg.id
     const input = `version 1.3
 extend httpCall as hereapi {
   with context
-  baseUrl = "https://geocode.search.hereapi.com/v1"
-  headers.apiKey <- context.hereapi.apiKey
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
 
 }
 extend hereapi as hereapi.geocode {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 
 }
 bridge Query.geocode {
@@ -778,7 +778,7 @@ gc.q <- i.search
     const tool = parseBridge(`version 1.3
 
 Extend httpCall as hereapi {
-  baseUrl = "https://example.com"
+  .baseUrl = "https://example.com"
 
 }`)[0] as ToolDef;
     assert.equal(tool.name, "hereapi");
@@ -789,7 +789,7 @@ Extend httpCall as hereapi {
     const tool = parseBridge(`version 1.3
 
 tool hereapi httpCall {
-  baseUrl = "https://example.com"
+  .baseUrl = "https://example.com"
 
 }`)[0] as ToolDef;
     assert.equal(tool.name, "hereapi");
@@ -800,12 +800,12 @@ tool hereapi httpCall {
     const result = parseBridge(`version 1.3
 
 extend httpCall as hereapi {
-  baseUrl = "https://example.com"
+  .baseUrl = "https://example.com"
 
 }
 extend hereapi as hereapi.geocode {
-  method = GET
-  path = /geocode
+  .method = GET
+  .path = /geocode
 
 }
 
@@ -937,14 +937,14 @@ o.result <- api.value
     const brace = parseBridge(`version 1.3
 
 extend httpCall as myApi {
-  baseUrl = "https://example.com"
-  method = GET
+  .baseUrl = "https://example.com"
+  .method = GET
 }`);
     const indent = parseBridge(`version 1.3
 
 extend httpCall as myApi {
-  baseUrl = "https://example.com"
-  method = GET
+  .baseUrl = "https://example.com"
+  .method = GET
 
 }`);
     assert.deepStrictEqual(brace, indent);
@@ -971,7 +971,7 @@ extend httpCall as myApi {
     const result = parseBridge(`version 1.3
 
 extend httpCall as api {
-  baseUrl = "https://example.com"
+  .baseUrl = "https://example.com"
 }
 
 bridge Query.demo {

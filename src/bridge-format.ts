@@ -25,6 +25,20 @@ import { SELF_MODULE } from "./types.js";
  */
 const BRIDGE_VERSION = "1.3";
 
+// Keywords that cannot be used as tool names, aliases, or const names
+const RESERVED_KEYWORDS = new Set(["bridge", "with", "as", "extend", "const", "tool", "version"]);
+// Source identifiers reserved for their special meaning inside bridge/extend blocks
+const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
+
+function assertNotReserved(name: string, lineNum: number, label: string) {
+  if (RESERVED_KEYWORDS.has(name.toLowerCase())) {
+    throw new Error(`Line ${lineNum}: "${name}" is a reserved keyword and cannot be used as a ${label}`);
+  }
+  if (SOURCE_IDENTIFIERS.has(name.toLowerCase())) {
+    throw new Error(`Line ${lineNum}: "${name}" is a reserved source identifier and cannot be used as a ${label}`);
+  }
+}
+
 export function parseBridge(text: string): Instruction[] {
   // Normalize: CRLF → LF, tabs → 2 spaces
   const normalized = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
@@ -668,8 +682,7 @@ function parseWithDeclaration(
     const name = match[1];
     const handle = match[2];
     checkDuplicate(handle);
-
-    // Split dotted name into module.field for NodeRef resolution
+    assertNotReserved(handle, lineNum, "handle alias");
     const lastDot = name.lastIndexOf(".");
     if (lastDot !== -1) {
       const modulePart = name.substring(0, lastDot);
@@ -825,6 +838,7 @@ function parseConstLines(block: string, lineOffset: number): ConstDef[] {
     }
 
     const name = constMatch[1];
+    assertNotReserved(name, ln(i), "const name");
     let valuePart = constMatch[2].trim();
 
     // Multi-line: if value starts with { or [ and isn't balanced, read more lines
@@ -961,6 +975,7 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
       }
       const source = extendMatch[1];
       toolName = extendMatch[2];
+      assertNotReserved(toolName, ln(i), "tool name");
       // If source matches a previously-defined tool, it's an extends; otherwise it's a function name
       const isKnownTool = previousInstructions?.some(
         (inst) => inst.kind === "tool" && inst.name === source,
@@ -1028,8 +1043,8 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
       continue;
     }
 
-    // Constant wire: target = "value" or target = value (unquoted)
-    const constantMatch = line.match(/^(\S+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
+    // Constant wire: .target = "value" or .target = value (unquoted)
+    const constantMatch = line.match(/^\.(\S+)\s*=\s*(?:"([^"]*)"|(\S+))$/);
     if (constantMatch) {
       const value = constantMatch[2] ?? constantMatch[3];
       wires.push({
@@ -1040,11 +1055,16 @@ function parseToolBlock(block: string, lineOffset: number, previousInstructions?
       continue;
     }
 
-    // Pull wire: target <- source
-    const pullMatch = line.match(/^(\S+)\s*<-\s*(\S+)$/);
+    // Pull wire: .target <- source
+    const pullMatch = line.match(/^\.(\S+)\s*<-\s*(\S+)$/);
     if (pullMatch) {
       wires.push({ target: pullMatch[1], kind: "pull", source: pullMatch[2] });
       continue;
+    }
+
+    // Catch bare param lines without leading dot — give a helpful error
+    if (/^[a-zA-Z]/.test(line)) {
+      throw new Error(`Line ${ln(i)}: Tool params require a dot prefix: ".${line.split(/[\s=<]/)[0]} ...". Only 'with' and 'on error' lines are unprefixed.`);
     }
 
     throw new Error(`Line ${ln(i)}: Unrecognized tool line: ${line}`);
@@ -1159,12 +1179,12 @@ function serializeToolBlock(tool: ToolDef): string {
     } else if (wire.kind === "constant") {
       // Use quoted form if value contains spaces or special chars, unquoted otherwise
       if (/\s/.test(wire.value) || wire.value === "") {
-        lines.push(`  ${wire.target} = "${wire.value}"`);
+        lines.push(`  .${wire.target} = "${wire.value}"`);
       } else {
-        lines.push(`  ${wire.target} = ${wire.value}`);
+        lines.push(`  .${wire.target} = ${wire.value}`);
       }
     } else {
-      lines.push(`  ${wire.target} <- ${wire.source}`);
+      lines.push(`  .${wire.target} <- ${wire.source}`);
     }
   }
 

@@ -56,18 +56,20 @@ Access const values in bridges or tools via `with const as c`, then reference as
 
 ### 2. Extend Blocks (`extend`)
 
-Defines the "Where" and the "How." Takes a function (or parent tool) and configures i, giving it a new name.
+Defines the "Where" and the "How." Takes a function (or parent tool) and configures it, giving it a new name.
 
 ```hcl
 extend <source> as <name> {
   [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from context/tool
-  
-  <param> = <value>               # Constant/Default value
-  <param> <- <source>             # Dynamic wire
+
+  .<param> = <value>              # Constant/Default value (dot = "this tool's param")
+  .<param> <- <source>            # Dynamic wire
 }
 ```
+
+Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines do not use a dot; they are control flow, not param assignments.
 
 When `<source>` is a function name (e.g. `httpCall`), a new tool is created.
 When `<source>` is an existing tool name, the new tool inherits its configuration.
@@ -106,6 +108,18 @@ bridge <Type.field> {
 
 ## Key Features
 
+### Reserved Words
+
+**Keywords** — cannot be used as tool names, handle aliases, or const names:
+
+> `bridge` `with` `as` `extend` `const` `tool` `version`
+
+**Source identifiers** — reserved for their specific role inside `bridge` and `extend` blocks:
+
+> `input` `output` `context`
+
+A parse error is thrown immediately if any of these appear where a user-defined name is expected.
+
 ### Scope Rules
 
 Bridge uses explicit scoping. Any entity referenced inside a `bridge` or `extend` block must first be introduced into scope using a `with` clause.
@@ -136,9 +150,9 @@ Declared inside the `extend` block. Catches any exception thrown by the tool's `
 
 ```hcl
 extend httpCall as geo {
-  baseUrl = "https://nominatim.openstreetmap.org"
-  method = GET
-  path = /search
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
   on error = { "lat": 0, "lon": 0 }   # tool-level default
 }
 ```
@@ -328,7 +342,7 @@ Use an `extend` block when you need to configure defaults:
 
 ```hcl
 extend std.pickFirst as pf {
-  strict = true
+  .strict = true
 }
 
 bridge Query.onlyResult {
@@ -374,10 +388,10 @@ Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response cach
 
 ```hcl
 extend httpCall as geo {
-  cache = 300          # cache for 5 minutes
-  baseUrl = "https://nominatim.openstreetmap.org"
-  method = GET
-  path = /search
+  .cache = 300          # cache for 5 minutes
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
 }
 ```
 
