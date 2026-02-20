@@ -240,6 +240,7 @@ extend currencyConverter as convert {
   currency = EUR   # default currency
 }
 
+# example with pipe syntax
 bridge Query.price {
   with convert as c
   with input as i
@@ -250,6 +251,27 @@ bridge Query.price {
   # Safe to use repeatedly — each is an independent tool call
   o.itemPrice  <- c:i.itemPrice
   o.totalPrice <- c:i.totalPrice
+}
+
+# same without the pipe syntax
+extend convert as c1
+extend convert as c2
+
+bridge Query.price {
+  with c1
+  with c2
+  with input as i
+  with output as o
+
+  c1.currency <- i.currency   # overrides the default per request
+  c2.currency <- i.currency   # overrides the default per request
+
+  c1.in <- i.itemPrice
+  c2.in <- i.totalPrice
+
+  # Safe to use repeatedly — each is an independent tool call
+  o.itemPrice  <- c1
+  o.totalPrice <- c2
 }
 ```
 
