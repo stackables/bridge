@@ -50,15 +50,6 @@ Declarative Connections: When you write o.name <- api.name, you aren't commandin
 ### Portability & Performance
 
 While the reference engine is implemented in TypeScript, the Bridge language itself is a simple, high-level specification for data flow. Because it describes intent rather than execution, it is architecturally "runtime-blind." It can be interpreted by any high-performance engines written in Rust, Go, or C++ without changing a single line of your .bridge files.
-
----
-
-You are absolutely right. Because The Bridge is a "Smart Proxy," it doesn't exist in a vacuum—it needs a GraphQL schema to "wrap." If the README doesn't show the `typeDefs`, the user can't see how the `bridge Query.location` block connects to the actual API surface.
-
-We should add a section called **"The Workflow"** or **"Start with the Schema"** to show the 1:1 relationship between the GraphQL types and the Bridge definitions.
-
-Here is a paragraph and an example you can slot in before the **"Language"** section:
-
 ---
 
 ## The Workflow
