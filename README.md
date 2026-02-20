@@ -485,42 +485,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 | `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
 | `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
 
-### Using Built-in Tools
-
-**No `tool` block needed** for pipe-like tools — reference them with the `std.` prefix in the `with` header:
-
-```hcl
-bridge Query.format {
-  with std.upperCase as up
-  with std.lowerCase as lo
-  with input as i
-  with output as o
-
-  o.upper <- up:i.text
-  o.lower <- lo:i.text
-}
-```
-
-Use a `tool` block when you need to configure defaults:
-
-```hcl
-tool pf from std.pickFirst {
-  .strict = true
-}
-
-bridge Query.onlyResult {
-  with pf
-  with someApi as api
-  with input as i
-  with output as o
-
-  o.value <- pf:api.items
-}
-```
-
 ### Adding Custom Tools
-
-The `std` namespace is always included automatically. Just add your own tools — no need to spread `builtinTools`:
 
 ```typescript
 import { bridgeTransform } from "@stackables/bridge";
@@ -573,11 +538,3 @@ bridgeTransform(schema, instructions, {
   tools: { std: { ...std, httpCall: createHttpCall(fetch, redisCache) } },
 });
 ```
-
----
-
-## Why The Bridge?
-
-* **No Resolver Sprawl:** Stop writing identical `fetch` and `map` logic
-* **Provider Agnostic:** Swap implementations (e.g., SendGrid vs Postmark) at the request level
-* **Edge-Ready:** Small footprint; works in Node, Bun, and Cloudflare Workers
