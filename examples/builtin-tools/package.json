@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import tsx/esm server.ts",
-    "e2e": "node --import tsx/esm --test e2e.test.ts"
+    "start": "node --import tsx/esm --conditions development server.ts",
+    "e2e": "node --import tsx/esm --conditions development --test e2e.test.ts"
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*",

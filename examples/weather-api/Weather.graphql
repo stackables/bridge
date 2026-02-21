@@ -2,6 +2,9 @@ type Query {
   # Get weather by city name (e.g., "Paris")
   getWeatherByName(cityName: String!): WeatherReport
   getWeatherByCoordinates(lat: String!, lon: String! ): WeatherReport
+
+  # All optional params
+  getWeather(cityName: String ,lat: Float, lon: Float): WeatherReport
 }
 
 type WeatherReport {

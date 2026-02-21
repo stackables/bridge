@@ -319,11 +319,22 @@ export class ExecutionTree {
         await this.resolveToolWires(toolDef, input);
       }
 
-      // Resolve bridge wires and apply on top
+      // Resolve bridge wires and apply on top.
+      // Group wires by target path so that || (null-fallback) and ??
+      // (error-fallback) semantics are honoured via resolveWires().
+      const wireGroups = new Map<string, Wire[]>();
+      for (const w of bridgeWires) {
+        const key = w.to.path.join(".");
+        let group = wireGroups.get(key);
+        if (!group) { group = []; wireGroups.set(key, group); }
+        group.push(w);
+      }
+
+      const groupEntries = Array.from(wireGroups.entries());
       const resolved = await Promise.all(
-        bridgeWires.map(async (w): Promise<[string[], any]> => {
-          const value = "value" in w ? w.value : await this.pullSingle(w.from);
-          return [w.to.path, value];
+        groupEntries.map(async ([, group]): Promise<[string[], any]> => {
+          const value = await this.resolveWires(group);
+          return [group[0].to.path, value];
         }),
       );
       for (const [path, value] of resolved) {

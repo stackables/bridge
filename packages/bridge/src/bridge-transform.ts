@@ -92,6 +92,11 @@ export function bridgeTransform(
 
           // Kick off forced wires (<-!) at the root entry point
           if (source instanceof ExecutionTree && !info.path.prev) {
+            // Ensure input state exists even with no args (prevents
+            // recursive scheduling of the input trunk → stack overflow).
+            if (!args || Object.keys(args).length === 0) {
+              source.push({});
+            }
             source.executeForced();
           }
 
