@@ -592,10 +592,14 @@ bridge Query.getWeather {
     return { executor, callLog };
   }
 
-  test("{ getWeather { city } } with no inputs still calls geo + weather", async () => {
-    // This test documents the CURRENT behaviour: the whole-object wire
-    // `o <- w` eagerly resolves the entire define block, including all
-    // tool calls, even when only `city` is requested.
+  test("{ getWeather { city } } with no inputs: lazy define skips weather", async () => {
+    // With lazy define resolution, `o <- w` defers field-by-field.
+    // Only `city` is requested → only the define's city wire fires.
+    // The city wire reads __define_in.cityName, resolved lazily:
+    //   w.cityName <- upper:i.cityName || f.display_name || "Unknown"
+    // No cityName input → upper:null → falls through to f.display_name
+    // → geo is called (to get display_name via geocode fallback).
+    // weather is NEVER called — no output field depends on it.
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
@@ -605,19 +609,18 @@ bridge Query.getWeather {
     const traces: ToolTrace[] = result.extensions?.traces ?? [];
     const toolNames = traces.map((t: ToolTrace) => t.tool);
 
-    // geo is called because f.display_name is in the || chain for w.cityName
-    assert.ok(toolNames.includes("geo"), "geo should be called (f.display_name fallback)");
+    // geo is called: cityName is null → upper(null) → null →
+    // falls through to f.display_name → needs geo
+    assert.ok(toolNames.includes("geo"), "geo called (cityName null, needs f.display_name)");
 
-    // weather is called because o <- w expands the ENTIRE define block,
-    // including wires that feed the weather tool (w.latitude, w.longitude)
-    assert.ok(toolNames.includes("weather"), "weather is called (whole-object wire eagerly resolves define)");
+    // weather is NOT called: lazy resolution only resolves the city wire,
+    // which doesn't depend on the weather tool
+    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define skips it)");
 
-    // city should fall through to "Unknown" (no cityName input, empty geo result)
     assert.equal(result.data.getWeather.city, "Unknown");
-    assert.deepStrictEqual(callLog, ["geo", "weather"]);
   });
 
-  test("{ getWeather(cityName: \"Berlin\") { city } } traces show short-circuit", async () => {
+  test("{ getWeather(cityName: \"Berlin\") { city } } no geo needed", async () => {
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
@@ -627,19 +630,19 @@ bridge Query.getWeather {
     const traces: ToolTrace[] = result.extensions?.traces ?? [];
     const toolNames = traces.map((t: ToolTrace) => t.tool);
 
-    // cityName is provided → upper:i.cityName succeeds → f.display_name
-    // is never needed → but geo is STILL called because w.lat needs f.lat
-    // (i.lat is null with no lat input)
-    assert.ok(toolNames.includes("geo"), "geo called for w.lat fallback");
+    // Lazy define input: only __define_in.cityName wire fires.
+    // upper:i.cityName → "BERLIN" (non-null) → short-circuits.
+    // geo is NOT called: lat/lon wires never fire, cityName doesn't
+    // fall through to f.display_name.
+    assert.ok(!toolNames.includes("geo"), "geo NOT called (cityName short-circuits)");
 
-    // weather still called via whole-object wire
-    assert.ok(toolNames.includes("weather"), "weather called via define expansion");
+    // weather NOT called: only city was requested
+    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define)");
 
-    // city should be the uppercased input
     assert.equal(result.data.getWeather.city, "BERLIN");
   });
 
-  test("{ getWeather(lat: 52.52, lon: 13.4, cityName: \"Berlin\") { city } } geo is still called", async () => {
+  test("{ getWeather(lat: 52.52, lon: 13.4, cityName: \"Berlin\") { city } } no tools called", async () => {
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
@@ -649,16 +652,30 @@ bridge Query.getWeather {
     const traces: ToolTrace[] = result.extensions?.traces ?? [];
     const toolNames = traces.map((t: ToolTrace) => t.tool);
 
-    // Even with all inputs provided:
-    // - i.lat is non-null → w.lat short-circuits (no f.lat needed)
-    // - i.lon is non-null → w.lon short-circuits (no f.lon needed)  
-    // - upper:i.cityName is non-null → w.cityName short-circuits
-    // But weather is STILL called because o <- w expands the define block
-    assert.ok(toolNames.includes("weather"), "weather called via define expansion");
-
-    // geo should NOT be called since all || chains short-circuit on input values
-    assert.ok(!toolNames.includes("geo"), "geo should NOT be called when all inputs provided");
+    // All inputs provided → all || chains short-circuit on input values
+    // → geo is NOT called (no fallback needed)
+    // → weather is NOT called (only city was requested, lazy define)
+    assert.ok(!toolNames.includes("geo"), "geo NOT called (all inputs short-circuit)");
+    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define)");
+    assert.deepStrictEqual(callLog, [], "no tool calls at all");
 
     assert.equal(result.data.getWeather.city, "BERLIN");
+  });
+
+  test("{ getWeather { city currentTemp } } weather called only when needed", async () => {
+    // When currentTemp IS requested, the define's currentTemp wire fires,
+    // which pulls from the weather tool.
+    const { executor, callLog } = createWeatherGateway();
+
+    const result: any = await executor({
+      document: parse(`{ getWeather(cityName: "Berlin") { city currentTemp } }`),
+    });
+
+    const traces: ToolTrace[] = result.extensions?.traces ?? [];
+    const toolNames = traces.map((t: ToolTrace) => t.tool);
+
+    assert.ok(toolNames.includes("weather"), "weather called for currentTemp");
+    assert.equal(result.data.getWeather.city, "BERLIN");
+    assert.equal(typeof result.data.getWeather.currentTemp, "number");
   });
 });

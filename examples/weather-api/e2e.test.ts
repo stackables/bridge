@@ -103,7 +103,7 @@ test("getWeather with cityName + lat + lon uses direct coordinates", async () =>
   // lat/lon should be ~London (provided), not ~Paris (geocoded)
   assert.ok(Math.abs(data.getWeather.lat - 51.5) < 0.5, `Should use provided lat (~51.5), got ${data.getWeather.lat}`);
   assert.ok(Math.abs(data.getWeather.lon - (-0.1278)) < 0.5, `Should use provided lon (~-0.13), got ${data.getWeather.lon}`);
-  assert.equal(data.getWeather.city, "Paris", "city should come from cityName input");
+  assert.equal(data.getWeather.city, "PARIS", "city should come from cityName input (uppercased by bridge)");
 });
 
 test("getWeather with only cityName geocodes to coordinates", async () => {
@@ -111,7 +111,7 @@ test("getWeather with only cityName geocodes to coordinates", async () => {
     `{ getWeather(cityName: "Tokyo") { lat lon city currentTemp timezone } }`,
   );
   assert.ok(Math.abs(data.getWeather.lat - 35.6) < 1, `Tokyo lat should be ~35.6, got ${data.getWeather.lat}`);
-  assert.equal(data.getWeather.city, "Tokyo", "city should be the provided name");
+  assert.equal(data.getWeather.city, "TOKYO", "city should be the provided name (uppercased by bridge)");
   assert.ok(typeof data.getWeather.currentTemp === "number", "currentTemp must be a number");
 });
 
@@ -168,7 +168,7 @@ test("getWeather with cityName + lat (no lon) gets lon from geocode", async () =
   // lat should be from input (99.0), lon from geocode (~2.35)
   assert.equal(data.getWeather.lat, 99, "lat should be the provided value");
   assert.ok(Math.abs(data.getWeather.lon - 2.35) < 0.5, `lon should be geocoded Paris lon (~2.35), got ${data.getWeather.lon}`);
-  assert.equal(data.getWeather.city, "Paris");
+  assert.equal(data.getWeather.city, "PARIS");
 });
 
 test("getWeather with non-existent city and no coords", async () => {
@@ -181,7 +181,7 @@ test("getWeather with non-existent city and no coords", async () => {
   } else {
     const r = body.data.getWeather;
     // cityName was provided so city should be the input value
-    assert.equal(r.city, "Xyzzyville99999", "city should still be the provided name");
+    assert.equal(r.city, "XYZZYVILLE99999", "city should still be the provided name (uppercased by bridge)");
   }
 });
 
@@ -229,7 +229,7 @@ test("getWeather with all fields requested returns complete object", async () =>
     `{ getWeather(cityName: "London") { city lat lon currentTemp timezone } }`,
   );
   const r = data.getWeather;
-  assert.equal(r.city, "London");
+  assert.equal(r.city, "LONDON");
   assert.ok(typeof r.lat === "number");
   assert.ok(typeof r.lon === "number");
   assert.ok(typeof r.currentTemp === "number");

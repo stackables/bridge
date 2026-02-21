@@ -505,6 +505,23 @@ export class ExecutionTree {
     }
 
     if (value === undefined) {
+      // ── Lazy define field resolution ────────────────────────────────
+      // For define trunks (__define_in_* / __define_out_*) with a specific
+      // field path, resolve ONLY the wire(s) targeting that field instead
+      // of scheduling the entire trunk.  This avoids triggering unrelated
+      // dependency chains (e.g. requesting "city" should not fire the
+      // lat/lon coalesce chains that call the geo tool).
+      if (ref.path.length > 0 && ref.module.startsWith("__define_")) {
+        const fieldWires =
+          this.bridge?.wires.filter(
+            (w) =>
+              sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
+          ) ?? [];
+        if (fieldWires.length > 0) {
+          return this.resolveWires(fieldWires);
+        }
+      }
+
       this.state[key] = this.schedule(ref);
       value = this.state[key];
     }
@@ -695,6 +712,26 @@ export class ExecutionTree {
       ) ?? [];
 
     if (matches.length > 0) {
+      // ── Lazy define resolution ──────────────────────────────────────
+      // When ALL matches at the root object level (path=[]) are
+      // whole-object wires sourced from define output modules, defer
+      // resolution to field-by-field GraphQL traversal.  This avoids
+      // eagerly scheduling every tool inside the define block — only
+      // fields actually requested by the query will trigger their
+      // dependency chains.
+      if (
+        cleanPath.length === 0 &&
+        !array &&
+        matches.every(
+          (w): boolean =>
+            "from" in w &&
+            w.from.module.startsWith("__define_out_") &&
+            w.from.path.length === 0,
+        )
+      ) {
+        return this;
+      }
+
       const response = this.resolveWires(matches);
 
       if (!array) {
@@ -708,6 +745,24 @@ export class ExecutionTree {
         s.state[trunkKey({ ...this.trunk, element: true })] = item;
         return s;
       });
+    }
+
+    // ── Resolve field from deferred define ────────────────────────────
+    // No direct wires for this field path — check whether a define
+    // forward wire exists at the root level (`o <- defineHandle`) and
+    // resolve only the matching field wire from the define's output.
+    if (cleanPath.length > 0) {
+      const defineFieldWires = this.findDefineFieldWires(cleanPath);
+      if (defineFieldWires.length > 0) {
+        const response = this.resolveWires(defineFieldWires);
+        if (!array) return response;
+        const items = (await response) as any[];
+        return items.map((item) => {
+          const s = this.shadow();
+          s.state[trunkKey({ ...this.trunk, element: true })] = item;
+          return s;
+        });
+      }
     }
 
     // Fallback: if this shadow tree has stored element data, resolve the
@@ -737,5 +792,39 @@ export class ExecutionTree {
 
     // Return self to trigger downstream resolvers
     return this;
+  }
+
+  /**
+   * Find define output wires for a specific field path.
+   *
+   * Looks for whole-object define forward wires (`o <- defineHandle`)
+   * at path=[] for this trunk, then searches the define's output wires
+   * for ones matching the requested field path.
+   */
+  private findDefineFieldWires(cleanPath: string[]): Wire[] {
+    const forwards =
+      this.bridge?.wires.filter(
+        (w): w is Extract<Wire, { from: NodeRef }> =>
+          "from" in w &&
+          sameTrunk(w.to, this.trunk) &&
+          w.to.path.length === 0 &&
+          w.from.module.startsWith("__define_out_") &&
+          w.from.path.length === 0,
+      ) ?? [];
+
+    if (forwards.length === 0) return [];
+
+    const result: Wire[] = [];
+    for (const fw of forwards) {
+      const defOutTrunk = fw.from;
+      const fieldWires =
+        this.bridge?.wires.filter(
+          (w) =>
+            sameTrunk(w.to, defOutTrunk) &&
+            pathEquals(w.to.path, cleanPath),
+        ) ?? [];
+      result.push(...fieldWires);
+    }
+    return result;
   }
 }
