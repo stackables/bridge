@@ -1,13 +1,54 @@
 # Bridge Observability — Tool-Call Tracing
 
 Bridge ships with a built-in tracing system that records every tool invocation
-during a GraphQL request. Traces are returned as a structured array in the
-standard GraphQL `extensions` field, making them available to any client without
-changing the data schema.
+during a GraphQL request. Traces are surfaced in two complementary ways:
 
-## Enabling Tracing
+1. **OpenTelemetry spans** — every tool call produces a `bridge.tool` span via
+   the standard `@opentelemetry/api`. Spans are emitted whenever an OTel SDK is
+   registered; they are zero-overhead no-ops otherwise.
+2. **`extensions.traces`** — structured traces are returned in the standard
+   GraphQL `extensions` field for debugging and testing when `trace` is enabled.
 
-Pass `trace` when calling `bridgeTransform`:
+## OpenTelemetry Integration
+
+Bridge instruments every tool invocation using the standard
+[`@opentelemetry/api`](https://www.npmjs.com/package/@opentelemetry/api)
+package. No additional configuration is required inside Bridge itself — you only
+need to register an OTel SDK in your application.
+
+### Span Details
+
+Each tool call produces one span named **`bridge.tool`** with the following
+attributes:
+
+| Attribute | Value |
+|-----------|-------|
+| `bridge.tool.name` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.upperCase"`) |
+| `bridge.tool.fn` | Registered function that was called (e.g. `"httpCall"`, `"upperCase"`) |
+
+On error the span status is set to `ERROR` and the exception is recorded with
+`span.recordException()`.
+
+### Example Setup (Node.js)
+
+```ts
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter(),
+});
+sdk.start();
+```
+
+Once the SDK is running, every `bridge.tool` span is automatically exported to
+your configured backend (Jaeger, Zipkin, Grafana Tempo, etc.). No changes to
+Bridge configuration are needed.
+
+## Enabling `extensions.traces`
+
+Pass `trace` when calling `bridgeTransform` to also populate the response
+`extensions.traces` array (useful for debugging and testing):
 
 ```ts
 import { bridgeTransform, useBridgeTracing } from "@stackables/bridge";
@@ -32,6 +73,9 @@ const yoga = createYoga({
 
 > **Zero overhead when disabled** — when `trace` is omitted or `false`, no
 > collector is created and the hot path is not touched.
+>
+> OTel spans are emitted regardless of the `trace` option; they become no-ops
+> automatically when no OTel SDK is registered.
 
 ## Response Format
 
