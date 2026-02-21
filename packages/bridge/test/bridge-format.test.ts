@@ -5,7 +5,7 @@ import {
     parsePath,
     serializeBridge,
 } from "../src/bridge-format.js";
-import type { Bridge, Instruction, ToolDef } from "../src/types.js";
+import type { Bridge, Instruction, ToolDef, Wire } from "../src/types.js";
 import { SELF_MODULE } from "../src/types.js";
 
 // ── parsePath ───────────────────────────────────────────────────────────────
@@ -893,6 +893,34 @@ o.result <- cfg.apiKey
       bridge.wires.filter((w) => "from" in w && w.from.element).length,
       2,
     );
+  });
+
+  test("inline # comments are stripped from wire lines", () => {
+    const bridge = parseBridge(`version 1.4
+
+bridge Query.greet {
+  with input as i  # the request
+  with output as o # the response
+
+  o.name <- i.username # copy the name across
+}`).find((inst) => inst.kind === "bridge") as Bridge;
+    const wire = bridge.wires.find(
+      (w) => "from" in w && !("value" in w),
+    ) as Wire;
+    assert.equal(wire.to.path.join("."), "name");
+    assert.equal(wire.from.path.join("."), "username");
+  });
+
+  test("# inside a string literal is not treated as a comment", () => {
+    const tool = parseBridge(`version 1.4
+
+tool myApi from httpCall {
+  .url = "https://example.com/things#anchor"
+}`).find((inst) => inst.kind === "tool") as ToolDef;
+    const urlWire = tool.wires.find(
+      (w) => w.kind === "constant" && w.target === "url",
+    ) as { kind: "constant"; target: string; value: string };
+    assert.equal(urlWire.value, "https://example.com/things#anchor");
   });
 });
 
