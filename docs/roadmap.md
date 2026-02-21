@@ -30,18 +30,6 @@ define smartPrice {
 
 **Implementation sketch:** ~50-80 lines -- one new Wire variant, one parser rule, one engine path in `resolveWires()`.
 
-### LSP: Completions
-
-After `with `, suggest declared tool/define names from the file. After `handle.`, suggest known field paths from the tool's wire definitions.
-
-### LSP: Go-to-Definition
-
-From a handle reference in a wire, jump to the `with <handle>` declaration line.
-
-### LSP: Prettify Error Messages
-
-Map verbose Chevrotain token-type names (e.g. "Expecting one of: Identifier, InputKw...") to human-readable descriptions.
-
 ### Browser Playground
 
 A fully client-side interactive playground — no server infra, no proxying, no client secrets leaving the browser.
