@@ -1,3 +1,5 @@
+[![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
+
 # The Bridge
 
 **Declarative dataflow for GraphQL.**

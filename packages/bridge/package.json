@@ -6,7 +6,8 @@
   "type": "module",
   "types": "./src/index.ts",
   "files": [
-    "build"
+    "build",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
