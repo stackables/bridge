@@ -234,13 +234,22 @@ export class ExecutionTree {
 
     let value: any;
     if (dep.kind === "context") {
-      value = this.context ?? this.parent?.context;
+      // Walk the full parent chain for context
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      let cursor: ExecutionTree | undefined = this;
+      while (cursor && value === undefined) {
+        value = cursor.context;
+        cursor = cursor.parent;
+      }
     } else if (dep.kind === "const") {
-      value = this.state[
-        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
-      ] ?? this.parent?.state[
-        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
-      ];
+      // Walk the full parent chain for const state
+      const constKey = trunkKey({ module: SELF_MODULE, type: "Const", field: "const" });
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      let cursor: ExecutionTree | undefined = this;
+      while (cursor && value === undefined) {
+        value = cursor.state[constKey];
+        cursor = cursor.parent;
+      }
     } else if (dep.kind === "tool") {
       value = await this.resolveToolDep(dep.tool);
     }
@@ -390,7 +399,14 @@ export class ExecutionTree {
 
   private async pullSingle(ref: NodeRef): Promise<any> {
     const key = trunkKey(ref);
-    let value: any = this.state[key] ?? this.parent?.state[key];
+    // Walk the full parent chain — shadow trees may be nested multiple levels
+    let value: any = undefined;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    let cursor: ExecutionTree | undefined = this;
+    while (cursor && value === undefined) {
+      value = cursor.state[key];
+      cursor = cursor.parent;
+    }
 
     if (value === undefined) {
       this.state[key] = this.schedule(ref);
@@ -577,6 +593,31 @@ export class ExecutionTree {
         s.state[trunkKey({ ...this.trunk, element: true })] = item;
         return s;
       });
+    }
+
+    // Fallback: if this shadow tree has stored element data, resolve the
+    // requested field directly from it. This handles passthrough arrays
+    // where the bridge maps an inner array (e.g. `.stops <- j.stops`) but
+    // doesn't explicitly wire each scalar field on the element type.
+    if (this.parent) {
+      const elementKey = trunkKey({ ...this.trunk, element: true });
+      const elementData = this.state[elementKey];
+      if (elementData != null && typeof elementData === "object" && !Array.isArray(elementData)) {
+        const fieldName = cleanPath[cleanPath.length - 1];
+        if (fieldName !== undefined && fieldName in elementData) {
+          const value = (elementData as Record<string, any>)[fieldName];
+          if (array && Array.isArray(value)) {
+            // Nested array: wrap items in shadow trees so they can
+            // resolve their own fields via this same fallback path.
+            return value.map((item: any) => {
+              const s = this.shadow();
+              s.state[elementKey] = item;
+              return s;
+            });
+          }
+          return value;
+        }
+      }
     }
 
     // Return self to trigger downstream resolvers

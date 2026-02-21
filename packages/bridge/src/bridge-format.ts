@@ -489,6 +489,7 @@ function parseBridgeBlock(block: string, lineOffset: number, previousInstruction
       const [, targetStr, quotedValue, unquotedValue] = constantMatch;
       const value = quotedValue ?? unquotedValue;
       const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
+      assertNoTargetIndices(toRef, ln(i));
       wires.push({ value, to: toRef });
       continue;
     }
@@ -509,6 +510,7 @@ function parseBridgeBlock(block: string, lineOffset: number, previousInstruction
         assertNotReserved(iterHandle, ln(i), "iterator handle");
         const fromRef = resolveAddress(fromClean, handleRes, bridgeType, bridgeField, ln(i));
         const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
+        assertNoTargetIndices(toRef, ln(i));
         wires.push({ from: fromRef, to: toRef });
         currentArrayToPath = toRef.path;
         currentIterHandle = iterHandle;
@@ -556,6 +558,7 @@ function parseBridgeBlock(block: string, lineOffset: number, previousInstruction
       }
 
       const toRef = resolveAddress(targetStr, handleRes, bridgeType, bridgeField, ln(i));
+      assertNoTargetIndices(toRef, ln(i));
 
       for (let ci = 0; ci < sourceParts.length; ci++) {
         const isFirst = ci === 0;
@@ -1107,6 +1110,17 @@ function resolveAddress(
     `${lineNum != null ? `Line ${lineNum}: ` : ""}Undeclared handle "${prefix}". ` +
     `Add 'with ${prefix}' or 'with ${prefix} as ${prefix}' to the bridge header.`,
   );
+}
+
+/** Reject explicit array indices on the target (LHS) of a wire. */
+function assertNoTargetIndices(ref: NodeRef, lineNum?: number): void {
+  if (ref.path.some((seg) => /^\d+$/.test(seg))) {
+    throw new Error(
+      `${lineNum != null ? `Line ${lineNum}: ` : ""}` +
+      `Explicit array index in wire target is not supported. ` +
+      `Use array mapping (\`[] as iter { }\`) instead.`,
+    );
+  }
 }
 
 // ── Const block parser ──────────────────────────────────────────────────────
