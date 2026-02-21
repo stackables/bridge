@@ -8,10 +8,9 @@ bridge Query.format {
   with input as i
   with output as o
 
-o.original <- i.text
-o.upper <- up:i.text
-o.lower <- lo:i.text
-
+  o.original <- i.text # Comments can be here also
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
 }
 
 bridge Query.findEmployee {
@@ -20,10 +19,9 @@ bridge Query.findEmployee {
   with input as i
   with output as o
 
-find.in <- db.employees
-find.department <- i.department
-o.id <- find.id
-o.name <- find.name
-o.department <- find.department
-
+  find.in <- db.employees
+  find.department <- i.department
+  o.id <- find.id
+  o.name <- find.name
+  o.department <- find.department
 }

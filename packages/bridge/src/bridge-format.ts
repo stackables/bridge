@@ -40,10 +40,25 @@ function assertNotReserved(name: string, lineNum: number, label: string) {
   }
 }
 
+/**
+ * Strip a trailing `# comment` from a single source line, respecting string
+ * literals so that a `#` inside `"..."` is never treated as a comment marker.
+ * Leading/trailing whitespace of the returned value is preserved (callers trim
+ * the result themselves as needed).
+ */
+function stripInlineComment(line: string): string {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') inString = !inString;
+    if (!inString && line[i] === "#") return line.slice(0, i).trimEnd();
+  }
+  return line;
+}
+
 export function parseBridge(text: string): Instruction[] {
-  // Normalize: CRLF → LF, tabs → 2 spaces
+  // Normalize: CRLF → LF, tabs → 2 spaces, inline comments stripped
   const normalized = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
-  const allLines = normalized.split("\n");
+  const allLines = normalized.split("\n").map(stripInlineComment);
 
   // Version check — first non-blank, non-comment line must be `version 1.4`
   const firstContentIdx = allLines.findIndex(

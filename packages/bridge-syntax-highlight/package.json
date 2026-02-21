@@ -1,9 +1,14 @@
 {
-  "name": "bridge-highlighting",
-  "displayName": "The Bridge Highlighter",
+  "name": "@stackables/bridge-syntax-highlight",
+  "displayName": "The Bridge Language",
+  "description": "Syntax highlighting for the bridge language",
   "version": "0.0.1",
-  "publisher": "local",
-  "engines": { "vscode": "^1.0.0" },
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
   "contributes": {
     "languages": [{
       "id": "bridge",
@@ -14,7 +19,7 @@
     "grammars": [{
       "language": "bridge",
       "scopeName": "source.bridge",
-      "path": "./bridge.tmLanguage.json"
+      "path": "./syntaxes/bridge.tmLanguage.json"
     }]
   }
 }
