@@ -1,4 +1,6 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
+[![extension](https://img.shields.io/badge/VS_Code-Syntax_highlight-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
+
 
 # The Bridge
 
@@ -127,6 +129,8 @@ const schema = bridgeTransform(
 ---
 
 ## The Language
+
+Get syntax highlighting for Visual Studio Code at https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight
 
 Every `.bridge` file must begin with a version declaration.
 

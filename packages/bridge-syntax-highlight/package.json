@@ -1,14 +1,19 @@
 {
-  "name": "@stackables/bridge-syntax-highlight",
+  "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting for the bridge language",
   "version": "0.0.1",
+  "publisher": "stackables",
   "engines": {
     "vscode": "^1.109.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stackables/bridge.git"
+  },
   "contributes": {
     "languages": [{
       "id": "bridge",
