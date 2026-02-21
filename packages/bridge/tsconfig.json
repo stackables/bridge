@@ -6,7 +6,6 @@
     "declarationMap": true,
     "strictNullChecks": true,
     "isolatedModules": true,
-    "composite": true
   },
   "include": [
     "src"
