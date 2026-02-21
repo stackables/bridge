@@ -1,4 +1,4 @@
-import { parsePath } from "./bridge-format.js";
+import { parsePath } from "./utils.js";
 import type {
   Bridge,
   ConstDef,

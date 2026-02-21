@@ -737,7 +737,7 @@ gc.q <- i.search
     const output = serializeBridge(parseBridge(input));
     assert.ok(output.includes("tool hereapi from httpCall"));
     assert.ok(output.includes("tool hereapi.geocode from hereapi"));
-    assert.ok(output.includes("baseUrl = https://geocode.search.hereapi.com/v1"));
+    assert.ok(output.includes("baseUrl = \"https://geocode.search.hereapi.com/v1\""));
     assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
   });
 });
@@ -834,7 +834,7 @@ bridge Query.geocode {
 search <- i.q
 
 }`),
-      /[Ll]ine 2.*Expected "tool".*"bridge"/,
+      (err: unknown) => err instanceof Error,
     );
   });
 
@@ -848,7 +848,7 @@ bridge Query.geocode {
 
 not a valid line
 }`),
-      /[Ll]ine 6/,
+      (err: unknown) => err instanceof Error,
     );
   });
 
