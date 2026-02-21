@@ -5,7 +5,7 @@ import {
   type GraphQLSchema,
   defaultFieldResolver,
 } from "graphql";
-import { ExecutionTree } from "./ExecutionTree.js";
+import { ExecutionTree, TraceCollector, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
 import { builtinTools } from "./tools/index.js";
 import type { Instruction, ToolCallFn, ToolMap } from "./types.js";
 import { SELF_MODULE } from "./types.js";
@@ -19,6 +19,10 @@ export type BridgeOptions = {
   /** Optional function to reshape/restrict the GQL context before it reaches bridge files.
    *  By default the full context is exposed via `with context`. */
   contextMapper?: (context: any) => Record<string, any>;
+  /** Enable tool-call tracing.
+   *  - `true` or `"full"`: record tool, fn, input, output/error, timing
+   *  - `"basic"`: record tool, fn, timing, error (no input/output) */
+  trace?: boolean | TraceLevel;
 };
 
 /** Instructions can be a static array or a function that selects per-request */
@@ -33,6 +37,8 @@ export function bridgeTransform(
 ): GraphQLSchema {
   const userTools = options?.tools;
   const contextMapper = options?.contextMapper;
+  const tracing = options?.trace ?? false;
+  const traceLevel: TraceLevel | false = tracing === true ? "full" : tracing === false ? false : tracing;
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -80,6 +86,12 @@ export function bridgeTransform(
               allTools,
               bridgeContext,
             );
+
+            if (traceLevel) {
+              source.tracer = new TraceCollector(traceLevel);
+              // Stash tracer on GQL context so the tracing plugin can read it
+              context.__bridgeTracer = source.tracer;
+            }
           }
 
           if (
@@ -109,4 +121,50 @@ export function bridgeTransform(
       };
     },
   });
+}
+
+/**
+ * Read traces that were collected during the current request.
+ * Pass the GraphQL context object; returns an empty array when tracing is
+ * disabled or no traces were recorded.
+ */
+export function getBridgeTraces(context: any): ToolTrace[] {
+  return (context?.__bridgeTracer as TraceCollector | undefined)?.traces ?? [];
+}
+
+/**
+ * Envelop-compatible plugin for GraphQL Yoga (or any Envelop-based server).
+ * When bridge tracing is enabled, this plugin copies the recorded traces into
+ * the GraphQL response `extensions.traces` field.
+ *
+ * Usage:
+ * ```ts
+ * createYoga({ schema, plugins: [useBridgeTracing()] })
+ * ```
+ */
+export function useBridgeTracing() {
+  return {
+    onExecute({ args }: { args: { contextValue: any } }) {
+      return {
+        onExecuteDone({
+          result,
+          setResult,
+        }: {
+          result: any;
+          setResult: (r: any) => void;
+        }) {
+          const traces = getBridgeTraces(args.contextValue);
+          if (traces.length > 0 && result && "data" in result) {
+            setResult({
+              ...result,
+              extensions: {
+                ...(result.extensions ?? {}),
+                traces,
+              },
+            });
+          }
+        },
+      };
+    },
+  };
 }

@@ -41,6 +41,62 @@ function pathEquals(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+/** Trace verbosity level */
+export type TraceLevel = "basic" | "full";
+
+/** A single recorded tool invocation. */
+export type ToolTrace = {
+  /** Tool name as resolved (e.g. "hereGeo", "std.upperCase") */
+  tool: string;
+  /** The function that was called (e.g. "httpCall", "upperCase") */
+  fn: string;
+  /** Input object passed to the tool function (only in "full" level) */
+  input?: Record<string, any>;
+  /** Resolved output (only in "full" level, on success) */
+  output?: any;
+  /** Error message (present when the tool threw) */
+  error?: string;
+  /** Wall-clock duration in milliseconds */
+  durationMs: number;
+  /** Monotonic timestamp (ms) relative to the first trace in the request */
+  startedAt: number;
+};
+
+/** Shared trace collector — one per request, passed through the tree. */
+export class TraceCollector {
+  readonly traces: ToolTrace[] = [];
+  readonly level: TraceLevel;
+  private readonly epoch = performance.now();
+
+  constructor(level: TraceLevel = "full") {
+    this.level = level;
+  }
+
+  /** Returns ms since the collector was created */
+  now(): number {
+    return Math.round((performance.now() - this.epoch) * 100) / 100;
+  }
+
+  record(trace: ToolTrace): void {
+    this.traces.push(trace);
+  }
+
+  /** Build a trace entry, omitting input/output for basic level. */
+  entry(base: { tool: string; fn: string; startedAt: number; durationMs: number; input?: Record<string, any>; output?: any; error?: string }): ToolTrace {
+    if (this.level === "basic") {
+      const t: ToolTrace = { tool: base.tool, fn: base.fn, durationMs: base.durationMs, startedAt: base.startedAt };
+      if (base.error) t.error = base.error;
+      return t;
+    }
+    // full
+    const t: ToolTrace = { tool: base.tool, fn: base.fn, durationMs: base.durationMs, startedAt: base.startedAt };
+    if (base.input) t.input = structuredClone(base.input);
+    if (base.error) t.error = base.error;
+    else if (base.output !== undefined) t.output = base.output;
+    return t;
+  }
+}
+
 /** Set a value at a nested path, creating intermediate objects/arrays as needed */
 function setNested(obj: any, path: string[], value: any): void {
   for (let i = 0; i < path.length - 1; i++) {
@@ -62,6 +118,8 @@ export class ExecutionTree {
   private toolDepCache: Map<string, Promise<any>> = new Map();
   private toolDefCache: Map<string, ToolDef | null> = new Map();
   private pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]> | undefined;
+  /** Shared trace collector — present only when tracing is enabled. */
+  tracer?: TraceCollector;
 
   constructor(
     public trunk: Trunk,
@@ -280,9 +338,18 @@ export class ExecutionTree {
 
       // on error: wrap the tool call with fallback from onError wire
       const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+      const tracer = this.tracer;
+      const traceStart = tracer?.now();
       try {
-        return await fn(input);
+        const result = await fn(input);
+        if (tracer && traceStart != null) {
+          tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+        }
+        return result;
       } catch (err) {
+        if (tracer && traceStart != null) {
+          tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+        }
         if (!onErrorWire) throw err;
         if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
         return this.resolveToolSource(onErrorWire.source, toolDef);
@@ -362,9 +429,18 @@ export class ExecutionTree {
 
         // on error: wrap the tool call with fallback from onError wire
         const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+        const tracer = this.tracer;
+        const traceStart = tracer?.now();
         try {
-          return await fn(input);
+          const result = await fn(input);
+          if (tracer && traceStart != null) {
+            tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+          }
+          return result;
         } catch (err) {
+          if (tracer && traceStart != null) {
+            tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+          }
           if (!onErrorWire) throw err;
           if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
           return this.resolveToolSource(onErrorWire.source, toolDef);
@@ -374,7 +450,20 @@ export class ExecutionTree {
       // Direct tool function lookup by name (simple or dotted)
       const directFn = this.lookupToolFn(toolName);
       if (directFn) {
-        return directFn(input);
+        const tracer = this.tracer;
+        const traceStart = tracer?.now();
+        try {
+          const result = await directFn(input);
+          if (tracer && traceStart != null) {
+            tracer.record(tracer.entry({ tool: toolName, fn: toolName, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+          }
+          return result;
+        } catch (err) {
+          if (tracer && traceStart != null) {
+            tracer.record(tracer.entry({ tool: toolName, fn: toolName, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
+          }
+          throw err;
+        }
       }
 
       // Define pass-through: synthetic trunks created by define inlining
@@ -388,13 +477,20 @@ export class ExecutionTree {
   }
 
   shadow(): ExecutionTree {
-    return new ExecutionTree(
+    const child = new ExecutionTree(
       this.trunk,
       this.instructions,
       this.toolFns,
       undefined,
       this,
     );
+    child.tracer = this.tracer;
+    return child;
+  }
+
+  /** Returns collected traces (empty array when tracing is disabled). */
+  getTraces(): ToolTrace[] {
+    return this.tracer?.traces ?? [];
   }
 
   private async pullSingle(ref: NodeRef): Promise<any> {

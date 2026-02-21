@@ -71,6 +71,7 @@ bridge Query.getWeather {
   with first as f
   with input as i
   with output as o
+  with std.upperCase as upper
 
   g.q <- i.cityName # Only used if lat/lon not provided
   g.format = "json"
@@ -79,7 +80,7 @@ bridge Query.getWeather {
 
   w.lat  <- i.lat || f.lat
   w.lon <- i.lon || f.lon
-  w.cityName <- i.cityName || f.display_name || "Unknown"
+  w.cityName <- upper:i.cityName || f.display_name || "Unknown"
 
   o <- w
 }
