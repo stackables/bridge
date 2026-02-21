@@ -2,8 +2,9 @@
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting for the bridge language",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "stackables",
+  "icon": "logo128.png",
   "engines": {
     "vscode": "^1.109.0"
   },
