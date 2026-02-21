@@ -11,8 +11,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { yoga as builtinToolsYoga } from "../examples/builtin-tools/server.js";
-import { yoga as weatherYoga } from "../examples/weather-api/server.js";
+import { yoga as builtinToolsYoga } from "../../../examples/builtin-tools/server.js";
+import { yoga as weatherYoga } from "../../../examples/weather-api/server.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

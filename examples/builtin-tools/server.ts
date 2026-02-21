@@ -1,7 +1,7 @@
 import { createSchema, createYoga } from "graphql-yoga";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { bridgeTransform, parseBridge } from "../../src/index.js";
+import { bridgeTransform, parseBridge } from "@stackables/bridge";
 
 const typeDefs = readFileSync(
   new URL("./BuiltinTools.graphql", import.meta.url),

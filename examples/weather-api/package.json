@@ -1,0 +1,16 @@
+{
+  "name": "@stackables/bridge-example-weather-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx/esm server.ts"
+  },
+  "dependencies": {
+    "@stackables/bridge": "workspace:*",
+    "graphql-yoga": "^5.18.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}
