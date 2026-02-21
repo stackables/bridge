@@ -1370,8 +1370,8 @@ o.label <- p.label || b.label
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
     assert.equal(result.data.lookup.label, "from-primary");
-    // backup still runs in parallel (multi-wire) but its result is discarded
-    // — what matters is the returned value, not whether backup was called
+    // v2.0: sequential short-circuit — backup is never called when primary succeeds
+    assert.equal(backupCalled, false, "backup should NOT be called when primary returns non-null");
   });
 
   test("|| source || literal: both null → literal fires", async () => {

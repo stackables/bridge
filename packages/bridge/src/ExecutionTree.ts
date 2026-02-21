@@ -432,41 +432,60 @@ export class ExecutionTree {
     return result;
   }
 
+  /**
+   * Infer the cost of resolving a NodeRef.
+   * Cost 0: memory reads (input, context, const) — no I/O.
+   * Cost 1: everything else (tool calls, pipes, defines) — may involve network.
+   */
+  private inferCost(ref: NodeRef): number {
+    // Input args, context, and const live in the state map — free reads
+    if (ref.module === SELF_MODULE) {
+      const key = trunkKey(ref);
+      // Already resolved in state? Free.
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      let cursor: ExecutionTree | undefined = this;
+      while (cursor) {
+        if (cursor.state[key] !== undefined) return 0;
+        cursor = cursor.parent;
+      }
+      // Input/context/const trunks are always cost 0
+      if (ref.type === "Context" || ref.type === "Const") return 0;
+      // Input args trunk: _:Query:fieldName (same as this.trunk) — cost 0
+      if (ref.module === SELF_MODULE && ref.type === this.trunk.type && ref.field === this.trunk.field && !ref.element) return 0;
+    }
+    return 1;
+  }
+
   async pull(refs: NodeRef[]): Promise<any> {
     if (refs.length === 1) return this.pullSingle(refs[0]);
 
-    // Multiple sources: all start in parallel.
-    // Return the first that resolves to a non-null/undefined value.
-    // If all resolve to null/undefined → resolve undefined (lets || fire).
-    // If all reject → throw AggregateError (lets ?? fire).
-    return new Promise<any>((resolve, reject) => {
-      let remaining = refs.length;
-      let hasValue = false;
-      const errors: unknown[] = [];
+    // Cost-sorted sequential evaluation with short-circuit.
+    //
+    // Sort by inferred cost (stable — preserves declaration order within
+    // the same cost tier). This means:
+    //   • ||  chains (both sources are tools = same cost) → left-to-right
+    //   • Overdefinition with mixed costs → cheapest first
+    //
+    // Evaluate sequentially. Return the first non-null value.
+    // If all return null/undefined → return undefined (lets || fire).
+    // If all throw → throw AggregateError (lets ?? fire).
+    const sorted = [...refs].sort((a, b) => this.inferCost(a) - this.inferCost(b));
+    const errors: unknown[] = [];
 
-      const settle = () => {
-        if (--remaining === 0 && !hasValue) {
-          if (errors.length === refs.length) {
-            reject(new AggregateError(errors, "All sources failed"));
-          } else {
-            resolve(undefined); // all resolved to null/undefined
-          }
-        }
-      };
-
-      for (const ref of refs) {
-        this.pullSingle(ref).then(
-          (value) => {
-            if (!hasValue && value != null) {
-              hasValue = true;
-              resolve(value);
-            }
-            settle();
-          },
-          (err) => { errors.push(err); settle(); },
-        );
+    for (const ref of sorted) {
+      try {
+        const value = await this.pullSingle(ref);
+        if (value != null) return value; // Short-circuit: found data
+      } catch (err) {
+        errors.push(err);
       }
-    });
+    }
+
+    // All resolved to null/undefined, or all threw
+    if (errors.length === refs.length) {
+      throw new AggregateError(errors, "All sources failed");
+    }
+    return undefined;
   }
 
   push(args: Record<string, any>) {
