@@ -9,6 +9,7 @@
     { "include": "#block-braces" },
     { "include": "#wire-lines" },
     { "include": "#const-lines" },
+    { "include": "#reserved-handles" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#booleans" },
@@ -53,8 +54,20 @@
       "name": "string.unquoted.path.bridge"
     },
 
+    "reserved-handles": {
+      "comment": "Special injected graph handles",
+      "match": "\\b(input|output|context)\\b",
+      "name": "variable.language.special.bridge"
+    },
+
+    "barewords": {
+      "comment": "Uppercase barewords like EUR or USD",
+      "match": "\\b[A-Z_][A-Z0-9_]*\\b",
+      "name": "constant.other.enum.bridge"
+    },
+
     "block-headers": {
-      "comment": "Lines starting with bridge/define/tool/extend/const/with keywords",
+      "comment": "Lines starting with bridge/define/tool/const/with keywords",
       "patterns": [
         {
           "comment": "bridge Type.field with <target>  (inline composition, no braces)",
@@ -92,24 +105,6 @@
             "2": { "name": "variable.other.handle.bridge" },
             "3": { "name": "keyword.control.bridge" },
             "4": { "name": "entity.name.function.bridge" }
-          }
-        },
-        {
-          "comment": "extend <source> as <name>",
-          "match": "^\\s*(extend)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
-            "1": { "name": "keyword.control.bridge" },
-            "2": { "name": "entity.name.function.bridge" },
-            "3": { "name": "keyword.control.bridge" },
-            "4": { "name": "variable.other.handle.bridge" }
-          }
-        },
-        {
-          "comment": "extend <source>  (no alias)",
-          "match": "^\\s*(extend)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
-          "captures": {
-            "1": { "name": "keyword.control.bridge" },
-            "2": { "name": "entity.name.function.bridge" }
           }
         },
         {
@@ -158,6 +153,7 @@
         "3": { "name": "keyword.operator.wire.bridge" }
       },
       "patterns": [
+        { "include": "#comments" },
         {
           "comment": "Array mapping: source[] as <alias>",
           "match": "(\\[\\])(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
@@ -187,6 +183,7 @@
           "match": "\\?\\?",
           "name": "keyword.operator.error-fallback.bridge"
         },
+        { "include": "#reserved-handles" },
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#booleans" }
@@ -205,6 +202,8 @@
             "2": { "name": "keyword.operator.assignment.bridge" }
           },
           "patterns": [
+            { "include": "#comments" },
+            { "include": "#barewords" },
             { "include": "#strings" },
             { "include": "#numbers" },
             { "include": "#booleans" },
@@ -214,11 +213,21 @@
         },
         {
           "comment": "Regular param: property = value",
-          "match": "^\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(=)\\s*",
-          "captures": {
+          "begin": "^\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(=)\\s*",
+          "end": "$",
+          "beginCaptures": {
             "1": { "name": "variable.other.property.bridge" },
             "2": { "name": "keyword.operator.assignment.bridge" }
-          }
+          },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#barewords" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#booleans" },
+            { "include": "#http-methods" },
+            { "include": "#path-values" }
+          ]
         }
       ]
     },

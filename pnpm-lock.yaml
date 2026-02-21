@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  packages/bridge:
     dependencies:
       '@graphql-tools/utils':
         specifier: ^11
@@ -36,6 +38,8 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/bridge-syntax-highlight: {}
 
 packages:
 
