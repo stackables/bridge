@@ -81,9 +81,9 @@ function assertNotReserved(name: string, lineNum: number, label: string) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class BridgeParser extends CstParser {
-  constructor() {
+  constructor(opts: { recovery?: boolean } = {}) {
     super(allTokens, {
-      recoveryEnabled: false,
+      recoveryEnabled: opts.recovery ?? false,
       maxLookahead: 4,
     });
     this.performSelfAnalysis();
@@ -694,8 +694,11 @@ class BridgeParser extends CstParser {
   });
 }
 
-// Singleton parser instance (Chevrotain best practice)
+// Singleton parser instances (Chevrotain best practice)
+// Strict instance: throws on first error (used by parseBridgeChevrotain)
 const parserInstance = new BridgeParser();
+// Lenient instance: error recovery enabled (used by parseBridgeDiagnostics)
+const diagParserInstance = new BridgeParser({ recovery: true });
 
 const BRIDGE_VERSION = "1.4";
 
@@ -705,6 +708,84 @@ const BRIDGE_VERSION = "1.4";
 
 export function parseBridgeChevrotain(text: string): Instruction[] {
   return internalParse(text);
+}
+
+// ── Diagnostic types ──────────────────────────────────────────────────────
+
+export type BridgeDiagnostic = {
+  message: string;
+  severity: "error" | "warning";
+  range: {
+    start: { line: number; character: number };
+    end:   { line: number; character: number };
+  };
+};
+
+export type BridgeParseResult = {
+  instructions: Instruction[];
+  diagnostics: BridgeDiagnostic[];
+  /** 1-based start line for each top-level instruction */
+  startLines: Map<Instruction, number>;
+};
+
+/**
+ * Parse a Bridge DSL text and return both the AST and all diagnostics.
+ * Uses Chevrotain's error recovery — always returns a (possibly partial) AST
+ * even when the file has errors. Designed for LSP/IDE use.
+ */
+export function parseBridgeDiagnostics(text: string): BridgeParseResult {
+  const diagnostics: BridgeDiagnostic[] = [];
+
+  // 1. Lex
+  const lexResult = BridgeLexer.tokenize(text);
+  for (const e of lexResult.errors) {
+    diagnostics.push({
+      message: e.message,
+      severity: "error",
+      range: {
+        start: { line: (e.line ?? 1) - 1, character: (e.column ?? 1) - 1 },
+        end:   { line: (e.line ?? 1) - 1, character: (e.column ?? 1) - 1 + e.length },
+      },
+    });
+  }
+
+  // 2. Parse with Chevrotain error recovery (builds partial CST past errors)
+  diagParserInstance.input = lexResult.tokens;
+  const cst = diagParserInstance.program();
+  for (const e of diagParserInstance.errors) {
+    const t = e.token;
+    diagnostics.push({
+      message: e.message,
+      severity: "error",
+      range: {
+        start: { line: (t.startLine ?? 1) - 1, character: (t.startColumn ?? 1) - 1 },
+        end:   { line: (t.endLine ?? t.startLine ?? 1) - 1, character: t.endColumn ?? t.startColumn ?? 1 },
+      },
+    });
+  }
+
+  // 3. Visit → AST (semantic errors thrown as "Line N: ..." messages)
+  let instructions: Instruction[] = [];
+  let startLines = new Map<Instruction, number>();
+  try {
+    const result = toBridgeAst(cst, []);
+    instructions = result.instructions;
+    startLines   = result.startLines;
+  } catch (err) {
+    const msg = String((err as Error)?.message ?? err);
+    const m = msg.match(/^Line (\d+):/);
+    const errorLine = m ? parseInt(m[1]) - 1 : 0;
+    diagnostics.push({
+      message: msg.replace(/^Line \d+:\s*/, ""),
+      severity: "error",
+      range: {
+        start: { line: errorLine, character: 0 },
+        end:   { line: errorLine, character: 999 },
+      },
+    });
+  }
+
+  return { instructions, diagnostics, startLines };
 }
 
 function internalParse(text: string, previousInstructions?: Instruction[]): Instruction[] {
@@ -726,7 +807,7 @@ function internalParse(text: string, previousInstructions?: Instruction[]): Inst
   }
 
   // 3. Visit → AST
-  return toBridgeAst(cst, previousInstructions);
+  return toBridgeAst(cst, previousInstructions).instructions;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -923,8 +1004,9 @@ type HandleResolution = {
 //  Main AST builder
 // ═══════════════════════════════════════════════════════════════════════════
 
-function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): Instruction[] {
+function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): { instructions: Instruction[]; startLines: Map<Instruction, number> } {
   const instructions: Instruction[] = [];
+  const startLines = new Map<Instruction, number>();
 
   // If called from passthrough expansion, seed with prior context
   const contextInstructions: Instruction[] = previousInstructions
@@ -957,23 +1039,38 @@ function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): Instru
   tagged.sort((a, b) => a.offset - b.offset);
 
   for (const item of tagged) {
+    const startLine = findFirstToken(item.node)?.startLine ?? 1;
     switch (item.kind) {
-      case "const":
-        instructions.push(buildConstDef(item.node));
+      case "const": {
+        const inst = buildConstDef(item.node);
+        instructions.push(inst);
+        startLines.set(inst, startLine);
         break;
-      case "tool":
-        instructions.push(buildToolDef(item.node, [...contextInstructions, ...instructions]));
+      }
+      case "tool": {
+        const inst = buildToolDef(item.node, [...contextInstructions, ...instructions]);
+        instructions.push(inst);
+        startLines.set(inst, startLine);
         break;
-      case "define":
-        instructions.push(buildDefineDef(item.node));
+      }
+      case "define": {
+        const inst = buildDefineDef(item.node);
+        instructions.push(inst);
+        startLines.set(inst, startLine);
         break;
-      case "bridge":
-        instructions.push(...buildBridge(item.node, [...contextInstructions, ...instructions]));
+      }
+      case "bridge": {
+        const newInsts = buildBridge(item.node, [...contextInstructions, ...instructions]);
+        for (const bi of newInsts) {
+          instructions.push(bi);
+          startLines.set(bi, startLine);
+        }
         break;
+      }
     }
   }
 
-  return instructions;
+  return { instructions, startLines };
 }
 
 // ── Const ───────────────────────────────────────────────────────────────

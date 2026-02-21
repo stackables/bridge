@@ -2,6 +2,15 @@
 
 All notable changes to the "bridge" extension will be documented in this file.
 
+## [0.5.0] - 2026-02-21
+
+### Added
+
+- **Language Server** with real-time diagnostics and hover information
+- Syntax error diagnostics powered by Chevrotain parser with error recovery (partial AST even on broken files)
+- Semantic diagnostics: undeclared handles, unsatisfied `with` dependencies
+- Hover provider: hover over any handle, dependency, or wire name to see its type and declaration context
+
 ## [0.0.1] - 2026-02-21
 
 ### Added

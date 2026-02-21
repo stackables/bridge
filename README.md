@@ -1,5 +1,5 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
-[![extension](https://img.shields.io/badge/VS_Code-Syntax_highlight-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
+[![extension](https://img.shields.io/badge/VS_Code-LSP-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 
 
 # The Bridge

@@ -1,8 +1,8 @@
 {
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
-  "description": "Syntax highlighting for the bridge language",
-  "version": "0.1.0",
+  "description": "Syntax highlighting and language intelligence for the Bridge DSL",
+  "version": "0.5.0",
   "publisher": "stackables",
   "icon": "logo128.png",
   "engines": {
@@ -15,6 +15,10 @@
     "type": "git",
     "url": "git+https://github.com/stackables/bridge.git"
   },
+  "main": "./build/extension.js",
+  "activationEvents": [
+    "onLanguage:bridge"
+  ],
   "contributes": {
     "languages": [{
       "id": "bridge",
@@ -27,5 +31,20 @@
       "scopeName": "source.bridge",
       "path": "./syntaxes/bridge.tmLanguage.json"
     }]
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "vscode:prepublish": "node build.mjs"
+  },
+  "devDependencies": {
+    "@stackables/bridge": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.109.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
   }
 }
