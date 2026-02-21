@@ -6,6 +6,6 @@
   "scripts": {
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "e2e": "pnpm --filter @stackables/bridge e2e"
+    "e2e": "pnpm -r e2e"
   }
 }
