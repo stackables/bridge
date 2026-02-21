@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "description": "Declarative dataflow for GraphQL",
   "main": "./src/index.ts",
   "type": "module",
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
     "test": "node --import tsx/esm --test test/*.test.ts",
-    "semantic-release": "semantic-release -b main"
+    "release": "npx --no-install semantic-release -e semantic-release-monorepo"
   },
   "repository": {
     "type": "git",

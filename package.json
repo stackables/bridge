@@ -6,6 +6,11 @@
   "scripts": {
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "e2e": "pnpm -r e2e"
+    "e2e": "pnpm -r e2e",
+    "release": "pnpm -r --workspace-concurrency=1 --if-present run release"
+  },
+  "devDependencies": {
+    "semantic-release": "^25.0.3",
+    "semantic-release-monorepo": "^8.0.2"
   }
 }
