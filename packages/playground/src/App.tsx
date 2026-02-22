@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
@@ -7,8 +7,16 @@ import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ShareDialog } from "./components/ShareDialog";
+import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -16,7 +24,9 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
     <PanelResizeHandle
       className={cn(
         "shrink-0",
-        direction === "horizontal" ? "w-2 cursor-[col-resize]" : "h-2 cursor-[row-resize]",
+        direction === "horizontal"
+          ? "w-2 cursor-[col-resize]"
+          : "h-2 cursor-[row-resize]",
       )}
     />
   );
@@ -36,8 +46,12 @@ function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
             d.severity === "error" ? "text-red-300" : "text-yellow-200",
           )}
         >
-          <span className="opacity-60">{d.severity === "error" ? "✗" : "⚠"}</span>
-          <span>{d.message} (line {d.range.start.line + 1})</span>
+          <span className="opacity-60">
+            {d.severity === "error" ? "✗" : "⚠"}
+          </span>
+          <span>
+            {d.message} (line {d.range.start.line + 1})
+          </span>
         </div>
       ))}
     </div>
@@ -53,13 +67,19 @@ type TabStripProps = {
   runDisabled: boolean;
   running: boolean;
 };
-function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripProps) {
+function TabStrip({
+  active,
+  onChange,
+  onRun,
+  runDisabled,
+  running,
+}: TabStripProps) {
   const tab = (id: Tab, label: string) => (
     <button
       key={id}
       onClick={() => onChange(id)}
       className={cn(
-        "px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+        "uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
         active === id
           ? "border-sky-400 text-slate-200"
           : "border-transparent text-slate-500 hover:text-slate-300",
@@ -97,7 +117,7 @@ function PanelBox({ children }: { children: React.ReactNode }) {
 // ── panel header label ─────────────────────────────────────────────────────────
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 px-3.5 pt-2.5 pb-1 text-[11px] font-bold text-slate-600 uppercase tracking-widest">
+    <div className="content-center shrink-0 px-5 h-10 pt-1.5 pb-1.5 text-[11px] font-bold text-slate-200 uppercase tracking-widest">
       {children}
     </div>
   );
@@ -115,6 +135,24 @@ export function App() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("query");
+
+  // Load shared playground state from ?s=<id> on first mount
+  useEffect(() => {
+    const id = getShareIdFromUrl();
+    if (!id) return;
+    clearShareIdFromUrl();
+    loadShare(id)
+      .then((payload) => {
+        setSchema(payload.schema);
+        setBridge(payload.bridge);
+        setQuery(payload.query);
+        setContext(payload.context);
+        setResult(null);
+      })
+      .catch(() => {
+        // silently ignore — invalid/expired share id
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectExample = useCallback((index: number) => {
     const e = examples[index] ?? examples[0]!;
@@ -141,44 +179,159 @@ export function App() {
   const hasErrors = diagnostics.some((d) => d.severity === "error");
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
+    <div className="md:h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
-      <header className="shrink-0 border-b border-slate-800 px-5 py-2.5 flex items-center gap-4">
-        <a
-          href="https://github.com/stackables/bridge"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2.5 no-underline"
-        >
-          <span className="text-xl font-bold text-sky-400 tracking-tight">Bridge</span>
-          <Badge className="text-[10px] tracking-wider uppercase">Playground</Badge>
-        </a>
+      <header className="shrink-0 border-b border-slate-800">
+        {/* Row 1: logo + (desktop: example picker + info) + share */}
+        <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
+          <a
+            href="https://github.com/stackables/bridge"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2.5 no-underline"
+          >
+            <span className="text-xl font-bold text-sky-400 tracking-tight">
+              Bridge
+            </span>
+            <Badge className="text-[10px] tracking-wider uppercase">
+              Playground
+            </Badge>
+          </a>
 
-        {/* Example picker */}
-        <div className="flex items-center gap-2">
+          {/* Example picker — desktop only (row 1) */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="text-xs text-slate-600">Example:</span>
+            <Select
+              value={String(exampleIndex)}
+              onValueChange={(v) => selectExample(Number(v))}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {examples.map((ex, i) => (
+                  <SelectItem key={i} value={String(i)}>
+                    {ex.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2 md:gap-3">
+            <span className="hidden md:block text-xs text-slate-700">
+              All code runs in-browser · no server required
+            </span>
+            <ShareDialog
+              schema={schema}
+              bridge={bridge}
+              query={query}
+              context={context}
+            />
+          </div>
+        </div>
+
+        {/* Row 2: example picker — mobile only */}
+        <div className="md:hidden px-4 pb-2 flex items-center gap-2">
           <span className="text-xs text-slate-600">Example:</span>
           <Select
             value={String(exampleIndex)}
             onValueChange={(v) => selectExample(Number(v))}
           >
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {examples.map((ex, i) => (
-                <SelectItem key={i} value={String(i)}>{ex.name}</SelectItem>
+                <SelectItem key={i} value={String(i)}>
+                  {ex.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-
-        <span className="ml-auto text-xs text-slate-700">
-          All code runs in-browser · no server required
-        </span>
       </header>
 
-      {/* ── Body: padding wrapper ensures panels never touch window edges ── */}
-      <div className="flex-1 min-h-0 p-3 overflow-hidden">
+      {/* ── Mobile layout: vertical scrollable stack ── */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 md:hidden">
+        {/* Schema panel */}
+        <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
+          <PanelLabel>GraphQL Schema</PanelLabel>
+          <div className="px-3 pb-3">
+            <Editor
+              label=""
+              value={schema}
+              onChange={setSchema}
+              language="graphql"
+              autoHeight
+            />
+          </div>
+        </div>
+
+        {/* Bridge DSL panel */}
+        <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
+          <PanelLabel>Bridge DSL</PanelLabel>
+          <div className="px-3 pb-3">
+            <Editor
+              label=""
+              value={bridge}
+              onChange={setBridge}
+              language="bridge"
+              autoHeight
+            />
+          </div>
+          <DiagnosticsBar bridgeText={bridge} />
+        </div>
+
+        {/* Query / Context panel */}
+        <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
+          <div className="shrink-0 px-5 pt-1.5">
+            <TabStrip
+              active={activeTab}
+              onChange={setActiveTab}
+              onRun={handleRun}
+              runDisabled={loading || hasErrors}
+              running={loading}
+            />
+          </div>
+          <div className="p-3 pt-2">
+            {activeTab === "query" ? (
+              <Editor
+                label=""
+                value={query}
+                onChange={setQuery}
+                language="graphql"
+                autoHeight
+              />
+            ) : (
+              <Editor
+                label=""
+                value={context}
+                onChange={setContext}
+                language="json"
+                autoHeight
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Result panel */}
+        <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
+          <PanelLabel>Result</PanelLabel>
+          <div className="px-3.5 pb-3.5 flex flex-col">
+            <ResultView
+              result={result?.data}
+              errors={result?.errors}
+              loading={loading}
+              traces={result?.traces}
+              autoHeight
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Desktop layout: resizable panels ── */}
+      <div className="flex-1 min-h-0 p-3 overflow-hidden hidden md:block">
         <PanelGroup
           direction="horizontal"
           autoSaveId="bridge-playground-h"
@@ -196,7 +349,12 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>GraphQL Schema</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={schema} onChange={setSchema} />
+                    <Editor
+                      label=""
+                      value={schema}
+                      onChange={setSchema}
+                      language="graphql"
+                    />
                   </div>
                 </PanelBox>
               </Panel>
@@ -208,12 +366,16 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={bridge} onChange={setBridge} />
+                    <Editor
+                      label=""
+                      value={bridge}
+                      onChange={setBridge}
+                      language="bridge"
+                    />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
                 </PanelBox>
               </Panel>
-
             </PanelGroup>
           </Panel>
 
@@ -230,20 +392,30 @@ export function App() {
               <Panel defaultSize={40} minSize={15}>
                 <PanelBox>
                   <PanelLabel>
-                                      <TabStrip
-                    active={activeTab}
-                    onChange={setActiveTab}
-                    onRun={handleRun}
-                    runDisabled={loading || hasErrors}
-                    running={loading}
-                  />
+                    <TabStrip
+                      active={activeTab}
+                      onChange={setActiveTab}
+                      onRun={handleRun}
+                      runDisabled={loading || hasErrors}
+                      running={loading}
+                    />
                   </PanelLabel>
 
                   <div className="flex-1 min-h-0 p-3 pt-0">
                     {activeTab === "query" ? (
-                      <Editor label="" value={query} onChange={setQuery} />
+                      <Editor
+                        label=""
+                        value={query}
+                        onChange={setQuery}
+                        language="graphql"
+                      />
                     ) : (
-                      <Editor label="" value={context} onChange={setContext} />
+                      <Editor
+                        label=""
+                        value={context}
+                        onChange={setContext}
+                        language="json"
+                      />
                     )}
                   </div>
                 </PanelBox>
@@ -265,7 +437,6 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-
             </PanelGroup>
           </Panel>
         </PanelGroup>

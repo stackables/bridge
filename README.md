@@ -12,7 +12,6 @@
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
----
 
 **Browser based interactive playground with examples at https://bridge.sdk42.com 🎉**
 
@@ -38,9 +37,15 @@ We use GraphQL strictly as a clean, strongly-typed interface for internal servic
 * Multi-step database transactions or sagas.
 * Very high-performance per-field computation.
 
+## The Playground
 
+Try The Bridge instantly in your browser at **[bridge.sdk42.com](https://bridge.sdk42.com)**.
 
----
+The playground is fully client-side. **Your API keys, schemas, and data are NEVER sent to our servers.** All parsing, routing, and HTTP execution happens directly inside your browser. 
+
+Want to run it offline or within your own VPN? You can spin up the playground locally by building the `./packages/playground` workspace directly from this repository.
+
+![Playground Screenshot](./docs/screenshot-playground.png)
 
 ## The Architecture
 
@@ -72,8 +77,6 @@ Unlike JavaScript or Python, where you write sequential instructions, a `.bridge
 The Bridge language is deliberately designed to be simple for LLMs to generate and visually easy for humans to review. It supports inline documentation and works well with Git or other source control systems.
 
 Most of the time, it’s enough to give your LLM this README and the GraphQL schema file. Based on that, the LLM can generate the mapping for any API it knows. For non-public or undocumented APIs, you should provide the LLM with the JSON schema or API documentation to avoid hallucinations.
-
----
 
 ## The Workflow
 
@@ -171,8 +174,6 @@ const yoga = createYoga({
 ```
 
 If you ever need to switch from SendGrid to AWS SES, you only rewrite `logic.bridge`. Your internal services and your GraphQL schema remain completely untouched.
-
----
 
 ## The Bridge Language
 
@@ -298,8 +299,6 @@ define namedOperation {
 bridge <Type.field> with namedOperation
 
 ```
-
----
 
 ## Key Features
 
@@ -477,8 +476,6 @@ bridge Query.price {
 
 ```
 
----
-
 ## Syntax Reference
 
 | Operator | Type | Behavior |
@@ -495,7 +492,6 @@ bridge Query.price {
 | **`const`** | Named Value | Declares reusable JSON constants. |
 | **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
 
----
 
 ## Built-in Tools
 
