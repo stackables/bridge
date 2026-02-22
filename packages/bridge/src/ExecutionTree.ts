@@ -498,7 +498,7 @@ export class ExecutionTree {
     const traceStart = tracer?.now();
     const metricAttrs = { "bridge.tool.name": toolName, "bridge.tool.fn": fnName };
     return otelTracer.startActiveSpan(
-      "bridge.tool",
+      `bridge.tool.${toolName}.${fnName}`,
       { attributes: metricAttrs },
       async (span) => {
         const wallStart = performance.now();
