@@ -69,7 +69,7 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
     </button>
   );
   return (
-    <div className="flex items-center border-b border-slate-800 shrink-0 pl-2 pr-2 pt-1">
+    <div className="flex items-center shrink-0">
       {tab("query", "Query")}
       {tab("context", "Context")}
       <div className="flex-1" />
@@ -77,7 +77,7 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
         size="sm"
         onClick={onRun}
         disabled={runDisabled}
-        className="text-xs h-7 px-3 mb-1"
+        className="text-xs h-7 px-3"
       >
         {running ? "Running…" : "▶  Run"}
       </Button>
@@ -207,7 +207,7 @@ export function App() {
               <Panel defaultSize={65} minSize={20}>
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
-                  <div className="flex-1 min-h-0 px-3 pb-0">
+                  <div className="flex-1 min-h-0 px-3 pb-3">
                     <Editor label="" value={bridge} onChange={setBridge} />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
@@ -229,14 +229,17 @@ export function App() {
               {/* Query / Context tabbed panel */}
               <Panel defaultSize={40} minSize={15}>
                 <PanelBox>
-                  <TabStrip
+                  <PanelLabel>
+                                      <TabStrip
                     active={activeTab}
                     onChange={setActiveTab}
                     onRun={handleRun}
                     runDisabled={loading || hasErrors}
                     running={loading}
                   />
-                  <div className="flex-1 min-h-0 p-3">
+                  </PanelLabel>
+
+                  <div className="flex-1 min-h-0 p-3 pt-0">
                     {activeTab === "query" ? (
                       <Editor label="" value={query} onChange={setQuery} />
                     ) : (

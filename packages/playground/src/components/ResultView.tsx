@@ -37,7 +37,7 @@ export function ResultView({ result, errors, loading, traces }: Props) {
         )}
 
         {!loading && result !== undefined && (
-          <pre className="rounded-lg border border-slate-800 bg-slate-950 p-3.5 font-mono text-[13px] leading-relaxed text-green-300 overflow-x-auto m-0">
+          <pre className="h-full rounded-lg border border-slate-800 bg-slate-950 p-3.5 font-mono text-[13px] leading-relaxed text-green-300 overflow-x-auto m-0">
             {JSON.stringify(result, null, 2)}
           </pre>
         )}
