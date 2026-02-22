@@ -14,6 +14,8 @@
 
 ---
 
+**Browser based interactive playground with examples at https://bridge.sdk42.com 🎉**
+
 # The Bridge
 
 
