@@ -25,9 +25,10 @@ export type BridgeOptions = {
    *  By default the full context is exposed via `with context`. */
   contextMapper?: (context: any) => Record<string, any>;
   /** Enable tool-call tracing.
-   *  - `true` or `"full"`: record tool, fn, input, output/error, timing
-   *  - `"basic"`: record tool, fn, timing, error (no input/output) */
-  trace?: boolean | TraceLevel;
+   *  - `"off"` (default) — no collection, zero overhead
+   *  - `"basic"` — tool, fn, timing, errors; no input/output
+   *  - `"full"` — everything including input and output */
+  trace?: TraceLevel;
   /**
    * Structured logger for engine-level events (tool errors, warnings, debug).
    * Accepts any logger with `debug`, `info`, `warn`, and `error` methods —
@@ -49,8 +50,7 @@ export function bridgeTransform(
 ): GraphQLSchema {
   const userTools = options?.tools;
   const contextMapper = options?.contextMapper;
-  const tracing = options?.trace ?? false;
-  const traceLevel: TraceLevel | false = tracing === true ? "full" : tracing === false ? false : tracing;
+  const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
 
   return mapSchema(schema, {
@@ -102,7 +102,7 @@ export function bridgeTransform(
 
             source.logger = logger;
 
-            if (traceLevel) {
+            if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);
               // Stash tracer on GQL context so the tracing plugin can read it
               context.__bridgeTracer = source.tracer;

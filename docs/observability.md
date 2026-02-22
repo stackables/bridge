@@ -118,7 +118,7 @@ import { bridgeTransform, useBridgeTracing } from "@stackables/bridge";
 
 const schema = bridgeTransform(baseSchema, instructions, {
   tools,
-  trace: true,      // "full" — records tool, fn, input, output, timing
+  trace: "full",   // records tool, fn, input, output, timing
   // trace: "basic", // records tool, fn, timing, error (no input/output)
 });
 ```
@@ -134,7 +134,7 @@ const yoga = createYoga({
 });
 ```
 
-> **Zero overhead when disabled** — when `trace` is omitted or `false`, no
+> **Zero overhead when disabled** — when `trace` is omitted or `"off"`, no
 > collector is created and the hot path is not touched.
 >
 > OTel spans and metrics are emitted regardless of the `trace` option; they
@@ -166,9 +166,9 @@ When `extensions.traces` is active, the GraphQL response includes:
 
 | Value | Records |
 |-------|---------|
-| `true` / `"full"` | tool, fn, input, output, error, timing |
+| `"full"` | tool, fn, input, output, error, timing |
 | `"basic"` | tool, fn, error, timing (no input/output — lighter payload) |
-| `false` (default) | nothing — zero overhead |
+| `"off"` (default) | nothing — zero overhead |
 
 ### `ToolTrace` Fields
 
@@ -258,7 +258,7 @@ The test helper `createGateway` supports the `trace` option:
 ```ts
 const gateway = createGateway(typeDefs, instructions, {
   tools: { geocoder: mockGeocoder },
-  trace: true,
+  trace: "full",
 });
 const executor = buildHTTPExecutor({ fetch: gateway.fetch });
 const result = await executor({ document: parse(query) });
@@ -278,3 +278,5 @@ All observability types are exported from the package:
 ```ts
 import type { Logger, ToolTrace, TraceLevel } from "@stackables/bridge";
 ```
+
+`TraceLevel` is `"basic" | "full" | "off"`.

@@ -73,8 +73,11 @@ function pathEquals(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Trace verbosity level */
-export type TraceLevel = "basic" | "full";
+/** Trace verbosity level.
+ *  - `"off"` (default) — no collection, zero overhead
+ *  - `"basic"` — tool, fn, timing, errors; no input/output
+ *  - `"full"` — everything including input and output */
+export type TraceLevel = "basic" | "full" | "off";
 
 /** A single recorded tool invocation. */
 export type ToolTrace = {
@@ -97,10 +100,10 @@ export type ToolTrace = {
 /** Shared trace collector — one per request, passed through the tree. */
 export class TraceCollector {
   readonly traces: ToolTrace[] = [];
-  readonly level: TraceLevel;
+  readonly level: "basic" | "full";
   private readonly epoch = performance.now();
 
-  constructor(level: TraceLevel = "full") {
+  constructor(level: "basic" | "full" = "full") {
     this.level = level;
   }
 

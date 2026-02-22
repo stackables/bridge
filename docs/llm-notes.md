@@ -105,7 +105,7 @@ bridgeTransform(schema, instructions, {
 
 Every `.bridge` file must begin with a version declaration — the parser rejects anything without it:
 
-```hcl
+```bridge
 version 1.4
 ```
 
@@ -138,7 +138,7 @@ Three block types, multiple operators. **Braces are mandatory** for `bridge` and
 ### `const` blocks
 Declare named values as raw JSON. Multiple consts can exist in one file.
 
-```hcl
+```bridge
 const fallbackGeo = { "lat": 0, "lon": 0 }
 const defaultCurrency = "EUR"
 const maxRetries = 3
@@ -163,7 +163,7 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant. |
 
 **Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
-```hcl
+```bridge
 # o.label <- A || B || C || "literal" ?? errorSource
 o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
 
@@ -180,7 +180,7 @@ o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.
 ### Multi-wire priority (duplicate target)
 Multiple wires pointing to the same target field express **source priority**: the engine evaluates all sources in parallel and returns the first that resolves to a non-null value. Cheaper/local sources (input args) resolve before slower remote tools, so priority is naturally ordered by speed.
 
-```hcl
+```bridge
 # Explicit multi-wire form (equivalent to || inline):
 o.textPart <- i.textBody             # prefer user-supplied plain text (fast, already in args)
 o.textPart <- convert:i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
@@ -197,7 +197,7 @@ o.textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 ### `tool` blocks
 Define a reusable API call configuration. Syntax: `tool <name> from <source>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
 
-```hcl
+```bridge
 tool hereapi from httpCall {
   with context
   .baseUrl = "https://geocode.search.hereapi.com/v1"
@@ -225,7 +225,7 @@ When inheriting from a parent tool, the engine merges wires from the parent chai
 ### `define` blocks
 Declare a reusable named subgraph (pipeline). Syntax: `define <name> { ... }`. The body uses the same wire syntax as bridge blocks, with `with input as i` and `with output as o` declaring the pipeline's interface.
 
-```hcl
+```bridge
 define geocode {
   with std.httpCall as geo
   with input as i
@@ -242,7 +242,7 @@ define geocode {
 
 Use in a bridge with `with <define> as <handle>`. The define's inputs are written via `<handle>.<input>` and outputs are read via `<handle>.<output>`:
 
-```hcl
+```bridge
 bridge Query.location {
   with geocode as g
   with input as i
@@ -259,7 +259,7 @@ Each invocation is fully isolated — calling the same define twice creates inde
 ### `bridge` blocks
 Connect a GraphQL field to its tools.
 
-```hcl
+```bridge
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
@@ -282,7 +282,7 @@ bridge Query.geocode {
 **`o.results <- gc.items[] as item { ... }`** — array mapping. Creates a shadow tree per element. The iterator `item` references the current element — `item.field` accesses element data. The `{ }` block can also include element constants (`.field = "value"`).
 
 Example — pipe-like built-in tools need no `tool` block:
-```hcl
+```bridge
 bridge Query.format {
   with std.upperCase as up
   with std.lowerCase as lo

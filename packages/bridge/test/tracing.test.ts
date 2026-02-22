@@ -40,7 +40,7 @@ async function execute(
   const instructions = parseBridge(bridgeText);
   const gateway = createGateway(typeDefs, instructions, {
     tools,
-    trace: true,
+    trace: "full",
   });
   const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
   const result: any = await executor({ document: parse(query) });
@@ -94,7 +94,7 @@ o.label <- g.label
     const instructions = parseBridge(bridge);
     const gateway = createGateway(typeDefs, instructions, {
       tools: { geocoder: async () => ({ label: "X" }) },
-      // trace: false (default)
+      // trace: "off" (default)
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
@@ -188,7 +188,7 @@ o.label <- g.label
           throw new Error("API rate limit exceeded");
         },
       },
-      trace: true,
+      trace: "full",
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
@@ -586,7 +586,7 @@ bridge Query.getWeather {
     const instructions = parseBridge(weatherBridge);
     const gateway = createGateway(weatherTypeDefs, instructions, {
       tools,
-      trace: true,
+      trace: "full",
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     return { executor, callLog };

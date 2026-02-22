@@ -35,7 +35,7 @@ type Query {
 
 Create your `logic.bridge` file to implement the resolver for that specific field. This is your "Implementation."
 
-```hcl
+```bridge
 version 1.4
 
 tool geo from httpCall {

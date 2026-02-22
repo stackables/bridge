@@ -16,7 +16,7 @@ Distinct from the existing operators:
 - `? :` = **selection** (check condition, pull exactly one branch)
 
 **Syntax:**
-```hcl
+```bridge
 define smartPrice {
   with stripe
   with output as o
