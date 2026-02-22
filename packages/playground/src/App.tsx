@@ -59,7 +59,7 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
       key={id}
       onClick={() => onChange(id)}
       className={cn(
-        "px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+        "uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
         active === id
           ? "border-sky-400 text-slate-200"
           : "border-transparent text-slate-500 hover:text-slate-300",
