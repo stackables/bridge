@@ -779,8 +779,8 @@ export class ExecutionTree {
       case "/": return Number(left) / Number(right);
       case "+": return Number(left) + Number(right);
       case "-": return Number(left) - Number(right);
-      case "==": return left == right;
-      case "!=": return left != right;
+      case "==": return left === right;
+      case "!=": return left !== right;
       case ">": return Number(left) > Number(right);
       case ">=": return Number(left) >= Number(right);
       case "<": return Number(left) < Number(right);

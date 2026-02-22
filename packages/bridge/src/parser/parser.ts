@@ -1980,7 +1980,7 @@ function buildBridgeBody(
     if (c.lessEqual) return "<=";
     if (c.greaterThan) return ">";
     if (c.lessThan) return "<";
-    return "*"; // unreachable
+    throw new Error("Invalid expression operator");
   }
 
   // ── Helper: extract expression operand ─────────────────────────────────
