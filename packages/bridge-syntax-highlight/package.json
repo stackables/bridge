@@ -20,17 +20,26 @@
     "onLanguage:bridge"
   ],
   "contributes": {
-    "languages": [{
-      "id": "bridge",
-      "aliases": ["The Bridge", "bridge"],
-      "extensions": [".bridge"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "bridge",
-      "scopeName": "source.bridge",
-      "path": "./syntaxes/bridge.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "bridge",
+        "aliases": [
+          "The Bridge",
+          "bridge"
+        ],
+        "extensions": [
+          ".bridge"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bridge",
+        "scopeName": "source.bridge",
+        "path": "./syntaxes/bridge.tmLanguage.json"
+      }
+    ]
   },
   "scripts": {
     "build": "node build.mjs",
@@ -39,10 +48,10 @@
   },
   "devDependencies": {
     "@stackables/bridge": "workspace:*",
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.3.0",
     "@types/vscode": "^1.109.0",
-    "esbuild": "^0.25.0",
-    "typescript": "^5.7.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12"
