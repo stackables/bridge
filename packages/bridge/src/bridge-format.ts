@@ -2,6 +2,7 @@ import type {
   Bridge,
   ConstDef,
   DefineDef,
+  ExprOperand,
   Instruction,
   NodeRef,
   ToolDef,
@@ -319,6 +320,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
     (w): w is Extract<Wire, { value: string }> =>
       "value" in w && !!w.to.element,
   );
+  // Expression wires: "expr" in w && to.element=true
+  type ExprWire = Extract<Wire, { expr: any }>;
+  const elementExprWires = bridge.wires.filter(
+    (w): w is ExprWire =>
+      "expr" in w && !!w.to.element,
+  );
 
   // Build grouped maps keyed by the full array-destination path (to.path joined)
   // For a 1-level array o.items <- src[], element paths are like ["items", "name"]
@@ -326,17 +333,19 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
   const elementPullAll = [...elementPullWires];
   const elementConstAll = [...elementConstWires];
+  const elementExprAll = [...elementExprWires];
 
   // Detect array source wires: a regular wire whose to.path (joined) matches
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
 
-  // ── Exclude pipe, element-pull, and element-const wires from main loop
+  // ── Exclude pipe, element-pull, element-const, and element-expr wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
       (!("from" in w) || !w.from.element) &&
-      (!("value" in w) || !w.to.element),
+      (!("value" in w) || !w.to.element) &&
+      (!("expr" in w) || !w.to.element),
   );
 
   const serializedArrays = new Set<string>();
@@ -354,6 +363,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
       inputHandle,
       outputHandle,
     );
+
+  // ── Helper: serialize an expression operand ────────────────────────────
+  const sOperand = (operand: ExprOperand): string => {
+    if (operand.kind === "ref") return sRef(operand.ref, true);
+    if (operand.value === null) return "null";
+    if (operand.value === true) return "true";
+    if (operand.value === false) return "false";
+    if (typeof operand.value === "string") return `"${operand.value}"`;
+    return String(operand.value);
+  };
 
   /**
    * Recursively serialize element wires for an array mapping block.
@@ -453,6 +472,26 @@ function serializeBridgeBlock(bridge: Bridge): string {
             : "";
       lines.push(`${indent}${elemTo} <- ${fromPart}${nfb}${errf}`);
     }
+
+    // Emit expression element wires at this level
+    const levelExprs = elementExprAll.filter((ew) => {
+      if (ew.to.path.length !== pathDepth + 1) return false;
+      for (let i = 0; i < pathDepth; i++) {
+        if (ew.to.path[i] !== arrayPath[i]) return false;
+      }
+      return true;
+    });
+    for (const ew of levelExprs) {
+      const fieldPath = ew.to.path.slice(pathDepth);
+      const elemTo = "." + serPath(fieldPath);
+      const leftStr = ew.expr.left.kind === "ref" && ew.expr.left.ref.element
+        ? parentIterName + "." + serPath(ew.expr.left.ref.path)
+        : sOperand(ew.expr.left);
+      const rightStr = ew.expr.right.kind === "ref" && ew.expr.right.ref.element
+        ? parentIterName + "." + serPath(ew.expr.right.ref.path)
+        : sOperand(ew.expr.right);
+      lines.push(`${indent}${elemTo} <- ${leftStr} ${ew.expr.op} ${rightStr}`);
+    }
   }
 
   for (const w of regularWires) {
@@ -460,6 +499,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if ("value" in w) {
       const toStr = sRef(w.to, false);
       lines.push(`${toStr} = "${w.value}"`);
+      continue;
+    }
+
+    // Expression wire
+    if ("expr" in w) {
+      const toStr = sRef(w.to, false);
+      const arrow = w.force ? "<-!" : "<-";
+      const leftStr = sOperand(w.expr.left);
+      const rightStr = sOperand(w.expr.right);
+      lines.push(`${toStr} ${arrow} ${leftStr} ${w.expr.op} ${rightStr}`);
       continue;
     }
 

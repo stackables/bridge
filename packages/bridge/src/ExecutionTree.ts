@@ -2,6 +2,8 @@ import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { parsePath } from "./utils.js";
 import type {
   Bridge,
+  ExprOp,
+  ExprOperand,
   Instruction,
   NodeRef,
   ToolCallFn,
@@ -703,7 +705,7 @@ export class ExecutionTree {
     }
   }
 
-  /** Resolve a set of matched wires — constants win, then pull from sources.
+  /** Resolve a set of matched wires — constants win, then expressions, then pull from sources.
    *  `||` (nullFallback): fires when all sources resolve to null/undefined.
    *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error). */
   private resolveWires(wires: Wire[]): Promise<any> {
@@ -711,6 +713,14 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     if (constant) return Promise.resolve(constant.value);
+
+    // Expression wires: evaluate the binary expression
+    const exprWire = wires.find(
+      (w): w is Extract<Wire, { expr: { op: ExprOp; left: ExprOperand; right: ExprOperand } }> => "expr" in w,
+    );
+    if (exprWire) {
+      return this.evaluateExprWire(exprWire.expr);
+    }
 
     const pulls = wires.filter(
       (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
@@ -750,6 +760,32 @@ export class ExecutionTree {
         return errorFallbackWire.fallback;
       }
     });
+  }
+
+  /** Resolve an expression operand to its runtime value */
+  private async resolveExprOperand(operand: ExprOperand): Promise<any> {
+    if (operand.kind === "literal") return operand.value;
+    return this.pullSingle(operand.ref);
+  }
+
+  /** Evaluate a binary expression wire */
+  private async evaluateExprWire(expr: { op: ExprOp; left: ExprOperand; right: ExprOperand }): Promise<any> {
+    const [left, right] = await Promise.all([
+      this.resolveExprOperand(expr.left),
+      this.resolveExprOperand(expr.right),
+    ]);
+    switch (expr.op) {
+      case "*": return Number(left) * Number(right);
+      case "/": return Number(left) / Number(right);
+      case "+": return Number(left) + Number(right);
+      case "-": return Number(left) - Number(right);
+      case "==": return left == right;
+      case "!=": return left != right;
+      case ">": return Number(left) > Number(right);
+      case ">=": return Number(left) >= Number(right);
+      case "<": return Number(left) < Number(right);
+      case "<=": return Number(left) <= Number(right);
+    }
   }
 
   async response(ipath: Path, array: boolean): Promise<any> {

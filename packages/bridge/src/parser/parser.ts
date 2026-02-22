@@ -39,6 +39,16 @@ import {
   TrueLiteral,
   FalseLiteral,
   NullLiteral,
+  Star,
+  Slash,
+  Plus,
+  Minus,
+  GreaterEqual,
+  LessEqual,
+  DoubleEquals,
+  NotEquals,
+  GreaterThan,
+  LessThan,
   BridgeLexer,
 } from "./lexer.js";
 
@@ -53,6 +63,8 @@ import type {
   ToolDep,
   ToolWire,
   Wire,
+  ExprOp,
+  ExprOperand,
 } from "../types.js";
 import { SELF_MODULE } from "../types.js";
 
@@ -332,8 +344,9 @@ class BridgeParser extends CstParser {
   });
 
   /**
-   * Merged bridge wire (constant or pull):
+   * Merged bridge wire (constant, pull, or expression):
    *   target = value
+   *   target <-[!] sourceExpr [op operand]
    *   target <-[!] sourceExpr [[] as iter { ...elements... }]
    *                           [|| alt]* [?? fallback]
    */
@@ -355,6 +368,11 @@ class BridgeParser extends CstParser {
             { ALT: () => this.CONSUME(ForceArrow, { LABEL: "forceArrow" }) },
           ]);
           this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+          // Optional expression operator + operand
+          this.OPTION3(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
+          });
           // Optional array mapping: [] as <iter> { ... }
           this.OPTION(() => this.SUBRULE(this.arrayMapping));
           // || coalesce chain
@@ -386,6 +404,7 @@ class BridgeParser extends CstParser {
   /**
    * Element line inside array mapping:
    *   .field = value
+   *   .field <- source [op operand]
    *   .field <- source [|| ...] [?? ...]
    *   .field <- source[] as iter { ...nested elements... }   (nested array)
    */
@@ -403,6 +422,11 @@ class BridgeParser extends CstParser {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "elemArrow" });
           this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+          // Optional expression operator + operand
+          this.OPTION3(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
+          });
           // Optional nested array mapping: [] as <iter> { ... }
           this.OPTION2(() =>
             this.SUBRULE(this.arrayMapping, { LABEL: "nestedArrayMapping" }),
@@ -475,6 +499,34 @@ class BridgeParser extends CstParser {
       this.CONSUME(Colon);
       this.SUBRULE2(this.addressPath, { LABEL: "pipeSegment" });
     });
+  });
+
+  /** Expression operator: arithmetic or comparison */
+  public exprOperator = this.RULE("exprOperator", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(Star, { LABEL: "star" }) },
+      { ALT: () => this.CONSUME(Slash, { LABEL: "slash" }) },
+      { ALT: () => this.CONSUME(Plus, { LABEL: "plus" }) },
+      { ALT: () => this.CONSUME(Minus, { LABEL: "minus" }) },
+      { ALT: () => this.CONSUME(DoubleEquals, { LABEL: "doubleEquals" }) },
+      { ALT: () => this.CONSUME(NotEquals, { LABEL: "notEquals" }) },
+      { ALT: () => this.CONSUME(GreaterEqual, { LABEL: "greaterEqual" }) },
+      { ALT: () => this.CONSUME(LessEqual, { LABEL: "lessEqual" }) },
+      { ALT: () => this.CONSUME(GreaterThan, { LABEL: "greaterThan" }) },
+      { ALT: () => this.CONSUME(LessThan, { LABEL: "lessThan" }) },
+    ]);
+  });
+
+  /** Expression operand: a source reference or a literal value */
+  public exprOperand = this.RULE("exprOperand", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
+      { ALT: () => this.CONSUME(StringLiteral, { LABEL: "stringLit" }) },
+      { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
+      { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
+      { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
+      { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceRef" }) },
+    ]);
   });
 
   /**
@@ -1059,6 +1111,8 @@ function processElementLines(
     altNode: CstNode,
     lineNum: number,
   ) => { literal: string } | { sourceRef: NodeRef },
+  extractExprOp?: (opNode: CstNode) => ExprOp,
+  extractExprOperand?: (operandNode: CstNode, lineNum: number) => ExprOperand,
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1121,6 +1175,42 @@ function processElementLines(
       const { root: elemSrcRoot, segments: elemSrcSegs } =
         extractAddressPath(elemHeadNode);
 
+      // ── Expression wire: .field <- source op operand ──
+      const elemExprOpNode = sub(elemLine, "elemExprOp");
+      if (elemExprOpNode && extractExprOp && extractExprOperand) {
+        const op = extractExprOp(elemExprOpNode);
+        const rightOperand = extractExprOperand(sub(elemLine, "elemExprRight")!, elemLineNum);
+        let leftOperand: ExprOperand;
+        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+          leftOperand = {
+            kind: "ref",
+            ref: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: elemSrcSegs,
+            },
+          };
+        } else {
+          leftOperand = {
+            kind: "ref",
+            ref: buildSourceExpr(elemSourceNode, elemLineNum, false),
+          };
+        }
+        wires.push({
+          expr: { op, left: leftOperand, right: rightOperand },
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemToPath,
+          },
+        });
+        continue;
+      }
+
       // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
       const nestedArrayNode = (
         elemC.nestedArrayMapping as CstNode[] | undefined
@@ -1167,6 +1257,8 @@ function processElementLines(
           arrayIterators,
           buildSourceExpr,
           extractCoalesceAlt,
+          extractExprOp,
+          extractExprOperand,
         );
         continue;
       }
@@ -1874,6 +1966,48 @@ function buildBridgeBody(
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);
   }
 
+  // ── Helper: extract expression operator ────────────────────────────────
+
+  function extractExprOp(opNode: CstNode): ExprOp {
+    const c = opNode.children;
+    if (c.star) return "*";
+    if (c.slash) return "/";
+    if (c.plus) return "+";
+    if (c.minus) return "-";
+    if (c.doubleEquals) return "==";
+    if (c.notEquals) return "!=";
+    if (c.greaterEqual) return ">=";
+    if (c.lessEqual) return "<=";
+    if (c.greaterThan) return ">";
+    if (c.lessThan) return "<";
+    return "*"; // unreachable
+  }
+
+  // ── Helper: extract expression operand ─────────────────────────────────
+
+  function extractExprOperand(
+    operandNode: CstNode,
+    lineNum: number,
+  ): ExprOperand {
+    const c = operandNode.children;
+    if (c.numberLit) {
+      return { kind: "literal", value: Number((c.numberLit as IToken[])[0].image) };
+    }
+    if (c.stringLit) {
+      const raw = (c.stringLit as IToken[])[0].image;
+      return { kind: "literal", value: raw.slice(1, -1) };
+    }
+    if (c.trueLit) return { kind: "literal", value: true };
+    if (c.falseLit) return { kind: "literal", value: false };
+    if (c.nullLit) return { kind: "literal", value: null };
+    if (c.sourceRef) {
+      const srcNode = (c.sourceRef as CstNode[])[0];
+      const ref = buildSourceExpr(srcNode, lineNum, false);
+      return { kind: "ref", ref };
+    }
+    throw new Error(`Line ${lineNum}: Invalid expression operand`);
+  }
+
   // ── Step 2: Process wire lines ─────────────────────────────────────────
 
   for (const bodyLine of bodyLines) {
@@ -1903,6 +2037,22 @@ function buildBridgeBody(
     // ── Pull wire: target <-[!] source [modifiers] ──
     const force = !!wc.forceArrow;
 
+    // ── Expression wire: target <- source op operand ──
+    const exprOpNode = sub(wireNode, "exprOp");
+    if (exprOpNode) {
+      const firstSourceNode = sub(wireNode, "firstSource")!;
+      const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const op = extractExprOp(exprOpNode);
+      const rightOperand = extractExprOperand(sub(wireNode, "exprRight")!, lineNum);
+      const leftOperand: ExprOperand = { kind: "ref", ref: leftRef };
+      wires.push({
+        expr: { op, left: leftOperand, right: rightOperand },
+        to: toRef,
+        ...(force ? { force: true as const } : {}),
+      });
+      continue;
+    }
+
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
@@ -1926,6 +2076,8 @@ function buildBridgeBody(
         arrayIterators,
         buildSourceExpr,
         extractCoalesceAlt,
+        extractExprOp,
+        extractExprOperand,
       );
       continue;
     }
@@ -2088,9 +2240,16 @@ function inlineDefine(
         wire.from = { ...wire.from, module: outModule };
       if (wire.fallbackRef?.module === genericModule)
         wire.fallbackRef = { ...wire.fallbackRef, module: outModule };
-    }
-    if ("value" in wire && wire.to.module === genericModule)
+    } else if ("expr" in wire) {
+      if (wire.to.module === genericModule)
+        wire.to = { ...wire.to, module: inModule };
+      if (wire.expr.left.kind === "ref" && wire.expr.left.ref.module === genericModule)
+        wire.expr.left = { ...wire.expr.left, ref: { ...wire.expr.left.ref, module: outModule } };
+      if (wire.expr.right.kind === "ref" && wire.expr.right.ref.module === genericModule)
+        wire.expr.right = { ...wire.expr.right, ref: { ...wire.expr.right.ref, module: outModule } };
+    } else if ("value" in wire && wire.to.module === genericModule) {
       wire.to = { ...wire.to, module: inModule };
+    }
   }
 
   const forkOffset = nextForkSeqRef.value;
@@ -2135,6 +2294,12 @@ function inlineDefine(
       cloned.to = remapRef(cloned.to, "to");
       if (cloned.fallbackRef)
         cloned.fallbackRef = remapRef(cloned.fallbackRef, "from");
+    } else if ("expr" in cloned) {
+      cloned.to = remapRef(cloned.to, "to");
+      if (cloned.expr.left.kind === "ref")
+        cloned.expr.left = { ...cloned.expr.left, ref: remapRef(cloned.expr.left.ref, "from") };
+      if (cloned.expr.right.kind === "ref")
+        cloned.expr.right = { ...cloned.expr.right, ref: remapRef(cloned.expr.right.ref, "from") };
     } else {
       cloned.to = remapRef(cloned.to, "to");
     }
