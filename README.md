@@ -72,6 +72,10 @@ Most of the time, it’s enough to give your LLM this README and the GraphQL sch
 
 You define your internal interface in standard GraphQL SDL, then use `.bridge` files to wire those types to your external providers.
 
+Read more about:
+- [Observability (tracing, metrics and logging)](./docs/observability.md)
+- [Dynamic routing](./docs/dynamic-routing.md)
+
 ### 1. Define your Schema
 
 Start with `schema.graphql`. This is the clean interface your internal microservices will call.
