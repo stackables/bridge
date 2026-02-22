@@ -78,14 +78,27 @@ export function bridgeTransform(
         ) {
           // Start execution tree at query/mutation root
           if (!source && !info.path.prev) {
-            const bridgeContext = contextMapper
-              ? contextMapper(context)
-              : (context ?? {});
-
             const activeInstructions =
               typeof instructions === "function"
                 ? instructions(context)
                 : instructions;
+
+            // Only intercept fields that have a matching bridge instruction.
+            // Fields without one fall through to their original resolver,
+            // allowing hand-coded resolvers to coexist with bridge-powered ones.
+            const hasBridge = activeInstructions.some(
+              (i) =>
+                i.kind === "bridge" &&
+                i.type === typeName &&
+                i.field === fieldName,
+            );
+            if (!hasBridge) {
+              return resolve(source, args, context, info);
+            }
+
+            const bridgeContext = contextMapper
+              ? contextMapper(context)
+              : (context ?? {});
 
             // Always include builtinTools; user tools merge on top (shallow)
             const allTools: ToolMap = {

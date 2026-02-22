@@ -1,0 +1,16 @@
+version 1.4
+
+# Free API – returns { id, quote, author }
+tool quotes from std.httpCall {
+  .baseUrl = "https://dummyjson.com"
+  .method = GET
+  .path = /quotes/random
+}
+
+bridge Query.randomQuote {
+  with quotes as q
+  with output as o
+
+  o.text   <- q.quote
+  o.author <- q.author
+}

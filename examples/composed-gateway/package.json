@@ -1,0 +1,17 @@
+{
+  "name": "@stackables/bridge-example-composed-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx/esm --conditions development server.ts",
+    "e2e": "node --import tsx/esm --conditions development --test e2e.test.ts"
+  },
+  "dependencies": {
+    "@stackables/bridge": "workspace:*",
+    "graphql-yoga": "^5.18.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

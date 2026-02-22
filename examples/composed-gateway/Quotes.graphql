@@ -1,0 +1,19 @@
+type Query {
+  randomQuote: Quote
+}
+
+type Mutation {
+  saveQuote(text: String!, author: String!): SavedQuote!
+}
+
+type Quote {
+  text: String
+  author: String
+}
+
+type SavedQuote {
+  id: ID!
+  text: String!
+  author: String!
+  savedAt: String!
+}

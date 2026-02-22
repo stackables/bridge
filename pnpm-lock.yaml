@@ -28,6 +28,19 @@ importers:
         specifier: ^4.21.0
         version: 4.21.0
 
+  examples/composed-gateway:
+    dependencies:
+      '@stackables/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      graphql-yoga:
+        specifier: ^5.18.0
+        version: 5.18.0(graphql@16.12.0)
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+
   examples/weather-api:
     dependencies:
       '@stackables/bridge':
