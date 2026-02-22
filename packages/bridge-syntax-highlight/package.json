@@ -1,7 +1,7 @@
 {
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
-  "description": "Syntax highlighting and language intelligence for the Bridge DSL",
+  "description": "Syntax highlighting, real-time diagnostics, and hover information for the Bridge declarative dataflow language",
   "version": "0.5.0",
   "publisher": "stackables",
   "icon": "logo128.png",
