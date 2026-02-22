@@ -142,6 +142,60 @@ bridge Query.location {
     context: `{}`,
   },
   {
+    name: "SBB Train Search",
+    description: "Query the Swiss public transport API to find the next train connection between two stations",
+    schema: /* GraphQL */ `type Query {
+  nextTrain(from: String!, to: String!): TrainConnection
+}
+
+type TrainConnection {
+  fromStation: String
+  toStation: String
+  departure: String
+  arrival: String
+  duration: String
+  transfers: Int
+  platform: String
+}`,
+    bridge: `version 1.4
+
+tool sbb from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch"
+  .method = GET
+  .path = /v1/connections
+}
+
+bridge Query.nextTrain {
+  with sbb
+  with input as i
+  with output as o
+
+  sbb.from <- i.from
+  sbb.to <- i.to
+  sbb.limit = "1"
+
+  o.fromStation <- sbb.connections[0].from.station.name
+  o.toStation   <- sbb.connections[0].to.station.name
+  o.departure   <- sbb.connections[0].from.departure
+  o.arrival     <- sbb.connections[0].to.arrival
+  o.duration    <- sbb.connections[0].duration
+  o.transfers   <- sbb.connections[0].transfers
+  o.platform    <- sbb.connections[0].from.platform
+}`,
+    query: `{
+  nextTrain(from: "Bern", to: "Zürich") {
+    fromStation
+    toStation
+    departure
+    arrival
+    duration
+    transfers
+    platform
+  }
+}`,
+    context: `{}`,
+  },
+  {
     name: "Passthrough",
     description: "Pass input arguments directly to output fields with no transformation",
     schema: /* GraphQL */ `type Query {
