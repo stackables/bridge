@@ -83,7 +83,7 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
       alignItems: "center",
       borderBottom: "1px solid #1e293b",
       flexShrink: 0,
-      padding: "0 6px",
+      padding: "12px 12px 0 12px",
     }}>
       {tab("query", "Query")}
       {tab("context", "Context")}
@@ -279,7 +279,7 @@ export function App() {
               <Panel defaultSize={65} minSize={20}>
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
-                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 0" }}>
+                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 12px" }}>
                     <Editor label="" value={bridge} onChange={setBridge} />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
