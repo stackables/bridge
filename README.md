@@ -2,8 +2,6 @@
 [![extension](https://img.shields.io/badge/VS_Code-LSP-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 [![roadmap](https://img.shields.io/badge/Roadmap-green)](./docs/roadmap.md)
 
-# The Bridge
-
 > **Developer Preview**
 > The Bridge v1.x is a public preview and is not recommended for production use.
 > * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
@@ -12,6 +10,11 @@
 > [See our roadmap](./docs/roadmap.md)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
+
+---
+
+# The Bridge
+
 
 **Declarative dataflow for controlled egress.**
 
