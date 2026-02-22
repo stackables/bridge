@@ -1,4 +1,6 @@
 
+import { cn } from "@/lib/utils";
+
 type Props = {
   label: string;
   value: string;
@@ -7,44 +9,25 @@ type Props = {
 
 export function Editor({ label, value, onChange }: Props) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{
-        fontSize: 11,
-        fontWeight: 700,
-        color: "#475569",
-        textTransform: "uppercase" as const,
-        letterSpacing: "0.08em",
-        padding: "0 0 6px 2px",
-        flexShrink: 0,
-      }}>
-        {label}
-      </div>
+    <div className="flex flex-col h-full">
+      {label && (
+        <div className="shrink-0 pb-1.5 text-[11px] font-bold text-slate-600 uppercase tracking-widest">
+          {label}
+        </div>
+      )}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-          fontSize: 13,
-          lineHeight: 1.6,
-          padding: "10px 14px",
-          background: "#0f172a",
-          color: "#e2e8f0",
-          border: "1px solid #1e293b",
-          borderRadius: 8,
-          resize: "none",
-          outline: "none",
-          caretColor: "#38bdf8",
-          boxSizing: "border-box",
-          width: "100%",
-          overflowY: "auto",
-        }}
-        onFocus={(e) => { e.target.style.borderColor = "#38bdf8"; }}
-        onBlur={(e) => { e.target.style.borderColor = "#1e293b"; }}
+        className={cn(
+          "flex-1 min-h-0 w-full resize-none rounded-lg border border-slate-800 bg-slate-950",
+          "px-3.5 py-2.5 font-mono text-[13px] leading-relaxed text-slate-200 caret-sky-400",
+          "outline-none overflow-y-auto",
+          "focus:border-sky-400",
+        )}
       />
     </div>
   );
 }
+
 

@@ -5,16 +5,20 @@ import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
 import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
-  const isH = direction === "horizontal";
   return (
-    <PanelResizeHandle style={{
-      flexShrink: 0,
-      [isH ? "width" : "height"]: 8,
-      cursor: isH ? "col-resize" : "row-resize",
-    }} />
+    <PanelResizeHandle
+      className={cn(
+        "shrink-0",
+        direction === "horizontal" ? "w-2 cursor-[col-resize]" : "h-2 cursor-[row-resize]",
+      )}
+    />
   );
 }
 
@@ -23,24 +27,16 @@ function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
   const diagnostics = getDiagnostics(bridgeText).diagnostics;
   if (diagnostics.length === 0) return null;
   return (
-    <div style={{
-      flexShrink: 0,
-      background: "#0f172a",
-      borderTop: "1px solid #1e293b",
-      padding: "6px 14px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 3,
-    }}>
+    <div className="shrink-0 border-t border-slate-800 bg-slate-950 px-3.5 py-1.5 flex flex-col gap-1">
       {diagnostics.map((d, i) => (
-        <div key={i} style={{
-          color: d.severity === "error" ? "#fca5a5" : "#fde68a",
-          fontFamily: "monospace",
-          fontSize: 12,
-          display: "flex",
-          gap: 8,
-        }}>
-          <span style={{ opacity: 0.6 }}>{d.severity === "error" ? "✗" : "⚠"}</span>
+        <div
+          key={i}
+          className={cn(
+            "flex gap-2 font-mono text-xs",
+            d.severity === "error" ? "text-red-300" : "text-yellow-200",
+          )}
+        >
+          <span className="opacity-60">{d.severity === "error" ? "✗" : "⚠"}</span>
           <span>{d.message} (line {d.range.start.line + 1})</span>
         </div>
       ))}
@@ -48,7 +44,7 @@ function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
   );
 }
 
-// ── tab strip with optional Run button ────────────────────────────────────────
+// ── tab strip with Run button ─────────────────────────────────────────────────
 type Tab = "query" | "context";
 type TabStripProps = {
   active: Tab;
@@ -62,50 +58,29 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
     <button
       key={id}
       onClick={() => onChange(id)}
-      style={{
-        padding: "6px 14px",
-        background: "transparent",
-        border: "none",
-        borderBottom: active === id ? "2px solid #38bdf8" : "2px solid transparent",
-        color: active === id ? "#e2e8f0" : "#475569",
-        fontSize: 12,
-        fontWeight: active === id ? 600 : 400,
-        cursor: "pointer",
-        letterSpacing: "0.03em",
-      }}
+      className={cn(
+        "px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+        active === id
+          ? "border-sky-400 text-slate-200"
+          : "border-transparent text-slate-500 hover:text-slate-300",
+      )}
     >
       {label}
     </button>
   );
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      borderBottom: "1px solid #1e293b",
-      flexShrink: 0,
-      padding: "12px 12px 0 12px",
-    }}>
+    <div className="flex items-center border-b border-slate-800 shrink-0 pl-2 pr-2 pt-1">
       {tab("query", "Query")}
       {tab("context", "Context")}
-      <div style={{ flex: 1 }} />
-      <button
+      <div className="flex-1" />
+      <Button
+        size="sm"
         onClick={onRun}
         disabled={runDisabled}
-        style={{
-          padding: "4px 16px",
-          background: runDisabled ? "#1e3a4a" : "#0ea5e9",
-          color: runDisabled ? "#475569" : "#fff",
-          border: "none",
-          borderRadius: 5,
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: runDisabled ? "not-allowed" : "pointer",
-          transition: "background 0.15s",
-          marginRight: 4,
-        }}
+        className="text-xs h-7 px-3 mb-1"
       >
         {running ? "Running…" : "▶  Run"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -113,14 +88,7 @@ function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripPro
 // ── panel wrapper ─────────────────────────────────────────────────────────────
 function PanelBox({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
-      background: "#1e293b",
-      borderRadius: 10,
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden",
-      height: "100%",
-    }}>
+    <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden h-full">
       {children}
     </div>
   );
@@ -129,15 +97,7 @@ function PanelBox({ children }: { children: React.ReactNode }) {
 // ── panel header label ─────────────────────────────────────────────────────────
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
-      fontSize: 11,
-      fontWeight: 700,
-      color: "#475569",
-      textTransform: "uppercase",
-      letterSpacing: "0.08em",
-      padding: "10px 14px 4px",
-      flexShrink: 0,
-    }}>
+    <div className="shrink-0 px-3.5 pt-2.5 pb-1 text-[11px] font-bold text-slate-600 uppercase tracking-widest">
       {children}
     </div>
   );
@@ -181,93 +141,61 @@ export function App() {
   const hasErrors = diagnostics.some((d) => d.severity === "error");
 
   return (
-    <div style={{
-      height: "100vh",
-      background: "#0f172a",
-      color: "#e2e8f0",
-      fontFamily: "system-ui, -apple-system, sans-serif",
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden",
-    }}>
+    <div className="h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
-      <header style={{
-        borderBottom: "1px solid #1e293b",
-        padding: "10px 20px",
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        flexShrink: 0,
-      }}>
+      <header className="shrink-0 border-b border-slate-800 px-5 py-2.5 flex items-center gap-4">
         <a
           href="https://github.com/stackables/bridge"
           target="_blank"
           rel="noopener noreferrer"
-          style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}
+          className="flex items-center gap-2.5 no-underline"
         >
-          <span style={{ fontSize: 20, fontWeight: 700, color: "#38bdf8", letterSpacing: "-0.02em" }}>
-            Bridge
-          </span>
-          <span style={{
-            background: "#164e63",
-            color: "#38bdf8",
-            fontSize: 10,
-            fontWeight: 700,
-            padding: "2px 7px",
-            borderRadius: 99,
-            letterSpacing: "0.07em",
-          }}>
-            PLAYGROUND
-          </span>
+          <span className="text-xl font-bold text-sky-400 tracking-tight">Bridge</span>
+          <Badge className="text-[10px] tracking-wider uppercase">Playground</Badge>
         </a>
 
         {/* Example picker */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "#475569" }}>Example:</span>
-          <select
-            value={exampleIndex}
-            onChange={(e) => selectExample(Number(e.target.value))}
-            style={{
-              background: "#1e293b",
-              color: "#e2e8f0",
-              border: "1px solid #334155",
-              borderRadius: 6,
-              padding: "5px 10px",
-              fontSize: 13,
-              cursor: "pointer",
-              outline: "none",
-            }}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-600">Example:</span>
+          <Select
+            value={String(exampleIndex)}
+            onValueChange={(v) => selectExample(Number(v))}
           >
-            {examples.map((ex, i) => (
-              <option key={i} value={i}>{ex.name}</option>
-            ))}
-          </select>
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {examples.map((ex, i) => (
+                <SelectItem key={i} value={String(i)}>{ex.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <div style={{ marginLeft: "auto", color: "#334155", fontSize: 12 }}>
+        <span className="ml-auto text-xs text-slate-700">
           All code runs in-browser · no server required
-        </div>
+        </span>
       </header>
 
       {/* ── Body: padding wrapper ensures panels never touch window edges ── */}
-      <div style={{ flex: 1, minHeight: 0, padding: "12px 16px 16px", overflow: "hidden" }}>
+      <div className="flex-1 min-h-0 p-3 overflow-hidden">
         <PanelGroup
           direction="horizontal"
           autoSaveId="bridge-playground-h"
-          style={{ height: "100%" }}
+          className="h-full"
         >
           {/* ── LEFT column: Schema + Bridge ── */}
           <Panel defaultSize={50} minSize={20}>
             <PanelGroup
               direction="vertical"
               autoSaveId="bridge-playground-left-v"
-              style={{ height: "100%" }}
+              className="h-full"
             >
               {/* Schema panel */}
               <Panel defaultSize={35} minSize={15}>
                 <PanelBox>
                   <PanelLabel>GraphQL Schema</PanelLabel>
-                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 12px" }}>
+                  <div className="flex-1 min-h-0 px-3 pb-3">
                     <Editor label="" value={schema} onChange={setSchema} />
                   </div>
                 </PanelBox>
@@ -279,7 +207,7 @@ export function App() {
               <Panel defaultSize={65} minSize={20}>
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
-                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 12px" }}>
+                  <div className="flex-1 min-h-0 px-3 pb-0">
                     <Editor label="" value={bridge} onChange={setBridge} />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
@@ -296,7 +224,7 @@ export function App() {
             <PanelGroup
               direction="vertical"
               autoSaveId="bridge-playground-right-v"
-              style={{ height: "100%" }}
+              className="h-full"
             >
               {/* Query / Context tabbed panel */}
               <Panel defaultSize={40} minSize={15}>
@@ -308,7 +236,7 @@ export function App() {
                     runDisabled={loading || hasErrors}
                     running={loading}
                   />
-                  <div style={{ flex: 1, minHeight: 0, padding: "8px 12px 12px" }}>
+                  <div className="flex-1 min-h-0 p-3">
                     {activeTab === "query" ? (
                       <Editor label="" value={query} onChange={setQuery} />
                     ) : (
@@ -324,8 +252,7 @@ export function App() {
               <Panel defaultSize={60} minSize={20}>
                 <PanelBox>
                   <PanelLabel>Result</PanelLabel>
-                  {/* content fills height; ResultView handles internal scroll + trace pinned bottom */}
-                  <div style={{ flex: 1, minHeight: 0, padding: "8px 14px 14px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  <div className="flex-1 min-h-0 px-3.5 pb-3.5 overflow-hidden flex flex-col">
                     <ResultView
                       result={result?.data}
                       errors={result?.errors}
@@ -343,5 +270,3 @@ export function App() {
     </div>
   );
 }
-
-

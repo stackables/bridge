@@ -1,5 +1,15 @@
 import { useState } from "react";
 import type { ToolTrace } from "../engine";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Props = {
   traces: ToolTrace[];
@@ -10,79 +20,52 @@ function TraceRow({ trace, index }: { trace: ToolTrace; index: number }) {
   const hasDetail = trace.input !== undefined || trace.output !== undefined || trace.error !== undefined;
 
   return (
-    <div style={{
-      borderBottom: "1px solid #1e293b",
-      padding: "8px 0",
-    }}>
+    <div className="border-b border-slate-800 py-2">
       <div
         onClick={() => hasDetail && setExpanded(!expanded)}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "24px 1fr auto auto",
-          gap: 8,
-          alignItems: "center",
-          cursor: hasDetail ? "pointer" : "default",
-        }}
+        className={cn(
+          "grid items-center gap-2",
+          hasDetail ? "cursor-pointer" : "cursor-default",
+        )}
+        style={{ gridTemplateColumns: "24px 1fr auto auto" }}
       >
-        <span style={{ color: "#475569", fontSize: 11, textAlign: "right" }}>{index + 1}</span>
-        <span style={{ fontFamily: "monospace", fontSize: 12, color: trace.error ? "#fca5a5" : "#e2e8f0" }}>
+        <span className="text-right text-[11px] text-slate-600">{index + 1}</span>
+        <span className={cn("font-mono text-xs", trace.error ? "text-red-300" : "text-slate-200")}>
           {trace.tool}
           {trace.tool !== trace.fn && (
-            <span style={{ color: "#475569" }}> ({trace.fn})</span>
+            <span className="text-slate-600"> ({trace.fn})</span>
           )}
         </span>
-        <span style={{
-          fontSize: 11,
-          color: trace.error ? "#fca5a5" : "#4ade80",
-          fontFamily: "monospace",
-        }}>
+        <span className={cn("font-mono text-[11px]", trace.error ? "text-red-300" : "text-green-400")}>
           {trace.durationMs.toFixed(1)}ms
         </span>
         {hasDetail && (
-          <span style={{ color: "#475569", fontSize: 11 }}>
+          <span className="text-[11px] text-slate-600">
             {expanded ? "▲" : "▼"}
           </span>
         )}
       </div>
 
       {expanded && (
-        <div style={{ marginTop: 6, paddingLeft: 32, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className="mt-1.5 pl-8 flex flex-col gap-1.5">
           {trace.error && (
             <div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>ERROR</div>
-              <pre style={{ margin: 0, fontFamily: "monospace", fontSize: 12, color: "#fca5a5" }}>{trace.error}</pre>
+              <p className="text-[11px] text-slate-400 mb-0.5">ERROR</p>
+              <pre className="m-0 font-mono text-xs text-red-300">{trace.error}</pre>
             </div>
           )}
           {trace.input !== undefined && (
             <div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>INPUT</div>
-              <pre style={{
-                margin: 0,
-                fontFamily: "monospace",
-                fontSize: 12,
-                color: "#93c5fd",
-                background: "#0f172a",
-                padding: "6px 10px",
-                borderRadius: 6,
-                overflowX: "auto",
-              }}>
+              <p className="text-[11px] text-slate-400 mb-0.5">INPUT</p>
+              <pre className="m-0 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-blue-300 overflow-x-auto">
                 {JSON.stringify(trace.input, null, 2)}
               </pre>
             </div>
           )}
           {trace.output !== undefined && (
             <div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>OUTPUT</div>
-              <pre style={{
-                margin: 0,
-                fontFamily: "monospace",
-                fontSize: 12,
-                color: "#86efac",
-                background: "#0f172a",
-                padding: "6px 10px",
-                borderRadius: 6,
-                overflowX: "auto",
-              }}>
+              <p className="text-[11px] text-slate-400 mb-0.5">OUTPUT</p>
+              <pre className="m-0 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-green-300 overflow-x-auto">
                 {JSON.stringify(trace.output, null, 2)}
               </pre>
             </div>
@@ -94,103 +77,44 @@ function TraceRow({ trace, index }: { trace: ToolTrace; index: number }) {
 }
 
 export function TraceDialog({ traces }: Props) {
-  const [open, setOpen] = useState(false);
   const totalMs = traces.reduce((sum, t) => sum + t.durationMs, 0);
   const hasErrors = traces.some((t) => t.error);
 
   return (
-    <>
-      {/* Inline summary badge */}
-      <button
-        onClick={() => setOpen(true)}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "4px 10px",
-          background: "transparent",
-          border: "1px solid",
-          borderColor: hasErrors ? "#7f1d1d" : "#1e3a5f",
-          borderRadius: 6,
-          color: hasErrors ? "#fca5a5" : "#38bdf8",
-          fontSize: 12,
-          cursor: "pointer",
-          fontFamily: "monospace",
-        }}
-      >
-        <span>{hasErrors ? "⚠" : "⚡"}</span>
-        <span>{traces.length} tool call{traces.length !== 1 ? "s" : ""}</span>
-        <span style={{ color: "#475569" }}>·</span>
-        <span>{totalMs.toFixed(1)}ms total</span>
-        <span style={{ color: "#475569", fontSize: 11 }}>— view traces</span>
-      </button>
-
-      {/* Modal dialog */}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(
+            "font-mono text-xs",
+            hasErrors
+              ? "border-red-900 text-red-300 hover:bg-red-950 hover:text-red-200"
+              : "border-sky-trace text-sky-400 hover:bg-slate-800 hover:text-sky-300",
+          )}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#1e293b",
-              borderRadius: 12,
-              border: "1px solid #334155",
-              width: "min(680px, 95vw)",
-              maxHeight: "80vh",
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-            }}
-          >
-            {/* Dialog header */}
-            <div style={{
-              padding: "14px 20px",
-              borderBottom: "1px solid #334155",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>Tool Traces</span>
-                <span style={{ fontSize: 12, color: "#475569", fontFamily: "monospace" }}>
-                  {traces.length} calls · {totalMs.toFixed(1)}ms
-                </span>
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#475569",
-                  fontSize: 18,
-                  cursor: "pointer",
-                  lineHeight: 1,
-                  padding: "0 4px",
-                }}
-              >
-                ×
-              </button>
-            </div>
+          <span>{hasErrors ? "⚠" : "⚡"}</span>
+          <span>{traces.length} tool call{traces.length !== 1 ? "s" : ""}</span>
+          <span className="text-slate-600">·</span>
+          <span>{totalMs.toFixed(1)}ms total</span>
+          <span className="text-slate-600 text-[11px]">— view traces</span>
+        </Button>
+      </DialogTrigger>
 
-            {/* Trace list */}
-            <div style={{ overflowY: "auto", padding: "4px 20px 16px" }}>
-              {traces.map((trace, i) => (
-                <TraceRow key={i} trace={trace} index={i} />
-              ))}
-            </div>
-          </div>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Tool Traces</DialogTitle>
+          <DialogDescription>
+            {traces.length} call{traces.length !== 1 ? "s" : ""} · {totalMs.toFixed(1)}ms
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto px-5 pb-4">
+          {traces.map((trace, i) => (
+            <TraceRow key={i} trace={trace} index={i} />
+          ))}
         </div>
-      )}
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }
+
