@@ -5,11 +5,23 @@
 # The Bridge
 
 **Declarative dataflow for GraphQL.**
-Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, no codegen, no plumbing.
 
-```bash
-npm install @stackables/bridge
-```
+Turn 80% of your typical GraphQL backend from imperative JavaScript resolvers into static .bridge files.
+
+**Best fit when your GraphQL schema is mostly:**
+
+- proxying / reshaping REST APIs
+- aggregating multiple external services
+- swapping providers (SendGrid ↔ Postmark, geocoding providers, payment gateways…)
+- enforcing uniform egress security / rate-limiting / caching
+
+**Not best fit when you need:**
+
+- heavy business logic
+- multi-step transactions / sagas
+- complex authorization rules inside resolvers
+- very high-performance per-field computation
+
 
 > **Developer Preview**
 > The Bridge v1.x is a public preview and is not recommended for production use.
@@ -87,7 +99,7 @@ type Query {
 
 Create your `logic.bridge` file to implement the resolver for that specific field. This is your "Implementation."
 
-```hcl
+```bridge
 version 1.4
 
 tool geo from httpCall {
@@ -136,7 +148,7 @@ Get syntax highlighting for [Visual Studio Code](https://marketplace.visualstudi
 
 Every `.bridge` file must begin with a version declaration.
 
-```hcl
+```bridge
 version 1.4
 ```
 
@@ -146,7 +158,7 @@ This is the first non-blank, non-comment line. Everything else follows after it.
 
 Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments.
 
-```hcl
+```bridge
 const fallbackGeo = { "lat": 0, "lon": 0 }
 const defaultCurrency = "EUR"
 const maxRetries = 3
@@ -158,7 +170,7 @@ Access const values in bridges or tools via `with const as c`, then reference as
 
 Defines the "Where" and the "How." Takes a function (or parent tool) and configures it, giving it a new name.
 
-```hcl
+```bridge
 tool <name> from <source> {
   [with context]                  # Injects GraphQL context (auth, secrets, etc.)
   [on error = <json_fallback>]    # Fallback value if tool fails
@@ -178,7 +190,7 @@ When `<source>` is an existing tool name, the new tool inherits its configuratio
 
 Reusable named subgraphs — compose tools and wires into a pipeline, then invoke it from any bridge.
 
-```hcl
+```bridge
 define <name> {
   with <tool> as <handle>     # Tools used inside the pipeline
   with input as <handle>      # Inputs provided by the caller
@@ -191,7 +203,7 @@ define <name> {
 
 Use a define in a bridge with `with <define> as <handle>`:
 
-```hcl
+```bridge
 define geocode {
   with std.httpCall as geo
   with input as i
@@ -222,7 +234,7 @@ Each invocation is fully isolated — calling the same define twice creates inde
 
 The resolver logic connecting GraphQL schema fields to your tools.
 
-```hcl
+```bridge
 bridge <Type.field> {
   with <tool> [as <alias>]
   with input as i
@@ -250,7 +262,7 @@ bridge <Type.field> {
 
 Bridge can be fully implemented in the defined pipeline.
 
-```
+```bridge
 define namedOperation {
   ....
 }
@@ -302,7 +314,7 @@ Each layer handles a different failure mode. They compose freely.
 
 Declared inside the `tool` block. Catches any exception thrown by the tool's `fn(input)`. All tools that inherit from this tool inherit the fallback.
 
-```hcl
+```bridge
 tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET
@@ -315,7 +327,7 @@ tool geo from httpCall {
 
 Fires when a source resolves **successfully but returns `null` or `undefined`**. The fallback can be a JSON literal or another source expression (handle path or pipe chain). Multiple `||` alternatives chain left-to-right like `COALESCE`.
 
-```hcl
+```bridge
 with output as o
 
 # JSON literal fallback
@@ -332,7 +344,7 @@ o.textPart <- i.textBody || convert:i.htmlBody || "empty"
 
 Fires when the **entire resolution chain throws** (network failure, tool down, dependency error). Does not fire on null values — that's `||`'s job. The fallback can be a JSON literal or a source/pipe expression (evaluated lazily, only when the error fires).
 
-```hcl
+```bridge
 with output as o
 
 # JSON literal error fallback
@@ -346,7 +358,7 @@ o.label <- api.label ?? errorHandler:i.fallbackMsg
 
 `||` and `??` compose into a Postgres-style `COALESCE` with an error guard at the end:
 
-```hcl
+```bridge
 with output as o
 
 # o.label <- A || B || C || "literal" ?? errorSource
@@ -365,7 +377,7 @@ Multiple `||` sources desugar to **parallel wires** — all sources are evaluate
 
 By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
 
-```hcl
+```bridge
 bridge Mutation.updateUser {
   with audit.logger as log
   with input as in
@@ -380,7 +392,7 @@ bridge Mutation.updateUser {
 
 Routes data right-to-left through one or more tool handles: `dest <- handle:source`.
 
-```hcl
+```bridge
 with output as o
 
 # i.rawData → normalize → transform → result
@@ -389,7 +401,7 @@ o.result <- transform:normalize:i.rawData
 
 Full example with a tool that has 2 input parameters:
 
-```hcl
+```bridge
 tool convert from currencyConverter {
   .currency = EUR   # default currency
 }
@@ -528,7 +540,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 
 Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
 
-```hcl
+```bridge
 tool geo from httpCall {
   .cache = 300          # cache for 5 minutes
   .baseUrl = "https://nominatim.openstreetmap.org"
