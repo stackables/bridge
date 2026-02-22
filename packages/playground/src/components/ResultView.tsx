@@ -1,11 +1,14 @@
+import { TraceDialog } from "./TraceDialog";
+import type { ToolTrace } from "../engine";
 
 type Props = {
   result: unknown | null;
   errors: string[] | undefined;
   loading: boolean;
+  traces?: ToolTrace[];
 };
 
-export function ResultView({ result, errors, loading }: Props) {
+export function ResultView({ result, errors, loading, traces }: Props) {
   if (loading) {
     return (
       <div style={{ padding: 20, color: "#94a3b8", fontFamily: "monospace", fontSize: 13 }}>
@@ -60,6 +63,9 @@ export function ResultView({ result, errors, loading }: Props) {
             {JSON.stringify(result, null, 2)}
           </pre>
         </div>
+      )}
+      {traces && traces.length > 0 && (
+        <TraceDialog traces={traces} />
       )}
     </div>
   );

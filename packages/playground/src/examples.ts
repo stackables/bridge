@@ -4,6 +4,7 @@ export type Example = {
   schema: string;
   bridge: string;
   query: string;
+  context: string;
 };
 
 export const examples: Example[] = [
@@ -38,6 +39,7 @@ bridge Query.greet {
     lower
   }
 }`,
+    context: `{}`,
   },
   {
     name: "Constants",
@@ -65,6 +67,40 @@ bridge Query.config {
     version
     env
     label
+  }
+}`,
+    context: `{}`,
+  },
+  {
+    name: "Context",
+    description: "Access the GraphQL context inside bridge files using 'with context'",
+    schema: /* GraphQL */ `type Query {
+  profile: Profile
+}
+
+type Profile {
+  userId: String
+  role: String
+}`,
+    bridge: `version 1.4
+
+bridge Query.profile {
+  with context as ctx
+  with output as o
+
+  o.userId <- ctx.user.id
+  o.role <- ctx.user.role
+}`,
+    query: `{
+  profile {
+    userId
+    role
+  }
+}`,
+    context: `{
+  "user": {
+    "id": "usr_42",
+    "role": "admin"
   }
 }`,
   },
@@ -103,6 +139,7 @@ bridge Query.location {
     lon
   }
 }`,
+    context: `{}`,
   },
   {
     name: "Passthrough",
@@ -130,6 +167,6 @@ bridge Query.echo {
     count
   }
 }`,
+    context: `{}`,
   },
 ];
-

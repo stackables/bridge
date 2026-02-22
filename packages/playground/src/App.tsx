@@ -6,13 +6,22 @@ import { examples } from "./examples";
 import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
 
-const PANEL_STYLE: CSSProperties = {
+const PANEL: CSSProperties = {
   background: "#1e293b",
   borderRadius: 12,
   padding: 20,
   display: "flex",
   flexDirection: "column",
-  gap: 16,
+  gap: 14,
+};
+
+const SECTION_LABEL: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#475569",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: -6,
 };
 
 export function App() {
@@ -22,6 +31,7 @@ export function App() {
   const [schema, setSchema] = useState(ex.schema);
   const [bridge, setBridge] = useState(ex.bridge);
   const [query, setQuery] = useState(ex.query);
+  const [context, setContext] = useState(ex.context);
   const [result, setResult] = useState<RunResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -31,6 +41,7 @@ export function App() {
     setSchema(e.schema);
     setBridge(e.bridge);
     setQuery(e.query);
+    setContext(e.context);
     setResult(null);
   }, []);
 
@@ -38,12 +49,12 @@ export function App() {
     setLoading(true);
     setResult(null);
     try {
-      const r = await runBridge(schema, bridge, query);
+      const r = await runBridge(schema, bridge, query, {}, context);
       setResult(r);
     } finally {
       setLoading(false);
     }
-  }, [schema, bridge, query]);
+  }, [schema, bridge, query, context]);
 
   const diagnostics = getDiagnostics(bridge).diagnostics;
   const hasErrors = diagnostics.some((d) => d.severity === "error");
@@ -57,83 +68,89 @@ export function App() {
       display: "flex",
       flexDirection: "column",
     }}>
-      {/* Header */}
+      {/* ── Header ── */}
       <header style={{
         borderBottom: "1px solid #1e293b",
-        padding: "14px 24px",
+        padding: "12px 24px",
         display: "flex",
         alignItems: "center",
-        gap: 24,
-        flexWrap: "wrap",
+        gap: 16,
+        flexShrink: 0,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 22, fontWeight: 700, color: "#38bdf8", letterSpacing: "-0.02em" }}>
+          <span style={{ fontSize: 20, fontWeight: 700, color: "#38bdf8", letterSpacing: "-0.02em" }}>
             Bridge
           </span>
           <span style={{
             background: "#164e63",
             color: "#38bdf8",
-            fontSize: 11,
-            fontWeight: 600,
-            padding: "2px 8px",
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "2px 7px",
             borderRadius: 99,
-            letterSpacing: "0.05em",
+            letterSpacing: "0.07em",
           }}>
             PLAYGROUND
           </span>
         </div>
-        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {examples.map((e, i) => (
-            <button
-              key={i}
-              onClick={() => selectExample(i)}
-              style={{
-                padding: "5px 14px",
-                borderRadius: 6,
-                border: "1px solid",
-                borderColor: i === exampleIndex ? "#38bdf8" : "#334155",
-                background: i === exampleIndex ? "#0c4a6e" : "transparent",
-                color: i === exampleIndex ? "#38bdf8" : "#94a3b8",
-                fontSize: 13,
-                cursor: "pointer",
-                fontWeight: i === exampleIndex ? 600 : 400,
-                transition: "all 0.15s",
-              }}
-            >
-              {e.name}
-            </button>
-          ))}
-        </nav>
-        <div style={{ marginLeft: "auto", color: "#475569", fontSize: 12 }}>
+
+        {/* Example picker dropdown */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "#475569" }}>Example:</span>
+          <select
+            value={exampleIndex}
+            onChange={(e) => selectExample(Number(e.target.value))}
+            style={{
+              background: "#1e293b",
+              color: "#e2e8f0",
+              border: "1px solid #334155",
+              borderRadius: 6,
+              padding: "5px 10px",
+              fontSize: 13,
+              cursor: "pointer",
+              outline: "none",
+            }}
+          >
+            {examples.map((ex, i) => (
+              <option key={i} value={i}>{ex.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginLeft: "auto", color: "#334155", fontSize: 12 }}>
           All code runs in-browser · no server required
         </div>
       </header>
 
-      {/* Description */}
-      <div style={{ padding: "10px 24px", color: "#64748b", fontSize: 13 }}>
+      {/* ── Description bar ── */}
+      <div style={{ padding: "8px 24px", color: "#475569", fontSize: 12, borderBottom: "1px solid #0f172a", flexShrink: 0 }}>
         {ex.description}
       </div>
 
-      {/* Main content */}
-      <main style={{
+      {/* ── Two-column layout ── */}
+      <div style={{
         flex: 1,
-        padding: "0 24px 24px",
         display: "grid",
         gridTemplateColumns: "1fr 1fr",
-        gridTemplateRows: "auto auto",
         gap: 16,
+        padding: "16px 24px 24px",
+        minHeight: 0,
       }}>
-        {/* Left top: Schema */}
-        <div style={PANEL_STYLE}>
-          <Editor label="GraphQL Schema" value={schema} onChange={setSchema} height="220px" />
-        </div>
 
-        {/* Right top: Bridge DSL */}
-        <div style={{ ...PANEL_STYLE, gridRow: "1 / 3" }}>
-          <Editor label="Bridge DSL" value={bridge} onChange={setBridge} height="400px" />
+        {/* ── LEFT: Definition panel ── */}
+        <div style={{ ...PANEL, overflow: "auto" }}>
+          <div style={SECTION_LABEL}>Definition</div>
+
+          {/* GraphQL Schema */}
+          <Editor label="GraphQL Schema" value={schema} onChange={setSchema} height="200px" />
+
+          {/* Bridge DSL */}
+          <Editor label="Bridge DSL" value={bridge} onChange={setBridge} height="280px" />
+
+          {/* Diagnostics */}
           {diagnostics.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 Diagnostics
               </label>
               <div style={{
@@ -141,6 +158,9 @@ export function App() {
                 border: "1px solid #1e293b",
                 borderRadius: 8,
                 padding: "8px 12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
               }}>
                 {diagnostics.map((d, i) => (
                   <div key={i} style={{
@@ -164,14 +184,22 @@ export function App() {
           )}
         </div>
 
-        {/* Left bottom: Query + Run + Result */}
-        <div style={PANEL_STYLE}>
-          <Editor label="GraphQL Query" value={query} onChange={setQuery} height="140px" />
+        {/* ── RIGHT: Execute panel ── */}
+        <div style={{ ...PANEL, overflow: "auto" }}>
+          <div style={SECTION_LABEL}>Execute</div>
+
+          {/* Context */}
+          <Editor label="Context (JSON)" value={context} onChange={setContext} height="110px" />
+
+          {/* Query */}
+          <Editor label="GraphQL Query" value={query} onChange={setQuery} height="150px" />
+
+          {/* Run button */}
           <button
             onClick={handleRun}
             disabled={loading || hasErrors}
             style={{
-              padding: "10px 24px",
+              padding: "9px 24px",
               background: loading || hasErrors ? "#1e3a4a" : "#0ea5e9",
               color: loading || hasErrors ? "#475569" : "#fff",
               border: "none",
@@ -185,13 +213,16 @@ export function App() {
           >
             {loading ? "Running…" : "▶  Run"}
           </button>
+
+          {/* Result + Traces */}
           <ResultView
             result={result?.data}
             errors={result?.errors}
             loading={loading}
+            traces={result?.traces}
           />
         </div>
-      </main>
+      </div>
     </div>
   );
 }
