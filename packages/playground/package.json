@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "deploy": "vite build && wrangler deploy",
     "preview": "vite preview"
   },
   "dependencies": {
