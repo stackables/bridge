@@ -5,10 +5,15 @@ import {
   type GraphQLSchema,
   defaultFieldResolver,
 } from "graphql";
-import { ExecutionTree, TraceCollector, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
+import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
 import { builtinTools } from "./tools/index.js";
 import type { Instruction, ToolCallFn, ToolMap } from "./types.js";
 import { SELF_MODULE } from "./types.js";
+
+export type { Logger };
+
+const noop = () => {};
+const defaultLogger: Logger = { debug: noop, info: noop, warn: noop, error: noop };
 
 export type BridgeOptions = {
   /** Tool functions available to the engine.
@@ -23,6 +28,13 @@ export type BridgeOptions = {
    *  - `true` or `"full"`: record tool, fn, input, output/error, timing
    *  - `"basic"`: record tool, fn, timing, error (no input/output) */
   trace?: boolean | TraceLevel;
+  /**
+   * Structured logger for engine-level events (tool errors, warnings, debug).
+   * Accepts any logger with `debug`, `info`, `warn`, and `error` methods —
+   * pino, winston, `console`, or any compatible interface.
+   * Defaults to silent no-ops so there is zero output unless you opt in.
+   */
+  logger?: Logger;
 };
 
 /** Instructions can be a static array or a function that selects per-request */
@@ -39,6 +51,7 @@ export function bridgeTransform(
   const contextMapper = options?.contextMapper;
   const tracing = options?.trace ?? false;
   const traceLevel: TraceLevel | false = tracing === true ? "full" : tracing === false ? false : tracing;
+  const logger = options?.logger ?? defaultLogger;
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -86,6 +99,8 @@ export function bridgeTransform(
               allTools,
               bridgeContext,
             );
+
+            source.logger = logger;
 
             if (traceLevel) {
               source.tracer = new TraceCollector(traceLevel);
