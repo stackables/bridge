@@ -2,7 +2,6 @@ import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { parsePath } from "./utils.js";
 import type {
   Bridge,
-  ConstDef,
   Instruction,
   NodeRef,
   ToolCallFn,

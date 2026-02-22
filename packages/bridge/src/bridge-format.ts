@@ -5,7 +5,6 @@ import type {
     Instruction,
     NodeRef,
     ToolDef,
-    ToolWire,
     Wire,
 } from "./types.js";
 import { SELF_MODULE } from "./types.js";

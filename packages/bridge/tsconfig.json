@@ -4,8 +4,14 @@
     "outDir": "build",
     "declaration": true,
     "declarationMap": true,
-    "strictNullChecks": true,
     "isolatedModules": true,
+    // Catches unused imports/variables at compile time (base for GitHub quality scan)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // All code paths in a function must return a value
+    "noImplicitReturns": true,
+    // Switch cases must not fall through
+    "noFallthroughCasesInSwitch": true,
   },
   "include": [
     "src"

@@ -903,11 +903,6 @@ function findFirstToken(node: CstNode): IToken | undefined {
   return undefined;
 }
 
-function stripQuotes(s: string): string {
-  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1);
-  return s;
-}
-
 /* ── parsePath: split "a.b[0].c" → ["a","b","0","c"] ── */
 function parsePath(text: string): string[] {
   const parts: string[] = [];
@@ -967,20 +962,6 @@ function extractBareValue(node: CstNode): string {
 function extractJsonValue(node: CstNode): string {
   const c = node.children;
   if (c.string) return (c.string as IToken[])[0].image;  // keep quotes for JSON.parse
-  if (c.number) return (c.number as IToken[])[0].image;
-  if (c.integer) return (c.integer as IToken[])[0].image;
-  if (c.true) return "true";
-  if (c.false) return "false";
-  if (c.null) return "null";
-  if (c.object) return reconstructJson((c.object as CstNode[])[0]);
-  if (c.array) return reconstructJson((c.array as CstNode[])[0]);
-  return "";
-}
-
-/* ── extractJsonValueStr: same as above but strips outer quotes for const values ── */
-function extractJsonValueStripped(node: CstNode): string {
-  const c = node.children;
-  if (c.string) return stripQuotes((c.string as IToken[])[0].image);
   if (c.number) return (c.number as IToken[])[0].image;
   if (c.integer) return (c.integer as IToken[])[0].image;
   if (c.true) return "true";
@@ -1636,7 +1617,6 @@ function buildBridgeBody(
     const firstSourceNode = sub(wireNode, "firstSource")!;
     const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
-    const headAddr = sub(firstSourceNode, "head")!;
     const pipeSegs = subs(firstSourceNode, "pipeSegment");
     const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
     const isPipeFork = firstRef.instance != null && firstRef.path.length === 0 && pipeSegs.length > 0;

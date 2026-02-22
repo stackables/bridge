@@ -48,30 +48,16 @@ export type Bridge = {
   /** Connection wires */
   wires: Wire[];
   /**
-   * Iterator handle names for array mapping blocks.
-   * Key: the array destination field name (first path component of `to`).
-   * Value: the iterator handle alias declared with `[] as <iter> { }`.
-   */
-  arrayIterators?: Record<string, string>;
-  /**
-   * Pipe fork registry — one entry per pipe use.
-   * Maps the fork's trunk key to the originating handle name and the base
-   * trunk (used by the executor to inherit non-pipe bridge wires).
-   */
-  pipeHandles?: Array<{
-    /** Unique trunk key for this fork: "module:type:field:instance" */
-    key: string;
-    /** The bridge handle name that was piped, e.g. "pt" or "convertToEur" */
-    handle: string;
-    /** Base trunk — regular (non-pipe) bridge wires targeting this trunk are
-     *  applied to every fork before the fork-specific pipe wires. */
-    baseTrunk: { module: string; type: string; field: string; instance?: number };
-  }>;
-  /**
    * When set, this bridge was declared with the passthrough shorthand:
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
+  arrayIterators?: Record<string, string>;
+  pipeHandles?: Array<{
+    key: string;
+    handle: string;
+    baseTrunk: { module: string; type: string; field: string; instance?: number };
+  }>;
 };
 
 /**

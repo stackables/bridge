@@ -7,7 +7,7 @@ import {
 } from "graphql";
 import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
 import { builtinTools } from "./tools/index.js";
-import type { Instruction, ToolCallFn, ToolMap } from "./types.js";
+import type { Instruction, ToolMap } from "./types.js";
 import { SELF_MODULE } from "./types.js";
 
 export type { Logger };
