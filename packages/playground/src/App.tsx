@@ -97,7 +97,7 @@ function PanelBox({ children }: { children: React.ReactNode }) {
 // ── panel header label ─────────────────────────────────────────────────────────
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 px-3.5 pt-2.5 pb-1 text-[11px] font-bold text-slate-600 uppercase tracking-widest">
+    <div className="content-center shrink-0 px-5 h-10 pt-1.5 pb-1.5 text-[11px] font-bold text-slate-200 uppercase tracking-widest">
       {children}
     </div>
   );
@@ -196,7 +196,7 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>GraphQL Schema</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={schema} onChange={setSchema} />
+                    <Editor label="" value={schema} onChange={setSchema} language="graphql" />
                   </div>
                 </PanelBox>
               </Panel>
@@ -208,7 +208,7 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={bridge} onChange={setBridge} />
+                    <Editor label="" value={bridge} onChange={setBridge} language="bridge" />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
                 </PanelBox>
@@ -241,9 +241,9 @@ export function App() {
 
                   <div className="flex-1 min-h-0 p-3 pt-0">
                     {activeTab === "query" ? (
-                      <Editor label="" value={query} onChange={setQuery} />
+                      <Editor label="" value={query} onChange={setQuery} language="graphql" />
                     ) : (
-                      <Editor label="" value={context} onChange={setContext} />
+                      <Editor label="" value={context} onChange={setContext} language="json" />
                     )}
                   </div>
                 </PanelBox>

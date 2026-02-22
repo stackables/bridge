@@ -1,4 +1,5 @@
 import { TraceDialog } from "./TraceDialog";
+import { Editor } from "./Editor";
 import type { ToolTrace } from "../engine";
 
 type Props = {
@@ -37,9 +38,15 @@ export function ResultView({ result, errors, loading, traces }: Props) {
         )}
 
         {!loading && result !== undefined && (
-          <pre className="h-full rounded-lg border border-slate-800 bg-slate-950 p-3.5 font-mono text-[13px] leading-relaxed text-green-300 overflow-x-auto m-0">
-            {JSON.stringify(result, null, 2)}
-          </pre>
+          <div className="h-full rounded-lg border border-slate-800 overflow-hidden">
+            <Editor
+              label=""
+              value={JSON.stringify(result, null, 2)}
+              onChange={() => {}}
+              language="json"
+              readOnly
+            />
+          </div>
         )}
       </div>
 
