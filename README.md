@@ -102,6 +102,9 @@ type Mutation {
 Create your `logic.bridge` file to map the schema to an external provider (e.g., SendGrid). This is your routing implementation.
 
 ```bridge
+# VSCode langauge support
+# https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight
+
 version 1.4
 
 tool sendgrid from httpCall {
