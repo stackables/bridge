@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ShareDialog } from "./components/ShareDialog";
+import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -116,6 +118,24 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("query");
 
+  // Load shared playground state from ?s=<id> on first mount
+  useEffect(() => {
+    const id = getShareIdFromUrl();
+    if (!id) return;
+    clearShareIdFromUrl();
+    loadShare(id)
+      .then((payload) => {
+        setSchema(payload.schema);
+        setBridge(payload.bridge);
+        setQuery(payload.query);
+        setContext(payload.context);
+        setResult(null);
+      })
+      .catch(() => {
+        // silently ignore — invalid/expired share id
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectExample = useCallback((index: number) => {
     const e = examples[index] ?? examples[0]!;
     setExampleIndex(index);
@@ -172,9 +192,10 @@ export function App() {
           </Select>
         </div>
 
-        <span className="ml-auto text-xs text-slate-700">
-          All code runs in-browser · no server required
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-slate-700">All code runs in-browser · no server required</span>
+          <ShareDialog schema={schema} bridge={bridge} query={query} context={context} />
+        </div>
       </header>
 
       {/* ── Body: padding wrapper ensures panels never touch window edges ── */}
