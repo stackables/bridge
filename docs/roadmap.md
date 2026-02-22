@@ -84,6 +84,37 @@ A lightweight, execution-only runtime that allows parsing `.bridge` files Ahead-
 3. Update `bridgeTransform` to accept either a raw string (which invokes the parser) or a pre-parsed AST array.
 4. Build a thin Node CLI wrapper around the existing `parseBridgeDiagnostics()` function for the build/check commands.
 
+### Execution-Inferred IntelliSense & Validation
+
+A massive upgrade to the Language Server (LSP) that provides deep autocomplete, hover tooltips, and field validation for both internal GraphQL types and external API payloads.
+
+**Problem:** While `.bridge` files are strictly typed on the GraphQL side (`input` and `output`), the external tools (`httpCall`) are opaque black boxes. Developers have to guess or manually check what fields an external REST API returns, leading to typos and frustrating trial-and-error wiring.
+
+**Solution:** 
+
+1. **Static GraphQL Binding:** The LSP reads the local `schema.graphql` to provide instant, strict IntelliSense for `i.*` (input arguments) and `o.*` (output fields).
+
+2. **Dynamic Execution Inference:** During local development, the Bridge engine caches the actual JSON payloads sent to and received from external tools. The LSP reads this cache to dynamically "learn" the shape of the external APIs and provide IntelliSense for tool handles (e.g., `sg.*` or `geo.*`).
+
+**How it works:**
+
+* **GraphQL Resolution:** The VS Code extension accepts a path to the project's `schema.graphql`. When a user types `bridge Mutation.sendEmail { with input as i }`, typing `i.` immediately yields completions for the mutation's arguments (`to`, `subject`, `textBody`).
+* **The Dev Cache (`.bridge-types.json`):** When the developer runs queries locally (via Yoga or the planned Browser Playground), the engine intercepts the raw input/output JSON of every tool execution. It recursively merges these payloads into a unified type shape and saves it to a local cache file.
+* **The Feedback Loop:** The LSP watches the `.bridge-types.json` file. As the developer tests their graph, the LSP updates its internal symbol table in real-time. Typing `sg.` now offers completions based on the *actual data* SendGrid just returned.
+* **Linting:** If a user maps `o.lat <- geo.ltt` (typo), the LSP flags `.ltt` with a warning: *"Field 'ltt' not found in execution history for tool 'geo'. Did you mean 'lat'?"*
+
+**Implementation sketch:**
+
+1. **Engine side:** Add a `recordExecutionTypes: boolean` flag to the engine options. When true, it pipes `JSON.stringify` shapes through a schema-inference utility (e.g., merging objects, turning arrays of mixed objects into optional fields) and writes to disk.
+2. **LSP side:** Add a `schema` property to the Bridge AST nodes. For `input`/`output`, populate it from `graphql`. For tools, populate it by parsing the dev cache file.
+3. **Language Server Providers:** Implement `CompletionItemProvider` (autocomplete dropdown) and `HoverProvider` (showing inferred JSON types on mouse hover) by walking the Chevrotain CST and matching the cursor position to the inferred scope.
+
+**Challenges:**
+
+* **Cold Start:** There is no tool autocomplete until the user executes at least one query. (Can mitigate this by eventually allowing users to manually point a tool to an OpenAPI spec or JSON schema, but execution-inference is the primary magic).
+* **Shape Unioning:** If an API returns `{ "price": null }` on the first call and `{ "price": 10 }` on the second, the inference engine needs to correctly type it as `number | null` rather than throwing away data.
+* **Process Sync:** Ensuring the VS Code LSP process can safely and quickly read the cache file written by the local Node/Yoga dev server process.
+
 ---
 
 ## v2.0 (Feb 2026)
