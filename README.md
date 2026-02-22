@@ -9,6 +9,7 @@
 > * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
 > * Versioning: We follow strict SemVer starting from v2.0.0.
 > 
+> [See our roadmap](./docs/roadmap.md)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
@@ -16,7 +17,7 @@
 
 Stop hardcoding third-party SDKs and API keys into every microservice. The Bridge allows you to build a unified internal gateway that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
 
-We use GraphQL strictly as a clean, strongly-typed interface for internal services. The Bridge is the engine that actually wires that interface to the outside world.
+We use GraphQL strictly as a clean, strongly-typed interface for internal services. Your internal apps just make a standard HTTP POST request—no complex client needed. The Bridge is the engine that actually wires that interface to the outside world.
 
 **Best fit when your architecture needs:**
 
@@ -154,8 +155,6 @@ const yoga = createYoga({
 
 If you ever need to switch from SendGrid to AWS SES, you only rewrite `logic.bridge`. Your internal services and your GraphQL schema remain completely untouched.
 
-[Read about dynamic routing](./docs/dynamic-routing.md)
-
 ---
 
 ## The Bridge Language
@@ -187,6 +186,7 @@ tool <name> from <source> {
   .<param> = <value>              # Constant/Default value (dot = "this tool's param")
   .<param> <- <source>            # Dynamic wire
 }
+
 ```
 
 Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines do not use a dot; they are control flow, not param assignments.
@@ -207,6 +207,7 @@ define <name> {
   <handle>.<param> <- <source>  # Wiring (same syntax as bridge)
   <handle>.<param> = <value>    # Constants
 }
+
 ```
 
 Use a define in a bridge with `with <define> as <handle>`:
@@ -234,6 +235,7 @@ bridge Query.location {
   o.lat <- g.lat
   o.lon <- g.lon
 }
+
 ```
 
 Each invocation is fully isolated — calling the same define twice creates independent tool instances with no namespace collisions.
@@ -266,16 +268,18 @@ bridge <Type.field> {
     .<sub_field> = "constant"           # Element constant
   }
 }
+
 ```
 
 Bridge can be fully implemented in the defined pipeline.
 
-```
+```bridge
 define namedOperation {
   ....
 }
 
 bridge <Type.field> with namedOperation
+
 ```
 
 ---
@@ -329,6 +333,7 @@ tool geo from httpCall {
   .path = /search
   on error = { "lat": 0, "lon": 0 }   # tool-level default
 }
+
 ```
 
 #### Layer 2 — Wire `||` (null / absent values)
@@ -346,6 +351,7 @@ o.label <- api.label || backup.label || "unknown"
 
 # Pipe chain as alternative
 o.textPart <- i.textBody || convert:i.htmlBody || "empty"
+
 ```
 
 #### Layer 3 — Wire `??` (errors and exceptions)
@@ -360,6 +366,7 @@ o.lat <- geo.lat ?? 0.0
 
 # Error fallback pulls from another source
 o.label <- api.label ?? errorHandler:i.fallbackMsg
+
 ```
 
 #### Full COALESCE — composing all three layers
@@ -377,6 +384,7 @@ o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorSt
 # api.label null         → try toolIfNeeded(api.backup.label)
 # that null              → "unknown"  (|| json literal always succeeds)
 # any source throws      → toolIfNeeded(const.errorString)  (?? fires last)
+
 ```
 
 Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
@@ -394,6 +402,7 @@ bridge Mutation.updateUser {
   # 'log' runs even if the client doesn't query the 'status' field
   out.status <-! log:in.changeData
 }
+
 ```
 
 ### The Pipe Operator (`:`)
@@ -405,6 +414,7 @@ with output as o
 
 # i.rawData → normalize → transform → result
 o.result <- transform:normalize:i.rawData
+
 ```
 
 Full example with a tool that has 2 input parameters:
@@ -447,6 +457,7 @@ bridge Query.price {
   o.itemPrice  <- c1
   o.totalPrice <- c2
 }
+
 ```
 
 ---
@@ -459,7 +470,7 @@ bridge Query.price {
 | **`<-`** | Wire | Pulls data from a source at runtime. |
 | **`<-!`** | Force | Eagerly schedules a tool (for side-effects). |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
-| **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
+| **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
 | **`tool ... from`** | Tool Definition | Configures a function or inherits from a parent tool. |
@@ -478,7 +489,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 | `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
 | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
 | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
-| `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
+| `findObject` | `{ in: any[], ...criteria }` | `object | undefined` | Finds the first object in `in` where all criteria match. |
 | `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
 | `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
 
@@ -493,6 +504,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   },
 });
 // std.upperCase, std.lowerCase, etc. are still available
+
 ```
 
 To override a `std` tool, replace the namespace (shallow merge):
@@ -505,6 +517,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
     std: { ...std, upperCase: myCustomUpperCase },
   },
 });
+
 ```
 
 ### Response Caching
@@ -518,6 +531,7 @@ tool geo from httpCall {
   .method = GET
   .path = /search
 }
+
 ```
 
 The default is an in-memory store. For Redis or other backends, pass a custom `CacheStore` to `createHttpCall`:
@@ -534,4 +548,5 @@ const redisCache: CacheStore = {
 bridgeTransform(schema, instructions, {
   tools: { std: { ...std, httpCall: createHttpCall(fetch, redisCache) } },
 });
+
 ```
