@@ -1,59 +1,68 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
 [![extension](https://img.shields.io/badge/VS_Code-LSP-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
-[![roadmap](https://img.shields.io/badge/Roadmap-green)](./docs/roadmap.md)
 
-# The Bridge
-
-**Declarative dataflow for GraphQL.**
-Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, no codegen, no plumbing.
-
-```bash
-npm install @stackables/bridge
-```
 
 > **Developer Preview**
 > The Bridge v1.x is a public preview and is not recommended for production use.
->
 > * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
 > * Versioning: We follow strict SemVer starting from v2.0.0.
+> 
+> [See our roadmap](./docs/roadmap.md)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
 ---
 
-## The Idea
+# The Bridge
 
-Most GraphQL backends are just plumbing: take input, call an API, rename fields, and return. **The Bridge** turns that manual labor into a declarative graph of intent.
 
-Every .bridge file maps GraphQL schema fields to tools and external APIs.
+**Declarative dataflow for controlled egress.**
 
-The engine resolves **backwards from demand**: when a GraphQL query requests `results[0].lat`, the engine traces the wire back to the `position.lat` of a specific API response. Only the data required to satisfy the query is ever fetched or executed.
+Stop hardcoding third-party SDKs and API keys into every microservice. The Bridge allows you to build a unified internal gateway that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
+
+We use GraphQL strictly as a clean, strongly-typed interface for internal services. Your internal apps just make a standard HTTP POST request—no complex client needed. The Bridge is the engine that actually wires that interface to the outside world.
+
+**Best fit when your architecture needs:**
+
+* **Controlled Egress:** Funnel all external API calls through a single gateway to enforce uniform rate-limiting, caching, and a single Egress IP for vendor allowlisting.
+* **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES, Stripe ↔ Braintree) without touching a single line of your calling services' code.
+* **Centralized Secrets:** Inject external API keys at the gateway level instead of distributing them across your internal microservices.
+* **Unified Internal API:** Give your internal teams a clean, single-endpoint graph to interact with messy external REST APIs.
+
+**Not best fit when you need:**
+
+* Heavy business logic or domain modeling.
+* Multi-step database transactions or sagas.
+* Very high-performance per-field computation.
+
+
+
+---
+
+## The Architecture
+
+If internal Service A and Service B both need to send an email, the standard approach is to install the SendGrid SDK and inject the API key into both services. This creates tight coupling.
+
+Instead, you stand up a lightweight Egress Gateway powered by The Bridge. Service A and B simply make a standard GraphQL request to the gateway. The gateway uses your `.bridge` files to map the request, inject the credentials, and route the traffic. To your internal services, the external provider is completely invisible.
 
 ### What it is (and isn't)
 
 The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your application logic.
 
-* **Use it to:** Morph external API shapes, enforce single exit points for security, and swap providers (e.g., SendGrid to Postmark) without changing app code.
-* **Don't use it for:** Complex business logic or database transactions. Keep the "intelligence" in your Tools; keep the "connectivity" in your Bridge.
-* Bridge is a declarative dataflow layer for GraphQL, **not a standalone API.**
+* **Use it to:** Morph external API shapes, enforce single exit points for security, and manage vendor integrations independently of your core services.
+* **Don't use it for:** Complex business logic. Keep the "intelligence" in your microservices; keep the "connectivity" in your Bridge.
 
 ### Wiring, not Programming
 
 The Bridge is not a programming language. It is a Data Topology Language.
 
-Unlike Python or JavaScript, where you write a list of instructions for a computer to execute in order, a .bridge file describes a static circuit. There is no "execution pointer" that moves from the top of the file to the bottom.
+Unlike JavaScript or Python, where you write sequential instructions, a `.bridge` file describes a static circuit. There is no "execution pointer".
 
-No Sequential Logic: Shuffling the lines inside a define or bridge block changes nothing. The engine doesn't "run" your file; it uses your file to understand how your GraphQL fields are physically wired to your tools.
-
-Pull, Don't Push: In a normal language, you "push" data into variables. In The Bridge, the GraphQL query "pulls" data through the wires. If a client doesn't ask for a field, the wire is "dead"—no code runs, and no API is called.
-
-Declarative Connections: When you write o.name <- api.name, you aren't commanding a copy operation; you are soldering a permanent link between two points in your graph.
+* **No Sequential Logic:** Shuffling the lines inside a block changes nothing. The engine uses your file to understand how internal fields physically wire to external tools.
+* **Pull, Don't Push:** Your microservices "pull" data through the wires. If a client doesn't ask for a field, the wire is "dead"—no code runs, and no API is called.
+* **Declarative Connections:** When you write `o.name <- api.name`, you aren't commanding a copy operation; you are soldering a permanent link between your internal interface and an external response.
 
 **Don't think in scripts. Think in schematics.**
-
-### Portability & Performance
-
-While the reference engine is implemented in TypeScript, the Bridge language itself is a simple, high-level specification for data flow. Because it describes intent rather than execution, it is architecturally "runtime-blind." It can be interpreted by any high-performance engines written in Rust, Go, or C++ without changing a single line of your .bridge files.
 
 ### Usage with LLMs
 
@@ -65,108 +74,122 @@ Most of the time, it’s enough to give your LLM this README and the GraphQL sch
 
 ## The Workflow
 
-The Bridge doesn't replace your GraphQL schema; it implements it. You define your **Types** in standard GraphQL SDL, then use `.bridge` files to wire those types to your data sources.
+You define your internal interface in standard GraphQL SDL, then use `.bridge` files to wire those types to your external providers.
+
+Read more about:
+- [Observability (tracing, metrics and logging)](./docs/observability.md)
+- [Dynamic routing](./docs/dynamic-routing.md)
 
 ### 1. Define your Schema
 
-Start with a standard `schema.graphql` file. This is your "Interface."
+Start with `schema.graphql`. This is the clean interface your internal microservices will call.
 
 ```graphql
-type Location {
-  lat: Float
-  lon: Float
+type EmailResult {
+  success: Boolean
+  messageId: String
 }
 
-type Query {
-  location(city: String!): Location
+type Mutation {
+  sendEmail(to: String!, subject: String!, textBody: String!): EmailResult
 }
 
 ```
 
 ### 2. Wire the Bridge
 
-Create your `logic.bridge` file to implement the resolver for that specific field. This is your "Implementation."
+Create your `logic.bridge` file to map the schema to an external provider (e.g., SendGrid). This is your routing implementation.
 
-```hcl
+```bridge
 version 1.4
 
-tool geo from httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .path = "/search"
+tool sendgrid from httpCall {
+  with context as ctx
+
+  .baseUrl = "https://api.sendgrid.com/v3"
+  .path = "/mail/send"
+  .method = POST
+  .headers.Authorization = ctx.env.SENDGRID_API_KEY
 }
 
-bridge Query.location {
-  with geo
+bridge Mutation.sendEmail {
+  with sendgrid as sg
   with input as i
   with output as o
 
-  # 'i.city' comes from the GraphQL argument
-  # 'o.lat' maps to the 'lat' field in the Location type
-  geo.q <- i.city
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
+  # Map our clean input to SendGrid's specific JSON structure
+  sg.personalizations[0].to[0].email <- i.to
+  sg.subject <- i.subject
+  sg.content[0].type = "text/plain"
+  sg.content[0].value <- i.textBody
+
+  # Force execution (<-!) since this is a side-effect/mutation
+  # and map the response back to our internal schema
+  o.success <-! sg:true ?? false
+  o.messageId <- sg.headers.x-message-id
 }
+
 ```
 
 ### 3. Initialize the Engine
 
-The Bridge takes your existing schema and automatically attaches the logic.
+The Bridge engine takes your schema, attaches the routing logic, and exposes the gateway.
 
 ```typescript
 import { bridgeTransform, parseBridge } from "@stackables/bridge";
-import { createSchema } from "graphql-yoga";
+import { createSchema, createYoga } from "graphql-yoga";
 
-const typeDefs = /* load your schema.graphql */;
-const bridgeFile = /* load your logic.bridge */;
+const typeDefs = /* load schema.graphql */;
+const bridgeFile = /* load logic.bridge */;
 
 const schema = bridgeTransform(
   createSchema({ typeDefs }), 
   parseBridge(bridgeFile)
 );
 
+const yoga = createYoga({
+  schema,
+  context: () => ({
+    env: { SENDGRID_API_KEY: process.env.SENDGRID_API_KEY },
+  }),
+});
+
 ```
+
+If you ever need to switch from SendGrid to AWS SES, you only rewrite `logic.bridge`. Your internal services and your GraphQL schema remain completely untouched.
 
 ---
 
-## The Language
+## The Bridge Language
 
-Get syntax highlighting for [Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight).
+Get syntax highlighting for [Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight). [Full language guide is here.](./docs//bridge-language-guide.md)
 
-[Full language guide](./docs//bridge-language-guide.md)
-
-Every `.bridge` file must begin with a version declaration.
-
-```hcl
-version 1.4
-```
-
-This is the first non-blank, non-comment line. Everything else follows after it.
+Every `.bridge` file must begin with a version declaration (`version 1.4`). This is the first non-blank, non-comment line.
 
 ### 1. Const Blocks (`const`)
 
-Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments.
+Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments. Access them via `with const as c`.
 
-```hcl
-const fallbackGeo = { "lat": 0, "lon": 0 }
+```bridge
 const defaultCurrency = "EUR"
 const maxRetries = 3
-```
 
-Access const values in bridges or tools via `with const as c`, then reference as `c.<name>.<path>`.
+```
 
 ### 2. Tool Blocks (`tool ... from`)
 
 Defines the "Where" and the "How." Takes a function (or parent tool) and configures it, giving it a new name.
 
-```hcl
+```bridge
 tool <name> from <source> {
-  [with context]                  # Injects GraphQL context (auth, secrets, etc.)
+  [with context]                  # Injects GraphQL context (auth, secrets)
   [on error = <json_fallback>]    # Fallback value if tool fails
   [on error <- <source>]          # Pull fallback from context/tool
 
   .<param> = <value>              # Constant/Default value (dot = "this tool's param")
   .<param> <- <source>            # Dynamic wire
 }
+
 ```
 
 Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines do not use a dot; they are control flow, not param assignments.
@@ -178,7 +201,7 @@ When `<source>` is an existing tool name, the new tool inherits its configuratio
 
 Reusable named subgraphs — compose tools and wires into a pipeline, then invoke it from any bridge.
 
-```hcl
+```bridge
 define <name> {
   with <tool> as <handle>     # Tools used inside the pipeline
   with input as <handle>      # Inputs provided by the caller
@@ -187,11 +210,12 @@ define <name> {
   <handle>.<param> <- <source>  # Wiring (same syntax as bridge)
   <handle>.<param> = <value>    # Constants
 }
+
 ```
 
 Use a define in a bridge with `with <define> as <handle>`:
 
-```hcl
+```bridge
 define geocode {
   with std.httpCall as geo
   with input as i
@@ -214,15 +238,16 @@ bridge Query.location {
   o.lat <- g.lat
   o.lon <- g.lon
 }
+
 ```
 
 Each invocation is fully isolated — calling the same define twice creates independent tool instances with no namespace collisions.
 
 ### 4. Bridge Blocks (`bridge`)
 
-The resolver logic connecting GraphQL schema fields to your tools.
+The routing logic connecting your internal schema fields to your tools.
 
-```hcl
+```bridge
 bridge <Type.field> {
   with <tool> [as <alias>]
   with input as i
@@ -246,16 +271,18 @@ bridge <Type.field> {
     .<sub_field> = "constant"           # Element constant
   }
 }
+
 ```
 
 Bridge can be fully implemented in the defined pipeline.
 
-```
+```bridge
 define namedOperation {
   ....
 }
 
 bridge <Type.field> with namedOperation
+
 ```
 
 ---
@@ -302,20 +329,21 @@ Each layer handles a different failure mode. They compose freely.
 
 Declared inside the `tool` block. Catches any exception thrown by the tool's `fn(input)`. All tools that inherit from this tool inherit the fallback.
 
-```hcl
+```bridge
 tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET
   .path = /search
   on error = { "lat": 0, "lon": 0 }   # tool-level default
 }
+
 ```
 
 #### Layer 2 — Wire `||` (null / absent values)
 
 Fires when a source resolves **successfully but returns `null` or `undefined`**. The fallback can be a JSON literal or another source expression (handle path or pipe chain). Multiple `||` alternatives chain left-to-right like `COALESCE`.
 
-```hcl
+```bridge
 with output as o
 
 # JSON literal fallback
@@ -326,13 +354,14 @@ o.label <- api.label || backup.label || "unknown"
 
 # Pipe chain as alternative
 o.textPart <- i.textBody || convert:i.htmlBody || "empty"
+
 ```
 
 #### Layer 3 — Wire `??` (errors and exceptions)
 
 Fires when the **entire resolution chain throws** (network failure, tool down, dependency error). Does not fire on null values — that's `||`'s job. The fallback can be a JSON literal or a source/pipe expression (evaluated lazily, only when the error fires).
 
-```hcl
+```bridge
 with output as o
 
 # JSON literal error fallback
@@ -340,13 +369,14 @@ o.lat <- geo.lat ?? 0.0
 
 # Error fallback pulls from another source
 o.label <- api.label ?? errorHandler:i.fallbackMsg
+
 ```
 
 #### Full COALESCE — composing all three layers
 
 `||` and `??` compose into a Postgres-style `COALESCE` with an error guard at the end:
 
-```hcl
+```bridge
 with output as o
 
 # o.label <- A || B || C || "literal" ?? errorSource
@@ -357,6 +387,7 @@ o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorSt
 # api.label null         → try toolIfNeeded(api.backup.label)
 # that null              → "unknown"  (|| json literal always succeeds)
 # any source throws      → toolIfNeeded(const.errorString)  (?? fires last)
+
 ```
 
 Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
@@ -365,7 +396,7 @@ Multiple `||` sources desugar to **parallel wires** — all sources are evaluate
 
 By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
 
-```hcl
+```bridge
 bridge Mutation.updateUser {
   with audit.logger as log
   with input as in
@@ -374,22 +405,24 @@ bridge Mutation.updateUser {
   # 'log' runs even if the client doesn't query the 'status' field
   out.status <-! log:in.changeData
 }
+
 ```
 
 ### The Pipe Operator (`:`)
 
 Routes data right-to-left through one or more tool handles: `dest <- handle:source`.
 
-```hcl
+```bridge
 with output as o
 
 # i.rawData → normalize → transform → result
 o.result <- transform:normalize:i.rawData
+
 ```
 
 Full example with a tool that has 2 input parameters:
 
-```hcl
+```bridge
 tool convert from currencyConverter {
   .currency = EUR   # default currency
 }
@@ -427,6 +460,7 @@ bridge Query.price {
   o.itemPrice  <- c1
   o.totalPrice <- c2
 }
+
 ```
 
 ---
@@ -439,50 +473,13 @@ bridge Query.price {
 | **`<-`** | Wire | Pulls data from a source at runtime. |
 | **`<-!`** | Force | Eagerly schedules a tool (for side-effects). |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
-| **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
+| **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
 | **`tool ... from`** | Tool Definition | Configures a function or inherits from a parent tool. |
 | **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
 | **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
-
----
-
-## Usage
-
-### 1. Basic Setup
-
-The Bridge wraps your existing GraphQL schema, handling the `resolve` functions automatically.
-
-```typescript
-import { createSchema, createYoga } from "graphql-yoga";
-import { bridgeTransform, parseBridge } from "@stackables/bridge";
-
-const schema = bridgeTransform(
-  createSchema({ typeDefs }), 
-  parseBridge(bridgeFileText)
-);
-
-const yoga = createYoga({
-  schema,
-  context: () => ({
-    api: { key: process.env.API_KEY },
-  }),
-});
-
-```
-
-### 2. Custom Tools
-
-```typescript
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
-  tools: {
-    toCents: ({ in: dollars }) => ({ cents: dollars * 100 }),
-  },
-});
-
-```
 
 ---
 
@@ -495,7 +492,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 | `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
 | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
 | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
-| `findObject` | `{ in: any[], ...criteria }` | `object \| undefined` | Finds the first object in `in` where all criteria match. |
+| `findObject` | `{ in: any[], ...criteria }` | `object | undefined` | Finds the first object in `in` where all criteria match. |
 | `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
 | `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
 
@@ -510,6 +507,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
   },
 });
 // std.upperCase, std.lowerCase, etc. are still available
+
 ```
 
 To override a `std` tool, replace the namespace (shallow merge):
@@ -522,19 +520,21 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
     std: { ...std, upperCase: myCustomUpperCase },
   },
 });
+
 ```
 
 ### Response Caching
 
 Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
 
-```hcl
+```bridge
 tool geo from httpCall {
   .cache = 300          # cache for 5 minutes
   .baseUrl = "https://nominatim.openstreetmap.org"
   .method = GET
   .path = /search
 }
+
 ```
 
 The default is an in-memory store. For Redis or other backends, pass a custom `CacheStore` to `createHttpCall`:
@@ -551,4 +551,5 @@ const redisCache: CacheStore = {
 bridgeTransform(schema, instructions, {
   tools: { std: { ...std, httpCall: createHttpCall(fetch, redisCache) } },
 });
+
 ```
