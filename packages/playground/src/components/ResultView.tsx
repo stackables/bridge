@@ -1,0 +1,56 @@
+import { TraceDialog } from "./TraceDialog";
+import type { ToolTrace } from "../engine";
+
+type Props = {
+  result: unknown | null;
+  errors: string[] | undefined;
+  loading: boolean;
+  traces?: ToolTrace[];
+};
+
+export function ResultView({ result, errors, loading, traces }: Props) {
+  const hasContent = loading || result !== undefined || (errors && errors.length > 0);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Scrollable result area */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {loading && (
+          <p className="py-4 font-mono text-[13px] text-slate-400">Running…</p>
+        )}
+
+        {!hasContent && (
+          <p className="py-4 font-mono text-[13px] text-slate-700">
+            Press Run to execute the query.
+          </p>
+        )}
+
+        {!loading && errors && errors.length > 0 && (
+          <div className="rounded-lg border border-red-900 bg-red-950 p-3.5 mb-2">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-300">
+              Errors
+            </p>
+            {errors.map((err, i) => (
+              <p key={i} className="font-mono text-[13px] text-red-300">{err}</p>
+            ))}
+          </div>
+        )}
+
+        {!loading && result !== undefined && (
+          <pre className="h-full rounded-lg border border-slate-800 bg-slate-950 p-3.5 font-mono text-[13px] leading-relaxed text-green-300 overflow-x-auto m-0">
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        )}
+      </div>
+
+      {/* Trace badge pinned to bottom */}
+      {traces && traces.length > 0 && (
+        <div className="shrink-0 pt-2.5">
+          <TraceDialog traces={traces} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+

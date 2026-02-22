@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  /* Monospace font stack for code editors */
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+
+  /* Custom accent colors not in Tailwind's palette */
+  --color-sky-badge: #164e63;
+  --color-sky-trace: #1e3a5f;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+}
