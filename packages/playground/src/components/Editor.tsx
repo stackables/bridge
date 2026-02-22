@@ -29,14 +29,25 @@ type Props = {
 
 function languageExtension(lang: EditorLanguage): Extension[] {
   switch (lang) {
-    case "bridge":  return [bridgeLanguage];
-    case "graphql": return [graphqlLanguage];
-    case "json":    return [json()];
-    case "plain":   return [];
+    case "bridge":
+      return [bridgeLanguage];
+    case "graphql":
+      return [graphqlLanguage];
+    case "json":
+      return [json()];
+    case "plain":
+      return [];
   }
 }
 
-export function Editor({ label, value, onChange, language = "plain", readOnly = false, autoHeight = false }: Props) {
+export function Editor({
+  label,
+  value,
+  onChange,
+  language = "plain",
+  readOnly = false,
+  autoHeight = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -67,7 +78,6 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
         playgroundTheme,
         ...languageExtension(language),
         updateListener(),
-        EditorView.lineWrapping,
         readOnlyCompartment.current.of([
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
@@ -78,7 +88,10 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
 
-    return () => { view.destroy(); viewRef.current = null; };
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps — intentionally only on mount
   }, [language, updateListener]);
 
@@ -113,5 +126,3 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
     </div>
   );
 }
-
-

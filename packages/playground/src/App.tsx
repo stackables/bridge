@@ -7,7 +7,13 @@ import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { ShareDialog } from "./components/ShareDialog";
 import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
@@ -18,7 +24,9 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
     <PanelResizeHandle
       className={cn(
         "shrink-0",
-        direction === "horizontal" ? "w-2 cursor-[col-resize]" : "h-2 cursor-[row-resize]",
+        direction === "horizontal"
+          ? "w-2 cursor-[col-resize]"
+          : "h-2 cursor-[row-resize]",
       )}
     />
   );
@@ -38,8 +46,12 @@ function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
             d.severity === "error" ? "text-red-300" : "text-yellow-200",
           )}
         >
-          <span className="opacity-60">{d.severity === "error" ? "✗" : "⚠"}</span>
-          <span>{d.message} (line {d.range.start.line + 1})</span>
+          <span className="opacity-60">
+            {d.severity === "error" ? "✗" : "⚠"}
+          </span>
+          <span>
+            {d.message} (line {d.range.start.line + 1})
+          </span>
         </div>
       ))}
     </div>
@@ -55,7 +67,13 @@ type TabStripProps = {
   runDisabled: boolean;
   running: boolean;
 };
-function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripProps) {
+function TabStrip({
+  active,
+  onChange,
+  onRun,
+  runDisabled,
+  running,
+}: TabStripProps) {
   const tab = (id: Tab, label: string) => (
     <button
       key={id}
@@ -161,7 +179,7 @@ export function App() {
   const hasErrors = diagnostics.some((d) => d.severity === "error");
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
+    <div className="md:h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
       <header className="shrink-0 border-b border-slate-800">
         {/* Row 1: logo + (desktop: example picker + info) + share */}
@@ -172,8 +190,12 @@ export function App() {
             rel="noopener noreferrer"
             className="flex items-center gap-2.5 no-underline"
           >
-            <span className="text-xl font-bold text-sky-400 tracking-tight">Bridge</span>
-            <Badge className="text-[10px] tracking-wider uppercase">Playground</Badge>
+            <span className="text-xl font-bold text-sky-400 tracking-tight">
+              Bridge
+            </span>
+            <Badge className="text-[10px] tracking-wider uppercase">
+              Playground
+            </Badge>
           </a>
 
           {/* Example picker — desktop only (row 1) */}
@@ -188,15 +210,24 @@ export function App() {
               </SelectTrigger>
               <SelectContent>
                 {examples.map((ex, i) => (
-                  <SelectItem key={i} value={String(i)}>{ex.name}</SelectItem>
+                  <SelectItem key={i} value={String(i)}>
+                    {ex.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
           <div className="ml-auto flex items-center gap-2 md:gap-3">
-            <span className="hidden md:block text-xs text-slate-700">All code runs in-browser · no server required</span>
-            <ShareDialog schema={schema} bridge={bridge} query={query} context={context} />
+            <span className="hidden md:block text-xs text-slate-700">
+              All code runs in-browser · no server required
+            </span>
+            <ShareDialog
+              schema={schema}
+              bridge={bridge}
+              query={query}
+              context={context}
+            />
           </div>
         </div>
 
@@ -207,12 +238,14 @@ export function App() {
             value={String(exampleIndex)}
             onValueChange={(v) => selectExample(Number(v))}
           >
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {examples.map((ex, i) => (
-                <SelectItem key={i} value={String(i)}>{ex.name}</SelectItem>
+                <SelectItem key={i} value={String(i)}>
+                  {ex.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -225,7 +258,13 @@ export function App() {
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <PanelLabel>GraphQL Schema</PanelLabel>
           <div className="px-3 pb-3">
-            <Editor label="" value={schema} onChange={setSchema} language="graphql" autoHeight />
+            <Editor
+              label=""
+              value={schema}
+              onChange={setSchema}
+              language="graphql"
+              autoHeight
+            />
           </div>
         </div>
 
@@ -233,7 +272,13 @@ export function App() {
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <PanelLabel>Bridge DSL</PanelLabel>
           <div className="px-3 pb-3">
-            <Editor label="" value={bridge} onChange={setBridge} language="bridge" autoHeight />
+            <Editor
+              label=""
+              value={bridge}
+              onChange={setBridge}
+              language="bridge"
+              autoHeight
+            />
           </div>
           <DiagnosticsBar bridgeText={bridge} />
         </div>
@@ -251,9 +296,21 @@ export function App() {
           </div>
           <div className="p-3 pt-2">
             {activeTab === "query" ? (
-              <Editor label="" value={query} onChange={setQuery} language="graphql" autoHeight />
+              <Editor
+                label=""
+                value={query}
+                onChange={setQuery}
+                language="graphql"
+                autoHeight
+              />
             ) : (
-              <Editor label="" value={context} onChange={setContext} language="json" autoHeight />
+              <Editor
+                label=""
+                value={context}
+                onChange={setContext}
+                language="json"
+                autoHeight
+              />
             )}
           </div>
         </div>
@@ -292,7 +349,12 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>GraphQL Schema</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={schema} onChange={setSchema} language="graphql" />
+                    <Editor
+                      label=""
+                      value={schema}
+                      onChange={setSchema}
+                      language="graphql"
+                    />
                   </div>
                 </PanelBox>
               </Panel>
@@ -304,12 +366,16 @@ export function App() {
                 <PanelBox>
                   <PanelLabel>Bridge DSL</PanelLabel>
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor label="" value={bridge} onChange={setBridge} language="bridge" />
+                    <Editor
+                      label=""
+                      value={bridge}
+                      onChange={setBridge}
+                      language="bridge"
+                    />
                   </div>
                   <DiagnosticsBar bridgeText={bridge} />
                 </PanelBox>
               </Panel>
-
             </PanelGroup>
           </Panel>
 
@@ -337,9 +403,19 @@ export function App() {
 
                   <div className="flex-1 min-h-0 p-3 pt-0">
                     {activeTab === "query" ? (
-                      <Editor label="" value={query} onChange={setQuery} language="graphql" />
+                      <Editor
+                        label=""
+                        value={query}
+                        onChange={setQuery}
+                        language="graphql"
+                      />
                     ) : (
-                      <Editor label="" value={context} onChange={setContext} language="json" />
+                      <Editor
+                        label=""
+                        value={context}
+                        onChange={setContext}
+                        language="json"
+                      />
                     )}
                   </div>
                 </PanelBox>
@@ -361,7 +437,6 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-
             </PanelGroup>
           </Panel>
         </PanelGroup>
