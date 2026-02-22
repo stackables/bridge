@@ -106,7 +106,7 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
         className={cn(
           "w-full rounded-lg border border-slate-800 bg-slate-950",
           autoHeight
-            ? "[&_.cm-scroller]:overflow-visible"
+            ? "[&_.cm-editor]:h-auto [&_.cm-scroller]:overflow-visible"
             : "flex-1 min-h-0 overflow-y-auto [&_.cm-editor]:h-full",
         )}
       />
