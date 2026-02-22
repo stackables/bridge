@@ -6,26 +6,15 @@ import { examples } from "./examples";
 import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
 
-// ── resize handle ─────────────────────────────────────────────────────────────
+// ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
   const isH = direction === "horizontal";
   return (
     <PanelResizeHandle style={{
       flexShrink: 0,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      [isH ? "width" : "height"]: 10,
+      [isH ? "width" : "height"]: 8,
       cursor: isH ? "col-resize" : "row-resize",
-    }}>
-      <div style={{
-        background: "#334155",
-        borderRadius: 4,
-        [isH ? "width" : "height"]: 4,
-        [isH ? "height" : "width"]: 32,
-        transition: "background 0.15s",
-      }} />
-    </PanelResizeHandle>
+    }} />
   );
 }
 
@@ -59,15 +48,22 @@ function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
   );
 }
 
-// ── tab strip ─────────────────────────────────────────────────────────────────
+// ── tab strip with optional Run button ────────────────────────────────────────
 type Tab = "query" | "context";
-function TabStrip({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
+type TabStripProps = {
+  active: Tab;
+  onChange: (t: Tab) => void;
+  onRun: () => void;
+  runDisabled: boolean;
+  running: boolean;
+};
+function TabStrip({ active, onChange, onRun, runDisabled, running }: TabStripProps) {
   const tab = (id: Tab, label: string) => (
     <button
       key={id}
       onClick={() => onChange(id)}
       style={{
-        padding: "5px 14px",
+        padding: "6px 14px",
         background: "transparent",
         border: "none",
         borderBottom: active === id ? "2px solid #38bdf8" : "2px solid transparent",
@@ -84,18 +80,38 @@ function TabStrip({ active, onChange }: { active: Tab; onChange: (t: Tab) => voi
   return (
     <div style={{
       display: "flex",
+      alignItems: "center",
       borderBottom: "1px solid #1e293b",
       flexShrink: 0,
       padding: "0 6px",
     }}>
       {tab("query", "Query")}
       {tab("context", "Context")}
+      <div style={{ flex: 1 }} />
+      <button
+        onClick={onRun}
+        disabled={runDisabled}
+        style={{
+          padding: "4px 16px",
+          background: runDisabled ? "#1e3a4a" : "#0ea5e9",
+          color: runDisabled ? "#475569" : "#fff",
+          border: "none",
+          borderRadius: 5,
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: runDisabled ? "not-allowed" : "pointer",
+          transition: "background 0.15s",
+          marginRight: 4,
+        }}
+      >
+        {running ? "Running…" : "▶  Run"}
+      </button>
     </div>
   );
 }
 
 // ── panel wrapper ─────────────────────────────────────────────────────────────
-function PanelBox({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+function PanelBox({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
       background: "#1e293b",
@@ -104,7 +120,6 @@ function PanelBox({ children, style }: { children: React.ReactNode; style?: Reac
       flexDirection: "column",
       overflow: "hidden",
       height: "100%",
-      ...style,
     }}>
       {children}
     </div>
@@ -120,7 +135,7 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
       color: "#475569",
       textTransform: "uppercase",
       letterSpacing: "0.08em",
-      padding: "10px 14px 0",
+      padding: "10px 14px 4px",
       flexShrink: 0,
     }}>
       {children}
@@ -234,103 +249,99 @@ export function App() {
         </div>
       </header>
 
-      {/* ── Body: two resizable columns ── */}
-      <PanelGroup
-        direction="horizontal"
-        style={{ flex: 1, padding: "12px 16px 16px", gap: 0, minHeight: 0 }}
-      >
-        {/* ── LEFT column: Schema + Bridge ── */}
-        <Panel defaultSize={50} minSize={20}>
-          <PanelGroup direction="vertical" style={{ height: "100%", gap: 0 }}>
+      {/* ── Body: padding wrapper ensures panels never touch window edges ── */}
+      <div style={{ flex: 1, minHeight: 0, padding: "12px 16px 16px", overflow: "hidden" }}>
+        <PanelGroup
+          direction="horizontal"
+          autoSaveId="bridge-playground-h"
+          style={{ height: "100%" }}
+        >
+          {/* ── LEFT column: Schema + Bridge ── */}
+          <Panel defaultSize={50} minSize={20}>
+            <PanelGroup
+              direction="vertical"
+              autoSaveId="bridge-playground-left-v"
+              style={{ height: "100%" }}
+            >
+              {/* Schema panel */}
+              <Panel defaultSize={35} minSize={15}>
+                <PanelBox>
+                  <PanelLabel>GraphQL Schema</PanelLabel>
+                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 12px" }}>
+                    <Editor label="" value={schema} onChange={setSchema} />
+                  </div>
+                </PanelBox>
+              </Panel>
 
-            {/* Schema panel */}
-            <Panel defaultSize={35} minSize={15}>
-              <PanelBox>
-                <PanelLabel>GraphQL Schema</PanelLabel>
-                <div style={{ flex: 1, minHeight: 0, padding: "8px 12px 12px" }}>
-                  <Editor label="" value={schema} onChange={setSchema} />
-                </div>
-              </PanelBox>
-            </Panel>
+              <ResizeHandle direction="vertical" />
 
-            <ResizeHandle direction="vertical" />
+              {/* Bridge DSL panel */}
+              <Panel defaultSize={65} minSize={20}>
+                <PanelBox>
+                  <PanelLabel>Bridge DSL</PanelLabel>
+                  <div style={{ flex: 1, minHeight: 0, padding: "4px 12px 0" }}>
+                    <Editor label="" value={bridge} onChange={setBridge} />
+                  </div>
+                  <DiagnosticsBar bridgeText={bridge} />
+                </PanelBox>
+              </Panel>
 
-            {/* Bridge DSL panel */}
-            <Panel defaultSize={65} minSize={20}>
-              <PanelBox>
-                <PanelLabel>Bridge DSL</PanelLabel>
-                <div style={{ flex: 1, minHeight: 0, padding: "8px 12px 0" }}>
-                  <Editor label="" value={bridge} onChange={setBridge} />
-                </div>
-                <DiagnosticsBar bridgeText={bridge} />
-              </PanelBox>
-            </Panel>
+            </PanelGroup>
+          </Panel>
 
-          </PanelGroup>
-        </Panel>
+          <ResizeHandle direction="horizontal" />
 
-        <ResizeHandle direction="horizontal" />
-
-        {/* ── RIGHT column: Execute (Query/Context tabs) + Results ── */}
-        <Panel defaultSize={50} minSize={20}>
-          <PanelGroup direction="vertical" style={{ height: "100%", gap: 0 }}>
-
-            {/* Query / Context tabbed panel */}
-            <Panel defaultSize={40} minSize={15}>
-              <PanelBox>
-                <TabStrip active={activeTab} onChange={setActiveTab} />
-                <div style={{ flex: 1, minHeight: 0, padding: "8px 12px 12px" }}>
-                  {activeTab === "query" ? (
-                    <Editor label="" value={query} onChange={setQuery} />
-                  ) : (
-                    <Editor label="" value={context} onChange={setContext} />
-                  )}
-                </div>
-              </PanelBox>
-            </Panel>
-
-            <ResizeHandle direction="vertical" />
-
-            {/* Result panel */}
-            <Panel defaultSize={60} minSize={20}>
-              <PanelBox>
-                <div style={{ padding: "10px 14px 8px", flexShrink: 0, display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    Result
-                  </span>
-                  <button
-                    onClick={handleRun}
-                    disabled={loading || hasErrors}
-                    style={{
-                      padding: "5px 18px",
-                      background: loading || hasErrors ? "#1e3a4a" : "#0ea5e9",
-                      color: loading || hasErrors ? "#475569" : "#fff",
-                      border: "none",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: loading || hasErrors ? "not-allowed" : "pointer",
-                      transition: "background 0.15s",
-                    }}
-                  >
-                    {loading ? "Running…" : "▶  Run"}
-                  </button>
-                </div>
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 14px 14px" }}>
-                  <ResultView
-                    result={result?.data}
-                    errors={result?.errors}
-                    loading={loading}
-                    traces={result?.traces}
+          {/* ── RIGHT column: Query/Context + Results ── */}
+          <Panel defaultSize={50} minSize={20}>
+            <PanelGroup
+              direction="vertical"
+              autoSaveId="bridge-playground-right-v"
+              style={{ height: "100%" }}
+            >
+              {/* Query / Context tabbed panel */}
+              <Panel defaultSize={40} minSize={15}>
+                <PanelBox>
+                  <TabStrip
+                    active={activeTab}
+                    onChange={setActiveTab}
+                    onRun={handleRun}
+                    runDisabled={loading || hasErrors}
+                    running={loading}
                   />
-                </div>
-              </PanelBox>
-            </Panel>
+                  <div style={{ flex: 1, minHeight: 0, padding: "8px 12px 12px" }}>
+                    {activeTab === "query" ? (
+                      <Editor label="" value={query} onChange={setQuery} />
+                    ) : (
+                      <Editor label="" value={context} onChange={setContext} />
+                    )}
+                  </div>
+                </PanelBox>
+              </Panel>
 
-          </PanelGroup>
-        </Panel>
-      </PanelGroup>
+              <ResizeHandle direction="vertical" />
+
+              {/* Result panel */}
+              <Panel defaultSize={60} minSize={20}>
+                <PanelBox>
+                  <PanelLabel>Result</PanelLabel>
+                  {/* content fills height; ResultView handles internal scroll + trace pinned bottom */}
+                  <div style={{ flex: 1, minHeight: 0, padding: "8px 14px 14px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <ResultView
+                      result={result?.data}
+                      errors={result?.errors}
+                      loading={loading}
+                      traces={result?.traces}
+                    />
+                  </div>
+                </PanelBox>
+              </Panel>
+
+            </PanelGroup>
+          </Panel>
+        </PanelGroup>
+      </div>
     </div>
   );
 }
+
 
