@@ -16,7 +16,7 @@ Distinct from the existing operators:
 - `? :` = **selection** (check condition, pull exactly one branch)
 
 **Syntax:**
-```hcl
+```bridge
 define smartPrice {
   with stripe
   with output as o
@@ -92,6 +92,19 @@ Transformed Bridge from a naive script executor into a cost-based declarative da
 **Problem:** No IDE support for `.bridge` files.
 
 **Solution:** Published `bridge-syntax-highlight` v0.5.0 with TextMate grammar, Language Server with real-time diagnostics (lex, parse, and semantic errors), hover provider, and `parseBridgeDiagnostics()` public API.
+
+### Observability -- DONE
+
+**Problem:** The engine was a black box — no visibility into which tools were called, how long they took, or why a request failed.
+
+**Solution:** Three complementary pillars, all opt-in and zero-cost when disabled:
+
+- **OpenTelemetry spans** — every tool call gets a span named `bridge.tool.<tool>.<fn>` with `bridge.tool.name` and `bridge.tool.fn` attributes. `span.recordException()` + `SpanStatusCode.ERROR` on failure. Works with any OTel-compatible backend (Jaeger, Honeycomb, Datadog, etc.).
+- **OTel metrics** — three instruments on the `@stackables/bridge` meter: `bridge.tool.calls` (counter), `bridge.tool.duration` (histogram, ms), `bridge.tool.errors` (counter). All share the same attribute keys so they join cleanly in dashboards.
+- **Structured tool traces** — per-request `ToolTrace[]` returned alongside the GraphQL response. Two levels: `"basic"` (tool, fn, timing, errors) and `"full"` (adds input/output). A Yoga plugin (`useBridgeTracing`) exposes traces in the response extensions under `bridgeTraces`.
+- **Structured logging** — `logger?: Logger` option accepts any pino/winston/console-compatible interface. Debug on success, error on failure, warn on array-access footguns. Silent no-ops by default.
+
+**API:** `trace?: "off" | "basic" | "full"` (default `"off"`). All instrumentation funnels through a single `callTool()` method — one instrumentation site, three tool-call paths covered.
 
 ### ~~Fat Wire IR Refactor~~ -- DROPPED
 

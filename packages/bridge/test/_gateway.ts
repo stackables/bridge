@@ -7,8 +7,8 @@ import type { TraceLevel } from "../src/ExecutionTree.js";
 type GatewayOptions = {
   context?: Record<string, any>;
   tools?: ToolMap;
-  /** Enable tool-call tracing — `true`/`"full"` for everything, `"basic"` for timings only */
-  trace?: boolean | TraceLevel;
+  /** Enable tool-call tracing — `"basic"` for timings only, `"full"` for everything, `"off"` to disable (default) */
+  trace?: TraceLevel;
 };
 
 export function createGateway(
@@ -17,14 +17,14 @@ export function createGateway(
   options?: GatewayOptions,
 ) {
   const schema = createSchema({ typeDefs });
-  const tracing = options?.trace ?? false;
+  const tracing = options?.trace ?? "off";
 
   return createYoga({
     schema: bridgeTransform(schema, instructions, {
       tools: options?.tools,
       trace: tracing,
     }),
-    plugins: tracing ? [useBridgeTracing()] : [],
+    plugins: tracing !== "off" ? [useBridgeTracing()] : [],
     context: () => ({
       ...(options?.context ?? {}),
     }),

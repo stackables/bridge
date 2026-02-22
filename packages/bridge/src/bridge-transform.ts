@@ -5,10 +5,15 @@ import {
   type GraphQLSchema,
   defaultFieldResolver,
 } from "graphql";
-import { ExecutionTree, TraceCollector, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
+import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
 import { builtinTools } from "./tools/index.js";
 import type { Instruction, ToolCallFn, ToolMap } from "./types.js";
 import { SELF_MODULE } from "./types.js";
+
+export type { Logger };
+
+const noop = () => {};
+const defaultLogger: Logger = { debug: noop, info: noop, warn: noop, error: noop };
 
 export type BridgeOptions = {
   /** Tool functions available to the engine.
@@ -20,9 +25,17 @@ export type BridgeOptions = {
    *  By default the full context is exposed via `with context`. */
   contextMapper?: (context: any) => Record<string, any>;
   /** Enable tool-call tracing.
-   *  - `true` or `"full"`: record tool, fn, input, output/error, timing
-   *  - `"basic"`: record tool, fn, timing, error (no input/output) */
-  trace?: boolean | TraceLevel;
+   *  - `"off"` (default) — no collection, zero overhead
+   *  - `"basic"` — tool, fn, timing, errors; no input/output
+   *  - `"full"` — everything including input and output */
+  trace?: TraceLevel;
+  /**
+   * Structured logger for engine-level events (tool errors, warnings, debug).
+   * Accepts any logger with `debug`, `info`, `warn`, and `error` methods —
+   * pino, winston, `console`, or any compatible interface.
+   * Defaults to silent no-ops so there is zero output unless you opt in.
+   */
+  logger?: Logger;
 };
 
 /** Instructions can be a static array or a function that selects per-request */
@@ -37,8 +50,8 @@ export function bridgeTransform(
 ): GraphQLSchema {
   const userTools = options?.tools;
   const contextMapper = options?.contextMapper;
-  const tracing = options?.trace ?? false;
-  const traceLevel: TraceLevel | false = tracing === true ? "full" : tracing === false ? false : tracing;
+  const traceLevel = options?.trace ?? "off";
+  const logger = options?.logger ?? defaultLogger;
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -87,7 +100,9 @@ export function bridgeTransform(
               bridgeContext,
             );
 
-            if (traceLevel) {
+            source.logger = logger;
+
+            if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);
               // Stash tracer on GQL context so the tracing plugin can read it
               context.__bridgeTracer = source.tracer;

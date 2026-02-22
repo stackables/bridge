@@ -1,3 +1,4 @@
+import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { parsePath } from "./utils.js";
 import type {
   Bridge,
@@ -10,6 +11,37 @@ import type {
   Wire,
 } from "./types.js";
 import { SELF_MODULE } from "./types.js";
+
+const otelTracer = trace.getTracer("@stackables/bridge");
+
+const otelMeter = metrics.getMeter("@stackables/bridge");
+const toolCallCounter = otelMeter.createCounter("bridge.tool.calls", {
+  description: "Total number of tool invocations",
+});
+const toolDurationHistogram = otelMeter.createHistogram("bridge.tool.duration", {
+  description: "Tool call duration in milliseconds",
+  unit: "ms",
+});
+const toolErrorCounter = otelMeter.createCounter("bridge.tool.errors", {
+  description: "Total number of tool invocation errors",
+});
+
+/** Round milliseconds to 2 decimal places */
+function roundMs(ms: number): number {
+  return Math.round(ms * 100) / 100;
+}
+
+/**
+ * Structured logger interface for Bridge engine events.
+ * Accepts any compatible logger: pino, winston, bunyan, `console`, etc.
+ * All methods default to silent no-ops when no logger is provided.
+ */
+export interface Logger {
+  debug: (...args: any[]) => void;
+  info: (...args: any[]) => void;
+  warn: (...args: any[]) => void;
+  error: (...args: any[]) => void;
+}
 
 /** Matches graphql's internal Path type (not part of the public exports map) */
 interface Path {
@@ -41,8 +73,11 @@ function pathEquals(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Trace verbosity level */
-export type TraceLevel = "basic" | "full";
+/** Trace verbosity level.
+ *  - `"off"` (default) — no collection, zero overhead
+ *  - `"basic"` — tool, fn, timing, errors; no input/output
+ *  - `"full"` — everything including input and output */
+export type TraceLevel = "basic" | "full" | "off";
 
 /** A single recorded tool invocation. */
 export type ToolTrace = {
@@ -65,16 +100,16 @@ export type ToolTrace = {
 /** Shared trace collector — one per request, passed through the tree. */
 export class TraceCollector {
   readonly traces: ToolTrace[] = [];
-  readonly level: TraceLevel;
+  readonly level: "basic" | "full";
   private readonly epoch = performance.now();
 
-  constructor(level: TraceLevel = "full") {
+  constructor(level: "basic" | "full" = "full") {
     this.level = level;
   }
 
   /** Returns ms since the collector was created */
   now(): number {
-    return Math.round((performance.now() - this.epoch) * 100) / 100;
+    return roundMs(performance.now() - this.epoch);
   }
 
   record(trace: ToolTrace): void {
@@ -120,6 +155,8 @@ export class ExecutionTree {
   private pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]> | undefined;
   /** Shared trace collector — present only when tracing is enabled. */
   tracer?: TraceCollector;
+  /** Structured logger passed from BridgeOptions. Defaults to no-ops. */
+  logger?: Logger;
 
   constructor(
     public trunk: Trunk,
@@ -338,18 +375,9 @@ export class ExecutionTree {
 
       // on error: wrap the tool call with fallback from onError wire
       const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-      const tracer = this.tracer;
-      const traceStart = tracer?.now();
       try {
-        const result = await fn(input);
-        if (tracer && traceStart != null) {
-          tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-        }
-        return result;
+        return await this.callTool(toolName, toolDef.fn!, fn, input);
       } catch (err) {
-        if (tracer && traceStart != null) {
-          tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-        }
         if (!onErrorWire) throw err;
         if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
         return this.resolveToolSource(onErrorWire.source, toolDef);
@@ -429,18 +457,9 @@ export class ExecutionTree {
 
         // on error: wrap the tool call with fallback from onError wire
         const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-        const tracer = this.tracer;
-        const traceStart = tracer?.now();
         try {
-          const result = await fn(input);
-          if (tracer && traceStart != null) {
-            tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-          }
-          return result;
+          return await this.callTool(toolName, toolDef.fn!, fn, input);
         } catch (err) {
-          if (tracer && traceStart != null) {
-            tracer.record(tracer.entry({ tool: toolName, fn: toolDef.fn!, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-          }
           if (!onErrorWire) throw err;
           if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
           return this.resolveToolSource(onErrorWire.source, toolDef);
@@ -450,20 +469,7 @@ export class ExecutionTree {
       // Direct tool function lookup by name (simple or dotted)
       const directFn = this.lookupToolFn(toolName);
       if (directFn) {
-        const tracer = this.tracer;
-        const traceStart = tracer?.now();
-        try {
-          const result = await directFn(input);
-          if (tracer && traceStart != null) {
-            tracer.record(tracer.entry({ tool: toolName, fn: toolName, input, output: result, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-          }
-          return result;
-        } catch (err) {
-          if (tracer && traceStart != null) {
-            tracer.record(tracer.entry({ tool: toolName, fn: toolName, input, error: (err as Error).message, durationMs: Math.round((tracer.now() - traceStart) * 100) / 100, startedAt: traceStart }));
-          }
-          throw err;
-        }
+        return this.callTool(toolName, toolName, directFn, input);
       }
 
       // Define pass-through: synthetic trunks created by define inlining
@@ -476,6 +482,76 @@ export class ExecutionTree {
     })();
   }
 
+  /**
+   * Invoke a tool function, recording both an OpenTelemetry span and (when
+   * tracing is enabled) a ToolTrace entry.  All three tool-call sites in the
+   * engine delegate here so instrumentation lives in exactly one place.
+   */
+  private async callTool(
+    toolName: string,
+    fnName: string,
+    fnImpl: (...args: any[]) => any,
+    input: Record<string, any>,
+  ): Promise<any> {
+    const tracer = this.tracer;
+    const logger = this.logger;
+    const traceStart = tracer?.now();
+    const metricAttrs = { "bridge.tool.name": toolName, "bridge.tool.fn": fnName };
+    return otelTracer.startActiveSpan(
+      `bridge.tool.${toolName}.${fnName}`,
+      { attributes: metricAttrs },
+      async (span) => {
+        const wallStart = performance.now();
+        try {
+          const result = await fnImpl(input);
+          const durationMs = roundMs(performance.now() - wallStart);
+          toolCallCounter.add(1, metricAttrs);
+          toolDurationHistogram.record(durationMs, metricAttrs);
+          if (tracer && traceStart != null) {
+            tracer.record(
+              tracer.entry({
+                tool: toolName,
+                fn: fnName,
+                input,
+                output: result,
+                durationMs: roundMs(tracer.now() - traceStart),
+                startedAt: traceStart,
+              }),
+            );
+          }
+          logger?.debug("[bridge] tool %s (%s) completed in %dms", toolName, fnName, durationMs);
+          return result;
+        } catch (err) {
+          const durationMs = roundMs(performance.now() - wallStart);
+          toolCallCounter.add(1, metricAttrs);
+          toolDurationHistogram.record(durationMs, metricAttrs);
+          toolErrorCounter.add(1, metricAttrs);
+          if (tracer && traceStart != null) {
+            tracer.record(
+              tracer.entry({
+                tool: toolName,
+                fn: fnName,
+                input,
+                error: (err as Error).message,
+                durationMs: roundMs(tracer.now() - traceStart),
+                startedAt: traceStart,
+              }),
+            );
+          }
+          span.recordException(err as Error);
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: (err as Error).message,
+          });
+          logger?.error("[bridge] tool %s (%s) failed: %s", toolName, fnName, (err as Error).message);
+          throw err;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   shadow(): ExecutionTree {
     const child = new ExecutionTree(
       this.trunk,
@@ -485,6 +561,7 @@ export class ExecutionTree {
       this,
     );
     child.tracer = this.tracer;
+    child.logger = this.logger;
     return child;
   }
 
@@ -536,7 +613,7 @@ export class ExecutionTree {
     let result: any = resolved;
     for (const segment of ref.path) {
       if (Array.isArray(result) && !/^\d+$/.test(segment)) {
-        console.warn(
+        this.logger?.warn(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
         );
       }
