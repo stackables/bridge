@@ -163,25 +163,51 @@ export function App() {
   return (
     <div className="h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
-      <header className="shrink-0 border-b border-slate-800 px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 md:px-5 md:py-2.5 md:gap-4">
-        <a
-          href="https://github.com/stackables/bridge"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2.5 no-underline"
-        >
-          <span className="text-xl font-bold text-sky-400 tracking-tight">Bridge</span>
-          <Badge className="text-[10px] tracking-wider uppercase">Playground</Badge>
-        </a>
+      <header className="shrink-0 border-b border-slate-800">
+        {/* Row 1: logo + (desktop: example picker + info) + share */}
+        <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
+          <a
+            href="https://github.com/stackables/bridge"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2.5 no-underline"
+          >
+            <span className="text-xl font-bold text-sky-400 tracking-tight">Bridge</span>
+            <Badge className="text-[10px] tracking-wider uppercase">Playground</Badge>
+          </a>
 
-        {/* Example picker */}
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:block text-xs text-slate-600">Example:</span>
+          {/* Example picker — desktop only (row 1) */}
+          <div className="hidden md:flex items-center gap-2">
+            <span className="text-xs text-slate-600">Example:</span>
+            <Select
+              value={String(exampleIndex)}
+              onValueChange={(v) => selectExample(Number(v))}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {examples.map((ex, i) => (
+                  <SelectItem key={i} value={String(i)}>{ex.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2 md:gap-3">
+            <span className="hidden md:block text-xs text-slate-700">All code runs in-browser · no server required</span>
+            <ShareDialog schema={schema} bridge={bridge} query={query} context={context} />
+          </div>
+        </div>
+
+        {/* Row 2: example picker — mobile only */}
+        <div className="md:hidden px-4 pb-2 flex items-center gap-2">
+          <span className="text-xs text-slate-600">Example:</span>
           <Select
             value={String(exampleIndex)}
             onValueChange={(v) => selectExample(Number(v))}
           >
-            <SelectTrigger className="w-36 md:w-44">
+            <SelectTrigger className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -191,11 +217,6 @@ export function App() {
             </SelectContent>
           </Select>
         </div>
-
-        <div className="ml-auto flex items-center gap-2 md:gap-3">
-          <span className="hidden md:block text-xs text-slate-700">All code runs in-browser · no server required</span>
-          <ShareDialog schema={schema} bridge={bridge} query={query} context={context} />
-        </div>
       </header>
 
       {/* ── Mobile layout: vertical scrollable stack ── */}
@@ -203,16 +224,16 @@ export function App() {
         {/* Schema panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <PanelLabel>GraphQL Schema</PanelLabel>
-          <div className="h-64 px-3 pb-3">
-            <Editor label="" value={schema} onChange={setSchema} language="graphql" />
+          <div className="px-3 pb-3">
+            <Editor label="" value={schema} onChange={setSchema} language="graphql" autoHeight />
           </div>
         </div>
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <PanelLabel>Bridge DSL</PanelLabel>
-          <div className="h-64 px-3 pb-3">
-            <Editor label="" value={bridge} onChange={setBridge} language="bridge" />
+          <div className="px-3 pb-3">
+            <Editor label="" value={bridge} onChange={setBridge} language="bridge" autoHeight />
           </div>
           <DiagnosticsBar bridgeText={bridge} />
         </div>
@@ -228,11 +249,11 @@ export function App() {
               running={loading}
             />
           </div>
-          <div className="h-48 p-3 pt-2">
+          <div className="p-3 pt-2">
             {activeTab === "query" ? (
-              <Editor label="" value={query} onChange={setQuery} language="graphql" />
+              <Editor label="" value={query} onChange={setQuery} language="graphql" autoHeight />
             ) : (
-              <Editor label="" value={context} onChange={setContext} language="json" />
+              <Editor label="" value={context} onChange={setContext} language="json" autoHeight />
             )}
           </div>
         </div>
@@ -240,12 +261,13 @@ export function App() {
         {/* Result panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <PanelLabel>Result</PanelLabel>
-          <div className="h-64 px-3.5 pb-3.5 overflow-hidden flex flex-col">
+          <div className="px-3.5 pb-3.5 flex flex-col">
             <ResultView
               result={result?.data}
               errors={result?.errors}
               loading={loading}
               traces={result?.traces}
+              autoHeight
             />
           </div>
         </div>

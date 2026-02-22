@@ -5,6 +5,7 @@ import { json } from "@codemirror/lang-json";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { graphqlLanguage } from "@/codemirror/graphql-lang";
 import { playgroundTheme } from "@/codemirror/theme";
+import { cn } from "@/lib/utils";
 
 /**
  * Language mode for the editor.
@@ -22,6 +23,8 @@ type Props = {
   onChange: (value: string) => void;
   language?: EditorLanguage;
   readOnly?: boolean;
+  /** When true the editor sizes itself to its content instead of filling the parent. */
+  autoHeight?: boolean;
 };
 
 function languageExtension(lang: EditorLanguage): Extension[] {
@@ -33,7 +36,7 @@ function languageExtension(lang: EditorLanguage): Extension[] {
   }
 }
 
-export function Editor({ label, value, onChange, language = "plain", readOnly = false }: Props) {
+export function Editor({ label, value, onChange, language = "plain", readOnly = false, autoHeight = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -92,7 +95,7 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
   }, [value]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={cn(!autoHeight && "flex flex-col h-full")}>
       {label && (
         <div className="shrink-0 pb-1.5 text-[11px] font-bold text-slate-600 uppercase tracking-widest">
           {label}
@@ -100,7 +103,12 @@ export function Editor({ label, value, onChange, language = "plain", readOnly = 
       )}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 w-full rounded-lg border border-slate-800 bg-slate-950 overflow-y-auto [&_.cm-editor]:h-full"
+        className={cn(
+          "w-full rounded-lg border border-slate-800 bg-slate-950",
+          autoHeight
+            ? "[&_.cm-scroller]:overflow-visible"
+            : "flex-1 min-h-0 overflow-y-auto [&_.cm-editor]:h-full",
+        )}
       />
     </div>
   );

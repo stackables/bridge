@@ -1,21 +1,24 @@
 import { TraceDialog } from "./TraceDialog";
 import { Editor } from "./Editor";
 import type { ToolTrace } from "../engine";
+import { cn } from "@/lib/utils";
 
 type Props = {
   result: unknown | null;
   errors: string[] | undefined;
   loading: boolean;
   traces?: ToolTrace[];
+  /** When true the result view sizes itself to its content instead of filling the parent. */
+  autoHeight?: boolean;
 };
 
-export function ResultView({ result, errors, loading, traces }: Props) {
+export function ResultView({ result, errors, loading, traces, autoHeight = false }: Props) {
   const hasContent = loading || result !== undefined || (errors && errors.length > 0);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={cn(!autoHeight && "flex flex-col h-full")}>
       {/* Scrollable result area */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className={cn(!autoHeight && "flex-1 min-h-0 overflow-y-auto")}>
         {loading && (
           <p className="py-4 font-mono text-[13px] text-slate-400">Running…</p>
         )}
@@ -38,13 +41,14 @@ export function ResultView({ result, errors, loading, traces }: Props) {
         )}
 
         {!loading && result !== undefined && (
-          <div className="h-full rounded-lg border border-slate-800 overflow-hidden">
+          <div className={cn("rounded-lg border border-slate-800 overflow-hidden", !autoHeight && "h-full")}>
             <Editor
               label=""
               value={JSON.stringify(result, null, 2)}
               onChange={() => {}}
               language="json"
               readOnly
+              autoHeight={autoHeight}
             />
           </div>
         )}
