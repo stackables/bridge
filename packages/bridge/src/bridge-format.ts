@@ -1,11 +1,11 @@
 import type {
-    Bridge,
-    ConstDef,
-    DefineDef,
-    Instruction,
-    NodeRef,
-    ToolDef,
-    Wire,
+  Bridge,
+  ConstDef,
+  DefineDef,
+  Instruction,
+  NodeRef,
+  ToolDef,
+  Wire,
 } from "./types.js";
 import { SELF_MODULE } from "./types.js";
 import { parseBridgeChevrotain } from "./parser/index.js";
@@ -24,16 +24,18 @@ const BRIDGE_VERSION = "1.4";
 
 export function serializeBridge(instructions: Instruction[]): string {
   const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
-  const tools = instructions.filter(
-    (i): i is ToolDef => i.kind === "tool",
-  );
-  const consts = instructions.filter(
-    (i): i is ConstDef => i.kind === "const",
-  );
+  const tools = instructions.filter((i): i is ToolDef => i.kind === "tool");
+  const consts = instructions.filter((i): i is ConstDef => i.kind === "const");
   const defines = instructions.filter(
     (i): i is DefineDef => i.kind === "define",
   );
-  if (bridges.length === 0 && tools.length === 0 && consts.length === 0 && defines.length === 0) return "";
+  if (
+    bridges.length === 0 &&
+    tools.length === 0 &&
+    consts.length === 0 &&
+    defines.length === 0
+  )
+    return "";
 
   const blocks: string[] = [];
 
@@ -61,7 +63,7 @@ export function serializeBridge(instructions: Instruction[]): string {
 function needsQuoting(v: string): boolean {
   if (v === "" || v === "true" || v === "false" || v === "null") return false;
   if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v)) return false; // number
-  if (/^\/[\w./-]*$/.test(v)) return false;  // /path
+  if (/^\/[\w./-]*$/.test(v)) return false; // /path
   if (/^[a-zA-Z_][\w-]*$/.test(v)) return false; // identifier / keyword
   return true;
 }
@@ -72,7 +74,11 @@ function serializeToolBlock(tool: ToolDef): string {
 
   // Declaration line — use `tool <name> from <source>` format
   const source = tool.extends ?? tool.fn;
-  lines.push(hasBody ? `tool ${tool.name} from ${source} {` : `tool ${tool.name} from ${source}`);
+  lines.push(
+    hasBody
+      ? `tool ${tool.name} from ${source} {`
+      : `tool ${tool.name} from ${source}`,
+  );
 
   // Dependencies
   for (const dep of tool.deps) {
@@ -136,9 +142,10 @@ function serializePipeOrRef(
   inputHandle: string | undefined,
   outputHandle: string | undefined,
 ): string {
-  const refTk = ref.instance != null
-    ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
-    : `${ref.module}:${ref.type}:${ref.field}`;
+  const refTk =
+    ref.instance != null
+      ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
+      : `${ref.module}:${ref.type}:${ref.field}`;
 
   if (ref.path.length === 0 && pipeHandleTrunkKeys.has(refTk)) {
     // Pipe-fork root — walk the chain to reconstruct `pipe:source` notation
@@ -151,12 +158,14 @@ function serializePipeOrRef(
       if (!handleName) break;
       const inWire = toInMap.get(currentTk);
       const fieldName = inWire?.to.path[0] ?? "in";
-      const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
+      const token =
+        fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
       handleChain.push(token);
       if (!inWire) break;
-      const fromTk = inWire.from.instance != null
-        ? `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}:${inWire.from.instance}`
-        : `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}`;
+      const fromTk =
+        inWire.from.instance != null
+          ? `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}:${inWire.from.instance}`
+          : `${inWire.from.module}:${inWire.from.type}:${inWire.from.field}`;
       if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(fromTk)) {
         currentTk = fromTk;
       } else {
@@ -166,7 +175,14 @@ function serializePipeOrRef(
     }
 
     if (actualSourceRef && handleChain.length > 0) {
-      const sourceStr = serializeRef(actualSourceRef, bridge, handleMap, inputHandle, outputHandle, true);
+      const sourceStr = serializeRef(
+        actualSourceRef,
+        bridge,
+        handleMap,
+        inputHandle,
+        outputHandle,
+        true,
+      );
       return `${handleChain.join(":")}:${sourceStr}`;
     }
   }
@@ -211,7 +227,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       case "tool": {
         // Short form `with <name>` when handle == last segment of name
         const lastDot = h.name.lastIndexOf(".");
-        const defaultHandle = lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
+        const defaultHandle =
+          lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
         if (h.handle === defaultHandle) {
           lines.push(`  with ${h.name}`);
         } else {
@@ -271,7 +288,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       : `${ref.module}:${ref.type}:${ref.field}`;
 
   type FW = Extract<Wire, { from: NodeRef }>;
-  const toInMap    = new Map<string, FW>();
+  const toInMap = new Map<string, FW>();
   const fromOutMap = new Map<string, FW>();
   const pipeWireSet = new Set<Wire>();
 
@@ -283,7 +300,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (fw.to.path.length === 1 && pipeHandleTrunkKeys.has(toTk)) {
       toInMap.set(toTk, fw);
     }
-    if (fw.from.path.length === 0 && pipeHandleTrunkKeys.has(refTrunkKey(fw.from))) {
+    if (
+      fw.from.path.length === 0 &&
+      pipeHandleTrunkKeys.has(refTrunkKey(fw.from))
+    ) {
       fromOutMap.set(refTrunkKey(fw.from), fw);
     }
   }
@@ -291,29 +311,25 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Group element wires by array-destination field ──────────────────
   // Pull wires: from.element=true
   const elementPullWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { from: NodeRef }> => "from" in w && !!w.from.element,
+    (w): w is Extract<Wire, { from: NodeRef }> =>
+      "from" in w && !!w.from.element,
   );
   // Constant wires: "value" in w && to.element=true
   const elementConstWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { value: string }> => "value" in w && !!w.to.element,
+    (w): w is Extract<Wire, { value: string }> =>
+      "value" in w && !!w.to.element,
   );
 
-  // Build grouped maps keyed by the array-destination field name (to.path[0])
-  const elementPullGroups  = new Map<string, Array<Extract<Wire, { from: NodeRef }>>>();
-  const elementConstGroups = new Map<string, Array<Extract<Wire, { value: string }>>>();
-  for (const w of elementPullWires) {
-    const key = w.to.path[0];
-    if (!elementPullGroups.has(key)) elementPullGroups.set(key, []);
-    elementPullGroups.get(key)!.push(w);
-  }
-  for (const w of elementConstWires) {
-    const key = w.to.path[0];
-    if (!elementConstGroups.has(key)) elementConstGroups.set(key, []);
-    elementConstGroups.get(key)!.push(w);
-  }
+  // Build grouped maps keyed by the full array-destination path (to.path joined)
+  // For a 1-level array o.items <- src[], element paths are like ["items", "name"]
+  // For a root-level array o <- src[], element paths are like ["name"]
+  // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
+  const elementPullAll = [...elementPullWires];
+  const elementConstAll = [...elementConstWires];
 
-  // Union of keys that have any element wire (pull or constant)
-  const allElementKeys = new Set([...elementPullGroups.keys(), ...elementConstGroups.keys()]);
+  // Detect array source wires: a regular wire whose to.path (joined) matches
+  // a key in arrayIterators. This includes root-level arrays (path=[]).
+  const arrayIterators = bridge.arrayIterators ?? {};
 
   // ── Exclude pipe, element-pull, and element-const wires from main loop
   const regularWires = bridge.wires.filter(
@@ -329,7 +345,115 @@ function serializeBridgeBlock(bridge: Bridge): string {
   const sRef = (ref: NodeRef, isFrom: boolean) =>
     serializeRef(ref, bridge, handleMap, inputHandle, outputHandle, isFrom);
   const sPipeOrRef = (ref: NodeRef) =>
-    serializePipeOrRef(ref, pipeHandleTrunkKeys, toInMap, handleMap, bridge, inputHandle, outputHandle);
+    serializePipeOrRef(
+      ref,
+      pipeHandleTrunkKeys,
+      toInMap,
+      handleMap,
+      bridge,
+      inputHandle,
+      outputHandle,
+    );
+
+  /**
+   * Recursively serialize element wires for an array mapping block.
+   * Handles nested array-in-array mappings by detecting inner iterators.
+   */
+  function serializeArrayElements(
+    arrayPath: string[],
+    parentIterName: string,
+    indent: string,
+  ): void {
+    const arrayPathStr = arrayPath.join(".");
+    const pathDepth = arrayPath.length;
+
+    // Find element constant wires at this level (path starts with arrayPath + one more segment)
+    const levelConsts = elementConstAll.filter((ew) => {
+      if (ew.to.path.length !== pathDepth + 1) return false;
+      for (let i = 0; i < pathDepth; i++) {
+        if (ew.to.path[i] !== arrayPath[i]) return false;
+      }
+      return true;
+    });
+
+    // Find element pull wires at this level (direct fields, not nested array children)
+    const levelPulls = elementPullAll.filter((ew) => {
+      if (ew.to.path.length < pathDepth + 1) return false;
+      for (let i = 0; i < pathDepth; i++) {
+        if (ew.to.path[i] !== arrayPath[i]) return false;
+      }
+      // Check this wire is a direct field (depth == pathDepth+1)
+      // or a nested array source (its path matches a nested iterator key)
+      return true;
+    });
+
+    // Partition pulls into direct-level fields vs nested-array sources
+    const nestedArrayPaths = new Set<string>();
+    for (const key of Object.keys(arrayIterators)) {
+      // A nested array key starts with the current array path
+      if (
+        key.length > arrayPathStr.length &&
+        (arrayPathStr === "" ? true : key.startsWith(arrayPathStr + ".")) &&
+        !key
+          .substring(arrayPathStr === "" ? 0 : arrayPathStr.length + 1)
+          .includes(".")
+      ) {
+        nestedArrayPaths.add(key);
+      }
+    }
+
+    // Emit constant element wires
+    for (const ew of levelConsts) {
+      const fieldPath = ew.to.path.slice(pathDepth);
+      const elemTo = "." + serPath(fieldPath);
+      lines.push(`${indent}${elemTo} = "${ew.value}"`);
+    }
+
+    // Emit pull element wires (direct level only)
+    for (const ew of levelPulls) {
+      const toPathStr = ew.to.path.join(".");
+      // Skip wires that belong to a nested array level
+      if (ew.to.path.length > pathDepth + 1) {
+        // Check if this wire's immediate child segment forms a nested array
+        const childPath = ew.to.path.slice(0, pathDepth + 1).join(".");
+        if (nestedArrayPaths.has(childPath)) continue; // handled by nested block
+      }
+
+      // Check if this wire IS a nested array source
+      if (nestedArrayPaths.has(toPathStr) && !serializedArrays.has(toPathStr)) {
+        serializedArrays.add(toPathStr);
+        const nestedIterName = arrayIterators[toPathStr];
+        const fromPart = ew.from.element
+          ? parentIterName + "." + serPath(ew.from.path)
+          : sRef(ew.from, true);
+        const fieldPath = ew.to.path.slice(pathDepth);
+        const elemTo = "." + serPath(fieldPath);
+        lines.push(
+          `${indent}${elemTo} <- ${fromPart}[] as ${nestedIterName} {`,
+        );
+        serializeArrayElements(ew.to.path, nestedIterName, indent + "  ");
+        lines.push(`${indent}}`);
+        continue;
+      }
+
+      // Regular element pull wire
+      const fromPart = ew.from.element
+        ? parentIterName + "." + serPath(ew.from.path)
+        : sRef(ew.from, true);
+      const fieldPath = ew.to.path.slice(pathDepth);
+      const elemTo = "." + serPath(fieldPath);
+
+      const nfb =
+        "nullFallback" in ew && ew.nullFallback ? ` || ${ew.nullFallback}` : "";
+      const errf =
+        "fallbackRef" in ew && ew.fallbackRef
+          ? ` ?? ${sPipeOrRef(ew.fallbackRef)}`
+          : "fallback" in ew && ew.fallback
+            ? ` ?? ${ew.fallback}`
+            : "";
+      lines.push(`${indent}${elemTo} <- ${fromPart}${nfb}${errf}`);
+    }
+  }
 
   for (const w of regularWires) {
     // Constant wire
@@ -340,46 +464,28 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Array mapping — emit brace-delimited element block
-    const arrayKey = w.to.path.length === 1 ? w.to.path[0] : null;
-    if (arrayKey && allElementKeys.has(arrayKey) && !serializedArrays.has(arrayKey)) {
+    const arrayKey = w.to.path.join(".");
+    if (arrayKey in arrayIterators && !serializedArrays.has(arrayKey)) {
       serializedArrays.add(arrayKey);
-      const iterName = bridge.arrayIterators?.[arrayKey] ?? "item";
+      const iterName = arrayIterators[arrayKey];
       const fromStr = sRef(w.from, true) + "[]";
-      const toStr   = sRef(w.to, false);
+      const toStr = sRef(w.to, false);
       lines.push(`${toStr} <- ${fromStr} as ${iterName} {`);
-
-      // Element constant wires (e.g. .provider = "RENFE")
-      for (const ew of elementConstGroups.get(arrayKey) ?? []) {
-        const fieldPath = ew.to.path.slice(1); // strip arrayKey prefix
-        const elemTo = "." + serPath(fieldPath);
-        lines.push(`  ${elemTo} = "${ew.value}"`);
-      }
-      // Element pull wires (e.g. .name <- iter.title)
-      for (const ew of elementPullGroups.get(arrayKey) ?? []) {
-        const fromPart = ew.from.element
-          ? iterName + "." + serPath(ew.from.path)
-          : sRef(ew.from, true);
-        const elemTo = "." + serPath(ew.to.path.slice(1));
-
-        // Handle fallbacks on element pull wires
-        const nfb = "nullFallback" in ew && ew.nullFallback ? ` || ${ew.nullFallback}` : "";
-        const errf = "fallbackRef" in ew && ew.fallbackRef
-          ? ` ?? ${sPipeOrRef(ew.fallbackRef)}`
-          : "fallback" in ew && ew.fallback ? ` ?? ${ew.fallback}` : "";
-        lines.push(`  ${elemTo} <- ${fromPart}${nfb}${errf}`);
-      }
+      serializeArrayElements(w.to.path, iterName, "  ");
       lines.push(`}`);
       continue;
     }
 
     // Regular wire
     const fromStr = sRef(w.from, true);
-    const toStr   = sRef(w.to, false);
+    const toStr = sRef(w.to, false);
     const arrow = w.force ? "<-!" : "<-";
     const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
     const errf = w.fallbackRef
       ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
-      : w.fallback ? ` ?? ${w.fallback}` : "";
+      : w.fallback
+        ? ` ?? ${w.fallback}`
+        : "";
     lines.push(`${toStr} ${arrow} ${fromStr}${nfb}${errf}`);
   }
 
@@ -397,7 +503,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       if (!handleName) break;
       const inWire = toInMap.get(currentTk);
       const fieldName = inWire?.to.path[0] ?? "in";
-      const token = fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
+      const token =
+        fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
       handleChain.push(token);
       if (inWire?.force) chainForced = true;
       if (!inWire) break;
@@ -412,13 +519,17 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = sRef(actualSourceRef, true);
-      const destStr   = sRef(outWire.to, false);
+      const destStr = sRef(outWire.to, false);
       const arrow = chainForced ? "<-!" : "<-";
       const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
       const errf = outWire.fallbackRef
         ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
-        : outWire.fallback ? ` ?? ${outWire.fallback}` : "";
-      lines.push(`${destStr} ${arrow} ${handleChain.join(":")}:${sourceStr}${nfb}${errf}`);
+        : outWire.fallback
+          ? ` ?? ${outWire.fallback}`
+          : "";
+      lines.push(
+        `${destStr} ${arrow} ${handleChain.join(":")}:${sourceStr}${nfb}${errf}`,
+      );
     }
   }
 
@@ -481,7 +592,10 @@ function buildHandleMap(bridge: Bridge): {
         handleMap.set(`${SELF_MODULE}:Const:const`, h.handle);
         break;
       case "define":
-        handleMap.set(`__define_${h.handle}:${bridge.type}:${bridge.field}`, h.handle);
+        handleMap.set(
+          `__define_${h.handle}:${bridge.type}:${bridge.field}`,
+          h.handle,
+        );
         break;
     }
   }

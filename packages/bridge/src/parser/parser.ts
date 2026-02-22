@@ -59,7 +59,14 @@ import { SELF_MODULE } from "../types.js";
 // ── Reserved-word guards (mirroring the regex parser) ──────────────────────
 
 const RESERVED_KEYWORDS = new Set([
-  "bridge", "with", "as", "from", "const", "tool", "version", "define",
+  "bridge",
+  "with",
+  "as",
+  "from",
+  "const",
+  "tool",
+  "version",
+  "define",
 ]);
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
@@ -136,7 +143,7 @@ class BridgeParser extends CstParser {
     this.OR([
       { ALT: () => this.SUBRULE(this.toolOnError) },
       { ALT: () => this.SUBRULE(this.toolWithDecl) },
-      { ALT: () => this.SUBRULE(this.toolWire) },      // merged constant + pull
+      { ALT: () => this.SUBRULE(this.toolWire) }, // merged constant + pull
     ]);
   });
 
@@ -257,7 +264,7 @@ class BridgeParser extends CstParser {
   public bridgeBodyLine = this.RULE("bridgeBodyLine", () => {
     this.OR([
       { ALT: () => this.SUBRULE(this.bridgeWithDecl) },
-      { ALT: () => this.SUBRULE(this.bridgeWire) },  // merged constant + pull
+      { ALT: () => this.SUBRULE(this.bridgeWire) }, // merged constant + pull
     ]);
   });
 
@@ -306,8 +313,12 @@ class BridgeParser extends CstParser {
         // GATE excludes keywords handled by specific alternatives above
         GATE: () => {
           const la = this.LA(1);
-          return la.tokenType !== InputKw && la.tokenType !== OutputKw
-              && la.tokenType !== ContextKw && la.tokenType !== ConstKw;
+          return (
+            la.tokenType !== InputKw &&
+            la.tokenType !== OutputKw &&
+            la.tokenType !== ContextKw &&
+            la.tokenType !== ConstKw
+          );
         },
         ALT: () => {
           this.SUBRULE(this.dottedName, { LABEL: "refName" });
@@ -340,7 +351,7 @@ class BridgeParser extends CstParser {
         // Pull wire: target <-[!] sourceExpr [modifiers]
         ALT: () => {
           this.OR2([
-            { ALT: () => this.CONSUME(Arrow,      { LABEL: "arrow" }) },
+            { ALT: () => this.CONSUME(Arrow, { LABEL: "arrow" }) },
             { ALT: () => this.CONSUME(ForceArrow, { LABEL: "forceArrow" }) },
           ]);
           this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
@@ -373,7 +384,10 @@ class BridgeParser extends CstParser {
   });
 
   /**
-   * Element line inside array mapping: .field = value | .field <- source [|| ...] [?? ...]
+   * Element line inside array mapping:
+   *   .field = value
+   *   .field <- source [|| ...] [?? ...]
+   *   .field <- source[] as iter { ...nested elements... }   (nested array)
    */
   public elementLine = this.RULE("elementLine", () => {
     this.CONSUME(Dot);
@@ -389,6 +403,11 @@ class BridgeParser extends CstParser {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "elemArrow" });
           this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+          // Optional nested array mapping: [] as <iter> { ... }
+          this.OPTION2(() =>
+            this.SUBRULE(this.arrayMapping, { LABEL: "nestedArrayMapping" }),
+          );
+          // || coalesce chain (only when no nested array mapping)
           this.MANY(() => {
             this.CONSUME(NullCoalesce);
             this.SUBRULE(this.coalesceAlternative, { LABEL: "elemNullAlt" });
@@ -417,11 +436,13 @@ class BridgeParser extends CstParser {
     this.OR([
       { ALT: () => this.CONSUME(StringLiteral, { LABEL: "stringLit" }) },
       { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
-      { ALT: () => this.CONSUME(TrueLiteral,   { LABEL: "trueLit" }) },
-      { ALT: () => this.CONSUME(FalseLiteral,  { LABEL: "falseLit" }) },
-      { ALT: () => this.CONSUME(NullLiteral,   { LABEL: "nullLit" }) },
-      { ALT: () => this.SUBRULE(this.jsonInlineObject, { LABEL: "objectLit" }) },
-      { ALT: () => this.SUBRULE(this.sourceExpr,  { LABEL: "sourceAlt" }) },
+      { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
+      { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
+      { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
+      {
+        ALT: () => this.SUBRULE(this.jsonInlineObject, { LABEL: "objectLit" }),
+      },
+      { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceAlt" }) },
     ]);
   });
 
@@ -478,8 +499,12 @@ class BridgeParser extends CstParser {
           // consumption in multi-line contexts like element blocks.
           // LA(0) gives the last consumed token.
           const prev = this.LA(0);
-          if (prev && la.startLine != null && prev.endLine != null
-              && la.startLine > prev.endLine) {
+          if (
+            prev &&
+            la.startLine != null &&
+            prev.endLine != null &&
+            la.startLine > prev.endLine
+          ) {
             return false;
           }
           return true;
@@ -541,8 +566,13 @@ class BridgeParser extends CstParser {
         const la = this.LA(1);
         if (la.tokenType !== Dot) return false;
         const prev = this.LA(0);
-        if (prev && la.startLine != null && prev.endLine != null
-            && la.startLine > prev.endLine) return false;
+        if (
+          prev &&
+          la.startLine != null &&
+          prev.endLine != null &&
+          la.startLine > prev.endLine
+        )
+          return false;
         return true;
       },
       DEF: () => {
@@ -560,8 +590,13 @@ class BridgeParser extends CstParser {
         const la = this.LA(1);
         if (la.tokenType !== Dot) return false;
         const prev = this.LA(0);
-        if (prev && la.startLine != null && prev.endLine != null
-            && la.startLine > prev.endLine) return false;
+        if (
+          prev &&
+          la.startLine != null &&
+          prev.endLine != null &&
+          la.startLine > prev.endLine
+        )
+          return false;
         return true;
       },
       DEF: () => {
@@ -617,11 +652,11 @@ class BridgeParser extends CstParser {
     this.OR([
       { ALT: () => this.CONSUME(StringLiteral, { LABEL: "string" }) },
       { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "number" }) },
-      { ALT: () => this.CONSUME(TrueLiteral,   { LABEL: "true" }) },
-      { ALT: () => this.CONSUME(FalseLiteral,  { LABEL: "false" }) },
-      { ALT: () => this.CONSUME(NullLiteral,   { LABEL: "null" }) },
+      { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "true" }) },
+      { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "false" }) },
+      { ALT: () => this.CONSUME(NullLiteral, { LABEL: "null" }) },
       { ALT: () => this.SUBRULE(this.jsonObject, { LABEL: "object" }) },
-      { ALT: () => this.SUBRULE(this.jsonArray,  { LABEL: "array" }) },
+      { ALT: () => this.SUBRULE(this.jsonArray, { LABEL: "array" }) },
     ]);
   });
 
@@ -717,7 +752,7 @@ export type BridgeDiagnostic = {
   severity: "error" | "warning";
   range: {
     start: { line: number; character: number };
-    end:   { line: number; character: number };
+    end: { line: number; character: number };
   };
 };
 
@@ -744,7 +779,10 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
       severity: "error",
       range: {
         start: { line: (e.line ?? 1) - 1, character: (e.column ?? 1) - 1 },
-        end:   { line: (e.line ?? 1) - 1, character: (e.column ?? 1) - 1 + e.length },
+        end: {
+          line: (e.line ?? 1) - 1,
+          character: (e.column ?? 1) - 1 + e.length,
+        },
       },
     });
   }
@@ -758,8 +796,14 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
       message: e.message,
       severity: "error",
       range: {
-        start: { line: (t.startLine ?? 1) - 1, character: (t.startColumn ?? 1) - 1 },
-        end:   { line: (t.endLine ?? t.startLine ?? 1) - 1, character: t.endColumn ?? t.startColumn ?? 1 },
+        start: {
+          line: (t.startLine ?? 1) - 1,
+          character: (t.startColumn ?? 1) - 1,
+        },
+        end: {
+          line: (t.endLine ?? t.startLine ?? 1) - 1,
+          character: t.endColumn ?? t.startColumn ?? 1,
+        },
       },
     });
   }
@@ -770,7 +814,7 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
   try {
     const result = toBridgeAst(cst, []);
     instructions = result.instructions;
-    startLines   = result.startLines;
+    startLines = result.startLines;
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
     const m = msg.match(/^Line (\d+):/);
@@ -780,7 +824,7 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
       severity: "error",
       range: {
         start: { line: errorLine, character: 0 },
-        end:   { line: errorLine, character: 999 },
+        end: { line: errorLine, character: 999 },
       },
     });
   }
@@ -788,14 +832,15 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
   return { instructions, diagnostics, startLines };
 }
 
-function internalParse(text: string, previousInstructions?: Instruction[]): Instruction[] {
+function internalParse(
+  text: string,
+  previousInstructions?: Instruction[],
+): Instruction[] {
   // 1. Lex
   const lexResult = BridgeLexer.tokenize(text);
   if (lexResult.errors.length > 0) {
     const e = lexResult.errors[0];
-    throw new Error(
-      `Line ${e.line}: Unexpected character "${e.message}"`,
-    );
+    throw new Error(`Line ${e.line}: Unexpected character "${e.message}"`);
   }
 
   // 2. Parse
@@ -851,7 +896,7 @@ function extractNameToken(node: CstNode): string {
 /* ── extractDottedName: reassemble from dottedName CST node ── */
 function extractDottedName(node: CstNode): string {
   const first = extractNameToken(sub(node, "first")!);
-  const rest = subs(node, "rest").map(n => extractNameToken(n));
+  const rest = subs(node, "rest").map((n) => extractNameToken(n));
   return [first, ...rest].join(".");
 }
 
@@ -867,28 +912,36 @@ function extractPathSegment(node: CstNode): string {
 /* ── extractDottedPathStr: reassemble from dottedPath CST node ── */
 function extractDottedPathStr(node: CstNode): string {
   const first = extractPathSegment(sub(node, "first")!);
-  const rest = subs(node, "rest").map(n => extractPathSegment(n));
+  const rest = subs(node, "rest").map((n) => extractPathSegment(n));
   return [first, ...rest].join(".");
 }
 
 /* ── extractAddressPath: get root + segments preserving order ── */
-function extractAddressPath(node: CstNode): { root: string; segments: string[] } {
+function extractAddressPath(node: CstNode): {
+  root: string;
+  segments: string[];
+} {
   const root = extractNameToken(sub(node, "root")!);
   type Seg = { offset: number; value: string };
   const items: Seg[] = [];
 
   for (const seg of subs(node, "segment")) {
     const firstTok = findFirstToken(seg);
-    items.push({ offset: firstTok?.startOffset ?? 0, value: extractPathSegment(seg) });
+    items.push({
+      offset: firstTok?.startOffset ?? 0,
+      value: extractPathSegment(seg),
+    });
   }
   for (const idxTok of toks(node, "arrayIndex")) {
     if (idxTok.image.includes(".")) {
-      throw new Error(`Line ${idxTok.startLine}: Array indices must be integers, found "${idxTok.image}"`);
+      throw new Error(
+        `Line ${idxTok.startLine}: Array indices must be integers, found "${idxTok.image}"`,
+      );
     }
     items.push({ offset: idxTok.startOffset, value: idxTok.image });
   }
   items.sort((a, b) => a.offset - b.offset);
-  return { root, segments: items.map(i => i.value) };
+  return { root, segments: items.map((i) => i.value) };
 }
 
 function findFirstToken(node: CstNode): IToken | undefined {
@@ -938,7 +991,9 @@ function reconstructJson(node: CstNode): string {
   if (tokens.length === 0) return "";
   let result = tokens[0].image;
   for (let i = 1; i < tokens.length; i++) {
-    const gap = tokens[i].startOffset - (tokens[i - 1].startOffset + tokens[i - 1].image.length);
+    const gap =
+      tokens[i].startOffset -
+      (tokens[i - 1].startOffset + tokens[i - 1].image.length);
     if (gap > 0) result += " ".repeat(gap);
     result += tokens[i].image;
   }
@@ -961,7 +1016,7 @@ function extractBareValue(node: CstNode): string {
 /* ── extractJsonValue: from a jsonValue CST node ── */
 function extractJsonValue(node: CstNode): string {
   const c = node.children;
-  if (c.string) return (c.string as IToken[])[0].image;  // keep quotes for JSON.parse
+  if (c.string) return (c.string as IToken[])[0].image; // keep quotes for JSON.parse
   if (c.number) return (c.number as IToken[])[0].image;
   if (c.integer) return (c.integer as IToken[])[0].image;
   if (c.true) return "true";
@@ -982,10 +1037,232 @@ type HandleResolution = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  Recursive element-line processor (supports nested array-in-array mapping)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Process element lines inside an array mapping block.
+ * When an element line itself contains a nested `[] as iter { ... }` block,
+ * this function registers the inner iterator and recurses into the nested
+ * element lines, building wires with the correct concatenated paths.
+ */
+function processElementLines(
+  elemLines: CstNode[],
+  arrayToPath: string[],
+  iterName: string,
+  bridgeType: string,
+  bridgeField: string,
+  wires: Wire[],
+  arrayIterators: Record<string, string>,
+  buildSourceExpr: (node: CstNode, lineNum: number, force: boolean) => NodeRef,
+  extractCoalesceAlt: (
+    altNode: CstNode,
+    lineNum: number,
+  ) => { literal: string } | { sourceRef: NodeRef },
+): void {
+  /**
+   * Wrap extractCoalesceAlt to handle iterator-relative source references
+   * in || and ?? alternatives. When the source root matches the current
+   * iterator name, construct an element ref instead of resolving via handles.
+   */
+  function extractCoalesceAltIterAware(
+    altNode: CstNode,
+    lineNum: number,
+  ): { literal: string } | { sourceRef: NodeRef } {
+    const c = altNode.children;
+    if (c.sourceAlt) {
+      const srcNode = (c.sourceAlt as CstNode[])[0];
+      const headNode = sub(srcNode, "head");
+      if (headNode) {
+        const { root, segments } = extractAddressPath(headNode);
+        const pipeSegs = subs(srcNode, "pipeSegment");
+        if (root === iterName && pipeSegs.length === 0) {
+          return {
+            sourceRef: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: segments,
+            },
+          };
+        }
+      }
+    }
+    return extractCoalesceAlt(altNode, lineNum);
+  }
+
+  for (const elemLine of elemLines) {
+    const elemC = elemLine.children;
+    const elemLineNum = line(findFirstToken(elemLine));
+    const elemTargetPathStr = extractDottedPathStr(
+      sub(elemLine, "elemTarget")!,
+    );
+    const elemToPath = [...arrayToPath, ...parsePath(elemTargetPathStr)];
+
+    if (elemC.elemEquals) {
+      const value = extractBareValue(sub(elemLine, "elemValue")!);
+      wires.push({
+        value,
+        to: {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: elemToPath,
+        },
+      });
+    } else if (elemC.elemArrow) {
+      const elemSourceNode = sub(elemLine, "elemSource")!;
+
+      // Check if iterator-relative source
+      const elemHeadNode = sub(elemSourceNode, "head")!;
+      const elemPipeSegs = subs(elemSourceNode, "pipeSegment");
+      const { root: elemSrcRoot, segments: elemSrcSegs } =
+        extractAddressPath(elemHeadNode);
+
+      // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
+      const nestedArrayNode = (
+        elemC.nestedArrayMapping as CstNode[] | undefined
+      )?.[0];
+      if (nestedArrayNode) {
+        // Emit the pass-through wire for the inner array source
+        let innerFromRef: NodeRef;
+        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+          innerFromRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemSrcSegs,
+          };
+        } else {
+          innerFromRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+        }
+        const innerToRef: NodeRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          path: elemToPath,
+        };
+        wires.push({ from: innerFromRef, to: innerToRef });
+
+        // Register the inner iterator
+        const innerIterName = extractNameToken(
+          sub(nestedArrayNode, "iterName")!,
+        );
+        assertNotReserved(innerIterName, elemLineNum, "iterator handle");
+        // Key by the joined path for nested arrays (e.g. "legs" or "journeys.legs")
+        const iterKey = elemToPath.join(".");
+        arrayIterators[iterKey] = innerIterName;
+
+        // Recurse into nested element lines
+        processElementLines(
+          subs(nestedArrayNode, "elementLine"),
+          elemToPath,
+          innerIterName,
+          bridgeType,
+          bridgeField,
+          wires,
+          arrayIterators,
+          buildSourceExpr,
+          extractCoalesceAlt,
+        );
+        continue;
+      }
+
+      // ── Regular element pull wire ──
+      const elemToRef: NodeRef = {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        path: elemToPath,
+      };
+
+      const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
+
+      if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+        sourceParts.push({
+          ref: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemSrcSegs,
+          },
+          isPipeFork: false,
+        });
+      } else {
+        const ref = buildSourceExpr(elemSourceNode, elemLineNum, false);
+        const isPipeFork =
+          ref.instance != null &&
+          ref.path.length === 0 &&
+          elemPipeSegs.length > 0;
+        sourceParts.push({ ref, isPipeFork });
+      }
+
+      // || alternatives
+      let nullFallback: string | undefined;
+      for (const alt of subs(elemLine, "elemNullAlt")) {
+        const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
+        if ("literal" in altResult) {
+          nullFallback = altResult.literal;
+        } else {
+          sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
+        }
+      }
+
+      // ?? fallback
+      let fallback: string | undefined;
+      let fallbackRef: NodeRef | undefined;
+      let fallbackInternalWires: Wire[] = [];
+      const errorAlt = sub(elemLine, "elemErrorAlt");
+      if (errorAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAltIterAware(errorAlt, elemLineNum);
+        if ("literal" in altResult) {
+          fallback = altResult.literal;
+        } else {
+          fallbackRef = altResult.sourceRef;
+          fallbackInternalWires = wires.splice(preLen);
+        }
+      }
+
+      // Emit wires
+      for (let ci = 0; ci < sourceParts.length; ci++) {
+        const { ref: fromRef, isPipeFork } = sourceParts[ci];
+        const isLast = ci === sourceParts.length - 1;
+        const lastAttrs = isLast
+          ? {
+              ...(nullFallback ? { nullFallback } : {}),
+              ...(fallback ? { fallback } : {}),
+              ...(fallbackRef ? { fallbackRef } : {}),
+            }
+          : {};
+        if (isPipeFork) {
+          wires.push({
+            from: fromRef,
+            to: elemToRef,
+            pipe: true,
+            ...lastAttrs,
+          });
+        } else {
+          wires.push({ from: fromRef, to: elemToRef, ...lastAttrs });
+        }
+      }
+      wires.push(...fallbackInternalWires);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  Main AST builder
 // ═══════════════════════════════════════════════════════════════════════════
 
-function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): { instructions: Instruction[]; startLines: Map<Instruction, number> } {
+function toBridgeAst(
+  cst: CstNode,
+  previousInstructions?: Instruction[],
+): { instructions: Instruction[]; startLines: Map<Instruction, number> } {
   const instructions: Instruction[] = [];
   const startLines = new Map<Instruction, number>();
 
@@ -1013,10 +1290,30 @@ function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): { inst
   // Chevrotain stores them by rule name, so we need to interleave by offset.
   type TaggedNode = { offset: number; kind: string; node: CstNode };
   const tagged: TaggedNode[] = [];
-  for (const n of subs(cst, "constDecl"))   tagged.push({ offset: findFirstToken(n)?.startOffset ?? 0, kind: "const",  node: n });
-  for (const n of subs(cst, "toolBlock"))   tagged.push({ offset: findFirstToken(n)?.startOffset ?? 0, kind: "tool",   node: n });
-  for (const n of subs(cst, "defineBlock")) tagged.push({ offset: findFirstToken(n)?.startOffset ?? 0, kind: "define", node: n });
-  for (const n of subs(cst, "bridgeBlock")) tagged.push({ offset: findFirstToken(n)?.startOffset ?? 0, kind: "bridge", node: n });
+  for (const n of subs(cst, "constDecl"))
+    tagged.push({
+      offset: findFirstToken(n)?.startOffset ?? 0,
+      kind: "const",
+      node: n,
+    });
+  for (const n of subs(cst, "toolBlock"))
+    tagged.push({
+      offset: findFirstToken(n)?.startOffset ?? 0,
+      kind: "tool",
+      node: n,
+    });
+  for (const n of subs(cst, "defineBlock"))
+    tagged.push({
+      offset: findFirstToken(n)?.startOffset ?? 0,
+      kind: "define",
+      node: n,
+    });
+  for (const n of subs(cst, "bridgeBlock"))
+    tagged.push({
+      offset: findFirstToken(n)?.startOffset ?? 0,
+      kind: "bridge",
+      node: n,
+    });
   tagged.sort((a, b) => a.offset - b.offset);
 
   for (const item of tagged) {
@@ -1029,7 +1326,10 @@ function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): { inst
         break;
       }
       case "tool": {
-        const inst = buildToolDef(item.node, [...contextInstructions, ...instructions]);
+        const inst = buildToolDef(item.node, [
+          ...contextInstructions,
+          ...instructions,
+        ]);
         instructions.push(inst);
         startLines.set(inst, startLine);
         break;
@@ -1041,7 +1341,10 @@ function toBridgeAst(cst: CstNode, previousInstructions?: Instruction[]): { inst
         break;
       }
       case "bridge": {
-        const newInsts = buildBridge(item.node, [...contextInstructions, ...instructions]);
+        const newInsts = buildBridge(item.node, [
+          ...contextInstructions,
+          ...instructions,
+        ]);
         for (const bi of newInsts) {
           instructions.push(bi);
           startLines.set(bi, startLine);
@@ -1065,8 +1368,12 @@ function buildConstDef(node: CstNode): ConstDef {
   const raw = extractJsonValue(valueNode);
 
   // Validate JSON
-  try { JSON.parse(raw); } catch {
-    throw new Error(`Line ${lineNum}: Invalid JSON value for const "${name}": ${raw}`);
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `Line ${lineNum}: Invalid JSON value for const "${name}": ${raw}`,
+    );
   }
 
   return { kind: "const", name, value: raw };
@@ -1074,14 +1381,17 @@ function buildConstDef(node: CstNode): ConstDef {
 
 // ── Tool ────────────────────────────────────────────────────────────────
 
-function buildToolDef(node: CstNode, previousInstructions: Instruction[]): ToolDef {
+function buildToolDef(
+  node: CstNode,
+  previousInstructions: Instruction[],
+): ToolDef {
   const toolName = extractDottedName(sub(node, "toolName")!);
   const source = extractDottedName(sub(node, "toolSource")!);
   const lineNum = line(findFirstToken(sub(node, "toolName")!));
   assertNotReserved(toolName, lineNum, "tool name");
 
   const isKnownTool = previousInstructions.some(
-    inst => inst.kind === "tool" && inst.name === source,
+    (inst) => inst.kind === "tool" && inst.name === source,
   );
 
   const deps: ToolDep[] = [];
@@ -1095,10 +1405,14 @@ function buildToolDef(node: CstNode, previousInstructions: Instruction[]): ToolD
     if (withNode) {
       const wc = withNode.children;
       if (wc.contextKw) {
-        const alias = wc.alias ? extractNameToken((wc.alias as CstNode[])[0]) : "context";
+        const alias = wc.alias
+          ? extractNameToken((wc.alias as CstNode[])[0])
+          : "context";
         deps.push({ kind: "context", handle: alias });
       } else if (wc.constKw) {
-        const alias = wc.constAlias ? extractNameToken((wc.constAlias as CstNode[])[0]) : "const";
+        const alias = wc.constAlias
+          ? extractNameToken((wc.constAlias as CstNode[])[0])
+          : "const";
         deps.push({ kind: "const", handle: alias });
       } else if (wc.toolName) {
         const tName = extractDottedName((wc.toolName as CstNode[])[0]);
@@ -1157,7 +1471,11 @@ function buildDefineDef(node: CstNode): DefineDef {
 
   const bodyLines = subs(node, "bridgeBodyLine");
   const { handles, wires, arrayIterators, pipeHandles } = buildBridgeBody(
-    bodyLines, "Define", name, [], lineNum,
+    bodyLines,
+    "Define",
+    name,
+    [],
+    lineNum,
   );
 
   return {
@@ -1206,7 +1524,11 @@ function buildBridge(
   // Full bridge block
   const bodyLines = subs(node, "bridgeBodyLine");
   const { handles, wires, arrayIterators, pipeHandles } = buildBridgeBody(
-    bodyLines, typeName, fieldName, previousInstructions, 0,
+    bodyLines,
+    typeName,
+    fieldName,
+    previousInstructions,
+    0,
   );
 
   // Inline define invocations
@@ -1224,26 +1546,44 @@ function buildBridge(
     }
   }
 
-  const nextForkSeqRef = { value: pipeHandles.length > 0
-    ? Math.max(
-        ...pipeHandles.map(p => {
-          const parts = p.key.split(":");
-          return parseInt(parts[parts.length - 1]) || 0;
-        }).filter(n => n >= 100000).map(n => n - 100000 + 1),
-        0,
-      )
-    : 0
+  const nextForkSeqRef = {
+    value:
+      pipeHandles.length > 0
+        ? Math.max(
+            ...pipeHandles
+              .map((p) => {
+                const parts = p.key.split(":");
+                return parseInt(parts[parts.length - 1]) || 0;
+              })
+              .filter((n) => n >= 100000)
+              .map((n) => n - 100000 + 1),
+            0,
+          )
+        : 0,
   };
 
   for (const hb of handles) {
     if (hb.kind !== "define") continue;
     const def = previousInstructions.find(
-      (inst): inst is DefineDef => inst.kind === "define" && inst.name === hb.name,
+      (inst): inst is DefineDef =>
+        inst.kind === "define" && inst.name === hb.name,
     );
     if (!def) {
-      throw new Error(`Define "${hb.name}" referenced by handle "${hb.handle}" not found`);
+      throw new Error(
+        `Define "${hb.name}" referenced by handle "${hb.handle}" not found`,
+      );
     }
-    inlineDefine(hb.handle, def, typeName, fieldName, wires, pipeHandles, handles, instanceCounters, nextForkSeqRef);
+    inlineDefine(
+      hb.handle,
+      def,
+      typeName,
+      fieldName,
+      wires,
+      pipeHandles,
+      handles,
+      instanceCounters,
+      nextForkSeqRef,
+    );
   }
 
   const instructions: Instruction[] = [];
@@ -1253,7 +1593,8 @@ function buildBridge(
     field: fieldName,
     handles,
     wires,
-    arrayIterators: Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
+    arrayIterators:
+      Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
     pipeHandles: pipeHandles.length > 0 ? pipeHandles : undefined,
   });
   return instructions;
@@ -1286,7 +1627,9 @@ function buildBridgeBody(
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
   for (const bodyLine of bodyLines) {
-    const withNode = (bodyLine.children.bridgeWithDecl as CstNode[] | undefined)?.[0];
+    const withNode = (
+      bodyLine.children.bridgeWithDecl as CstNode[] | undefined
+    )?.[0];
     if (!withNode) continue;
     const wc = withNode.children;
     const lineNum = line(findFirstToken(withNode));
@@ -1298,25 +1641,49 @@ function buildBridgeBody(
     };
 
     if (wc.inputKw) {
-      const handle = wc.inputAlias ? extractNameToken((wc.inputAlias as CstNode[])[0]) : "input";
+      const handle = wc.inputAlias
+        ? extractNameToken((wc.inputAlias as CstNode[])[0])
+        : "input";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "input" });
-      handleRes.set(handle, { module: SELF_MODULE, type: bridgeType, field: bridgeField });
+      handleRes.set(handle, {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+      });
     } else if (wc.outputKw) {
-      const handle = wc.outputAlias ? extractNameToken((wc.outputAlias as CstNode[])[0]) : "output";
+      const handle = wc.outputAlias
+        ? extractNameToken((wc.outputAlias as CstNode[])[0])
+        : "output";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "output" });
-      handleRes.set(handle, { module: SELF_MODULE, type: bridgeType, field: bridgeField });
+      handleRes.set(handle, {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+      });
     } else if (wc.contextKw) {
-      const handle = wc.contextAlias ? extractNameToken((wc.contextAlias as CstNode[])[0]) : "context";
+      const handle = wc.contextAlias
+        ? extractNameToken((wc.contextAlias as CstNode[])[0])
+        : "context";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "context" });
-      handleRes.set(handle, { module: SELF_MODULE, type: "Context", field: "context" });
+      handleRes.set(handle, {
+        module: SELF_MODULE,
+        type: "Context",
+        field: "context",
+      });
     } else if (wc.constKw) {
-      const handle = wc.constAlias ? extractNameToken((wc.constAlias as CstNode[])[0]) : "const";
+      const handle = wc.constAlias
+        ? extractNameToken((wc.constAlias as CstNode[])[0])
+        : "const";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "const" });
-      handleRes.set(handle, { module: SELF_MODULE, type: "Const", field: "const" });
+      handleRes.set(handle, {
+        module: SELF_MODULE,
+        type: "Const",
+        field: "const",
+      });
     } else if (wc.refName) {
       const name = extractDottedName((wc.refName as CstNode[])[0]);
       const lastDot = name.lastIndexOf(".");
@@ -1330,11 +1697,16 @@ function buildBridgeBody(
 
       // Check if it's a define reference
       const defineDef = previousInstructions.find(
-        (inst): inst is DefineDef => inst.kind === "define" && inst.name === name,
+        (inst): inst is DefineDef =>
+          inst.kind === "define" && inst.name === name,
       );
       if (defineDef) {
         handleBindings.push({ handle, kind: "define", name });
-        handleRes.set(handle, { module: `__define_${handle}`, type: bridgeType, field: bridgeField });
+        handleRes.set(handle, {
+          module: `__define_${handle}`,
+          type: bridgeType,
+          field: bridgeField,
+        });
       } else if (lastDot !== -1) {
         const modulePart = name.substring(0, lastDot);
         const fieldPart = name.substring(lastDot + 1);
@@ -1342,20 +1714,34 @@ function buildBridgeBody(
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
         handleBindings.push({ handle, kind: "tool", name });
-        handleRes.set(handle, { module: modulePart, type: bridgeType, field: fieldPart, instance });
+        handleRes.set(handle, {
+          module: modulePart,
+          type: bridgeType,
+          field: fieldPart,
+          instance,
+        });
       } else {
         const key = `Tools:${name}`;
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
         handleBindings.push({ handle, kind: "tool", name });
-        handleRes.set(handle, { module: SELF_MODULE, type: "Tools", field: name, instance });
+        handleRes.set(handle, {
+          module: SELF_MODULE,
+          type: "Tools",
+          field: name,
+          instance,
+        });
       }
     }
   }
 
   // ── Helper: resolve address ────────────────────────────────────────────
 
-  function resolveAddress(root: string, segments: string[], lineNum: number): NodeRef {
+  function resolveAddress(
+    root: string,
+    segments: string[],
+    lineNum: number,
+  ): NodeRef {
     const resolution = handleRes.get(root);
     if (!resolution) {
       if (segments.length === 0) {
@@ -1378,7 +1764,7 @@ function buildBridgeBody(
   }
 
   function assertNoTargetIndices(ref: NodeRef, lineNum: number): void {
-    if (ref.path.some(seg => /^\d+$/.test(seg))) {
+    if (ref.path.some((seg) => /^\d+$/.test(seg))) {
       throw new Error(
         `Line ${lineNum}: Explicit array index in wire target is not supported. Use array mapping (\`[] as iter { }\`) instead.`,
       );
@@ -1387,7 +1773,11 @@ function buildBridgeBody(
 
   // ── Helper: build source expression ────────────────────────────────────
 
-  function buildSourceExpr(sourceNode: CstNode, lineNum: number, forceOnOutermost: boolean): NodeRef {
+  function buildSourceExpr(
+    sourceNode: CstNode,
+    lineNum: number,
+    forceOnOutermost: boolean,
+  ): NodeRef {
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
@@ -1412,14 +1802,16 @@ function buildBridgeBody(
       }
     }
 
-    const { root: srcRoot, segments: srcSegments } = extractAddressPath(actualSourceNode);
+    const { root: srcRoot, segments: srcSegments } =
+      extractAddressPath(actualSourceNode);
     let prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
 
     // Process pipe handles right-to-left (innermost first)
     const reversed = [...pipeChainNodes].reverse();
     for (let idx = 0; idx < reversed.length; idx++) {
       const pNode = reversed[idx];
-      const { root: handleName, segments: handleSegs } = extractAddressPath(pNode);
+      const { root: handleName, segments: handleSegs } =
+        extractAddressPath(pNode);
       const fieldName = handleSegs.length > 0 ? handleSegs.join(".") : "in";
       const res = handleRes.get(handleName)!;
       const forkInstance = 100000 + nextForkSeq++;
@@ -1427,15 +1819,24 @@ function buildBridgeBody(
       pipeHandleEntries.push({
         key: forkKey,
         handle: handleName,
-        baseTrunk: { module: res.module, type: res.type, field: res.field, instance: res.instance },
+        baseTrunk: {
+          module: res.module,
+          type: res.type,
+          field: res.field,
+          instance: res.instance,
+        },
       });
       const forkInRef: NodeRef = {
-        module: res.module, type: res.type, field: res.field,
+        module: res.module,
+        type: res.type,
+        field: res.field,
         instance: forkInstance,
         path: parsePath(fieldName),
       };
       const forkRootRef: NodeRef = {
-        module: res.module, type: res.type, field: res.field,
+        module: res.module,
+        type: res.type,
+        field: res.field,
         instance: forkInstance,
         path: [],
       };
@@ -1460,11 +1861,12 @@ function buildBridgeBody(
     const c = altNode.children;
     if (c.stringLit) return { literal: (c.stringLit as IToken[])[0].image };
     if (c.numberLit) return { literal: (c.numberLit as IToken[])[0].image };
-    if (c.intLit)    return { literal: (c.intLit as IToken[])[0].image };
-    if (c.trueLit)   return { literal: "true" };
-    if (c.falseLit)  return { literal: "false" };
-    if (c.nullLit)   return { literal: "null" };
-    if (c.objectLit) return { literal: reconstructJson((c.objectLit as CstNode[])[0]) };
+    if (c.intLit) return { literal: (c.intLit as IToken[])[0].image };
+    if (c.trueLit) return { literal: "true" };
+    if (c.falseLit) return { literal: "false" };
+    if (c.nullLit) return { literal: "null" };
+    if (c.objectLit)
+      return { literal: reconstructJson((c.objectLit as CstNode[])[0]) };
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
       return { sourceRef: buildSourceExpr(srcNode, lineNum, false) };
@@ -1485,7 +1887,9 @@ function buildBridgeBody(
     const lineNum = line(findFirstToken(wireNode));
 
     // Parse target
-    const { root: targetRoot, segments: targetSegs } = extractAddressPath(sub(wireNode, "target")!);
+    const { root: targetRoot, segments: targetSegs } = extractAddressPath(
+      sub(wireNode, "target")!,
+    );
     const toRef = resolveAddress(targetRoot, targetSegs, lineNum);
     assertNoTargetIndices(toRef, lineNum);
 
@@ -1509,107 +1913,20 @@ function buildBridgeBody(
       const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
       assertNotReserved(iterName, lineNum, "iterator handle");
       const arrayToPath = toRef.path;
-      arrayIterators[arrayToPath[0]] = iterName;
+      arrayIterators[arrayToPath.join(".")] = iterName;
 
-      // Process element lines
-      for (const elemLine of subs(arrayMappingNode, "elementLine")) {
-        const elemC = elemLine.children;
-        const elemLineNum = line(findFirstToken(elemLine));
-        const elemTargetPathStr = extractDottedPathStr(sub(elemLine, "elemTarget")!);
-        const elemToPath = [...arrayToPath, ...parsePath(elemTargetPathStr)];
-
-        if (elemC.elemEquals) {
-          const value = extractBareValue(sub(elemLine, "elemValue")!);
-          wires.push({
-            value,
-            to: {
-              module: SELF_MODULE,
-              type: bridgeType,
-              field: bridgeField,
-              element: true,
-              path: elemToPath,
-            },
-          });
-        } else if (elemC.elemArrow) {
-          const elemSourceNode = sub(elemLine, "elemSource")!;
-          const elemToRef: NodeRef = {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            path: elemToPath,
-          };
-
-          // Check if iterator-relative source
-          const elemHeadNode = sub(elemSourceNode, "head")!;
-          const elemPipeSegs = subs(elemSourceNode, "pipeSegment");
-          const { root: elemSrcRoot, segments: elemSrcSegs } = extractAddressPath(elemHeadNode);
-
-          const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
-
-          if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-            sourceParts.push({
-              ref: {
-                module: SELF_MODULE,
-                type: bridgeType,
-                field: bridgeField,
-                element: true,
-                path: elemSrcSegs,
-              },
-              isPipeFork: false,
-            });
-          } else {
-            const ref = buildSourceExpr(elemSourceNode, elemLineNum, false);
-            const isPipeFork = ref.instance != null && ref.path.length === 0 && elemPipeSegs.length > 0;
-            sourceParts.push({ ref, isPipeFork });
-          }
-
-          // || alternatives
-          let nullFallback: string | undefined;
-          for (const alt of subs(elemLine, "elemNullAlt")) {
-            const altResult = extractCoalesceAlt(alt, elemLineNum);
-            if ("literal" in altResult) {
-              nullFallback = altResult.literal;
-            } else {
-              sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
-            }
-          }
-
-          // ?? fallback
-          let fallback: string | undefined;
-          let fallbackRef: NodeRef | undefined;
-          let fallbackInternalWires: Wire[] = [];
-          const errorAlt = sub(elemLine, "elemErrorAlt");
-          if (errorAlt) {
-            const preLen = wires.length;
-            const altResult = extractCoalesceAlt(errorAlt, elemLineNum);
-            if ("literal" in altResult) {
-              fallback = altResult.literal;
-            } else {
-              fallbackRef = altResult.sourceRef;
-              fallbackInternalWires = wires.splice(preLen);
-            }
-          }
-
-          // Emit wires
-          for (let ci = 0; ci < sourceParts.length; ci++) {
-            const { ref: fromRef, isPipeFork } = sourceParts[ci];
-            const isLast = ci === sourceParts.length - 1;
-            const lastAttrs = isLast
-              ? {
-                  ...(nullFallback ? { nullFallback } : {}),
-                  ...(fallback ? { fallback } : {}),
-                  ...(fallbackRef ? { fallbackRef } : {}),
-                }
-              : {};
-            if (isPipeFork) {
-              wires.push({ from: fromRef, to: elemToRef, pipe: true, ...lastAttrs });
-            } else {
-              wires.push({ from: fromRef, to: elemToRef, ...lastAttrs });
-            }
-          }
-          wires.push(...fallbackInternalWires);
-        }
-      }
+      // Process element lines (supports nested array mappings recursively)
+      processElementLines(
+        subs(arrayMappingNode, "elementLine"),
+        arrayToPath,
+        iterName,
+        bridgeType,
+        bridgeField,
+        wires,
+        arrayIterators,
+        buildSourceExpr,
+        extractCoalesceAlt,
+      );
       continue;
     }
 
@@ -1619,7 +1936,10 @@ function buildBridgeBody(
 
     const pipeSegs = subs(firstSourceNode, "pipeSegment");
     const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
-    const isPipeFork = firstRef.instance != null && firstRef.path.length === 0 && pipeSegs.length > 0;
+    const isPipeFork =
+      firstRef.instance != null &&
+      firstRef.path.length === 0 &&
+      pipeSegs.length > 0;
     sourceParts.push({ ref: firstRef, isPipeFork });
 
     let nullFallback: string | undefined;
@@ -1672,7 +1992,12 @@ function buildBridgeBody(
     wires.push(...fallbackInternalWires);
   }
 
-  return { handles: handleBindings, wires, arrayIterators, pipeHandles: pipeHandleEntries };
+  return {
+    handles: handleBindings,
+    wires,
+    arrayIterators,
+    pipeHandles: pipeHandleEntries,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1697,16 +2022,29 @@ function inlineDefine(
   const defField = defineDef.name;
 
   const defCounters = new Map<string, number>();
-  const trunkRemap = new Map<string, { module: string; type: string; field: string; instance: number }>();
+  const trunkRemap = new Map<
+    string,
+    { module: string; type: string; field: string; instance: number }
+  >();
 
   for (const hb of defineDef.handles) {
-    if (hb.kind === "input" || hb.kind === "output" || hb.kind === "context" || hb.kind === "const") continue;
+    if (
+      hb.kind === "input" ||
+      hb.kind === "output" ||
+      hb.kind === "context" ||
+      hb.kind === "const"
+    )
+      continue;
     if (hb.kind === "define") continue;
     const name = hb.kind === "tool" ? hb.name : "";
     if (!name) continue;
 
     const lastDot = name.lastIndexOf(".");
-    let oldModule: string, oldType: string, oldField: string, instanceKey: string, bridgeKey: string;
+    let oldModule: string,
+      oldType: string,
+      oldField: string,
+      instanceKey: string,
+      bridgeKey: string;
 
     if (lastDot !== -1) {
       oldModule = name.substring(0, lastDot);
@@ -1728,31 +2066,60 @@ function inlineDefine(
     instanceCounters.set(bridgeKey, newInstance);
 
     const oldKey = `${oldModule}:${oldType}:${oldField}:${oldInstance}`;
-    trunkRemap.set(oldKey, { module: oldModule, type: oldType, field: oldField, instance: newInstance });
-    handleBindings.push({ handle: `${defineHandle}$${hb.handle}`, kind: "tool", name });
+    trunkRemap.set(oldKey, {
+      module: oldModule,
+      type: oldType,
+      field: oldField,
+      instance: newInstance,
+    });
+    handleBindings.push({
+      handle: `${defineHandle}$${hb.handle}`,
+      kind: "tool",
+      name,
+    });
   }
 
   // Remap existing bridge wires pointing at the generic define module
   for (const wire of wires) {
     if ("from" in wire) {
-      if (wire.to.module === genericModule) wire.to = { ...wire.to, module: inModule };
-      if (wire.from.module === genericModule) wire.from = { ...wire.from, module: outModule };
-      if (wire.fallbackRef?.module === genericModule) wire.fallbackRef = { ...wire.fallbackRef, module: outModule };
+      if (wire.to.module === genericModule)
+        wire.to = { ...wire.to, module: inModule };
+      if (wire.from.module === genericModule)
+        wire.from = { ...wire.from, module: outModule };
+      if (wire.fallbackRef?.module === genericModule)
+        wire.fallbackRef = { ...wire.fallbackRef, module: outModule };
     }
-    if ("value" in wire && wire.to.module === genericModule) wire.to = { ...wire.to, module: inModule };
+    if ("value" in wire && wire.to.module === genericModule)
+      wire.to = { ...wire.to, module: inModule };
   }
 
   const forkOffset = nextForkSeqRef.value;
   let maxDefForkSeq = 0;
 
   function remapRef(ref: NodeRef, side: "from" | "to"): NodeRef {
-    if (ref.module === SELF_MODULE && ref.type === defType && ref.field === defField) {
+    if (
+      ref.module === SELF_MODULE &&
+      ref.type === defType &&
+      ref.field === defField
+    ) {
       const targetModule = side === "from" ? inModule : outModule;
-      return { ...ref, module: targetModule, type: bridgeType, field: bridgeField };
+      return {
+        ...ref,
+        module: targetModule,
+        type: bridgeType,
+        field: bridgeField,
+      };
     }
     const key = `${ref.module}:${ref.type}:${ref.field}:${ref.instance ?? ""}`;
     const newTrunk = trunkRemap.get(key);
-    if (newTrunk) return { ...ref, module: newTrunk.module, type: newTrunk.type, field: newTrunk.field, instance: newTrunk.instance };
+    if (newTrunk)
+      return {
+        ...ref,
+        module: newTrunk.module,
+        type: newTrunk.type,
+        field: newTrunk.field,
+        instance: newTrunk.instance,
+      };
     if (ref.instance != null && ref.instance >= 100000) {
       const defSeq = ref.instance - 100000;
       if (defSeq + 1 > maxDefForkSeq) maxDefForkSeq = defSeq + 1;
@@ -1766,7 +2133,8 @@ function inlineDefine(
     if ("from" in cloned) {
       cloned.from = remapRef(cloned.from, "from");
       cloned.to = remapRef(cloned.to, "to");
-      if (cloned.fallbackRef) cloned.fallbackRef = remapRef(cloned.fallbackRef, "from");
+      if (cloned.fallbackRef)
+        cloned.fallbackRef = remapRef(cloned.fallbackRef, "from");
     } else {
       cloned.to = remapRef(cloned.to, "to");
     }
@@ -1795,7 +2163,12 @@ function inlineDefine(
         key: newKey,
         handle: `${defineHandle}$${ph.handle}`,
         baseTrunk: resolvedBt
-          ? { module: resolvedBt.module, type: resolvedBt.type, field: resolvedBt.field, instance: resolvedBt.instance }
+          ? {
+              module: resolvedBt.module,
+              type: resolvedBt.type,
+              field: resolvedBt.field,
+              instance: resolvedBt.instance,
+            }
           : ph.baseTrunk,
       });
     }

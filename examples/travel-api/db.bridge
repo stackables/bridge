@@ -1,0 +1,50 @@
+version 1.4
+
+tool dbApi from std.httpCall {
+  .baseUrl = "https://v6.db.api.bahn.guru"
+  .method = GET
+  .path = "/journeys"
+  
+  # Layer 1 Resiliency: If DB goes down, return empty results, don't crash the gateway
+  on error = { "journeys": [] }
+}
+
+bridge Query.searchTrains {
+  with dbApi as api
+  with input as i
+  with output as o
+
+  # Map internal GraphQL args to the external REST query params
+  api.from <- i.from
+  api.to <- i.to
+
+  # Map the root array using the iter syntax
+  o <- api.journeys[] as j {
+    .id <- j.refreshToken || "db-unknown"
+    .provider = "DB"
+    
+    # DB nests the total journey time inside the legs array
+    .departureTime <- j.legs[0].plannedDeparture || j.legs[0].departure
+    .arrivalTime <- j.legs[0].plannedArrival || j.legs[0].arrival
+    .transfers = 0 # DB v6 requires manual counting of legs; defaulting to 0 for brevity
+
+    # Nested iteration for the train changes (legs)
+    .legs <- j.legs[] as l {
+      .trainName <- l.line.name || l.line.id || "Walk"
+      
+      .origin.station.id <- l.origin.id
+      .origin.station.name <- l.origin.name
+      .origin.plannedTime <- l.plannedDeparture
+      .origin.actualTime <- l.departure || l.plannedDeparture
+      .origin.delayMinutes <- l.departureDelay || 0
+      .origin.platform <- l.plannedDeparturePlatform || l.departurePlatform
+
+      .destination.station.id <- l.destination.id
+      .destination.station.name <- l.destination.name
+      .destination.plannedTime <- l.plannedArrival
+      .destination.actualTime <- l.arrival || l.plannedArrival
+      .destination.delayMinutes <- l.arrivalDelay || 0
+      .destination.platform <- l.plannedArrivalPlatform || l.arrivalPlatform
+    }
+  }
+}

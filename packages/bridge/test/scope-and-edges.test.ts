@@ -2,7 +2,11 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, parsePath, serializeBridge } from "../src/bridge-format.js";
+import {
+  parseBridge,
+  parsePath,
+  serializeBridge,
+} from "../src/bridge-format.js";
 import { createGateway } from "./_gateway.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -90,7 +94,10 @@ o.journeys <- r.journeys[] as j {
       }`),
     });
 
-    assert.ok(!result.errors, `should not error: ${JSON.stringify(result.errors)}`);
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
     assert.equal(result.data.plan.journeys.length, 2);
     assert.equal(result.data.plan.journeys[0].label, "Express");
     assert.equal(result.data.plan.journeys[1].label, "Local");
@@ -109,7 +116,10 @@ o.journeys <- r.journeys[] as j {
       }`),
     });
 
-    assert.ok(!result.errors, `should not error: ${JSON.stringify(result.errors)}`);
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
     const journeys = result.data.plan.journeys;
     assert.equal(journeys.length, 2);
 
@@ -195,10 +205,15 @@ o.routes <- r.routes[] as route {
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
-      document: parse(`{ trips(origin: "Berlin") { routes { carrier legs { from to } } } }`),
+      document: parse(
+        `{ trips(origin: "Berlin") { routes { carrier legs { from to } } } }`,
+      ),
     });
 
-    assert.ok(!result.errors, `should not error: ${JSON.stringify(result.errors)}`);
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
     // Context should flow through to the tool
     assert.equal(capturedInput.headers?.apiKey, "secret-123");
 
@@ -277,7 +292,10 @@ o.name <- b.name
       document: parse(`{ locate(q: "test") { lat name } }`),
     });
 
-    assert.ok(!result.errors, `should not error: ${JSON.stringify(result.errors)}`);
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
     // The child's constant "child-value" should be the ONLY value.
     // Neither the parent's pull ("parent-token") nor constant ("fallback")
     // should leak through.
@@ -385,7 +403,7 @@ o.items[0].name <- a.firstName
     if (parsed) {
       assert.fail(
         "KNOWN ISSUE: explicit index on output LHS parses but silently produces null at runtime. " +
-        "Parser should reject `o.items[0].name` — use array mapping blocks instead.",
+          "Parser should reject `o.items[0].name` — use array mapping blocks instead.",
       );
     } else {
       // Fixed: parser rejects explicit indices on the target side
@@ -405,6 +423,186 @@ describe("setNested sparse arrays", () => {
     // The real protection is issue #3: forbid explicit indices on output LHS.
     // If that's enforced, sparse arrays from bridge wiring can't happen.
     // This test is a placeholder acknowledging the concern.
-    assert.ok(true, "Sparse arrays are a concern if explicit indices are allowed in output paths");
+    assert.ok(
+      true,
+      "Sparse arrays are a concern if explicit indices are allowed in output paths",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. Nested array-in-array mapping (explicit field wiring)
+//
+//    When a bridge maps an outer array AND explicitly maps fields of a
+//    nested inner array using `[] as iter { ... }` syntax inside an
+//    element block, the parser, serializer, and runtime must all handle
+//    the recursion correctly.
+//
+//    This is the pattern used by the travel-api example where journeys[]
+//    contain legs[], and each leg's fields are explicitly remapped.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("nested array-in-array mapping", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      searchTrains(from: String!, to: String!): [Journey!]!
+    }
+    type Journey {
+      id: ID!
+      provider: String!
+      legs: [Leg!]!
+    }
+    type Leg {
+      trainName: String
+      originStation: String
+      destStation: String
+    }
+  `;
+
+  const bridgeText = `version 1.4
+
+tool trainApi from httpCall {
+  .baseUrl = "http://mock"
+  .method = GET
+  .path = /journeys
+  on error = { "journeys": [] }
+}
+
+bridge Query.searchTrains {
+  with trainApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.journeys[] as j {
+    .id <- j.token || "unknown"
+    .provider = "TRAIN"
+    .legs <- j.legs[] as l {
+      .trainName <- l.line.name || "Walk"
+      .originStation <- l.origin.name
+      .destStation <- l.destination.name
+    }
+  }
+}`;
+
+  const mockHttpCall = async (input: Record<string, any>) => ({
+    journeys: [
+      {
+        token: "ABC",
+        legs: [
+          {
+            line: { name: "ICE 100" },
+            origin: { name: "Berlin" },
+            destination: { name: "Hamburg" },
+          },
+          {
+            line: { name: null },
+            origin: { name: "Hamburg" },
+            destination: { name: "Copenhagen" },
+          },
+        ],
+      },
+      {
+        token: null,
+        legs: [
+          {
+            line: { name: "IC 200" },
+            origin: { name: "Munich" },
+            destination: { name: "Vienna" },
+          },
+        ],
+      },
+    ],
+  });
+
+  function makeExecutor() {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { httpCall: mockHttpCall },
+    });
+    return buildHTTPExecutor({ fetch: gateway.fetch as any });
+  }
+
+  test("parse produces correct arrayIterators for nested arrays", () => {
+    const instructions = parseBridge(bridgeText);
+    const bridge = instructions.find((i): i is any => i.kind === "bridge");
+    assert.ok(bridge, "bridge instruction must exist");
+    // Root array iterator
+    assert.equal(bridge.arrayIterators[""], "j");
+    // Nested array iterator
+    assert.equal(bridge.arrayIterators["legs"], "l");
+  });
+
+  test("roundtrip: parse → serialize → parse preserves nested array structure", () => {
+    const instructions = parseBridge(bridgeText);
+    const serialized = serializeBridge(instructions);
+    const reparsed = parseBridge(serialized);
+
+    const origBridge = instructions.find((i): i is any => i.kind === "bridge");
+    const reparsedBridge = reparsed.find((i): i is any => i.kind === "bridge");
+
+    // Same number of wires
+    assert.equal(
+      reparsedBridge.wires.length,
+      origBridge.wires.length,
+      `wire count: expected ${origBridge.wires.length}, got ${reparsedBridge.wires.length}`,
+    );
+
+    // Same arrayIterators
+    assert.deepEqual(reparsedBridge.arrayIterators, origBridge.arrayIterators);
+  });
+
+  test("runtime: outer array fields resolve correctly", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{
+        searchTrains(from: "Berlin", to: "Hamburg") { id provider }
+      }`),
+    });
+
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
+    assert.equal(result.data.searchTrains.length, 2);
+    assert.equal(result.data.searchTrains[0].id, "ABC");
+    assert.equal(result.data.searchTrains[0].provider, "TRAIN");
+    assert.equal(result.data.searchTrains[1].id, "unknown"); // null-fallback
+    assert.equal(result.data.searchTrains[1].provider, "TRAIN");
+  });
+
+  test("runtime: nested inner array fields resolve with explicit mapping", async () => {
+    const executor = makeExecutor();
+    const result: any = await executor({
+      document: parse(`{
+        searchTrains(from: "Berlin", to: "Hamburg") {
+          id
+          legs { trainName originStation destStation }
+        }
+      }`),
+    });
+
+    assert.ok(
+      !result.errors,
+      `should not error: ${JSON.stringify(result.errors)}`,
+    );
+    const trains = result.data.searchTrains;
+
+    // First journey: 2 legs
+    assert.equal(trains[0].legs.length, 2);
+    assert.equal(trains[0].legs[0].trainName, "ICE 100");
+    assert.equal(trains[0].legs[0].originStation, "Berlin");
+    assert.equal(trains[0].legs[0].destStation, "Hamburg");
+    assert.equal(trains[0].legs[1].trainName, "Walk"); // null-fallback
+    assert.equal(trains[0].legs[1].originStation, "Hamburg");
+    assert.equal(trains[0].legs[1].destStation, "Copenhagen");
+
+    // Second journey: 1 leg
+    assert.equal(trains[1].legs.length, 1);
+    assert.equal(trains[1].legs[0].trainName, "IC 200");
+    assert.equal(trains[1].legs[0].originStation, "Munich");
+    assert.equal(trains[1].legs[0].destStation, "Vienna");
   });
 });

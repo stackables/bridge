@@ -1,0 +1,47 @@
+version 1.4
+
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  on error = { "connections": [] }
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.connections[] as c {
+    # The Swiss API provides a clean root-level summary we can pull from
+    .id <- c.from.station.id
+    .provider = "SBB"
+    .departureTime <- c.from.departure
+    .arrivalTime <- c.to.arrival
+    .transfers <- c.transfers || 0
+
+    # Swiss "sections" equal our GraphQL "legs"
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+
+      .origin.station.id <- s.departure.station.id
+      .origin.station.name <- s.departure.station.name
+      .origin.plannedTime <- s.departure.departure
+      .origin.actualTime <- s.departure.departure
+      # The Swiss API sometimes returns delay as a string (e.g., "+3"); 
+      # a custom tool could parse this, but we'll wire it directly for now
+      .origin.delayMinutes <- s.departure.delay || 0
+      .origin.platform <- s.departure.platform
+
+      .destination.station.id <- s.arrival.station.id
+      .destination.station.name <- s.arrival.station.name
+      .destination.plannedTime <- s.arrival.arrival
+      .destination.actualTime <- s.arrival.arrival
+      .destination.delayMinutes <- s.arrival.delay || 0
+      .destination.platform <- s.arrival.platform
+    }
+  }
+}

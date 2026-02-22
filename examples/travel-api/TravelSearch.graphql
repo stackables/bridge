@@ -1,0 +1,36 @@
+# Represents a physical station
+type Station {
+  id: ID
+  name: String!
+}
+
+# Represents a specific point in time at a station (e.g., a departure or arrival)
+type StopEvent {
+  station: Station!
+  plannedTime: String!
+  actualTime: String
+  delayMinutes: Int
+  platform: String
+}
+
+# A single segment of a journey (e.g., you ride one train before transferring)
+type Leg {
+  origin: StopEvent!
+  destination: StopEvent!
+  trainName: String # e.g., "ICE 100" or "IR 15"
+}
+
+# The complete A-to-B trip
+type Journey {
+  id: ID!
+  provider: String! # "DB" or "SBB"
+  departureTime: String! # The overall start time
+  arrivalTime: String! # The overall end time
+  transfers: Int! # Number of times the user has to change trains
+  legs: [Leg!]! # The individual train rides
+}
+
+type Query {
+  # The single unified entry point for your internal services
+  searchTrains(from: String!, to: String!): [Journey!]!
+}
