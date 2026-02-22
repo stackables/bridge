@@ -4,6 +4,14 @@
 
 # The Bridge
 
+> **Developer Preview**
+> The Bridge v1.x is a public preview and is not recommended for production use.
+> * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
+> * Versioning: We follow strict SemVer starting from v2.0.0.
+> 
+>
+> Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
+
 **Declarative dataflow for controlled egress.**
 
 Stop hardcoding third-party SDKs and API keys into every microservice. The Bridge allows you to build a unified internal gateway that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
@@ -23,13 +31,7 @@ We use GraphQL strictly as a clean, strongly-typed interface for internal servic
 * Multi-step database transactions or sagas.
 * Very high-performance per-field computation.
 
-> **Developer Preview**
-> The Bridge v1.x is a public preview and is not recommended for production use.
-> * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
-> * Versioning: We follow strict SemVer starting from v2.0.0.
-> 
->
-> Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
+
 
 ---
 
