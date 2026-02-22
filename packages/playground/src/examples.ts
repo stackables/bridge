@@ -143,54 +143,101 @@ bridge Query.location {
   },
   {
     name: "SBB Train Search",
-    description: "Query the Swiss public transport API to find the next train connection between two stations",
-    schema: /* GraphQL */ `type Query {
-  nextTrain(from: String!, to: String!): TrainConnection
+    description: "Query the Swiss public transport API to find train connections between two stations",
+    schema: /* GraphQL */ `type Station {
+  id: ID
+  name: String!
 }
 
-type TrainConnection {
-  fromStation: String
-  toStation: String
-  departure: String
-  arrival: String
-  duration: String
-  transfers: Int
+type StopEvent {
+  station: Station!
+  plannedTime: String!
+  actualTime: String
+  delayMinutes: Int
   platform: String
+}
+
+type Leg {
+  origin: StopEvent!
+  destination: StopEvent!
+  trainName: String
+}
+
+type Journey {
+  id: ID!
+  provider: String!
+  departureTime: String!
+  arrivalTime: String!
+  transfers: Int!
+  legs: [Leg!]!
+}
+
+type Query {
+  searchTrains(from: String!, to: String!): [Journey!]!
 }`,
     bridge: `version 1.4
 
-tool sbb from std.httpCall {
-  .baseUrl = "https://transport.opendata.ch"
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
   .method = GET
-  .path = /v1/connections
+  .path = "/connections"
+  on error = { "connections": [] }
 }
 
-bridge Query.nextTrain {
-  with sbb
+bridge Query.searchTrains {
+  with sbbApi as api
   with input as i
   with output as o
 
-  sbb.from <- i.from
-  sbb.to <- i.to
-  sbb.limit = "1"
+  api.from <- i.from
+  api.to <- i.to
 
-  o.fromStation <- sbb.connections[0].from.station.name
-  o.toStation   <- sbb.connections[0].to.station.name
-  o.departure   <- sbb.connections[0].from.departure
-  o.arrival     <- sbb.connections[0].to.arrival
-  o.duration    <- sbb.connections[0].duration
-  o.transfers   <- sbb.connections[0].transfers
-  o.platform    <- sbb.connections[0].from.platform
+  o <- api.connections[] as c {
+    .id <- c.from.station.id
+    .provider = "SBB"
+    .departureTime <- c.from.departure
+    .arrivalTime <- c.to.arrival
+    .transfers <- c.transfers || 0
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+
+      .origin.station.id <- s.departure.station.id
+      .origin.station.name <- s.departure.station.name
+      .origin.plannedTime <- s.departure.departure
+      .origin.actualTime <- s.departure.departure
+      .origin.delayMinutes <- s.departure.delay || 0
+      .origin.platform <- s.departure.platform
+
+      .destination.station.id <- s.arrival.station.id
+      .destination.station.name <- s.arrival.station.name
+      .destination.plannedTime <- s.arrival.arrival
+      .destination.actualTime <- s.arrival.arrival
+      .destination.delayMinutes <- s.arrival.delay || 0
+      .destination.platform <- s.arrival.platform
+    }
+  }
 }`,
     query: `{
-  nextTrain(from: "Bern", to: "Zürich") {
-    fromStation
-    toStation
-    departure
-    arrival
-    duration
+  searchTrains(from: "Bern", to: "Zürich") {
+    id
+    provider
+    departureTime
+    arrivalTime
     transfers
-    platform
+    legs {
+      trainName
+      origin {
+        station { name }
+        plannedTime
+        platform
+      }
+      destination {
+        station { name }
+        plannedTime
+        platform
+      }
+    }
   }
 }`,
     context: `{}`,
