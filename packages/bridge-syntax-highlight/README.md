@@ -2,7 +2,7 @@
 
 Full IDE support for [The Bridge](https://github.com/stackables/bridge): a declarative dataflow language for GraphQL. Wire data between APIs and schema fields using `.bridge` files — no resolvers, no codegen, no plumbing.
 
-![Bridge syntax highlighting and language server in action](./syntax-image.png)
+![Bridge syntax highlighting and language server in action](./packages/bridge-syntax-highlight/syntax-image.png)
 
 ## Features
 

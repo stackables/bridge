@@ -2,7 +2,7 @@
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting, real-time diagnostics, and hover information for the Bridge declarative dataflow language",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "stackables",
   "icon": "logo128.png",
   "engines": {
