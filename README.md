@@ -113,6 +113,8 @@ tool sendgrid from httpCall {
   .baseUrl = "https://api.sendgrid.com/v3"
   .path = "/mail/send"
   .method = POST
+  
+  # Inject the API key directly from the reserved context handle
   .headers.Authorization = ctx.env.SENDGRID_API_KEY
 }
 
@@ -123,14 +125,20 @@ bridge Mutation.sendEmail {
 
   # Map our clean input to SendGrid's specific JSON structure
   sg.personalizations[0].to[0].email <- i.to
+  
+  # SendGrid requires a 'from' address
+  sg.from.email = "no-reply@yourdomain.com"
+  
   sg.subject <- i.subject
   sg.content[0].type = "text/plain"
   sg.content[0].value <- i.textBody
 
-  # Force execution (<-!) since this is a side-effect/mutation
-  # and map the response back to our internal schema
-  o.success <-! sg:true ?? false
-  o.messageId <- sg.headers.x-message-id
+  # Force execution (<-!) to ensure the side-effect happens, 
+  # even if the client doesn't query the messageId field.
+  o.messageId <-! sg.headers.x-message-id
+  
+  # If the forced wire above succeeds without throwing, we can safely return true.
+  o.success = true
 }
 
 ```
