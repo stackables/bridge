@@ -59,6 +59,33 @@ A fully client-side interactive playground — no server infra, no proxying, no 
 
 ---
 
+Here is a spec for this feature that fits perfectly into your "Open" section. It leverages the fact that you just moved to Chevrotain (which is robust but heavier than regex), making an execution-only runtime incredibly valuable for edge and serverless gateways.
+
+
+### Split Parser & Engine (AOT Compilation)
+
+A lightweight, execution-only runtime that allows parsing `.bridge` files Ahead-Of-Time (AOT) during the build step or via a control-plane API, stripping the parser from the production deployment.
+
+**Problem:** The new Chevrotain parser is fantastic for the LSP and correctness, but it adds unnecessary bundle size and cold-start latency to the runtime. Since `.bridge` files define static circuits, parsing them on every server start in an edge/serverless gateway is wasteful.
+
+**Solution:** Separate the core execution engine from the parser. Allow the engine to accept a pre-parsed, serialized JSON AST (`Instruction[]`) instead of raw `.bridge` strings.
+
+**How it works:**
+
+* **JSON-Serializable AST:** Ensure the output of the parser is strictly JSON-serializable (no functions, closures, or class instances in the AST).
+* **Subpath Exports:** Isolate the execution engine into a lightweight import (e.g., `@stackables/bridge/runtime` or `@stackables/bridge-engine`). This entry point includes zero Chevrotain or parsing dependencies.
+* **CLI for CI/CD:** Introduce a simple CLI (`npx @stackables/bridge build`) that parses `.bridge` files, runs semantic validation, and outputs `.bridge.json` artifacts. A `check` command allows CI pipelines to fail on invalid graphs before deployment.
+* **API-Driven Gateways:** For dynamic architectures, a central control plane can parse the `.bridge` files and serve the JSON ASTs directly to the fleet of gateways over an internal API. The gateways simply feed the JSON into the lightweight execution engine.
+
+**Implementation sketch:**
+
+1. Audit the current AST types to guarantee 100% JSON serialization.
+2. Refactor package exports to split `parseBridge` from `bridgeTransform` / `executeGraph`.
+3. Update `bridgeTransform` to accept either a raw string (which invokes the parser) or a pre-parsed AST array.
+4. Build a thin Node CLI wrapper around the existing `parseBridgeDiagnostics()` function for the build/check commands.
+
+---
+
 ## v2.0 (Feb 2026)
 
 Transformed Bridge from a naive script executor into a cost-based declarative dataflow engine, replaced the hand-rolled regex parser with Chevrotain, and shipped a VS Code extension with LSP.
