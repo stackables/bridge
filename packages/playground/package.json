@@ -12,7 +12,8 @@
     "@stackables/bridge": "workspace:*",
     "graphql": "^16",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-resizable-panels": "2.1.9"
   },
   "devDependencies": {
     "@types/react": "^19.1.6",
