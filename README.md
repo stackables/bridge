@@ -7,7 +7,8 @@
 > * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
 > * Versioning: We follow strict SemVer starting from v2.0.0.
 > 
-> [See our roadmap](./docs/roadmap.md)
+> [See our roadmap](./docs/roadmap.md) \
+> [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
