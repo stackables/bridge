@@ -1,6 +1,6 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
 [![extension](https://img.shields.io/badge/VS_Code-LSP-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
-[![roadmap](https://img.shields.io/badge/Roadmap-green)](./docs/roadmap.md)
+
 
 > **Developer Preview**
 > The Bridge v1.x is a public preview and is not recommended for production use.
