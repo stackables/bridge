@@ -433,10 +433,15 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scoping block: target { .field <- source | .field = value | .field { ... } }
+        // Path scoping block: target { .field <- source | .field = value | .field { ... } | alias ... as ... }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "scopeBlock" });
-          this.MANY3(() => this.SUBRULE(this.pathScopeLine));
+          this.MANY3(() =>
+            this.OR3([
+              { ALT: () => this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }) },
+              { ALT: () => this.SUBRULE(this.pathScopeLine) },
+            ]),
+          );
           this.CONSUME(RCurly);
         },
       },
@@ -1465,7 +1470,7 @@ function processElementLines(
           wires.push({ value: raw, to: elemToRef, ...lastAttrs });
         }
         for (const ref of nullAltRefs) {
-          wires.push({ from: ref, to: elemToRef });
+          wires.push({ from: ref, to: elemToRef, });
         }
         wires.push(...fallbackInternalWires);
         continue;
@@ -1656,7 +1661,7 @@ function processElementLines(
           to: elemToRef,
         });
         for (const ref of elemNullAltRefs) {
-          wires.push({ from: ref, to: elemToRef });
+          wires.push({ from: ref, to: elemToRef, });
         }
         wires.push(...elemFallbackInternalWires);
         continue;
@@ -3026,6 +3031,31 @@ function buildBridgeBody(
 
     // ── Path scoping block: target { .field ... } ──
     if (wc.scopeBlock) {
+      // Process alias declarations inside the scope block first
+      const scopeAliases = subs(wireNode, "scopeAlias");
+      for (const aliasNode of scopeAliases) {
+        const aliasLineNum = line(findFirstToken(aliasNode));
+        const sourceNode = sub(aliasNode, "nodeAliasSource")!;
+        const alias = extractNameToken(sub(aliasNode, "nodeAliasName")!);
+        assertNotReserved(alias, aliasLineNum, "node alias");
+        if (handleRes.has(alias)) {
+          throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
+        }
+        const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+        const localRes: HandleResolution = {
+          module: "__local",
+          type: "Shadow",
+          field: alias,
+        };
+        handleRes.set(alias, localRes);
+        const localToRef: NodeRef = {
+          module: "__local",
+          type: "Shadow",
+          field: alias,
+          path: [],
+        };
+        wires.push({ from: sourceRef, to: localToRef });
+      }
       const scopeLines = subs(wireNode, "pathScopeLine");
       processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;

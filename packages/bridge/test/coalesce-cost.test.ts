@@ -202,8 +202,8 @@ o.label <- p.label || b.label || "null-default" ?? "error-default"
 
 // ── Cost-based resolution: overdefinition ────────────────────────────────
 
-describe("overdefinition cost-based ordering", () => {
-  test("input read (cost 0) wins over tool call (cost 1) — tool never called", async () => {
+describe("overdefinition: authored order respected", () => {
+  test("first wire wins when both are non-null (left-to-right)", async () => {
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with expensiveApi as api
@@ -226,10 +226,9 @@ o.label <- i.hint
     const result: any = await executor({
       document: parse(`{ lookup(q: "x", hint: "cheap") { label } }`),
     });
-    assert.equal(result.data.lookup.label, "cheap");
-    // The tool should never be called because the input read is cost 0
-    // and returns non-null, short-circuiting the expensive API call.
-    assert.deepStrictEqual(callLog, [], "expensive API should NOT be called when input has value");
+    // Authored order: api.label is first → wins
+    assert.equal(result.data.lookup.label, "expensive");
+    assert.deepStrictEqual(callLog, ["expensiveApi"], "first wire evaluated first");
   });
 
   test("input is null → falls through to tool call", async () => {
@@ -260,9 +259,9 @@ o.label <- i.hint
     assert.deepStrictEqual(callLog, ["expensiveApi"], "API called when input is null");
   });
 
-  test("overdefinition order in file doesn't matter — cost determines priority", async () => {
-    // Even though the expensive tool wire is written FIRST,
-    // the cheap input wire should be evaluated first.
+  test("overdefinition respects authored order — first wire wins", async () => {
+    // The expensive tool wire is written FIRST, so it is evaluated first.
+    // Left-to-right semantics mean the tool result wins.
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with expensiveApi as api
@@ -285,11 +284,11 @@ o.label <- i.hint
     const result: any = await executor({
       document: parse(`{ lookup(q: "x", hint: "from-input") { label } }`),
     });
-    assert.equal(result.data.lookup.label, "from-input");
-    assert.deepStrictEqual(callLog, [], "file order is irrelevant — cost wins");
+    assert.equal(result.data.lookup.label, "expensive");
+    assert.deepStrictEqual(callLog, ["expensiveApi"], "first wire wins — authored order matters");
   });
 
-  test("context read (cost 0) wins over tool call (cost 1)", async () => {
+  test("authored order: tool before context — tool wins", async () => {
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with expensiveApi as api
@@ -316,8 +315,9 @@ o.label <- ctx.defaultLabel
     const result: any = await executor({
       document: parse(`{ lookup(q: "x") { label } }`),
     });
-    assert.equal(result.data.lookup.label, "from-context");
-    assert.deepStrictEqual(callLog, [], "context is free — API never called");
+    // api.label is first wire → evaluated first → wins
+    assert.equal(result.data.lookup.label, "expensive");
+    assert.deepStrictEqual(callLog, ["api"], "authored order: api first, context second");
   });
 
   test("two tool sources with same cost — file order preserved", async () => {
@@ -346,9 +346,9 @@ o.label <- b.label
     const result: any = await executor({
       document: parse(`{ lookup(q: "x") { label } }`),
     });
-    // Both are cost 1 → file order matters. A is first in the bridge.
+    // Authored order: A is first in the bridge → wins.
     assert.equal(result.data.lookup.label, "from-A");
-    assert.deepStrictEqual(callLog, ["A"], "B never called — same cost, file order wins");
+    assert.deepStrictEqual(callLog, ["A"], "B never called — A is first, short-circuits");
   });
 });
 
