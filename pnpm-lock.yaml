@@ -24,6 +24,9 @@ importers:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.12.0)
     devDependencies:
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -37,6 +40,9 @@ importers:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.12.0)
     devDependencies:
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -50,6 +56,9 @@ importers:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.12.0)
     devDependencies:
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -63,6 +72,22 @@ importers:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.12.0)
     devDependencies:
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+
+  examples/without-graphql:
+    dependencies:
+      '@stackables/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0

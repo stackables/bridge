@@ -1,0 +1,38 @@
+version 1.4
+
+# Tool 1: Geocoder — city name → lat/lon (Nominatim, no auth required)
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
+  .format = "json"
+  .limit = "1"
+  .headers.User-Agent = "BridgeDemo/1.0"
+}
+
+# Tool 2: Weather forecast — lat/lon → temperature (Open-Meteo, no auth required)
+tool weather from std.httpCall {
+  .baseUrl = "https://api.open-meteo.com/v1"
+  .method = GET
+  .path = /forecast
+  .current_weather = "true"
+}
+
+bridge Query.getWeather {
+  with geo
+  with weather as w
+  with input as i
+  with output as o
+
+  geo.q <- i.city
+
+  w.latitude  <- geo[0].lat
+  w.longitude <- geo[0].lon
+
+  o.city        <- i.city
+  o.lat         <- geo[0].lat
+  o.lon         <- geo[0].lon
+  o.temperature <- w.current_weather.temperature
+  o.unit        = "°C"
+  o.timezone    <- w.timezone
+}
