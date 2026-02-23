@@ -10,7 +10,6 @@
     "release": "pnpm -r --workspace-concurrency=1 --if-present run release"
   },
   "devDependencies": {
-    "semantic-release": "^25.0.3",
-    "semantic-release-monorepo": "^8.0.2"
+    "@rimac-technology/semantic-release-monorepo": "^1.2.10"
   }
 }
