@@ -1470,7 +1470,7 @@ function processElementLines(
           wires.push({ value: raw, to: elemToRef, ...lastAttrs });
         }
         for (const ref of nullAltRefs) {
-          wires.push({ from: ref, to: elemToRef, });
+          wires.push({ from: ref, to: elemToRef });
         }
         wires.push(...fallbackInternalWires);
         continue;
@@ -1661,7 +1661,7 @@ function processElementLines(
           to: elemToRef,
         });
         for (const ref of elemNullAltRefs) {
-          wires.push({ from: ref, to: elemToRef, });
+          wires.push({ from: ref, to: elemToRef });
         }
         wires.push(...elemFallbackInternalWires);
         continue;

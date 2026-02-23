@@ -30,7 +30,6 @@ describe("string interpolation || fallback priority", () => {
       name: "Alice",
       email: "alice@test.com",
     });
-    console.log("Test 1 (flat) result:", JSON.stringify(result.data));
     assert.equal((result.data as any).displayName, "Alice (alice@test.com)");
   });
 
@@ -51,7 +50,6 @@ describe("string interpolation || fallback priority", () => {
       name: "Alice",
       email: "alice@test.com",
     });
-    console.log("Test 2 (scope block) result:", JSON.stringify(result.data));
     assert.equal((result.data as any).displayName, "Alice (alice@test.com)");
   });
 
@@ -74,7 +72,6 @@ describe("string interpolation || fallback priority", () => {
       name: "Alice",
       email: "alice@test.com",
     });
-    console.log("Test 3 (scope + alias) result:", JSON.stringify(result.data));
     assert.equal((result.data as any).displayName, "Alice (alice@test.com)");
   });
 });
