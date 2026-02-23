@@ -286,6 +286,13 @@ bridge <Type.field> {
     .<sub_field> = "constant"           # Element constant
   }
 
+  # Path Scoping (nested objects without repeating prefixes)
+  <target> {
+    .<field> <- <source>                # Flattened to target.field <- source
+    .<field> = <value>                  # Flattened to target.field = value
+    .<field> { ... }                    # Nested scope (recursive)
+  }
+
   # Alias (rename or cache a source expression)
   alias <source> as <name>
 
