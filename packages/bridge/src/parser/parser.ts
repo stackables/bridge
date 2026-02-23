@@ -4,7 +4,7 @@
  * Drop-in replacement for the regex-based `parseBridge()` in bridge-format.ts.
  * Produces the *exact same* AST types (`Instruction[]`).
  */
-import { CstParser, CstNode, IToken } from "chevrotain";
+import { CstParser, type CstNode, type IToken } from "chevrotain";
 import {
   allTokens,
   Identifier,
@@ -50,7 +50,7 @@ import {
   GreaterThan,
   LessThan,
   BridgeLexer,
-} from "./lexer.js";
+} from "./lexer.ts";
 
 import type {
   Bridge,
@@ -63,8 +63,8 @@ import type {
   ToolDep,
   ToolWire,
   Wire,
-} from "../types.js";
-import { SELF_MODULE } from "../types.js";
+} from "../types.ts";
+import { SELF_MODULE } from "../types.ts";
 
 // ── Reserved-word guards (mirroring the regex parser) ──────────────────────
 

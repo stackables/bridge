@@ -1,8 +1,8 @@
-import { ExecutionTree, TraceCollector } from "./ExecutionTree.js";
-import { builtinTools } from "./tools/index.js";
-import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.js";
-import type { Instruction, ToolMap } from "./types.js";
-import { SELF_MODULE } from "./types.js";
+import { ExecutionTree, TraceCollector } from "./ExecutionTree.ts";
+import { builtinTools } from "./tools/index.ts";
+import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
+import type { Instruction, ToolMap } from "./types.ts";
+import { SELF_MODULE } from "./types.ts";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge instructions (from `parseBridgeDiagnostics`). */

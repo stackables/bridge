@@ -2,10 +2,10 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.js";
-import type { Bridge, ConstDef, NodeRef, ToolDef, Wire } from "../src/types.js";
-import { SELF_MODULE } from "../src/types.js";
-import { createGateway } from "./_gateway.js";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
+import type { Bridge, ConstDef, NodeRef, ToolDef, Wire } from "../src/types.ts";
+import { SELF_MODULE } from "../src/types.ts";
+import { createGateway } from "./_gateway.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Const blocks — parser, serializer, roundtrip, end-to-end
