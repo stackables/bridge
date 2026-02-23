@@ -1,6 +1,6 @@
 ## 🚀 Decouple Side-Effects from Data Wires (The `force` keyword)
 
-**Status:** Planned (Breaking Change)
+**Status:** Fully implemented
 **Target Release:** v2.0 (or upcoming v1.x minor release)
 
 ### 📖 The Problem: The "204 No Content" Edge Case
