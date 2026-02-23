@@ -4,3 +4,4 @@ build
 *.vsix
 dist
 .playwright-mcp
+.wrangler

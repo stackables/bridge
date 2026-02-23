@@ -76,6 +76,25 @@ const schema = bridgeTransform(
 
 ---
 
+## Linting
+
+The package ships a `bridge-lint` CLI to validate `.bridge` files from the terminal or CI.
+
+```bash
+# Lint a single file
+npx bridge-lint path/to/logic.bridge
+
+# Lint multiple files / globs
+npx bridge-lint src/**/*.bridge
+
+# Output diagnostics as JSON (for tooling / CI integration)
+npx bridge-lint --json src/**/*.bridge
+```
+
+Exit code is `1` when any errors are present, `0` when everything is clean.
+
+---
+
 ## The Language
 
 https://github.com/stackables/bridge

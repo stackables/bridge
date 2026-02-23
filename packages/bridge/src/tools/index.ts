@@ -72,6 +72,23 @@ export const builtinTools = {
 } as const;
 
 export { audit } from "./audit.ts";
+
+/**
+ * All known built-in tool names as "namespace.tool" strings.
+ *
+ * Useful for LSP/IDE autocomplete and diagnostics. Derived at module
+ * load time from the `std` and `math` objects — no manual sync needed.
+ *
+ * ```ts
+ * builtinToolNames
+ * // ["std.httpCall", "std.upperCase", ..., "math.multiply", ...]
+ * ```
+ */
+export const builtinToolNames: readonly string[] = [
+  ...Object.keys(std).map((k) => `std.${k}`),
+  ...Object.keys(math).map((k) => `math.${k}`),
+];
+
 export { createHttpCall } from "./http-call.ts";
 export { upperCase } from "./upper-case.ts";
 export { lowerCase } from "./lower-case.ts";

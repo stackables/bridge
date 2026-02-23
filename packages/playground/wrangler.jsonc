@@ -1,7 +1,15 @@
 {
-  "name": "createclarity",
+  "name": "bridge",
   "compatibility_date": "2026-02-20",
+  "main": "./api/index.ts",
   "assets": {
     "directory": "./dist"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SHARES",
+      "id": "9972f6f87b064a409102e66949d8564f"
+    }
+  ]
 }
+
