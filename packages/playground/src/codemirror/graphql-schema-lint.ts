@@ -25,10 +25,11 @@ export const graphqlSchemaLinter = linter((view: EditorView): Diagnostic[] => {
 
     const loc = gqlErr.locations?.[0];
     if (!loc) {
-      // No location — place the error on line 1
+      // No location — highlight the first character of the document.
+      const firstLine = view.state.doc.line(1);
       return [{
         from: 0,
-        to: Math.min(1, view.state.doc.length),
+        to: Math.max(firstLine.to, 1),
         severity: "error",
         message: gqlErr.message,
       }];
@@ -37,10 +38,7 @@ export const graphqlSchemaLinter = linter((view: EditorView): Diagnostic[] => {
     const line = Math.min(loc.line, view.state.doc.lines);
     const lineInfo = view.state.doc.line(line);
     const from = lineInfo.from + Math.min(Math.max(loc.column - 1, 0), lineInfo.length);
-    let to = lineInfo.to;
-
-    // Ensure at least one character is highlighted.
-    if (to <= from) to = Math.min(from + 1, view.state.doc.length);
+    const to = Math.max(lineInfo.to, from + 1);
 
     return [{
       from,
