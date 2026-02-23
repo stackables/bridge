@@ -151,7 +151,8 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 |---|---|
 | `=` | Constant — sets a fixed value |
 | `<-` | Wire — pulls data from a source at runtime |
-| `force <handle>` | Force statement — eagerly schedules the named handle even if no field demands its output. Used for side-effect-only tools (audit logging, analytics, cache warming). Error isolation: a forced tool failure does not break the main response. |
+| `force <handle>` | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `?? null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
+| `force <handle> ?? null` | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure. |
 | `<- h1:h2:source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
 | `\|\| <source>` | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained. |
 | `\|\| <json>` | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors. |
@@ -317,7 +318,7 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 
 **Execution flow:**
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree
-2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all `force: true` wires and eagerly schedules their target trunks via `schedule()`, with `.catch(() => {})` to suppress unhandled rejections for fire-and-forget tools
+2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all force entries in `bridge.forces` and eagerly schedules their target trunks via `schedule()`. **Critical forces** (no `catchError`) return their promises; the engine awaits them alongside data resolution and propagates errors. **Fire-and-forget forces** (`catchError: true`, from `force handle ?? null` syntax) have `.catch(() => {})` to suppress errors
 3. `response()` finds matching wires for the current path
 4. For each wire source, calls `pullSingle(ref)` which calls `schedule(target)` if not yet in state
 5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function
@@ -387,7 +388,7 @@ test/
   property-search.test.ts — integration: reads from test/property-search.bridge file
   tool-features.test.ts   — integration: missing tool, inheritance chain, config pull, tool-to-tool deps
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
-  force-wire.test.ts      — force statement (force <handle>): parser, serializer roundtrip, end-to-end forced execution
+  force-wire.test.ts      — force statement: parser tests (force <handle>, force <handle> ?? null), serializer roundtrip, critical-by-default error propagation, fire-and-forget error suppression, parallel timing
   resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
   builtin-tools.test.ts   — built-in tools: unit tests, bundle shape, default/override behaviour, e2e with bridge, inline with syntax
   _gateway.ts             — test helper (not a test file, not picked up by test runner)

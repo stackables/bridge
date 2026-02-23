@@ -146,11 +146,13 @@
     },
 
     "force-lines": {
-      "comment": "Force statement: force <handle>",
-      "match": "^\\s*(force)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "comment": "Force statement: force <handle> [?? null]",
+      "match": "^\\s*(force)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s*(\\?\\?)\\s*(null))?",
       "captures": {
         "1": { "name": "keyword.control.bridge" },
-        "2": { "name": "variable.other.handle.bridge" }
+        "2": { "name": "variable.other.handle.bridge" },
+        "3": { "name": "keyword.operator.error-fallback.bridge" },
+        "4": { "name": "constant.language.null.bridge" }
       }
     },
 

@@ -152,6 +152,8 @@ export class ExecutionTree {
   private toolDepCache: Map<string, Promise<any>> = new Map();
   private toolDefCache: Map<string, ToolDef | null> = new Map();
   private pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]> | undefined;
+  /** Promise that resolves when all critical `force` handles have settled. */
+  private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
   tracer?: TraceCollector;
   /** Structured logger passed from BridgeOptions. Defaults to no-ops. */
@@ -692,11 +694,32 @@ export class ExecutionTree {
     this.state[trunkKey(this.trunk)] = args;
   }
 
-  /** Eagerly schedule tools targeted by `force <handle>` statements. */
-  executeForced(): void {
-    const forces = this.bridge?.forces;
-    if (!forces || forces.length === 0) return;
+  /** Store the aggregated promise for critical forced handles so
+   *  `response()` can await it exactly once per bridge execution. */
+  setForcedExecution(p: Promise<void>): void {
+    this.forcedExecution = p;
+  }
 
+  /** Return the critical forced-execution promise (if any). */
+  getForcedExecution(): Promise<void> | undefined {
+    return this.forcedExecution;
+  }
+
+  /**
+   * Eagerly schedule tools targeted by `force <handle>` statements.
+   *
+   * Returns an array of promises for **critical** forced handles (those
+   * without `?? null`).  Fire-and-forget handles (`catchError: true`) are
+   * scheduled but their errors are silently suppressed.
+   *
+   * Callers must `await Promise.all(...)` the returned promises so that a
+   * critical force failure propagates as a standard error.
+   */
+  executeForced(): Promise<any>[] {
+    const forces = this.bridge?.forces;
+    if (!forces || forces.length === 0) return [];
+
+    const critical: Promise<any>[] = [];
     const scheduled = new Set<string>();
     for (const f of forces) {
       const trunk: Trunk = {
@@ -709,10 +732,16 @@ export class ExecutionTree {
       if (scheduled.has(key) || this.state[key] !== undefined) continue;
       scheduled.add(key);
       this.state[key] = this.schedule(trunk);
-      // Fire-and-forget: suppress unhandled rejection for side-effect tools
-      // whose output is never consumed.
-      Promise.resolve(this.state[key]).catch(() => {});
+
+      if (f.catchError) {
+        // Fire-and-forget: suppress unhandled rejection.
+        Promise.resolve(this.state[key]).catch(() => {});
+      } else {
+        // Critical: caller must await and let failure propagate.
+        critical.push(Promise.resolve(this.state[key]));
+      }
     }
+    return critical;
   }
 
   /** Resolve a set of matched wires — constants win, then pull from sources.
@@ -870,7 +899,7 @@ export class ExecutionTree {
     }
 
     this.push(input);
-    this.executeForced();
+    const forcePromises = this.executeForced();
 
     const { type, field } = this.trunk;
 
@@ -897,13 +926,20 @@ export class ExecutionTree {
     );
 
     if (hasRootWire && hasElementWires) {
-      const shadows = (await this.pullOutputField([], true)) as ExecutionTree[];
+      const [shadows] = await Promise.all([
+        this.pullOutputField([], true) as Promise<ExecutionTree[]>,
+        ...forcePromises,
+      ]);
       return this.materializeShadows(shadows, []);
     }
 
     // Whole-object passthrough: `o <- api.user`
     if (hasRootWire) {
-      return this.pullOutputField([]);
+      const [result] = await Promise.all([
+        this.pullOutputField([]),
+        ...forcePromises,
+      ]);
+      return result;
     }
 
     // Object output — collect unique top-level field names
@@ -927,11 +963,12 @@ export class ExecutionTree {
     }
 
     const result: Record<string, unknown> = {};
-    await Promise.all(
-      [...outputFields].map(async (name) => {
+    await Promise.all([
+      ...[...outputFields].map(async (name) => {
         result[name] = await this.pullOutputField([name]);
       }),
-    );
+      ...forcePromises,
+    ]);
     return result;
   }
 

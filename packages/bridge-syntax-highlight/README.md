@@ -22,7 +22,7 @@ Full IDE support for [The Bridge](https://github.com/stackables/bridge): a decla
 - Full syntax highlighting for `.bridge` files (language version 1.4)
 - Block keyword highlighting: `version`, `const`, `tool`, `define`, `bridge`
 - Wire operator colouring: `<-` (pull), `||` (null-coalesce), `??` (error-fallback), `:` (pipe)
-- `force <handle>` keyword highlighting
+- `force <handle>` and `force <handle> ?? null` keyword highlighting
 - Distinct colours for GraphQL type/field targets in `bridge` declarations
 - Tool handle and alias highlighting
 - Built-in handle highlighting: `input`, `output`, `context`

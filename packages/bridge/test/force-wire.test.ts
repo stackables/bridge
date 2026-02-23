@@ -149,6 +149,50 @@ o.ok = "true"
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces![0].handle, "se");
+    assert.equal(bridge.forces![0].catchError, undefined, "default is critical");
+  });
+
+  test("force ?? null sets catchError flag", () => {
+    const [bridge] = parseBridge(`version 1.4
+
+bridge Mutation.fire {
+  with analytics as ping
+  with input as i
+  with output as o
+
+ping.event <- i.event
+force ping ?? null
+o.ok = "true"
+
+}`) as Bridge[];
+
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces!.length, 1);
+    assert.equal(bridge.forces![0].handle, "ping");
+    assert.equal(bridge.forces![0].catchError, true);
+  });
+
+  test("mixed critical and fire-and-forget forces", () => {
+    const [bridge] = parseBridge(`version 1.4
+
+bridge Mutation.multi {
+  with logger.log as lg
+  with metrics.emit as mt
+  with input as i
+
+lg.action <- i.event
+mt.name <- i.event
+force lg
+force mt ?? null
+
+}`) as Bridge[];
+
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces!.length, 2);
+    assert.equal(bridge.forces![0].handle, "lg");
+    assert.equal(bridge.forces![0].catchError, undefined, "lg is critical");
+    assert.equal(bridge.forces![1].handle, "mt");
+    assert.equal(bridge.forces![1].catchError, true, "mt is fire-and-forget");
   });
 });
 
@@ -205,6 +249,42 @@ force lg
     const output = serializeBridge(parseBridge(input));
     assert.ok(output.includes("force lg"), "serialized output should contain 'force lg'");
     assert.ok(!output.includes("<-!"), "serialized output should NOT contain <-!");
+  });
+
+  test("force ?? null roundtrips", () => {
+    const input = `version 1.4
+bridge Mutation.audit {
+  with analytics as ping
+  with input as i
+
+ping.event <- i.event
+force ping ?? null
+
+}`;
+    const instructions = parseBridge(input);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("force ping ?? null"), "should contain ?? null");
+    const reparsed = parseBridge(serialized);
+    assert.deepStrictEqual(reparsed, instructions);
+  });
+
+  test("mixed critical and fire-and-forget roundtrip", () => {
+    const input = `version 1.4
+bridge Mutation.multi {
+  with logger.log as lg
+  with metrics.emit as mt
+  with input as i
+
+lg.action <- i.event
+mt.name <- i.event
+force lg
+force mt ?? null
+
+}`;
+    const instructions = parseBridge(input);
+    const serialized = serializeBridge(instructions);
+    const reparsed = parseBridge(serialized);
+    assert.deepStrictEqual(reparsed, instructions);
   });
 
   test("multiple force statements roundtrip", () => {
@@ -424,7 +504,7 @@ o.ok = "true"
     assert.ok(sideEffectCalled, "side-effect tool must run even with no output wires");
   });
 
-  test("forced tool error does not break demand-driven response", async () => {
+  test("critical forced tool error DOES break the response (GraphQL)", async () => {
     const bridgeText = `version 1.4
 bridge Query.search {
   with mainApi as m
@@ -454,7 +534,43 @@ o.title <- m.title
       document: parse(`{ search(q: "test") { title } }`),
     });
 
-    // The main result should succeed even if the forced tool fails
+    // Critical force: error propagates into GraphQL errors
+    // (Yoga masks internal errors as "Unexpected error." by default)
+    assert.ok(result.errors, "should have errors");
+    assert.ok(result.errors.length > 0, "should have at least one error");
+  });
+
+  test("fire-and-forget (?? null) error does NOT break the response", async () => {
+    const bridgeText = `version 1.4
+bridge Query.search {
+  with mainApi as m
+  with audit.log as audit
+  with input as i
+  with output as o
+
+m.q <- i.q
+audit.action <- i.q
+force audit ?? null
+o.title <- m.title
+
+}`;
+
+    const tools: Record<string, any> = {
+      mainApi: async () => ({ title: "OK" }),
+      "audit.log": async () => {
+        throw new Error("audit service unavailable");
+      },
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, { tools });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ search(q: "test") { title } }`),
+    });
+
+    // Fire-and-forget: main result succeeds despite audit failure
     assert.equal(result.data.search.title, "OK");
   });
 });

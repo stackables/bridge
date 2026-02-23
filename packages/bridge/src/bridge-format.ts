@@ -750,7 +750,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // Force statements
   if (bridge.forces) {
     for (const f of bridge.forces) {
-      lines.push(`force ${f.handle}`);
+      lines.push(f.catchError ? `force ${f.handle} ?? null` : `force ${f.handle}`);
     }
   }
 

@@ -53,13 +53,18 @@ export type Bridge = {
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
-  /** Handles to eagerly evaluate (e.g. side-effect tools). */
+  /** Handles to eagerly evaluate (e.g. side-effect tools).
+   *  Critical by default — a forced handle that throws aborts the bridge.
+   *  Add `catchError: true` (written as `force <handle> ?? null`) to
+   *  swallow the error for fire-and-forget side-effects. */
   forces?: Array<{
     handle: string;
     module: string;
     type: string;
     field: string;
     instance?: number;
+    /** When true, errors from this forced handle are silently caught (`?? null`). */
+    catchError?: true;
   }>;
   arrayIterators?: Record<string, string>;
   pipeHandles?: Array<{

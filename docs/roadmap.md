@@ -174,7 +174,26 @@ The condition can be any source expression, including comparison expressions: `i
 
 Expressions are **parser-level syntactic sugar**: the Chevrotain parser desugars them into synthetic tool forks using built-in `math` namespace tools (`multiply`, `divide`, `add`, `subtract`, `eq`, `neq`, `gt`, `gte`, `lt`, `lte`). The execution engine never sees expression syntax — it processes standard pull/constant wires. This keeps `inferCost`, `pull`, and OpenTelemetry logic clean.
 
-Expressions compose with existing operators: `||` null coalesce, `??` error coalesce, `force` statements, and `[] as iter { }` array mapping all work with expression results.
+Expressions compose with existing operators: `||` null coalesce, `??` error coalesce, `force` statements (both critical and fire-and-forget), and `[] as iter { }` array mapping all work with expression results.
+
+### Force Critical by Default -- DONE
+
+**Problem:** `force <handle>` was fire-and-forget — errors were silently swallowed. For essential side effects (payment capture, order creation), a failure must propagate to the caller.
+
+**Solution:** `force <handle>` is now **critical by default**. If the forced tool throws, the error propagates into the GraphQL response alongside any data. To opt into the old fire-and-forget behaviour, append `?? null`: `force handle ?? null`.
+
+**Syntax:**
+```bridge
+force audit              # critical — error breaks the response
+force analytics ?? null  # fire-and-forget — errors silently caught
+```
+
+**Semantics:**
+- Critical forces run in parallel with data resolution. Their promises are awaited alongside the main output pull — errors propagate via `Promise.all`.
+- Fire-and-forget forces have `.catch(() => {})` applied — errors are silently discarded.
+- Both variants schedule eagerly at bridge entry, before any field is demanded.
+
+**Implementation:** Parser extended with optional `?? null` suffix on `bridgeForce` rule. AST `Bridge.forces` entries gain `catchError?: true` for fire-and-forget. `executeForced()` returns only critical promises; the engine awaits them in both the standalone `run()` path and the GraphQL adapter path (`bridge-transform.ts`).
 
 ### ~~Fat Wire IR Refactor~~ -- DROPPED
 

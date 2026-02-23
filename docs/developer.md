@@ -103,7 +103,7 @@ type NodeRef = {
 **`Wire`** — a directed data connection:
 ```typescript
 type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
+  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef };  // constant wire: value
 ```
 
@@ -115,6 +115,14 @@ type Bridge = {
   field: string;         // GraphQL field name
   handles: HandleBinding[];  // declared sources (tools, input, output, context)
   wires: Wire[];
+  forces?: Array<{       // force statements — eagerly scheduled tools
+    handle: string;
+    module: string;
+    type: string;
+    field: string;
+    instance?: number;
+    catchError?: true;   // true = fire-and-forget (force handle ?? null)
+  }>;
   arrayIterators?: Record<string, string>;  // for array mapping blocks
   pipeHandles?: Array<{ key: string; handle: string; baseTrunk: … }>;
   passthrough?: string;  // set when using shorthand: bridge Type.field with tool
@@ -168,7 +176,7 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 1. Calls `buildHandleMap` to map canonical trunk keys back to human-readable handle names
 2. Serializes each `Bridge` block with its `with` declarations and wire body
-3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements
+3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements (`force handle` for critical, `force handle ?? null` for fire-and-forget)
 4. Handles pipe notation, array mapping blocks, fallback chains
 
 ---

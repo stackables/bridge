@@ -280,10 +280,14 @@ class BridgeParser extends CstParser {
     ]);
   });
 
-  /** force <handle> */
+  /** force <handle> [?? null] */
   public bridgeForce = this.RULE("bridgeForce", () => {
     this.CONSUME(ForceKw);
     this.SUBRULE(this.nameToken, { LABEL: "forcedHandle" });
+    this.OPTION(() => {
+      this.CONSUME(ErrorCoalesce, { LABEL: "forceErrorCoalesce" });
+      this.CONSUME(NullLiteral, { LABEL: "forceNullFallback" });
+    });
   });
 
   /** with input/output/context/const/tool [as handle] */
@@ -2466,7 +2470,9 @@ function buildBridgeBody(
         `Line ${lineNum}: Cannot force undeclared handle "${handle}". Add 'with ${handle}' to the bridge header.`,
       );
     }
-    forces.push({ handle, ...res });
+    const fc = forceNode.children;
+    const catchError = !!(fc.forceErrorCoalesce as IToken[] | undefined)?.length;
+    forces.push({ handle, ...res, ...(catchError ? { catchError: true as const } : {}) });
   }
 
   return {

@@ -137,10 +137,12 @@ bridge Mutation.sendEmail {
 
   # Force sg to ensure the side-effect happens, 
   # even if the client doesn't query the messageId field.
+  # Critical by default — if sg throws, the error propagates.
   o.messageId <- sg.headers.x-message-id
   force sg
   
   # If the forced tool above succeeds without throwing, we can safely return true.
+  # (Use `force sg ?? null` to make it fire-and-forget instead.)
   o.success = true
 }
 
@@ -271,7 +273,8 @@ bridge <Type.field> {
   # Field Mapping
   o.<field> = <json>                    # Constant output value
   o.<field> <- <source>                 # Standard Pull (lazy)
-  force <handle>                        # Eagerly schedule handle (side-effects)
+  force <handle>                        # Eagerly schedule handle (critical — error propagates)
+  force <handle> ?? null                # Eagerly schedule handle (fire-and-forget — errors swallowed)
 
   # Pipe chain (tool transformation)
   o.<field> <- handle:source            # Route source through tool handle
@@ -409,17 +412,21 @@ Multiple `||` sources desugar to **parallel wires** — all sources are evaluate
 
 ### Force Statement (`force <handle>`)
 
-By default, the engine is **lazy**. Use `force <handle>` to eagerly schedule a tool regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
+By default, the engine is **lazy**. Use `force <handle>` to eagerly schedule a tool regardless of demand—perfect for side-effects like analytics, audit logging, or payment capture.
+
+**Critical by default:** If the forced tool throws, the error propagates into the GraphQL response. Use `force <handle> ?? null` to make it fire-and-forget (errors are silently swallowed).
 
 ```bridge
 bridge Mutation.updateUser {
   with audit.logger as log
+  with analytics as stats
   with input as in
   with output as out
 
   # 'log' runs even if the client doesn't query the 'status' field
   out.status <- log:in.changeData
-  force log
+  force log              # critical — error breaks the response
+  force stats ?? null    # fire-and-forget — OK if analytics fails
 }
 
 ```
@@ -523,7 +530,7 @@ o <- api.items[] as item {
 | --- | --- | --- |
 | **`=`** | Constant | Sets a static value. |
 | **`<-`** | Wire | Pulls data from a source at runtime. |
-| **`force`** | Force | Eagerly schedules a handle (for side-effects). |
+| **`force`** | Force | Eagerly schedules a handle. **Critical by default** — errors propagate. Append `?? null` for fire-and-forget. |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
 | **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
