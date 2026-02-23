@@ -9,6 +9,7 @@ import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
 import type { GraphQLSchema } from "graphql";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { bridgeLinter } from "@/codemirror/bridge-lint";
+import { bridgeAutocomplete } from "@/codemirror/bridge-completion";
 import { graphqlSchemaLinter } from "@/codemirror/graphql-schema-lint";
 import { playgroundTheme } from "@/codemirror/theme";
 import { cn } from "@/lib/utils";
@@ -47,7 +48,7 @@ function languageExtension(
 ): Extension[] {
   switch (lang) {
     case "bridge":
-      return [bridgeLanguage, bridgeLinter, lintGutter()];
+      return [bridgeLanguage, bridgeLinter, bridgeAutocomplete, lintGutter()];
     case "graphql":
       return [graphqlLanguageSupport(), graphqlSchemaLinter, lintGutter()];
     case "graphql-query":

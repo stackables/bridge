@@ -166,32 +166,13 @@ function QueryTabBar({
   );
 }
 
-// ── bridge DSL panel header (label + clear-cache button) ────────────────────
-function BridgeDslHeader({ onClearCache }: { onClearCache: () => void }) {
+// ── bridge DSL panel header (label only) ─────────────────────────────────────
+function BridgeDslHeader() {
   return (
-    <div className="content-center shrink-0 px-5 h-10 flex items-center justify-between">
+    <div className="content-center shrink-0 px-5 h-10 flex items-center">
       <span className="text-[11px] font-bold text-slate-200 uppercase tracking-widest">
         Bridge DSL
       </span>
-      <button
-        onClick={onClearCache}
-        title="Clear HTTP response cache"
-        className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-slate-600 hover:text-slate-300 transition-colors"
-      >
-        <svg
-          className="w-3 h-3"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="1 4 1 10 7 10" />
-          <path d="M3.51 15a9 9 0 1 0 .49-4.95" />
-        </svg>
-        Clear Cache
-      </button>
     </div>
   );
 }
@@ -463,7 +444,7 @@ export function App() {
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader onClearCache={clearHttpCache} />
+          <BridgeDslHeader />
           <div className="px-3 pb-3">
             <Editor
               label=""
@@ -522,6 +503,7 @@ export function App() {
               loading={displayRunning}
               traces={displayResult?.traces}
               logs={displayResult?.logs}
+              onClearCache={clearHttpCache}
               autoHeight
             />
           </div>
@@ -562,7 +544,7 @@ export function App() {
               {/* Bridge DSL panel */}
               <Panel defaultSize={65} minSize={20}>
                 <PanelBox>
-                  <BridgeDslHeader onClearCache={clearHttpCache} />
+                  <BridgeDslHeader />
                   <div className="flex-1 min-h-0 px-3 pb-3">
                     <Editor
                       label=""
@@ -636,6 +618,7 @@ export function App() {
                       loading={displayRunning}
                       traces={displayResult?.traces}
                       logs={displayResult?.logs}
+                      onClearCache={clearHttpCache}
                     />
                   </div>
                 </PanelBox>

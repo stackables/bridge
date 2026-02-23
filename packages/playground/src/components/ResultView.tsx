@@ -15,6 +15,7 @@ type Props = {
   loading: boolean;
   traces?: ToolTrace[];
   logs?: LogEntry[];
+  onClearCache?: () => void;
   /** When true the result view sizes itself to its content instead of filling the parent. */
   autoHeight?: boolean;
 };
@@ -25,6 +26,7 @@ export function ResultView({
   loading,
   traces,
   logs,
+  onClearCache,
   autoHeight = false,
 }: Props) {
   const hasContent =
@@ -87,7 +89,7 @@ export function ResultView({
       </div>
 
       {/* Badges row + expanded panel pinned to bottom */}
-      {(hasTraces || hasLogs) && (
+      {(hasTraces || hasLogs || onClearCache) && (
         <div className="shrink-0 pt-2.5 space-y-2">
           <div className="flex items-center gap-2">
             {hasTraces && (
@@ -103,6 +105,27 @@ export function ResultView({
                 expanded={activePanel === "logs"}
                 onToggle={() => toggle("logs")}
               />
+            )}
+            {onClearCache && (
+              <button
+                onClick={onClearCache}
+                title="Clear HTTP response cache"
+                className="ml-auto flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-slate-600 hover:text-slate-300 transition-colors"
+              >
+                <svg
+                  className="w-3 h-3"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 .49-4.95" />
+                </svg>
+                Clear Cache
+              </button>
             )}
           </div>
           {activePanel === "traces" && hasTraces && (
