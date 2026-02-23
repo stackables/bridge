@@ -6,8 +6,8 @@ import {
   parseBridge,
   parsePath,
   serializeBridge,
-} from "../src/bridge-format.js";
-import { createGateway } from "./_gateway.js";
+} from "../src/bridge-format.ts";
+import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Nested shadow tree — scope chain leak

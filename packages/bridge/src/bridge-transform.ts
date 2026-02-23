@@ -5,10 +5,10 @@ import {
   type GraphQLSchema,
   defaultFieldResolver,
 } from "graphql";
-import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "./ExecutionTree.js";
-import { builtinTools } from "./tools/index.js";
-import type { Instruction, ToolMap } from "./types.js";
-import { SELF_MODULE } from "./types.js";
+import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "./ExecutionTree.ts";
+import { builtinTools } from "./tools/index.ts";
+import type { Instruction, ToolMap } from "./types.ts";
+import { SELF_MODULE } from "./types.ts";
 
 export type { Logger };
 
