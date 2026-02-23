@@ -372,10 +372,11 @@ class BridgeParser extends CstParser {
   });
 
   /**
-   * Merged bridge wire (constant or pull/expression):
+   * Merged bridge wire (constant, pull/expression, or path scoping block):
    *   target = value
    *   target <-[!] sourceExpr [op operand]* [[] as iter { ...elements... }]
    *                           [|| alt]* [?? fallback]
+   *   target { .field <- source | .field = value | .field { ... } }
    */
   public bridgeWire = this.RULE("bridgeWire", () => {
     this.SUBRULE(this.addressPath, { LABEL: "target" });
@@ -429,6 +430,19 @@ class BridgeParser extends CstParser {
             this.CONSUME(ErrorCoalesce);
             this.SUBRULE2(this.coalesceAlternative, { LABEL: "errorAlt" });
           });
+        },
+      },
+      {
+        // Path scoping block: target { .field <- source | .field = value | .field { ... } | alias ... as ... }
+        ALT: () => {
+          this.CONSUME(LCurly, { LABEL: "scopeBlock" });
+          this.MANY3(() =>
+            this.OR3([
+              { ALT: () => this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }) },
+              { ALT: () => this.SUBRULE(this.pathScopeLine) },
+            ]),
+          );
+          this.CONSUME(RCurly);
         },
       },
     ]);
@@ -521,6 +535,78 @@ class BridgeParser extends CstParser {
             this.CONSUME(ErrorCoalesce);
             this.SUBRULE2(this.coalesceAlternative, { LABEL: "elemErrorAlt" });
           });
+        },
+      },
+    ]);
+  });
+
+  /**
+   * Path scope line: .target = value | .target <- source | .target { ... }
+   *
+   * Used inside path scoping blocks to build deeply nested objects
+   * without repeating the full target path. Supports the same source
+   * syntax as bridge wires (pipes, expressions, ternary, fallbacks).
+   */
+  public pathScopeLine = this.RULE("pathScopeLine", () => {
+    this.CONSUME(Dot);
+    this.SUBRULE(this.dottedPath, { LABEL: "scopeTarget" });
+    this.OR([
+      {
+        // Constant: .field = value
+        ALT: () => {
+          this.CONSUME(Equals, { LABEL: "scopeEquals" });
+          this.SUBRULE(this.bareValue, { LABEL: "scopeValue" });
+        },
+      },
+      {
+        // Pull wire: .field <- source [modifiers]
+        ALT: () => {
+          this.CONSUME(Arrow, { LABEL: "scopeArrow" });
+          this.OR2([
+            {
+              ALT: () => {
+                this.CONSUME(StringLiteral, { LABEL: "scopeStringSource" });
+              },
+            },
+            {
+              ALT: () => {
+                this.SUBRULE(this.sourceExpr, { LABEL: "scopeSource" });
+                this.MANY(() => {
+                  this.SUBRULE(this.exprOperator, { LABEL: "scopeExprOp" });
+                  this.SUBRULE(this.exprOperand, { LABEL: "scopeExprRight" });
+                });
+                this.OPTION(() => {
+                  this.CONSUME(QuestionMark, { LABEL: "scopeTernaryOp" });
+                  this.SUBRULE(this.ternaryBranch, { LABEL: "scopeThenBranch" });
+                  this.CONSUME(Colon, { LABEL: "scopeTernaryColon" });
+                  this.SUBRULE2(this.ternaryBranch, { LABEL: "scopeElseBranch" });
+                });
+              },
+            },
+          ]);
+          // || coalesce chain
+          this.MANY2(() => {
+            this.CONSUME(NullCoalesce);
+            this.SUBRULE(this.coalesceAlternative, { LABEL: "scopeNullAlt" });
+          });
+          // ?? error fallback
+          this.OPTION2(() => {
+            this.CONSUME(ErrorCoalesce);
+            this.SUBRULE2(this.coalesceAlternative, { LABEL: "scopeErrorAlt" });
+          });
+        },
+      },
+      {
+        // Nested scope: .field { ... }
+        ALT: () => {
+          this.CONSUME(LCurly);
+          this.MANY3(() =>
+            this.OR3([
+              { ALT: () => this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }) },
+              { ALT: () => this.SUBRULE(this.pathScopeLine) },
+            ]),
+          );
+          this.CONSUME(RCurly);
         },
       },
     ]);
@@ -2704,6 +2790,205 @@ function buildBridgeBody(
     };
   }
 
+  // ── Helper: recursively process path scoping block lines ───────────────
+  // Flattens nested scope blocks into standard flat wires by prepending
+  // the accumulated path prefix to each inner target.
+
+  function processScopeLines(
+    scopeLines: CstNode[],
+    targetRoot: string,
+    pathPrefix: string[],
+  ): void {
+    for (const scopeLine of scopeLines) {
+      const sc = scopeLine.children;
+      const scopeLineNum = line(findFirstToken(scopeLine));
+      const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
+      const scopeSegs = parsePath(targetStr);
+      const fullSegs = [...pathPrefix, ...scopeSegs];
+
+      // ── Nested scope: .field { ... } ──
+      const nestedScopeLines = subs(scopeLine, "pathScopeLine");
+      if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+        // Process alias declarations inside the nested scope block first
+        const scopeAliases = subs(scopeLine, "scopeAlias");
+        for (const aliasNode of scopeAliases) {
+          const aliasLineNum = line(findFirstToken(aliasNode));
+          const sourceNode = sub(aliasNode, "nodeAliasSource")!;
+          const alias = extractNameToken(sub(aliasNode, "nodeAliasName")!);
+          assertNotReserved(alias, aliasLineNum, "node alias");
+          if (handleRes.has(alias)) {
+            throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
+          }
+          const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+          const localRes: HandleResolution = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+          };
+          handleRes.set(alias, localRes);
+          const localToRef: NodeRef = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+            path: [],
+          };
+          wires.push({ from: sourceRef, to: localToRef });
+        }
+        processScopeLines(nestedScopeLines, targetRoot, fullSegs);
+        continue;
+      }
+
+      const toRef = resolveAddress(targetRoot, fullSegs, scopeLineNum);
+      assertNoTargetIndices(toRef, scopeLineNum);
+
+      // ── Constant wire: .field = value ──
+      if (sc.scopeEquals) {
+        const value = extractBareValue(sub(scopeLine, "scopeValue")!);
+        wires.push({ value, to: toRef });
+        continue;
+      }
+
+      // ── Pull wire: .field <- source [modifiers] ──
+      if (sc.scopeArrow) {
+        // String source (template or plain): .field <- "..."
+        const stringSourceToken = (sc.scopeStringSource as IToken[] | undefined)?.[0];
+        if (stringSourceToken) {
+          const raw = stringSourceToken.image.slice(1, -1);
+          const segs = parseTemplateString(raw);
+
+          let nullFallback: string | undefined;
+          const nullAltRefs: NodeRef[] = [];
+          for (const alt of subs(scopeLine, "scopeNullAlt")) {
+            const altResult = extractCoalesceAlt(alt, scopeLineNum);
+            if ("literal" in altResult) nullFallback = altResult.literal;
+            else nullAltRefs.push(altResult.sourceRef);
+          }
+          let fallback: string | undefined;
+          let fallbackRef: NodeRef | undefined;
+          let fallbackInternalWires: Wire[] = [];
+          const errorAlt = sub(scopeLine, "scopeErrorAlt");
+          if (errorAlt) {
+            const preLen = wires.length;
+            const altResult = extractCoalesceAlt(errorAlt, scopeLineNum);
+            if ("literal" in altResult) fallback = altResult.literal;
+            else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+          }
+          const lastAttrs = {
+            ...(nullFallback ? { nullFallback } : {}),
+            ...(fallback ? { fallback } : {}),
+            ...(fallbackRef ? { fallbackRef } : {}),
+          };
+          if (segs) {
+            const concatOutRef = desugarTemplateString(segs, scopeLineNum);
+            wires.push({ from: concatOutRef, to: toRef, pipe: true, ...lastAttrs });
+          } else {
+            wires.push({ value: raw, to: toRef, ...lastAttrs });
+          }
+          for (const ref of nullAltRefs) wires.push({ from: ref, to: toRef });
+          wires.push(...fallbackInternalWires);
+          continue;
+        }
+
+        // Normal source expression
+        const firstSourceNode = sub(scopeLine, "scopeSource")!;
+        const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
+        const exprOps = subs(scopeLine, "scopeExprOp");
+
+        let condRef: NodeRef;
+        let condIsPipeFork: boolean;
+        if (exprOps.length > 0) {
+          const exprRights = subs(scopeLine, "scopeExprRight");
+          const leftRef = buildSourceExpr(firstSourceNode, scopeLineNum);
+          condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum);
+          condIsPipeFork = true;
+        } else {
+          const pipeSegs = subs(firstSourceNode, "pipeSegment");
+          condRef = buildSourceExpr(firstSourceNode, scopeLineNum);
+          condIsPipeFork =
+            condRef.instance != null &&
+            condRef.path.length === 0 &&
+            pipeSegs.length > 0;
+        }
+
+        // Ternary wire: .field <- cond ? then : else
+        const scopeTernaryOp = (sc.scopeTernaryOp as IToken[] | undefined)?.[0];
+        if (scopeTernaryOp) {
+          const thenNode = sub(scopeLine, "scopeThenBranch")!;
+          const elseNode = sub(scopeLine, "scopeElseBranch")!;
+          const thenBranch = extractTernaryBranch(thenNode, scopeLineNum);
+          const elseBranch = extractTernaryBranch(elseNode, scopeLineNum);
+          let nullFallback: string | undefined;
+          const nullAltRefs: NodeRef[] = [];
+          for (const alt of subs(scopeLine, "scopeNullAlt")) {
+            const altResult = extractCoalesceAlt(alt, scopeLineNum);
+            if ("literal" in altResult) nullFallback = altResult.literal;
+            else nullAltRefs.push(altResult.sourceRef);
+          }
+          let fallback: string | undefined;
+          let fallbackRef: NodeRef | undefined;
+          let fallbackInternalWires: Wire[] = [];
+          const errorAlt = sub(scopeLine, "scopeErrorAlt");
+          if (errorAlt) {
+            const preLen = wires.length;
+            const altResult = extractCoalesceAlt(errorAlt, scopeLineNum);
+            if ("literal" in altResult) fallback = altResult.literal;
+            else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+          }
+          wires.push({
+            cond: condRef,
+            ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+            ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+            ...(nullFallback !== undefined ? { nullFallback } : {}),
+            ...(fallback !== undefined ? { fallback } : {}),
+            ...(fallbackRef !== undefined ? { fallbackRef } : {}),
+            to: toRef,
+          });
+          for (const ref of nullAltRefs) wires.push({ from: ref, to: toRef });
+          wires.push(...fallbackInternalWires);
+          continue;
+        }
+
+        sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
+
+        let nullFallback: string | undefined;
+        for (const alt of subs(scopeLine, "scopeNullAlt")) {
+          const altResult = extractCoalesceAlt(alt, scopeLineNum);
+          if ("literal" in altResult) nullFallback = altResult.literal;
+          else sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
+        }
+
+        let fallback: string | undefined;
+        let fallbackRef: NodeRef | undefined;
+        let fallbackInternalWires: Wire[] = [];
+        const errorAlt = sub(scopeLine, "scopeErrorAlt");
+        if (errorAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(errorAlt, scopeLineNum);
+          if ("literal" in altResult) fallback = altResult.literal;
+          else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+        }
+
+        for (let ci = 0; ci < sourceParts.length; ci++) {
+          const { ref: fromRef, isPipeFork: isPipe } = sourceParts[ci];
+          const isLast = ci === sourceParts.length - 1;
+          const lastAttrs = isLast
+            ? {
+                ...(nullFallback ? { nullFallback } : {}),
+                ...(fallback ? { fallback } : {}),
+                ...(fallbackRef ? { fallbackRef } : {}),
+              }
+            : {};
+          if (isPipe) {
+            wires.push({ from: fromRef, to: toRef, pipe: true, ...lastAttrs });
+          } else {
+            wires.push({ from: fromRef, to: toRef, ...lastAttrs });
+          }
+        }
+        wires.push(...fallbackInternalWires);
+      }
+    }
+  }
+
   // ── Step 1.5: Process top-level node alias declarations ────────────────
   // `with <sourceExpr> as <alias>` at bridge body level (pipe-based).
   // Also detect simple renames via bridgeWithDecl when the root is already
@@ -2771,6 +3056,38 @@ function buildBridgeBody(
     if (wc.equalsOp) {
       const value = extractBareValue(sub(wireNode, "constValue")!);
       wires.push({ value, to: toRef });
+      continue;
+    }
+
+    // ── Path scoping block: target { .field ... } ──
+    if (wc.scopeBlock) {
+      // Process alias declarations inside the scope block first
+      const scopeAliases = subs(wireNode, "scopeAlias");
+      for (const aliasNode of scopeAliases) {
+        const aliasLineNum = line(findFirstToken(aliasNode));
+        const sourceNode = sub(aliasNode, "nodeAliasSource")!;
+        const alias = extractNameToken(sub(aliasNode, "nodeAliasName")!);
+        assertNotReserved(alias, aliasLineNum, "node alias");
+        if (handleRes.has(alias)) {
+          throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
+        }
+        const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+        const localRes: HandleResolution = {
+          module: "__local",
+          type: "Shadow",
+          field: alias,
+        };
+        handleRes.set(alias, localRes);
+        const localToRef: NodeRef = {
+          module: "__local",
+          type: "Shadow",
+          field: alias,
+          path: [],
+        };
+        wires.push({ from: sourceRef, to: localToRef });
+      }
+      const scopeLines = subs(wireNode, "pathScopeLine");
+      processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;
     }
 

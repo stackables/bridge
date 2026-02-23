@@ -1,7 +1,19 @@
 ## Path Scoping Blocks (Nested Object Wiring)
 
-**Status:** Parked / Planned
-**Target Release:** v2.1
+**Status:** ✅ Fully implemented
+**Target Release:** v1.x (Feature Addition)
+
+### Implementation Notes
+
+Implemented as designed. Key details:
+
+- **Lexer**: No changes needed — reuses existing `Dot`, `Arrow`, `Equals`, `LCurly`, and `RCurly` tokens
+- **Grammar**: New `pathScopeLine` rule added to `packages/bridge/src/parser/parser.ts`. The `bridgeWire` rule now accepts `{ pathScopeLines }` as a third alternative after `addressPath`, alongside `=` (constant) and `<-` (pull)
+- **CST → AST Visitor**: `processScopeLines()` function inside `buildBridgeBody` recursively flattens scope blocks by prepending the accumulated path prefix to each inner target. Supports all wire features: pull, constant, pipe chains, expressions, ternary, string interpolation, and fallback operators (`||`, `??`)
+- **No engine changes** — purely parser-level syntactic sugar, as planned
+- **Serializer**: Scope blocks are flattened during parsing. The serializer emits standard flat wires; round-trip produces equivalent ASTs
+- **Define blocks** get scope support automatically (they use the same `bridgeBodyLine` rule and `buildBridgeBody` visitor)
+- Tests in `test/path-scoping.test.ts` covering: constants, pull wires, nested scoping, pipes, fallbacks, expressions, ternary, string interpolation, tool handle targets, wire equivalence with flat syntax, serializer round-trip, and execution
 
 ### 📖 The Problem: Deep Path Repetition
 

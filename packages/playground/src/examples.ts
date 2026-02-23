@@ -615,4 +615,105 @@ bridge Query.userProfile {
     ],
     context: `{}`,
   },
+  {
+    name: "Path Scoping (Nested Objects)",
+    description:
+      "Group deeply nested wires with path scoping blocks — syntactic sugar that avoids repeating long target prefixes",
+    schema: `
+type Query {
+  createPayload(
+    name: String!
+    email: String!
+    theme: String
+    isPro: Boolean
+  ): Payload
+}
+
+type Payload {
+  method: String
+  body: Body
+}
+
+type Body {
+  profile: Profile
+  settings: Settings
+}
+
+type Profile {
+  name: String
+  email: String
+  displayName: String
+}
+
+type Settings {
+  theme: String
+  tier: String
+  notifications: Boolean
+}
+    `,
+    bridge: `version 1.4
+
+bridge Query.createPayload {
+  with input as i
+  with output as o
+
+  o.method = "POST"
+
+  # Path scoping: group nested fields under a common prefix
+  o.body {
+    .profile {
+      .name <- i.name
+      .email <- i.email
+      .displayName <- "{i.name} ({i.email})"
+    }
+    .settings {
+      .theme <- i.theme || "light"
+      .tier <- i.isPro ? "premium" : "basic"
+      .notifications = true
+    }
+  }
+}`,
+    queries: [
+      {
+        name: "Pro user",
+        query: `{
+  createPayload(name: "Alice", email: "alice@example.com", theme: "dark", isPro: true) {
+    method
+    body {
+      profile {
+        name
+        email
+        displayName
+      }
+      settings {
+        theme
+        tier
+        notifications
+      }
+    }
+  }
+}`,
+      },
+      {
+        name: "Basic user",
+        query: `{
+  createPayload(name: "Bob", email: "bob@example.com", isPro: false) {
+    method
+    body {
+      profile {
+        name
+        displayName
+      }
+      settings {
+        theme
+        tier
+        notifications
+      }
+    }
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];
