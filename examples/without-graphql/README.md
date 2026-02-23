@@ -62,9 +62,9 @@ node --import tsx/esm cli.ts weather.bridge '{"city":"Paris"}' | jq .temperature
 
 ```ts
 import { readFileSync } from "node:fs";
-import { parseBridgeDiagnostics, executeBridge } from "@stackables/bridge";
+import { parseBridge, executeBridge } from "@stackables/bridge";
 
-const { instructions } = parseBridgeDiagnostics(
+const instructions = parseBridge(
   readFileSync("weather.bridge", "utf8"),
 );
 
