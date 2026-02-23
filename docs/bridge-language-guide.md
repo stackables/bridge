@@ -705,8 +705,6 @@ The `force` statement eagerly schedules a tool for execution, even if no output
 field demands its data. Use it for side effects — audit logging, analytics,
 cache warming.
 
-### Critical by default
-
 A bare `force` is **critical**: if the forced tool throws, the error propagates
 into the response just like a regular tool failure.
 
@@ -720,52 +718,9 @@ bridge Query.search {
   s.q <- i.q
   audit.action <- i.q
   force audit            # critical — error breaks the response
+  force audit ?? null.   # fire-and-forget — errors are silently swallowed
   o.title <- s.title
 }
-```
-
-If `audit.log` throws, the engine returns a GraphQL error. The main data
-resolution still runs in parallel with the forced tool — there is no
-performance penalty when the force succeeds.
-
-### Fire-and-forget (`?? null`)
-
-Append `?? null` to opt out of error propagation:
-
-```bridge
-  force audit ?? null    # fire-and-forget — errors are silently swallowed
-```
-
-The `?? null` suffix tells the engine to catch and discard any error from the
-forced tool. The main response is never affected, regardless of whether the
-forced tool succeeds or fails.
-
-### Choosing between the two
-
-| Syntax | Behaviour | Use when… |
-|---|---|---|
-| `force handle` | Critical — error propagates | The side effect is essential (payment capture, order creation) |
-| `force handle ?? null` | Fire-and-forget — errors swallowed | The side effect is best-effort (analytics, logging, cache warming) |
-
-### Combining with output wires
-
-A forced tool can also provide data to output wires. The `force` statement
-only controls whether the tool is **eagerly scheduled** and whether its
-errors are **propagated**:
-
-```bridge
-  o.auditId <- audit.id    # output wire reads from the forced tool
-  force audit              # tool runs even if auditId is never queried
-```
-
-### Multiple forces
-
-A bridge can have any number of `force` statements. Each one is independent —
-critical and fire-and-forget forces can coexist:
-
-```bridge
-  force payment            # critical — must succeed
-  force analytics ?? null  # fire-and-forget — OK to fail
 ```
 
 ---

@@ -323,11 +323,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Expression fork detection ──────────────────────────────────────────
   // Operator tool name → infix operator symbol
   const FN_TO_OP: Record<string, string> = {
-    multiply: "*", divide: "/", add: "+", subtract: "-",
-    eq: "==", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=",
+    multiply: "*",
+    divide: "/",
+    add: "+",
+    subtract: "-",
+    eq: "==",
+    neq: "!=",
+    gt: ">",
+    gte: ">=",
+    lt: "<",
+    lte: "<=",
   };
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
-  type ExprForkInfo = { op: string; bWire: Wire | undefined; aWire: FW | undefined };
+  type ExprForkInfo = {
+    op: string;
+    bWire: Wire | undefined;
+    aWire: FW | undefined;
+  };
   const exprForks = new Map<string, ExprForkInfo>();
   const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
 
@@ -341,7 +353,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     let bWire: Wire | undefined;
     for (const w of bridge.wires) {
       const wTo = (w as any).to as NodeRef;
-      if (!wTo || refTrunkKey(wTo) !== ph.key || wTo.path.length !== 1) continue;
+      if (!wTo || refTrunkKey(wTo) !== ph.key || wTo.path.length !== 1)
+        continue;
       if (wTo.path[0] === "a" && "from" in w) aWire = w as FW;
       else if (wTo.path[0] === "b") bWire = w;
     }
@@ -366,8 +379,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // For a 1-level array o.items <- src[], element paths are like ["items", "name"]
   // For a root-level array o <- src[], element paths are like ["name"]
   // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
-  const elementPullAll = elementPullWires.filter((w) => !exprPipeWireSet.has(w));
-  const elementConstAll = elementConstWires.filter((w) => !exprPipeWireSet.has(w));
+  const elementPullAll = elementPullWires.filter(
+    (w) => !exprPipeWireSet.has(w),
+  );
+  const elementConstAll = elementConstWires.filter(
+    (w) => !exprPipeWireSet.has(w),
+  );
 
   // Collect element-targeting expression output wires (from expression fork → element)
   type ElementExprInfo = {
@@ -561,7 +578,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
       if (eew.toPath.length !== pathDepth + 1) continue;
       let match = true;
       for (let i = 0; i < pathDepth; i++) {
-        if (eew.toPath[i] !== arrayPath[i]) { match = false; break; }
+        if (eew.toPath[i] !== arrayPath[i]) {
+          match = false;
+          break;
+        }
       }
       if (!match) continue;
       const fieldPath = eew.toPath.slice(pathDepth);
@@ -595,9 +615,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
         } else if (info.bWire && "from" in info.bWire) {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
-          rightStr = bFrom.path.length === 0 && exprForks.has(bTk)
-            ? serFork(bTk)
-            : sRef(bFrom, true);
+          rightStr =
+            bFrom.path.length === 0 && exprForks.has(bTk)
+              ? serFork(bTk)
+              : sRef(bFrom, true);
         } else {
           rightStr = "0";
         }
@@ -614,15 +635,21 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if ("cond" in w) {
       const toStr = sRef(w.to, false);
       const condStr = serializeExprOrRef(w.cond);
-      const thenStr = w.thenRef ? sRef(w.thenRef, true) : (w.thenValue ?? "null");
-      const elseStr = w.elseRef ? sRef(w.elseRef, true) : (w.elseValue ?? "null");
+      const thenStr = w.thenRef
+        ? sRef(w.thenRef, true)
+        : (w.thenValue ?? "null");
+      const elseStr = w.elseRef
+        ? sRef(w.elseRef, true)
+        : (w.elseValue ?? "null");
       const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
       const errf = w.fallbackRef
         ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
         : w.fallback
           ? ` ?? ${w.fallback}`
           : "";
-      lines.push(`${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${errf}`);
+      lines.push(
+        `${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${errf}`,
+      );
       continue;
     }
 
@@ -762,7 +789,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // Force statements
   if (bridge.forces) {
     for (const f of bridge.forces) {
-      lines.push(f.catchError ? `force ${f.handle} ?? null` : `force ${f.handle}`);
+      lines.push(
+        f.catchError ? `force ${f.handle} ?? null` : `force ${f.handle}`,
+      );
     }
   }
 
