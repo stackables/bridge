@@ -512,7 +512,7 @@ o.isActive <- i.status == "active"
 | Category | Operators | Description |
 |---|---|---|
 | Arithmetic | `*` `/` `+` `-` | Multiply, divide, add, subtract |
-| Comparison | `==` `!=` `>` `>=` `<` `<=` | Returns `1` (true) or `0` (false) |
+| Comparison | `==` `!=` `>` `>=` `<` `<=` | Returns `true` or `false` |
 
 ### Operator precedence
 
@@ -566,7 +566,7 @@ All arithmetic operands are coerced via JavaScript `Number()`:
 | Numeric string | Number | `"10" * 5 = 50` |
 | Non-numeric string | `NaN` | `"hello" + 1 = NaN` |
 
-Comparison operators with `NaN` always return `0`.
+Comparison operators with `NaN` always return `false`.
 
 ### Expressions in array mapping
 
@@ -582,15 +582,15 @@ o.items <- api.items[] as item {
 ### How it works
 
 Expressions are **syntactic sugar**. The parser desugars them into synthetic
-tool forks using the built-in `std` math/comparison tools. The execution engine
+tool forks using the built-in `math` namespace tools. The execution engine
 never sees expression syntax — it processes standard pull and constant wires.
 
 For example, `o.total <- i.price * i.qty` becomes:
 
 ```
-Wire: i.price → std.multiply.a
-Wire: i.qty   → std.multiply.b
-Wire: std.multiply → o.total
+Wire: i.price → math.multiply.a
+Wire: i.qty   → math.multiply.b
+Wire: math.multiply → o.total
 ```
 
 ---
@@ -646,7 +646,7 @@ immediately when the bridge starts, not when the field is demanded.
 
 ## 15. Built-in Tools
 
-The `std` namespace provides built-in transform tools:
+### `std` namespace — Transform tools
 
 | Tool | Description |
 |---|---|
@@ -655,19 +655,32 @@ The `std` namespace provides built-in transform tools:
 | `pickFirst` | Take the first element of an array |
 | `toArray` | Wrap a value in an array |
 | `findObject` | Find an object in an array by key/value |
+
+These are available without explicit registration and can be used as pipe
+transforms:
+
+```bridge
+o.name <- upperCase:api.name
+o.first <- pickFirst:api.results
+```
+
+### `math` namespace — Math and comparison tools
+
+| Tool | Description |
+|---|---|
 | `multiply` | Multiply two numbers (`a * b`) |
 | `divide` | Divide two numbers (`a / b`) |
 | `add` | Add two numbers (`a + b`) |
 | `subtract` | Subtract two numbers (`a - b`) |
-| `eq` | Strict equality (`a === b`), returns `1` or `0` |
-| `neq` | Strict inequality (`a !== b`), returns `1` or `0` |
-| `gt` | Greater than (`a > b`), returns `1` or `0` |
-| `gte` | Greater than or equal (`a >= b`), returns `1` or `0` |
-| `lt` | Less than (`a < b`), returns `1` or `0` |
-| `lte` | Less than or equal (`a <= b`), returns `1` or `0` |
+| `eq` | Strict equality (`a === b`), returns `true` or `false` |
+| `neq` | Strict inequality (`a !== b`), returns `true` or `false` |
+| `gt` | Greater than (`a > b`), returns `true` or `false` |
+| `gte` | Greater than or equal (`a >= b`), returns `true` or `false` |
+| `lt` | Less than (`a < b`), returns `true` or `false` |
+| `lte` | Less than or equal (`a <= b`), returns `true` or `false` |
 
-The math and comparison tools are used automatically by inline expression
-syntax (see [Section 12](#12-inline-expressions)). They can also be used
+The `math` tools are used automatically by inline expression syntax
+(see [Section 12](#12-inline-expressions)). They can also be used
 explicitly as pipe transforms.
 
 ```bridge
