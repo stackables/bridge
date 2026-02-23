@@ -1113,9 +1113,7 @@ function processElementLines(
     exprOps: CstNode[],
     exprRights: CstNode[],
     lineNum: number,
-    isElement?: boolean,
     iterName?: string,
-    arrayToPath?: string[],
   ) => NodeRef,
 ): void {
   /**
@@ -1195,7 +1193,7 @@ function processElementLines(
         } else {
           leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
         }
-        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, true, iterName, arrayToPath);
+        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
         wires.push({
           from: resultRef,
           to: {
@@ -2048,9 +2046,7 @@ function buildBridgeBody(
     exprOps: CstNode[],
     exprRights: CstNode[],
     lineNum: number,
-    _isElement?: boolean,
     iterName?: string,
-    _arrayToPath?: string[],
   ): NodeRef {
     let currentRef = leftRef;
 
