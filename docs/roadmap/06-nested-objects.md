@@ -1,0 +1,68 @@
+## Path Scoping Blocks (Nested Object Wiring)
+
+**Status:** Parked / Planned
+**Target Release:** v2.1
+
+### 📖 The Problem: Deep Path Repetition
+
+When developers map data to external REST APIs, the required JSON payloads are often deeply nested. Currently, constructing these payloads inline requires repeating the full target path for every single field:
+
+```bridge
+# Current syntax requires heavy repetition
+api.body.user.profile.id <- i.id
+api.body.user.profile.name <- std.upperCase:i.name
+api.body.user.settings.theme = "dark"
+api.body.user.settings.notifications = true
+
+```
+
+While developers can extract this into a `define` block, doing so for every medium-sized payload breaks the flow of reading a bridge top-to-bottom. We need a way to visually construct nested objects inline, **without** introducing foreign, JSON-style syntax (`"key": value`) that clashes with our native wire operators (`<-` and `=`).
+
+### ✨ Proposed Solution: Path Scoping
+
+We will introduce "Path Scoping" blocks. A developer can open a `{ ... }` block on any target path. Inside the block, any wire starting with a dot (`.`) implicitly appends to the parent path.
+
+This perfectly mirrors the syntax and mental model we already use for array iterators (`[] as it { .field <- ... }`), keeping the language unified and strictly declarative.
+
+**New Syntax:**
+
+```bridge
+bridge Mutation.createUser {
+  with std.httpCall as api
+  with input as i
+
+  api.method = "POST"
+
+  # Path Scoping Block
+  api.body.user {
+    .profile {
+      .id <- i.id
+      .name <- std.upperCase:i.name
+    }
+    .settings {
+      .theme = "dark"
+      .notifications = true
+    }
+  }
+}
+
+```
+
+### 🛠️ Architecture & Implementation Plan
+
+The most powerful aspect of this feature is that **the Execution Engine requires absolutely zero changes.** This is purely parser-level syntactic sugar.
+
+1. **Lexer Updates:**
+* NONE. We reuse the exact same `Dot`, `Arrow`, `Equals`, `LCurly`, and `RCurly` tokens already in the grammar.
+
+
+2. **Parser Grammar (`BridgeParser`):**
+* Introduce a new rule: `pathScopeBlock`.
+* It matches an `addressPath` followed by a block `{ ... }`.
+* Inside the block, it accepts either standard element lines (`.field <- source`) or nested `pathScopeBlock`s.
+
+
+3. **CST → AST Visitor (`toBridgeAst`):**
+* When the visitor enters a `pathScopeBlock`, it pushes the parent path (e.g., `["api", "body", "user"]`) onto a local `pathPrefix` stack.
+* When it visits a wire inside the block (e.g., `.profile.id <- i.id`), it prepends the stack to the target path.
+* The visitor emits a perfectly flat list of standard `Wire` objects to the engine. The engine natively executes them as deep `setNested` operations, completely unaware that a block was ever used.
