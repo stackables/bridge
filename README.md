@@ -524,12 +524,43 @@ o <- api.items[] as item {
 
 ---
 
+### String Interpolation (`"{…}"`)
+
+Build strings from multiple sources using `{…}` placeholders inside quoted strings on pull wires (`<-`):
+
+```bridge
+bridge Query.userProfile {
+  with input as i
+  with output as o
+
+  o.url  <- "/users/{i.id}/profile"
+  o.name <- "{i.first} {i.last}"
+  o.greeting <- "Hello, {i.first}!"
+}
+```
+
+Placeholder values are coerced to strings automatically — numbers become `"42"`, booleans become `"true"`, and null/undefined become `""`.
+
+Plain strings without `{…}` are treated as constants. The `=` operator is never interpolated.
+
+Works inside array mapping blocks:
+
+```bridge
+o <- api.items[] as it {
+  .url   <- "/items/{it.id}"
+  .label <- "{it.name} (#{it.id})"
+}
+```
+
+---
+
 ## Syntax Reference
 
 | Operator | Type | Behavior |
 | --- | --- | --- |
 | **`=`** | Constant | Sets a static value. |
 | **`<-`** | Wire | Pulls data from a source at runtime. |
+| **`<- "...{ref}..."`** | Template | String interpolation — `{…}` placeholders are resolved at runtime. |
 | **`force`** | Force | Eagerly schedules a handle. **Critical by default** — errors propagate. Append `?? null` for fire-and-forget. |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
 | **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
@@ -550,6 +581,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 | Tool | Input | Output | Description |
 | --- | --- | --- | --- |
 | `audit` | `{ ...any, level?: string }` | passthrough (same object) | Logs all inputs via the engine logger (`BridgeOptions.logger`). Level defaults to `info`; override with `audit.level = "warn"`. |
+| `concat` | `{ parts: any[] }` | `{ value: string }` | Joins ordered parts into a string. Used internally by string interpolation. |
 | `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
 | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
 | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |

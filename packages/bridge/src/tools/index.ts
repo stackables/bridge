@@ -1,4 +1,5 @@
 import { audit } from "./audit.ts";
+import { concat } from "./concat.ts";
 import { createHttpCall } from "./http-call.ts";
 import { upperCase } from "./upper-case.ts";
 import { lowerCase } from "./lower-case.ts";
@@ -25,6 +26,7 @@ const httpCallFn = createHttpCall();
 
 export const std = {
   audit,
+  concat,
   httpCall: httpCallFn,
   upperCase,
   lowerCase,
@@ -90,6 +92,7 @@ export const builtinToolNames: readonly string[] = [
 ];
 
 export { createHttpCall } from "./http-call.ts";
+export { concat } from "./concat.ts";
 export { upperCase } from "./upper-case.ts";
 export { lowerCase } from "./lower-case.ts";
 export { findObject } from "./find-object.ts";

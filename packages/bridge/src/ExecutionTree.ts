@@ -1036,11 +1036,14 @@ export class ExecutionTree {
     // AND element-level wires (from.element === true).  A plain passthrough
     // (`o <- api.user`) only has the root wire.
     // Local bindings (from.__local) are also element-scoped.
+    // Pipe fork output wires in element context (e.g. concat template strings)
+    // may have to.element === true instead.
     const hasElementWires = bridge.wires.some(
       (w) =>
         "from" in w &&
         ((w.from as NodeRef).element === true ||
-          (w.from as NodeRef).module === "__local") &&
+          (w.from as NodeRef).module === "__local" ||
+          w.to.element === true) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
         w.to.field === field,

@@ -391,19 +391,32 @@ class BridgeParser extends CstParser {
         // Pull wire: target <-[!] sourceExpr [op operand]* [modifiers]
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "arrow" });
-          this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
-          // Optional expression chain: operator + operand, repeatable
-          this.MANY2(() => {
-            this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
-            this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
-          });
-          // Optional ternary: ? thenBranch : elseBranch
-          this.OPTION3(() => {
-            this.CONSUME(QuestionMark, { LABEL: "ternaryOp" });
-            this.SUBRULE(this.ternaryBranch, { LABEL: "thenBranch" });
-            this.CONSUME(Colon, { LABEL: "ternaryColon" });
-            this.SUBRULE2(this.ternaryBranch, { LABEL: "elseBranch" });
-          });
+          this.OR2([
+            {
+              // String literal as source (template or plain): target <- "..."
+              ALT: () => {
+                this.CONSUME(StringLiteral, { LABEL: "stringSource" });
+              },
+            },
+            {
+              // Normal source expression
+              ALT: () => {
+                this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+                // Optional expression chain: operator + operand, repeatable
+                this.MANY2(() => {
+                  this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
+                  this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
+                });
+                // Optional ternary: ? thenBranch : elseBranch
+                this.OPTION3(() => {
+                  this.CONSUME(QuestionMark, { LABEL: "ternaryOp" });
+                  this.SUBRULE(this.ternaryBranch, { LABEL: "thenBranch" });
+                  this.CONSUME(Colon, { LABEL: "ternaryColon" });
+                  this.SUBRULE2(this.ternaryBranch, { LABEL: "elseBranch" });
+                });
+              },
+            },
+          ]);
           // Optional array mapping: [] as <iter> { ... }
           this.OPTION(() => this.SUBRULE(this.arrayMapping));
           // || coalesce chain
@@ -469,19 +482,32 @@ class BridgeParser extends CstParser {
       {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "elemArrow" });
-          this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
-          // Optional expression chain
-          this.MANY2(() => {
-            this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
-            this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
-          });
-          // Optional ternary: ? thenBranch : elseBranch
-          this.OPTION3(() => {
-            this.CONSUME(QuestionMark, { LABEL: "elemTernaryOp" });
-            this.SUBRULE(this.ternaryBranch, { LABEL: "elemThenBranch" });
-            this.CONSUME(Colon, { LABEL: "elemTernaryColon" });
-            this.SUBRULE2(this.ternaryBranch, { LABEL: "elemElseBranch" });
-          });
+          this.OR2([
+            {
+              // String literal as source (template or plain): .field <- "..."
+              ALT: () => {
+                this.CONSUME(StringLiteral, { LABEL: "elemStringSource" });
+              },
+            },
+            {
+              // Normal source expression
+              ALT: () => {
+                this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+                // Optional expression chain
+                this.MANY2(() => {
+                  this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
+                  this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
+                });
+                // Optional ternary: ? thenBranch : elseBranch
+                this.OPTION3(() => {
+                  this.CONSUME(QuestionMark, { LABEL: "elemTernaryOp" });
+                  this.SUBRULE(this.ternaryBranch, { LABEL: "elemThenBranch" });
+                  this.CONSUME(Colon, { LABEL: "elemTernaryColon" });
+                  this.SUBRULE2(this.ternaryBranch, { LABEL: "elemElseBranch" });
+                });
+              },
+            },
+          ]);
           // Optional nested array mapping: [] as <iter> { ... }
           this.OPTION2(() =>
             this.SUBRULE(this.arrayMapping, { LABEL: "nestedArrayMapping" }),
@@ -1138,6 +1164,57 @@ function extractBareValue(node: CstNode): string {
   return "";
 }
 
+/* ── parseTemplateString: split a string into text and ref segments ── */
+type TemplateSeg = { kind: "text"; value: string } | { kind: "ref"; path: string };
+
+function parseTemplateString(raw: string): TemplateSeg[] | null {
+  // raw is the content between quotes (already stripped of outer quotes)
+  const segs: TemplateSeg[] = [];
+  let i = 0;
+  let hasRef = false;
+  let text = "";
+  while (i < raw.length) {
+    if (raw[i] === "\\" && i + 1 < raw.length) {
+      if (raw[i + 1] === "{") {
+        text += "{";
+        i += 2;
+        continue;
+      }
+      // preserve other escapes as-is
+      text += raw[i] + raw[i + 1];
+      i += 2;
+      continue;
+    }
+    if (raw[i] === "{") {
+      const end = raw.indexOf("}", i + 1);
+      if (end === -1) {
+        // unclosed brace — treat as literal text
+        text += raw[i];
+        i++;
+        continue;
+      }
+      const ref = raw.slice(i + 1, end).trim();
+      if (ref.length === 0) {
+        text += "{}";
+        i = end + 1;
+        continue;
+      }
+      if (text.length > 0) {
+        segs.push({ kind: "text", value: text });
+        text = "";
+      }
+      segs.push({ kind: "ref", path: ref });
+      hasRef = true;
+      i = end + 1;
+      continue;
+    }
+    text += raw[i];
+    i++;
+  }
+  if (text.length > 0) segs.push({ kind: "text", value: text });
+  return hasRef ? segs : null;
+}
+
 /* ── extractJsonValue: from a jsonValue CST node ── */
 function extractJsonValue(node: CstNode): string {
   const c = node.children;
@@ -1200,6 +1277,11 @@ function processElementLines(
     withDecls: CstNode[],
     iterName: string,
   ) => () => void,
+  desugarTemplateStringFn?: (
+    segs: TemplateSeg[],
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1254,6 +1336,65 @@ function processElementLines(
         },
       });
     } else if (elemC.elemArrow) {
+      // ── String source in element context: .field <- "..." ──
+      const elemStrToken = (elemC.elemStringSource as IToken[] | undefined)?.[0];
+      if (elemStrToken && desugarTemplateStringFn) {
+        const raw = elemStrToken.image.slice(1, -1);
+        const segs = parseTemplateString(raw);
+
+        const elemToRef: NodeRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          path: elemToPath,
+        };
+
+        // Process coalesce modifiers
+        let nullFallback: string | undefined;
+        const nullAltRefs: NodeRef[] = [];
+        for (const alt of subs(elemLine, "elemNullAlt")) {
+          const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
+          if ("literal" in altResult) {
+            nullFallback = altResult.literal;
+          } else {
+            nullAltRefs.push(altResult.sourceRef);
+          }
+        }
+        let fallback: string | undefined;
+        let fallbackRef: NodeRef | undefined;
+        let fallbackInternalWires: Wire[] = [];
+        const errorAlt = sub(elemLine, "elemErrorAlt");
+        if (errorAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAltIterAware(errorAlt, elemLineNum);
+          if ("literal" in altResult) {
+            fallback = altResult.literal;
+          } else {
+            fallbackRef = altResult.sourceRef;
+            fallbackInternalWires = wires.splice(preLen);
+          }
+        }
+
+        const lastAttrs = {
+          ...(nullFallback ? { nullFallback } : {}),
+          ...(fallback ? { fallback } : {}),
+          ...(fallbackRef ? { fallbackRef } : {}),
+        };
+
+        if (segs) {
+          const concatOutRef = desugarTemplateStringFn(segs, elemLineNum, iterName);
+          const elemToRefWithElement: NodeRef = { ...elemToRef, element: true };
+          wires.push({ from: concatOutRef, to: elemToRefWithElement, pipe: true, ...lastAttrs });
+        } else {
+          wires.push({ value: raw, to: elemToRef, ...lastAttrs });
+        }
+        for (const ref of nullAltRefs) {
+          wires.push({ from: ref, to: elemToRef });
+        }
+        wires.push(...fallbackInternalWires);
+        continue;
+      }
+
       const elemSourceNode = sub(elemLine, "elemSource")!;
 
       // Check if iterator-relative source
@@ -1313,6 +1454,7 @@ function processElementLines(
           desugarExprChain,
           extractTernaryBranchFn,
           processLocalBindings,
+          desugarTemplateStringFn,
         );
         nestedCleanup?.();
         continue;
@@ -2497,6 +2639,71 @@ function buildBridgeBody(
     return final.ref;
   }
 
+  // ── Helper: desugar template string into synthetic std.concat fork ─────
+
+  function desugarTemplateString(
+    segs: TemplateSeg[],
+    lineNum: number,
+    iterName?: string,
+  ): NodeRef {
+    const forkInstance = 100000 + nextForkSeq++;
+    const forkModule = SELF_MODULE;
+    const forkType = "Tools";
+    const forkField = "concat";
+    const forkKey = `${forkModule}:${forkType}:${forkField}:${forkInstance}`;
+    pipeHandleEntries.push({
+      key: forkKey,
+      handle: `__concat_${forkInstance}`,
+      baseTrunk: {
+        module: forkModule,
+        type: forkType,
+        field: forkField,
+      },
+    });
+
+    for (let idx = 0; idx < segs.length; idx++) {
+      const seg = segs[idx];
+      const partRef: NodeRef = {
+        module: forkModule,
+        type: forkType,
+        field: forkField,
+        instance: forkInstance,
+        path: ["parts", String(idx)],
+      };
+      if (seg.kind === "text") {
+        wires.push({ value: seg.value, to: partRef });
+      } else {
+        // Parse the ref path: e.g. "i.id" → root="i", segments=["id"]
+        const dotParts = seg.path.split(".");
+        const root = dotParts[0];
+        const segments = dotParts.slice(1);
+
+        // Check for iterator-relative refs
+        if (iterName && root === iterName) {
+          const fromRef: NodeRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: segments,
+          };
+          wires.push({ from: fromRef, to: partRef });
+        } else {
+          const fromRef = resolveAddress(root, segments, lineNum);
+          wires.push({ from: fromRef, to: partRef });
+        }
+      }
+    }
+
+    return {
+      module: forkModule,
+      type: forkType,
+      field: forkField,
+      instance: forkInstance,
+      path: ["value"],
+    };
+  }
+
   // ── Step 1.5: Process top-level node alias declarations ────────────────
   // `with <sourceExpr> as <alias>` at bridge body level (pipe-based).
   // Also detect simple renames via bridgeWithDecl when the root is already
@@ -2569,6 +2776,59 @@ function buildBridgeBody(
 
     // ── Pull wire: target <- source [modifiers] ──
 
+    // ── String source (template or plain): target <- "..." ──
+    const stringSourceToken = (wc.stringSource as IToken[] | undefined)?.[0];
+    if (stringSourceToken) {
+      const raw = stringSourceToken.image.slice(1, -1); // strip quotes
+      const segs = parseTemplateString(raw);
+
+      // Process coalesce modifiers
+      let nullFallback: string | undefined;
+      const nullAltRefs: NodeRef[] = [];
+      for (const alt of subs(wireNode, "nullAlt")) {
+        const altResult = extractCoalesceAlt(alt, lineNum);
+        if ("literal" in altResult) {
+          nullFallback = altResult.literal;
+        } else {
+          nullAltRefs.push(altResult.sourceRef);
+        }
+      }
+      let fallback: string | undefined;
+      let fallbackRef: NodeRef | undefined;
+      let fallbackInternalWires: Wire[] = [];
+      const errorAlt = sub(wireNode, "errorAlt");
+      if (errorAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(errorAlt, lineNum);
+        if ("literal" in altResult) {
+          fallback = altResult.literal;
+        } else {
+          fallbackRef = altResult.sourceRef;
+          fallbackInternalWires = wires.splice(preLen);
+        }
+      }
+
+      const lastAttrs = {
+        ...(nullFallback ? { nullFallback } : {}),
+        ...(fallback ? { fallback } : {}),
+        ...(fallbackRef ? { fallbackRef } : {}),
+      };
+
+      if (segs) {
+        // Template string — desugar to synthetic std.concat fork
+        const concatOutRef = desugarTemplateString(segs, lineNum);
+        wires.push({ from: concatOutRef, to: toRef, pipe: true, ...lastAttrs });
+      } else {
+        // Plain string without interpolation — emit constant wire
+        wires.push({ value: raw, to: toRef, ...lastAttrs });
+      }
+      for (const ref of nullAltRefs) {
+        wires.push({ from: ref, to: toRef });
+      }
+      wires.push(...fallbackInternalWires);
+      continue;
+    }
+
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
@@ -2597,6 +2857,7 @@ function buildBridgeBody(
         desugarExprChain,
         extractTernaryBranch,
         processLocalBindings,
+        desugarTemplateString,
       );
       cleanup();
       continue;

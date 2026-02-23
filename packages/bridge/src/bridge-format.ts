@@ -312,11 +312,21 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (fw.to.path.length === 1 && pipeHandleTrunkKeys.has(toTk)) {
       toInMap.set(toTk, fw);
     }
+    const fromTk = refTrunkKey(fw.from);
     if (
       fw.from.path.length === 0 &&
-      pipeHandleTrunkKeys.has(refTrunkKey(fw.from))
+      pipeHandleTrunkKeys.has(fromTk)
     ) {
-      fromOutMap.set(refTrunkKey(fw.from), fw);
+      fromOutMap.set(fromTk, fw);
+    }
+    // Concat fork output: from.path=["value"], target is not a pipe handle
+    if (
+      fw.from.path.length === 1 &&
+      fw.from.path[0] === "value" &&
+      pipeHandleTrunkKeys.has(fromTk) &&
+      !pipeHandleTrunkKeys.has(toTk)
+    ) {
+      fromOutMap.set(fromTk, fw);
     }
   }
 
@@ -363,6 +373,68 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (aWire) exprPipeWireSet.add(aWire);
   }
 
+  // ── Concat (template string) fork detection ────────────────────────────
+  // Detect __concat_* forks and collect their ordered parts wires.
+  type ConcatForkInfo = {
+    /** Ordered parts: either { kind: "text", value } or { kind: "ref", ref } */
+    parts: ({ kind: "text"; value: string } | { kind: "ref"; ref: NodeRef })[];
+  };
+  const concatForks = new Map<string, ConcatForkInfo>();
+  const concatPipeWireSet = new Set<Wire>(); // wires that belong to concat forks
+
+  for (const ph of bridge.pipeHandles ?? []) {
+    if (!ph.handle.startsWith("__concat_")) continue;
+    if (ph.baseTrunk.field !== "concat") continue;
+
+    // Collect parts.N wires (constant or pull)
+    const partsMap = new Map<number, { kind: "text"; value: string } | { kind: "ref"; ref: NodeRef }>();
+    for (const w of bridge.wires) {
+      const wTo = (w as any).to as NodeRef;
+      if (!wTo || refTrunkKey(wTo) !== ph.key) continue;
+      if (wTo.path.length !== 2 || wTo.path[0] !== "parts") continue;
+      const idx = parseInt(wTo.path[1], 10);
+      if (isNaN(idx)) continue;
+      if ("value" in w && !("from" in w)) {
+        partsMap.set(idx, { kind: "text", value: (w as any).value });
+      } else if ("from" in w) {
+        partsMap.set(idx, { kind: "ref", ref: (w as FW).from });
+      }
+      concatPipeWireSet.add(w);
+    }
+
+    // Build ordered parts array
+    const maxIdx = Math.max(...partsMap.keys(), -1);
+    const parts: ConcatForkInfo["parts"] = [];
+    for (let i = 0; i <= maxIdx; i++) {
+      const part = partsMap.get(i);
+      if (part) parts.push(part);
+    }
+    concatForks.set(ph.key, { parts });
+  }
+
+  /**
+   * Reconstruct a template string from a concat fork.
+   * Returns `"literal{ref}literal"` notation.
+   */
+  function reconstructTemplateString(forkTk: string): string | null {
+    const info = concatForks.get(forkTk);
+    if (!info || info.parts.length === 0) return null;
+
+    let result = "";
+    for (const part of info.parts) {
+      if (part.kind === "text") {
+        // Escape backslashes before braces first, then escape literal braces
+        result += part.value.replace(/\\/g, "\\\\").replace(/\{/g, "\\{");
+      } else {
+        const refStr = part.ref.element
+          ? "ITER." + serPath(part.ref.path)
+          : sRef(part.ref, true);
+        result += `{${refStr}}`;
+      }
+    }
+    return `"${result}"`;
+  }
+
   // ── Group element wires by array-destination field ──────────────────
   // Pull wires: from.element=true
   const elementPullWires = bridge.wires.filter(
@@ -380,10 +452,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // For a root-level array o <- src[], element paths are like ["name"]
   // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
   const elementPullAll = elementPullWires.filter(
-    (w) => !exprPipeWireSet.has(w) && !pipeWireSet.has(w),
+    (w) => !exprPipeWireSet.has(w) && !pipeWireSet.has(w) && !concatPipeWireSet.has(w),
   );
   const elementConstAll = elementConstWires.filter(
-    (w) => !exprPipeWireSet.has(w),
+    (w) => !exprPipeWireSet.has(w) && !concatPipeWireSet.has(w),
   );
 
   // Collect element-targeting expression output wires (from expression fork → element)
@@ -397,11 +469,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
 
-  // ── Exclude pipe, element-pull, element-const, expression-internal, and __local wires from main loop
+  // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, and __local wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
       !exprPipeWireSet.has(w) &&
+      !concatPipeWireSet.has(w) &&
       (!("from" in w) || !w.from.element) &&
       (!("value" in w) || !w.to.element) &&
       w.to.module !== "__local" &&
@@ -491,6 +564,18 @@ function serializeBridgeBlock(bridge: Bridge): string {
       elementExprWires.push({
         toPath: outWire.to.path,
         sourceStr: exprStr,
+      });
+    }
+  }
+
+  // Pre-compute element-targeting concat (template string) wires
+  for (const [tk, outWire] of fromOutMap.entries()) {
+    if (!concatForks.has(tk) || !outWire.to.element) continue;
+    const templateStr = reconstructTemplateString(tk);
+    if (templateStr) {
+      elementExprWires.push({
+        toPath: outWire.to.path,
+        sourceStr: templateStr,
       });
     }
   }
@@ -649,7 +734,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const fieldPath = eew.toPath.slice(pathDepth);
       const elemTo = "." + serPath(fieldPath);
       // Replace ITER. placeholder with actual iterator name
-      const src = eew.sourceStr.replace(/^ITER\./, parentIterName + ".");
+      const src = eew.sourceStr.replaceAll("ITER.", parentIterName + ".");
       lines.push(`${indent}${elemTo} <- ${src}`);
     }
 
@@ -894,6 +979,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
             ? ` ?? ${outWire.fallback}`
             : "";
         lines.push(`${destStr} <- ${exprStr}${nfb}${errf}`);
+      }
+      continue;
+    }
+
+    // ── Concat (template string) detection ───────────────────────────
+    if (concatForks.has(tk)) {
+      if (outWire.to.element) continue; // handled in serializeArrayElements
+      const templateStr = reconstructTemplateString(tk);
+      if (templateStr) {
+        const destStr = sRef(outWire.to, false);
+        const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
+        const errf = outWire.fallbackRef
+          ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
+          : outWire.fallback
+            ? ` ?? ${outWire.fallback}`
+            : "";
+        lines.push(`${destStr} <- ${templateStr}${nfb}${errf}`);
       }
       continue;
     }

@@ -562,4 +562,57 @@ bridge Query.searchTrains {
     ],
     context: `{}`,
   },
+  {
+    name: "String Interpolation",
+    description:
+      "Build strings from multiple sources using {…} template placeholders in pull wires",
+    schema: `
+type Query {
+  userProfile(firstName: String!, lastName: String!, id: ID!): UserProfile
+}
+
+type UserProfile {
+  greeting: String
+  fullName: String
+  profileUrl: String
+  badge: String
+}
+    `,
+    bridge: `version 1.4
+
+bridge Query.userProfile {
+  with input as i
+  with output as o
+
+  o.greeting <- "Hello, {i.firstName}!"
+  o.fullName <- "{i.firstName} {i.lastName}"
+  o.profileUrl <- "/users/{i.id}/profile"
+  o.badge <- "{i.firstName} (#{i.id})"
+}`,
+    queries: [
+      {
+        name: "Alice",
+        query: `{
+  userProfile(firstName: "Alice", lastName: "Smith", id: "42") {
+    greeting
+    fullName
+    profileUrl
+    badge
+  }
+}`,
+      },
+      {
+        name: "Bob",
+        query: `{
+  userProfile(firstName: "Bob", lastName: "Johnson", id: "99") {
+    greeting
+    fullName
+    profileUrl
+    badge
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];
