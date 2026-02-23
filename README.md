@@ -45,7 +45,7 @@ The playground is fully client-side. **Your API keys, schemas, and data are NEVE
 
 Want to run it offline or within your own VPN? You can spin up the playground locally by building the `./packages/playground` workspace directly from this repository.
 
-![Playground Screenshot](./docs/screenshot-playground.png)
+![Playground Screenshot](./docs/images/screenshot-playground.png)
 
 ## The Architecture
 
