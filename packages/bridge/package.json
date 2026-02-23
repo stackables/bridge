@@ -11,6 +11,9 @@
       "types": "./build/index.d.ts"
     }
   },
+  "bin": {
+    "bridge-lint": "./build/bridge-lint.js"
+  },
   "files": [
     "build",
     "README.md"
