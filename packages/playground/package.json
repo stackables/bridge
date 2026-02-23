@@ -9,9 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.2",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.12.1",
+    "@codemirror/lint": "^6.9.4",
     "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.15",
     "@lezer/highlight": "^1.2.3",
     "@radix-ui/react-dialog": "1.1.15",
     "@radix-ui/react-select": "2.2.6",
@@ -19,6 +22,7 @@
     "@stackables/bridge": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "cm6-graphql": "^0.2.1",
     "codemirror": "^6.0.2",
     "graphql": "^16",
     "lucide-react": "0.575.0",

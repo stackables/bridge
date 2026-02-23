@@ -3,23 +3,26 @@ export type Example = {
   description: string;
   schema: string;
   bridge: string;
-  query: string;
+  queries: { name: string; query: string }[];
   context: string;
 };
 
 export const examples: Example[] = [
   {
     name: "String Transform",
-    description: "Use std.upperCase and std.lowerCase to transform string fields using pipe syntax",
-    schema: /* GraphQL */ `type Query {
-  greet(name: String!): Greeting
-}
+    description:
+      "Use std.upperCase and std.lowerCase to transform string fields using pipe syntax",
+    schema: /* GraphQL */ `
+      type Query {
+        greet(name: String!): Greeting
+      }
 
-type Greeting {
-  message: String
-  upper: String
-  lower: String
-}`,
+      type Greeting {
+        message: String
+        upper: String
+        lower: String
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.greet {
@@ -32,27 +35,35 @@ bridge Query.greet {
   o.upper <- uc:i.name
   o.lower <- lc:i.name
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   greet(name: "Hello Bridge") {
     message
     upper
     lower
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "Constants",
-    description: "Hardcode constant values directly in bridge files using the = assignment syntax",
-    schema: /* GraphQL */ `type Query {
-  config: Config
-}
+    description:
+      "Hardcode constant values directly in bridge files using the = assignment syntax",
+    schema: /* GraphQL */ `
+      type Query {
+        config: Config
+      }
 
-type Config {
-  version: String
-  env: String
-  label: String
-}`,
+      type Config {
+        version: String
+        env: String
+        label: String
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.config {
@@ -62,26 +73,34 @@ bridge Query.config {
   o.env = "browser"
   o.label = "Bridge Playground"
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   config {
     version
     env
     label
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "Context",
-    description: "Access the GraphQL context inside bridge files using 'with context'",
-    schema: /* GraphQL */ `type Query {
-  profile: Profile
-}
+    description:
+      "Access the GraphQL context inside bridge files using 'with context'",
+    schema: /* GraphQL */ `
+      type Query {
+        profile: Profile
+      }
 
-type Profile {
-  userId: String
-  role: String
-}`,
+      type Profile {
+        userId: String
+        role: String
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.profile {
@@ -91,12 +110,17 @@ bridge Query.profile {
   o.userId <- ctx.user.id
   o.role <- ctx.user.role
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   profile {
     userId
     role
   }
 }`,
+      },
+    ],
     context: `{
   "user": {
     "id": "usr_42",
@@ -106,15 +130,18 @@ bridge Query.profile {
   },
   {
     name: "HTTP Tool",
-    description: "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
-    schema: /* GraphQL */ `type Query {
-  location(city: String!): Location
-}
+    description:
+      "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
+    schema: /* GraphQL */ `
+      type Query {
+        location(city: String!): Location
+      }
 
-type Location {
-  lat: Float
-  lon: Float
-}`,
+      type Location {
+        lat: Float
+        lon: Float
+      }
+    `,
     bridge: `version 1.4
 
 tool geo from std.httpCall {
@@ -133,48 +160,56 @@ bridge Query.location {
   o.lat <- geo[0].lat
   o.lon <- geo[0].lon
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   location(city: "Berlin") {
     lat
     lon
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "SBB Train Search",
-    description: "Query the Swiss public transport API to find train connections between two stations",
-    schema: /* GraphQL */ `type Station {
-  id: ID
-  name: String!
-}
+    description:
+      "Query the Swiss public transport API to find train connections between two stations",
+    schema: /* GraphQL */ `
+      type Station {
+        id: ID
+        name: String!
+      }
 
-type StopEvent {
-  station: Station!
-  plannedTime: String!
-  actualTime: String
-  delayMinutes: Int
-  platform: String
-}
+      type StopEvent {
+        station: Station!
+        plannedTime: String!
+        actualTime: String
+        delayMinutes: Int
+        platform: String
+      }
 
-type Leg {
-  origin: StopEvent!
-  destination: StopEvent!
-  trainName: String
-}
+      type Leg {
+        origin: StopEvent!
+        destination: StopEvent!
+        trainName: String
+      }
 
-type Journey {
-  id: ID!
-  provider: String!
-  departureTime: String!
-  arrivalTime: String!
-  transfers: Int!
-  legs: [Leg!]!
-}
+      type Journey {
+        id: ID!
+        provider: String!
+        departureTime: String!
+        arrivalTime: String!
+        transfers: Int!
+        legs: [Leg!]!
+      }
 
-type Query {
-  searchTrains(from: String!, to: String!): [Journey!]!
-}`,
+      type Query {
+        searchTrains(from: String!, to: String!): [Journey!]!
+      }
+    `,
     bridge: `version 1.4
 
 tool sbbApi from std.httpCall {
@@ -218,8 +253,11 @@ bridge Query.searchTrains {
     }
   }
 }`,
-    query: `{
-  searchTrains(from: "Bern", to: "Zürich") {
+    queries: [
+      {
+        name: "Bern \u2192 Z\u00fcrich",
+        query: `{
+  searchTrains(from: "Bern", to: "Z\u00fcrich") {
     id
     provider
     departureTime
@@ -240,19 +278,35 @@ bridge Query.searchTrains {
     }
   }
 }`,
+      },
+      {
+        name: "Z\u00fcrich \u2192 Gen\u00e8ve",
+        query: `{
+  searchTrains(from: "Z\u00fcrich", to: "Gen\u00e8ve") {
+    id
+    departureTime
+    arrivalTime
+    transfers
+  }
+}`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "Passthrough",
-    description: "Pass input arguments directly to output fields with no transformation",
-    schema: /* GraphQL */ `type Query {
-  echo(text: String!, count: Int): EchoResult
-}
+    description:
+      "Pass input arguments directly to output fields with no transformation",
+    schema: /* GraphQL */ `
+      type Query {
+        echo(text: String!, count: Int): EchoResult
+      }
 
-type EchoResult {
-  text: String
-  count: Int
-}`,
+      type EchoResult {
+        text: String
+        count: Int
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.echo {
@@ -262,26 +316,34 @@ bridge Query.echo {
   o.text <- i.text
   o.count <- i.count
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   echo(text: "Hello Bridge!", count: 42) {
     text
     count
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "Expressions",
-    description: "Use inline math and comparison operators to transform values directly in wire assignments",
-    schema: /* GraphQL */ `type Query {
-  pricing(dollars: Float!, quantity: Int!, minOrder: Float): PricingResult
-}
+    description:
+      "Use inline math and comparison operators to transform values directly in wire assignments",
+    schema: /* GraphQL */ `
+      type Query {
+        pricing(dollars: Float!, quantity: Int!, minOrder: Float): PricingResult
+      }
 
-type PricingResult {
-  cents: Float
-  total: Float
-  eligible: Boolean
-}`,
+      type PricingResult {
+        cents: Float
+        total: Float
+        eligible: Boolean
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.pricing {
@@ -292,27 +354,39 @@ bridge Query.pricing {
   o.total <- i.dollars * i.quantity
   o.eligible <- i.dollars * i.quantity >= 50
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   pricing(dollars: 9.99, quantity: 3) {
     cents
     total
     eligible
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
   {
     name: "Conditional Wire (Ternary)",
-    description: "Select between two sources based on a condition — only the chosen branch is evaluated",
-    schema: /* GraphQL */ `type Query {
-  pricing(isPro: Boolean!, proPrice: Float!, basicPrice: Float!): PricingResult
-}
+    description:
+      "Select between two sources based on a condition — only the chosen branch is evaluated",
+    schema: /* GraphQL */ `
+      type Query {
+        pricing(
+          isPro: Boolean!
+          proPrice: Float!
+          basicPrice: Float!
+        ): PricingResult
+      }
 
-type PricingResult {
-  tier: String
-  price: Float
-  discount: Float
-}`,
+      type PricingResult {
+        tier: String
+        price: Float
+        discount: Float
+      }
+    `,
     bridge: `version 1.4
 
 bridge Query.pricing {
@@ -328,13 +402,18 @@ bridge Query.pricing {
   # Source ref branches — selects proPrice or basicPrice
   o.price <- i.isPro ? i.proPrice : i.basicPrice
 }`,
-    query: `{
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
   pricing(isPro: true, proPrice: 49.99, basicPrice: 9.99) {
     tier
     price
     discount
   }
 }`,
+      },
+    ],
     context: `{}`,
   },
 ];

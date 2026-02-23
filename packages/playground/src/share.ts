@@ -8,7 +8,7 @@
 export interface SharePayload {
   schema: string;
   bridge: string;
-  query: string;
+  queries: { name: string; query: string }[];
   context: string;
 }
 
@@ -32,7 +32,17 @@ export async function loadShare(id: string): Promise<SharePayload> {
     const err = (await resp.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? `HTTP ${resp.status}`);
   }
-  return resp.json() as Promise<SharePayload>;
+  const raw = (await resp.json()) as Record<string, unknown>;
+  // Normalize legacy single-query payloads to the current multi-query format.
+  if (!raw.queries && typeof raw.query === "string") {
+    return {
+      schema: raw.schema as string,
+      bridge: raw.bridge as string,
+      queries: [{ name: "Query 1", query: raw.query }],
+      context: raw.context as string,
+    };
+  }
+  return raw as unknown as SharePayload;
 }
 
 /** Build the full share URL for a given ID. */

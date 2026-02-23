@@ -19,7 +19,11 @@ type Phase = "idle" | "loading" | "done" | "error";
 function hasContext(context: string): boolean {
   try {
     const parsed = JSON.parse(context.trim());
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
       return Object.keys(parsed).length > 0;
     }
   } catch {
@@ -28,7 +32,7 @@ function hasContext(context: string): boolean {
   return context.trim().length > 0 && context.trim() !== "{}";
 }
 
-export function ShareDialog({ schema, bridge, query, context }: Props) {
+export function ShareDialog({ schema, bridge, queries, context }: Props) {
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [url, setUrl] = useState("");
@@ -48,7 +52,7 @@ export function ShareDialog({ schema, bridge, query, context }: Props) {
   async function handleCreate() {
     setPhase("loading");
     try {
-      const id = await saveShare({ schema, bridge, query, context });
+      const id = await saveShare({ schema, bridge, queries, context });
       setUrl(shareUrl(id));
       setPhase("done");
     } catch (err) {
@@ -78,7 +82,11 @@ export function ShareDialog({ schema, bridge, query, context }: Props) {
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 px-3 text-xs gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-3 text-xs gap-1.5"
+        >
           <svg
             className="w-3.5 h-3.5"
             viewBox="0 0 24 24"
@@ -101,18 +109,20 @@ export function ShareDialog({ schema, bridge, query, context }: Props) {
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Share Playground</DialogTitle>
-          <DialogDescription className="sr-only">Create a shareable link to this playground state</DialogDescription>
+          <DialogDescription className="sr-only">
+            Create a shareable link to this playground state
+          </DialogDescription>
         </DialogHeader>
 
         <div className="p-5 flex flex-col gap-4">
-
           {/* Context warning */}
           {contextFilled && (
             <div className="flex gap-2.5 rounded-lg border border-amber-800 bg-amber-950/40 px-3.5 py-2.5 text-xs text-amber-300">
               <span className="shrink-0 mt-0.5">⚠</span>
               <span>
-                Your <strong>Context</strong> tab contains data and will be included in the shared link.
-                Remove any sensitive values (tokens, secrets) before sharing.
+                Your <strong>Context</strong> tab contains data and will be
+                included in the shared link. Remove any sensitive values
+                (tokens, secrets) before sharing.
               </span>
             </div>
           )}
@@ -121,8 +131,8 @@ export function ShareDialog({ schema, bridge, query, context }: Props) {
             <>
               <p className="text-sm text-slate-400">
                 Creates a permanent link to the current schema, bridge, query
-                {contextFilled ? ", and context" : ""}.
-                Anyone with the link can view and run this playground.
+                {contextFilled ? ", and context" : ""}. Anyone with the link can
+                view and run this playground.
               </p>
               <Button onClick={handleCreate} className="w-full">
                 Create share link
@@ -132,9 +142,24 @@ export function ShareDialog({ schema, bridge, query, context }: Props) {
 
           {phase === "loading" && (
             <Button disabled className="w-full">
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              <svg
+                className="animate-spin w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                />
               </svg>
               Creating link…
             </Button>

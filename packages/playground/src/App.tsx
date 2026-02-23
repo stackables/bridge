@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
 import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
+import { buildSchema, type GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,75 +33,135 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
   );
 }
 
-// ── diagnostics strip ─────────────────────────────────────────────────────────
-function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
-  const diagnostics = getDiagnostics(bridgeText).diagnostics;
-  if (diagnostics.length === 0) return null;
-  return (
-    <div className="shrink-0 border-t border-slate-800 bg-slate-950 px-3.5 py-1.5 flex flex-col gap-1">
-      {diagnostics.map((d, i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex gap-2 font-mono text-xs",
-            d.severity === "error" ? "text-red-300" : "text-yellow-200",
-          )}
-        >
-          <span className="opacity-60">
-            {d.severity === "error" ? "✗" : "⚠"}
-          </span>
-          <span>
-            {d.message} (line {d.range.start.line + 1})
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+// ── query tab type ────────────────────────────────────────────────────────────
+type QueryTab = { id: string; name: string; query: string };
+
+// ── extract GraphQL operation name from query text ───────────────────────────
+function extractOperationName(query: string): string | null {
+  // Named operation: query/mutation/subscription OpName
+  const named =
+    /^\s*(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/m.exec(
+      query,
+    );
+  if (named) return named[1]!;
+  // Anonymous shorthand { fieldName ... } — use first root field
+  const anon = /^\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)/m.exec(query);
+  if (anon) return anon[1]!;
+  return null;
 }
 
-// ── tab strip with Run button ─────────────────────────────────────────────────
-type Tab = "query" | "context";
-type TabStripProps = {
-  active: Tab;
-  onChange: (t: Tab) => void;
+// ── query tab bar ─────────────────────────────────────────────────────────────
+type QueryTabBarProps = {
+  queries: QueryTab[];
+  activeTabId: string;
+  onSelectTab: (id: string) => void;
+  onAddQuery: () => void;
+  onRemoveQuery: (id: string) => void;
   onRun: () => void;
   runDisabled: boolean;
   running: boolean;
 };
-function TabStrip({
-  active,
-  onChange,
+function QueryTabBar({
+  queries,
+  activeTabId,
+  onSelectTab,
+  onAddQuery,
+  onRemoveQuery,
   onRun,
   runDisabled,
   running,
-}: TabStripProps) {
-  const tab = (id: Tab, label: string) => (
-    <button
-      key={id}
-      onClick={() => onChange(id)}
-      className={cn(
-        "uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
-        active === id
-          ? "border-sky-400 text-slate-200"
-          : "border-transparent text-slate-500 hover:text-slate-300",
-      )}
-    >
-      {label}
-    </button>
-  );
+}: QueryTabBarProps) {
+  const isQueryTab = activeTabId !== "context";
+  const canRemove = queries.length > 1;
   return (
-    <div className="flex items-center shrink-0">
-      {tab("query", "Query")}
-      {tab("context", "Context")}
-      <div className="flex-1" />
-      <Button
-        size="sm"
-        onClick={onRun}
-        disabled={runDisabled}
-        className="text-xs h-7 px-3"
+    <div className="flex items-center shrink-0 gap-px overflow-x-auto scrollbar-none">
+      {/* Context tab — always first */}
+      <button
+        onClick={() => onSelectTab("context")}
+        className={cn(
+          "shrink-0 uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+          activeTabId === "context"
+            ? "border-sky-400 text-slate-200"
+            : "border-transparent text-slate-500 hover:text-slate-300",
+        )}
       >
-        {running ? "Running…" : "▶  Run"}
-      </Button>
+        Context
+      </button>
+
+      {/* One tab per query */}
+      {queries.map((q) => (
+        <div
+          key={q.id}
+          className={cn(
+            "group shrink-0 flex items-center border-b-2 -mb-px transition-colors",
+            activeTabId === q.id
+              ? "border-sky-400 text-slate-200"
+              : "border-transparent text-slate-500 hover:text-slate-300",
+          )}
+        >
+          <button
+            onClick={() => onSelectTab(q.id)}
+            className="uppercase px-3.5 py-1.5 text-xs font-medium whitespace-nowrap"
+          >
+            {q.name}
+          </button>
+          {canRemove && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveQuery(q.id);
+              }}
+              className="pr-2 -ml-1.5 text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+              title={`Close ${q.name}`}
+            >
+              <svg
+                className="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
+      ))}
+
+      {/* Add query button */}
+      <button
+        onClick={onAddQuery}
+        className="shrink-0 px-2 py-1.5 text-slate-600 hover:text-slate-300 transition-colors -mb-px border-b-2 border-transparent"
+        title="Add query"
+      >
+        <svg
+          className="w-3.5 h-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+
+      <div className="flex-1" />
+
+      {/* Run button — visible only when a query tab is active */}
+      {isQueryTab && (
+        <Button
+          size="sm"
+          onClick={onRun}
+          disabled={runDisabled}
+          className="shrink-0 text-xs h-7 px-3"
+        >
+          {running ? "Running…" : "▶  Run"}
+        </Button>
+      )}
     </div>
   );
 }
@@ -130,11 +191,36 @@ export function App() {
 
   const [schema, setSchema] = useState(ex.schema);
   const [bridge, setBridge] = useState(ex.bridge);
-  const [query, setQuery] = useState(ex.query);
   const [context, setContext] = useState(ex.context);
-  const [result, setResult] = useState<RunResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>("query");
+
+  // ── multi-query state ──
+  const queryCounterRef = useRef(ex.queries.length);
+  const [queries, setQueries] = useState<QueryTab[]>(() =>
+    ex.queries.map((q) => ({
+      id: crypto.randomUUID(),
+      name: q.name,
+      query: q.query,
+    })),
+  );
+  const [activeTabId, setActiveTabId] = useState<string>(
+    () => queries[0]?.id ?? "context",
+  );
+  const [results, setResults] = useState<Record<string, RunResult>>({});
+  const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
+
+  // Track the last active query so the result panel keeps showing when context tab is open
+  const lastQueryIdRef = useRef(queries[0]?.id);
+  if (activeTabId !== "context") lastQueryIdRef.current = activeTabId;
+  const displayQueryId =
+    activeTabId !== "context" ? activeTabId : lastQueryIdRef.current;
+  const displayResult = displayQueryId
+    ? (results[displayQueryId] ?? null)
+    : null;
+  const displayRunning = displayQueryId
+    ? runningIds.has(displayQueryId)
+    : false;
+
+  const activeQuery = queries.find((q) => q.id === activeTabId);
 
   // Load shared playground state from ?s=<id> on first mount
   useEffect(() => {
@@ -145,9 +231,17 @@ export function App() {
       .then((payload) => {
         setSchema(payload.schema);
         setBridge(payload.bridge);
-        setQuery(payload.query);
+        queryCounterRef.current = payload.queries.length;
+        const newQ = payload.queries.map((q) => ({
+          id: crypto.randomUUID(),
+          name: q.name,
+          query: q.query,
+        }));
+        setQueries(newQ);
         setContext(payload.context);
-        setResult(null);
+        setResults({});
+        setRunningIds(new Set());
+        setActiveTabId(newQ[0]?.id ?? "context");
       })
       .catch(() => {
         // silently ignore — invalid/expired share id
@@ -159,24 +253,93 @@ export function App() {
     setExampleIndex(index);
     setSchema(e.schema);
     setBridge(e.bridge);
-    setQuery(e.query);
+    queryCounterRef.current = e.queries.length;
+    const newQ = e.queries.map((q) => ({
+      id: crypto.randomUUID(),
+      name: q.name,
+      query: q.query,
+    }));
+    setQueries(newQ);
     setContext(e.context);
-    setResult(null);
+    setResults({});
+    setRunningIds(new Set());
+    setActiveTabId(newQ[0]?.id ?? "context");
   }, []);
 
+  const updateQuery = useCallback((id: string, text: string) => {
+    setQueries((prev) =>
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const opName = extractOperationName(text);
+        return { ...q, query: text, ...(opName ? { name: opName } : {}) };
+      }),
+    );
+  }, []);
+
+  const addQuery = useCallback(() => {
+    queryCounterRef.current += 1;
+    const tab: QueryTab = {
+      id: crypto.randomUUID(),
+      name: `Query ${queryCounterRef.current}`,
+      query: "",
+    };
+    setQueries((prev) => [...prev, tab]);
+    setActiveTabId(tab.id);
+  }, []);
+
+  const removeQuery = useCallback(
+    (id: string) => {
+      setQueries((prev) => {
+        if (prev.length <= 1) return prev;
+        const idx = prev.findIndex((q) => q.id === id);
+        const next = prev.filter((q) => q.id !== id);
+        if (activeTabId === id) {
+          const fallback =
+            next[Math.min(idx, next.length - 1)]?.id ?? "context";
+          setActiveTabId(fallback);
+        }
+        return next;
+      });
+      setResults((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    },
+    [activeTabId],
+  );
+
   const handleRun = useCallback(async () => {
-    setLoading(true);
-    setResult(null);
+    if (!activeQuery) return;
+    const qId = activeQuery.id;
+    const qText = activeQuery.query;
+    setRunningIds((prev) => new Set(prev).add(qId));
     try {
-      const r = await runBridge(schema, bridge, query, {}, context);
-      setResult(r);
+      const r = await runBridge(schema, bridge, qText, {}, context);
+      setResults((prev) => ({ ...prev, [qId]: r }));
     } finally {
-      setLoading(false);
+      setRunningIds((prev) => {
+        const next = new Set(prev);
+        next.delete(qId);
+        return next;
+      });
     }
-  }, [schema, bridge, query, context]);
+  }, [activeQuery, schema, bridge, context]);
 
   const diagnostics = getDiagnostics(bridge).diagnostics;
   const hasErrors = diagnostics.some((d) => d.severity === "error");
+  const isActiveRunning =
+    activeTabId !== "context" && runningIds.has(activeTabId);
+
+  // Build the GraphQL schema object for the query editor (autocomplete + linting).
+  // Returns undefined when the SDL is invalid so the query editor still works.
+  const graphqlSchema = useMemo<GraphQLSchema | undefined>(() => {
+    try {
+      return buildSchema(schema);
+    } catch {
+      return undefined;
+    }
+  }, [schema]);
 
   return (
     <div className="md:h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
@@ -225,7 +388,7 @@ export function App() {
             <ShareDialog
               schema={schema}
               bridge={bridge}
-              query={query}
+              queries={queries.map((q) => ({ name: q.name, query: q.query }))}
               context={context}
             />
           </div>
@@ -280,30 +443,24 @@ export function App() {
               autoHeight
             />
           </div>
-          <DiagnosticsBar bridgeText={bridge} />
         </div>
 
         {/* Query / Context panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <div className="shrink-0 px-5 pt-1.5">
-            <TabStrip
-              active={activeTab}
-              onChange={setActiveTab}
+            <QueryTabBar
+              queries={queries}
+              activeTabId={activeTabId}
+              onSelectTab={setActiveTabId}
+              onAddQuery={addQuery}
+              onRemoveQuery={removeQuery}
               onRun={handleRun}
-              runDisabled={loading || hasErrors}
-              running={loading}
+              runDisabled={isActiveRunning || hasErrors}
+              running={isActiveRunning}
             />
           </div>
           <div className="p-3 pt-2">
-            {activeTab === "query" ? (
-              <Editor
-                label=""
-                value={query}
-                onChange={setQuery}
-                language="graphql"
-                autoHeight
-              />
-            ) : (
+            {activeTabId === "context" ? (
               <Editor
                 label=""
                 value={context}
@@ -311,7 +468,17 @@ export function App() {
                 language="json"
                 autoHeight
               />
-            )}
+            ) : activeQuery ? (
+              <Editor
+                key={activeTabId}
+                label=""
+                value={activeQuery.query}
+                onChange={(v) => updateQuery(activeTabId, v)}
+                language="graphql-query"
+                graphqlSchema={graphqlSchema}
+                autoHeight
+              />
+            ) : null}
           </div>
         </div>
 
@@ -320,10 +487,11 @@ export function App() {
           <PanelLabel>Result</PanelLabel>
           <div className="px-3.5 pb-3.5 flex flex-col">
             <ResultView
-              result={result?.data}
-              errors={result?.errors}
-              loading={loading}
-              traces={result?.traces}
+              result={displayResult?.data}
+              errors={displayResult?.errors}
+              loading={displayRunning}
+              traces={displayResult?.traces}
+              logs={displayResult?.logs}
               autoHeight
             />
           </div>
@@ -373,7 +541,6 @@ export function App() {
                       language="bridge"
                     />
                   </div>
-                  <DiagnosticsBar bridgeText={bridge} />
                 </PanelBox>
               </Panel>
             </PanelGroup>
@@ -392,31 +559,36 @@ export function App() {
               <Panel defaultSize={40} minSize={15}>
                 <PanelBox>
                   <PanelLabel>
-                    <TabStrip
-                      active={activeTab}
-                      onChange={setActiveTab}
+                    <QueryTabBar
+                      queries={queries}
+                      activeTabId={activeTabId}
+                      onSelectTab={setActiveTabId}
+                      onAddQuery={addQuery}
+                      onRemoveQuery={removeQuery}
                       onRun={handleRun}
-                      runDisabled={loading || hasErrors}
-                      running={loading}
+                      runDisabled={isActiveRunning || hasErrors}
+                      running={isActiveRunning}
                     />
                   </PanelLabel>
 
                   <div className="flex-1 min-h-0 p-3 pt-0">
-                    {activeTab === "query" ? (
-                      <Editor
-                        label=""
-                        value={query}
-                        onChange={setQuery}
-                        language="graphql"
-                      />
-                    ) : (
+                    {activeTabId === "context" ? (
                       <Editor
                         label=""
                         value={context}
                         onChange={setContext}
                         language="json"
                       />
-                    )}
+                    ) : activeQuery ? (
+                      <Editor
+                        key={activeTabId}
+                        label=""
+                        value={activeQuery.query}
+                        onChange={(v) => updateQuery(activeTabId, v)}
+                        language="graphql-query"
+                        graphqlSchema={graphqlSchema}
+                      />
+                    ) : null}
                   </div>
                 </PanelBox>
               </Panel>
@@ -429,10 +601,11 @@ export function App() {
                   <PanelLabel>Result</PanelLabel>
                   <div className="flex-1 min-h-0 px-3.5 pb-3.5 overflow-hidden flex flex-col">
                     <ResultView
-                      result={result?.data}
-                      errors={result?.errors}
-                      loading={loading}
-                      traces={result?.traces}
+                      result={displayResult?.data}
+                      errors={displayResult?.errors}
+                      loading={displayRunning}
+                      traces={displayResult?.traces}
+                      logs={displayResult?.logs}
                     />
                   </div>
                 </PanelBox>
