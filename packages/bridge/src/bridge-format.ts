@@ -423,8 +423,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     let result = "";
     for (const part of info.parts) {
       if (part.kind === "text") {
-        // Escape literal braces
-        result += part.value.replace(/\{/g, "\\{");
+        // Escape backslashes before braces first, then escape literal braces
+        result += part.value.replace(/\\/g, "\\\\").replace(/\{/g, "\\{");
       } else {
         const refStr = part.ref.element
           ? "ITER." + serPath(part.ref.path)
