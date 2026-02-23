@@ -537,6 +537,16 @@ class BridgeParser extends CstParser {
           });
         },
       },
+      {
+        // Path scope block: .field { .subField <- source | .subField = value | ... }
+        ALT: () => {
+          this.CONSUME(LCurly, { LABEL: "elemScopeBlock" });
+          this.MANY3(() =>
+            this.SUBRULE(this.pathScopeLine, { LABEL: "elemScopeLine" }),
+          );
+          this.CONSUME(RCurly);
+        },
+      },
     ]);
   });
 
@@ -1720,6 +1730,306 @@ function processElementLines(
             pipe: true,
             ...lastAttrs,
           });
+        } else {
+          wires.push({ from: fromRef, to: elemToRef, ...lastAttrs });
+        }
+      }
+      wires.push(...fallbackInternalWires);
+    } else if (elemC.elemScopeBlock) {
+      // ── Path scope block inside array mapping: .field { .sub <- ... } ──
+      const scopeLines = subs(elemLine, "elemScopeLine");
+      processElementScopeLines(
+        scopeLines,
+        elemToPath,
+        [],
+        iterName,
+        bridgeType,
+        bridgeField,
+        wires,
+        buildSourceExpr,
+        extractCoalesceAlt,
+        desugarExprChain,
+        extractTernaryBranchFn,
+        desugarTemplateStringFn,
+      );
+    }
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recursively flatten path-scope blocks (`pathScopeLine` CST nodes) that
+ * appear inside an array-mapping block.  Mirrors `processScopeLines` in
+ * `buildBridgeBody` but emits element-context wires (same as
+ * `processElementLines`).
+ */
+function processElementScopeLines(
+  scopeLines: CstNode[],
+  arrayToPath: string[],
+  pathPrefix: string[],
+  iterName: string,
+  bridgeType: string,
+  bridgeField: string,
+  wires: Wire[],
+  buildSourceExpr: (node: CstNode, lineNum: number) => NodeRef,
+  extractCoalesceAlt: (
+    altNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ) => { literal: string } | { sourceRef: NodeRef },
+  desugarExprChain?: (
+    leftRef: NodeRef,
+    exprOps: CstNode[],
+    exprRights: CstNode[],
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
+  extractTernaryBranchFn?: (
+    branchNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  desugarTemplateStringFn?: (
+    segs: TemplateSeg[],
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
+): void {
+  /** Wrap extractCoalesceAlt with iterator-relative source awareness. */
+  function extractCoalesceAltIterAware(
+    altNode: CstNode,
+    lineNum: number,
+  ): { literal: string } | { sourceRef: NodeRef } {
+    const c = altNode.children;
+    if (c.sourceAlt) {
+      const srcNode = (c.sourceAlt as CstNode[])[0];
+      const headNode = sub(srcNode, "head");
+      if (headNode) {
+        const { root, segments } = extractAddressPath(headNode);
+        const pipeSegs = subs(srcNode, "pipeSegment");
+        if (root === iterName && pipeSegs.length === 0) {
+          return {
+            sourceRef: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: segments,
+            },
+          };
+        }
+      }
+    }
+    return extractCoalesceAlt(altNode, lineNum, iterName);
+  }
+
+  for (const scopeLine of scopeLines) {
+    const sc = scopeLine.children;
+    const scopeLineNum = line(findFirstToken(scopeLine));
+    const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
+    const scopeSegs = parsePath(targetStr);
+    const fullSegs = [...pathPrefix, ...scopeSegs];
+
+    // ── Nested scope: .field { ... } ──
+    const nestedScopeLines = subs(scopeLine, "pathScopeLine");
+    if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+      processElementScopeLines(
+        nestedScopeLines,
+        arrayToPath,
+        fullSegs,
+        iterName,
+        bridgeType,
+        bridgeField,
+        wires,
+        buildSourceExpr,
+        extractCoalesceAlt,
+        desugarExprChain,
+        extractTernaryBranchFn,
+        desugarTemplateStringFn,
+      );
+      continue;
+    }
+
+    const elemToPath = [...arrayToPath, ...fullSegs];
+
+    // ── Constant wire: .field = value ──
+    if (sc.scopeEquals) {
+      const value = extractBareValue(sub(scopeLine, "scopeValue")!);
+      wires.push({
+        value,
+        to: {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: elemToPath,
+        },
+      });
+      continue;
+    }
+
+    // ── Pull wire: .field <- source [modifiers] ──
+    if (sc.scopeArrow) {
+      const elemToRef: NodeRef = {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        path: elemToPath,
+      };
+
+      // String source (template or plain): .field <- "..."
+      const stringSourceToken = (sc.scopeStringSource as IToken[] | undefined)?.[0];
+      if (stringSourceToken && desugarTemplateStringFn) {
+        const raw = stringSourceToken.image.slice(1, -1);
+        const segs = parseTemplateString(raw);
+
+        let nullFallback: string | undefined;
+        const nullAltRefs: NodeRef[] = [];
+        for (const alt of subs(scopeLine, "scopeNullAlt")) {
+          const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
+          if ("literal" in altResult) nullFallback = altResult.literal;
+          else nullAltRefs.push(altResult.sourceRef);
+        }
+        let fallback: string | undefined;
+        let fallbackRef: NodeRef | undefined;
+        let fallbackInternalWires: Wire[] = [];
+        const errorAlt = sub(scopeLine, "scopeErrorAlt");
+        if (errorAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAltIterAware(errorAlt, scopeLineNum);
+          if ("literal" in altResult) fallback = altResult.literal;
+          else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+        }
+        const lastAttrs = {
+          ...(nullFallback ? { nullFallback } : {}),
+          ...(fallback ? { fallback } : {}),
+          ...(fallbackRef ? { fallbackRef } : {}),
+        };
+        if (segs) {
+          const concatOutRef = desugarTemplateStringFn(segs, scopeLineNum, iterName);
+          wires.push({ from: concatOutRef, to: { ...elemToRef, element: true }, pipe: true, ...lastAttrs });
+        } else {
+          wires.push({ value: raw, to: elemToRef, ...lastAttrs });
+        }
+        for (const ref of nullAltRefs) wires.push({ from: ref, to: elemToRef });
+        wires.push(...fallbackInternalWires);
+        continue;
+      }
+
+      // Normal source expression
+      const scopeSourceNode = sub(scopeLine, "scopeSource")!;
+      const scopeHeadNode = sub(scopeSourceNode, "head")!;
+      const scopePipeSegs = subs(scopeSourceNode, "pipeSegment");
+      const { root: srcRoot, segments: srcSegs } = extractAddressPath(scopeHeadNode);
+
+      const exprOps = subs(scopeLine, "scopeExprOp");
+      let condRef: NodeRef;
+      let condIsPipeFork: boolean;
+      if (exprOps.length > 0 && desugarExprChain) {
+        const exprRights = subs(scopeLine, "scopeExprRight");
+        let leftRef: NodeRef;
+        if (srcRoot === iterName && scopePipeSegs.length === 0) {
+          leftRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: srcSegs,
+          };
+        } else {
+          leftRef = buildSourceExpr(scopeSourceNode, scopeLineNum);
+        }
+        condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum, iterName);
+        condIsPipeFork = true;
+      } else if (srcRoot === iterName && scopePipeSegs.length === 0) {
+        condRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: srcSegs,
+        };
+        condIsPipeFork = false;
+      } else {
+        condRef = buildSourceExpr(scopeSourceNode, scopeLineNum);
+        condIsPipeFork =
+          condRef.instance != null &&
+          condRef.path.length === 0 &&
+          scopePipeSegs.length > 0;
+      }
+
+      // Ternary wire: .field <- cond ? then : else
+      const scopeTernaryOp = (sc.scopeTernaryOp as IToken[] | undefined)?.[0];
+      if (scopeTernaryOp && extractTernaryBranchFn) {
+        const thenNode = sub(scopeLine, "scopeThenBranch")!;
+        const elseNode = sub(scopeLine, "scopeElseBranch")!;
+        const thenBranch = extractTernaryBranchFn(thenNode, scopeLineNum, iterName);
+        const elseBranch = extractTernaryBranchFn(elseNode, scopeLineNum, iterName);
+
+        let nullFallback: string | undefined;
+        const nullAltRefs: NodeRef[] = [];
+        for (const alt of subs(scopeLine, "scopeNullAlt")) {
+          const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
+          if ("literal" in altResult) nullFallback = altResult.literal;
+          else nullAltRefs.push(altResult.sourceRef);
+        }
+        let fallback: string | undefined;
+        let fallbackRef: NodeRef | undefined;
+        let fallbackInternalWires: Wire[] = [];
+        const errorAlt = sub(scopeLine, "scopeErrorAlt");
+        if (errorAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAltIterAware(errorAlt, scopeLineNum);
+          if ("literal" in altResult) fallback = altResult.literal;
+          else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+        }
+        wires.push({
+          cond: condRef,
+          ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+          ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+          ...(nullFallback !== undefined ? { nullFallback } : {}),
+          ...(fallback !== undefined ? { fallback } : {}),
+          ...(fallbackRef !== undefined ? { fallbackRef } : {}),
+          to: elemToRef,
+        });
+        for (const ref of nullAltRefs) wires.push({ from: ref, to: elemToRef });
+        wires.push(...fallbackInternalWires);
+        continue;
+      }
+
+      const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
+      sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
+
+      let nullFallback: string | undefined;
+      for (const alt of subs(scopeLine, "scopeNullAlt")) {
+        const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
+        if ("literal" in altResult) nullFallback = altResult.literal;
+        else sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
+      }
+
+      let fallback: string | undefined;
+      let fallbackRef: NodeRef | undefined;
+      let fallbackInternalWires: Wire[] = [];
+      const errorAlt = sub(scopeLine, "scopeErrorAlt");
+      if (errorAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAltIterAware(errorAlt, scopeLineNum);
+        if ("literal" in altResult) fallback = altResult.literal;
+        else { fallbackRef = altResult.sourceRef; fallbackInternalWires = wires.splice(preLen); }
+      }
+
+      for (let ci = 0; ci < sourceParts.length; ci++) {
+        const { ref: fromRef, isPipeFork: isPipe } = sourceParts[ci];
+        const isLast = ci === sourceParts.length - 1;
+        const lastAttrs = isLast
+          ? {
+              ...(nullFallback ? { nullFallback } : {}),
+              ...(fallback ? { fallback } : {}),
+              ...(fallbackRef ? { fallbackRef } : {}),
+            }
+          : {};
+        if (isPipe) {
+          wires.push({ from: fromRef, to: elemToRef, pipe: true, ...lastAttrs });
         } else {
           wires.push({ from: fromRef, to: elemToRef, ...lastAttrs });
         }
