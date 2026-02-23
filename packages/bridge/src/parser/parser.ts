@@ -2687,10 +2687,10 @@ function buildBridgeBody(
             element: true,
             path: segments,
           };
-          wires.push({ from: fromRef, to: partRef, pipe: true });
+          wires.push({ from: fromRef, to: partRef });
         } else {
           const fromRef = resolveAddress(root, segments, lineNum);
-          wires.push({ from: fromRef, to: partRef, pipe: true });
+          wires.push({ from: fromRef, to: partRef });
         }
       }
     }
