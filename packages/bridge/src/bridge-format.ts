@@ -2,7 +2,6 @@ import type {
   Bridge,
   ConstDef,
   DefineDef,
-  ExprOperand,
   Instruction,
   NodeRef,
   ToolDef,
@@ -309,6 +308,36 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
+  // ── Expression fork detection ──────────────────────────────────────────
+  // Operator tool name → infix operator symbol
+  const FN_TO_OP: Record<string, string> = {
+    multiply: "*", divide: "/", add: "+", subtract: "-",
+    eq: "==", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=",
+  };
+  // Collect expression fork metadata: forkTk → { op, bWire, aWire }
+  type ExprForkInfo = { op: string; bWire: Wire | undefined; aWire: FW | undefined };
+  const exprForks = new Map<string, ExprForkInfo>();
+  const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
+
+  for (const ph of bridge.pipeHandles ?? []) {
+    if (!ph.handle.startsWith("__expr_")) continue;
+    const op = FN_TO_OP[ph.baseTrunk.field];
+    if (!op) continue;
+
+    // Find the .a and .b wires for this fork
+    let aWire: FW | undefined;
+    let bWire: Wire | undefined;
+    for (const w of bridge.wires) {
+      const wTo = (w as any).to as NodeRef;
+      if (!wTo || refTrunkKey(wTo) !== ph.key || wTo.path.length !== 1) continue;
+      if (wTo.path[0] === "a" && "from" in w) aWire = w as FW;
+      else if (wTo.path[0] === "b") bWire = w;
+    }
+    exprForks.set(ph.key, { op, bWire, aWire });
+    if (bWire) exprPipeWireSet.add(bWire);
+    if (aWire) exprPipeWireSet.add(aWire);
+  }
+
   // ── Group element wires by array-destination field ──────────────────
   // Pull wires: from.element=true
   const elementPullWires = bridge.wires.filter(
@@ -320,32 +349,32 @@ function serializeBridgeBlock(bridge: Bridge): string {
     (w): w is Extract<Wire, { value: string }> =>
       "value" in w && !!w.to.element,
   );
-  // Expression wires: "expr" in w && to.element=true
-  type ExprWire = Extract<Wire, { expr: any }>;
-  const elementExprWires = bridge.wires.filter(
-    (w): w is ExprWire =>
-      "expr" in w && !!w.to.element,
-  );
 
   // Build grouped maps keyed by the full array-destination path (to.path joined)
   // For a 1-level array o.items <- src[], element paths are like ["items", "name"]
   // For a root-level array o <- src[], element paths are like ["name"]
   // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
-  const elementPullAll = [...elementPullWires];
-  const elementConstAll = [...elementConstWires];
-  const elementExprAll = [...elementExprWires];
+  const elementPullAll = elementPullWires.filter((w) => !exprPipeWireSet.has(w));
+  const elementConstAll = elementConstWires.filter((w) => !exprPipeWireSet.has(w));
+
+  // Collect element-targeting expression output wires (from expression fork → element)
+  type ElementExprInfo = {
+    toPath: string[];
+    sourceStr: string; // fully serialized expression string
+  };
+  const elementExprWires: ElementExprInfo[] = [];
 
   // Detect array source wires: a regular wire whose to.path (joined) matches
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
 
-  // ── Exclude pipe, element-pull, element-const, and element-expr wires from main loop
+  // ── Exclude pipe, element-pull, element-const, and expression-internal wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
+      !exprPipeWireSet.has(w) &&
       (!("from" in w) || !w.from.element) &&
-      (!("value" in w) || !w.to.element) &&
-      (!("expr" in w) || !w.to.element),
+      (!("value" in w) || !w.to.element),
   );
 
   const serializedArrays = new Set<string>();
@@ -364,15 +393,51 @@ function serializeBridgeBlock(bridge: Bridge): string {
       outputHandle,
     );
 
-  // ── Helper: serialize an expression operand ────────────────────────────
-  const sOperand = (operand: ExprOperand): string => {
-    if (operand.kind === "ref") return sRef(operand.ref, true);
-    if (operand.value === null) return "null";
-    if (operand.value === true) return "true";
-    if (operand.value === false) return "false";
-    if (typeof operand.value === "string") return `"${operand.value}"`;
-    return String(operand.value);
-  };
+  // ── Pre-compute element expression wires ────────────────────────────
+  // Walk expression chains from fromOutMap that target element refs
+  for (const [tk, outWire] of fromOutMap.entries()) {
+    if (!exprForks.has(tk) || !outWire.to.element) continue;
+
+    const exprParts: { op: string; right: string }[] = [];
+    let currentTk = tk;
+    let actualSourceRef: NodeRef | null = null;
+
+    while (exprForks.has(currentTk)) {
+      const info = exprForks.get(currentTk)!;
+      let rightStr: string;
+      if (info.bWire && "value" in info.bWire) {
+        rightStr = info.bWire.value;
+      } else if (info.bWire && "from" in info.bWire) {
+        rightStr = sRef((info.bWire as FW).from, true);
+      } else {
+        rightStr = "0";
+      }
+      exprParts.push({ op: info.op, right: rightStr });
+      const aWire = info.aWire;
+      if (!aWire) break;
+      const fromTk = refTrunkKey(aWire.from);
+      if (aWire.from.path.length === 0 && exprForks.has(fromTk)) {
+        currentTk = fromTk;
+      } else {
+        actualSourceRef = aWire.from;
+        break;
+      }
+    }
+
+    if (actualSourceRef && exprParts.length > 0) {
+      const sourceStr = actualSourceRef.element
+        ? "ITER." + serPath(actualSourceRef.path)
+        : sRef(actualSourceRef, true);
+      const exprStr = exprParts
+        .reverse()
+        .map(({ op, right }) => `${op} ${right}`)
+        .join(" ");
+      elementExprWires.push({
+        toPath: outWire.to.path,
+        sourceStr: `${sourceStr} ${exprStr}`,
+      });
+    }
+  }
 
   /**
    * Recursively serialize element wires for an array mapping block.
@@ -474,23 +539,18 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Emit expression element wires at this level
-    const levelExprs = elementExprAll.filter((ew) => {
-      if (ew.to.path.length !== pathDepth + 1) return false;
+    for (const eew of elementExprWires) {
+      if (eew.toPath.length !== pathDepth + 1) continue;
+      let match = true;
       for (let i = 0; i < pathDepth; i++) {
-        if (ew.to.path[i] !== arrayPath[i]) return false;
+        if (eew.toPath[i] !== arrayPath[i]) { match = false; break; }
       }
-      return true;
-    });
-    for (const ew of levelExprs) {
-      const fieldPath = ew.to.path.slice(pathDepth);
+      if (!match) continue;
+      const fieldPath = eew.toPath.slice(pathDepth);
       const elemTo = "." + serPath(fieldPath);
-      const leftStr = ew.expr.left.kind === "ref" && ew.expr.left.ref.element
-        ? parentIterName + "." + serPath(ew.expr.left.ref.path)
-        : sOperand(ew.expr.left);
-      const rightStr = ew.expr.right.kind === "ref" && ew.expr.right.ref.element
-        ? parentIterName + "." + serPath(ew.expr.right.ref.path)
-        : sOperand(ew.expr.right);
-      lines.push(`${indent}${elemTo} <- ${leftStr} ${ew.expr.op} ${rightStr}`);
+      // Replace ITER. placeholder with actual iterator name
+      const src = eew.sourceStr.replace(/^ITER\./, parentIterName + ".");
+      lines.push(`${indent}${elemTo} <- ${src}`);
     }
   }
 
@@ -499,16 +559,6 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if ("value" in w) {
       const toStr = sRef(w.to, false);
       lines.push(`${toStr} = "${w.value}"`);
-      continue;
-    }
-
-    // Expression wire
-    if ("expr" in w) {
-      const toStr = sRef(w.to, false);
-      const arrow = w.force ? "<-!" : "<-";
-      const leftStr = sOperand(w.expr.left);
-      const rightStr = sOperand(w.expr.right);
-      lines.push(`${toStr} ${arrow} ${leftStr} ${w.expr.op} ${rightStr}`);
       continue;
     }
 
@@ -542,6 +592,57 @@ function serializeBridgeBlock(bridge: Bridge): string {
   for (const [tk, outWire] of fromOutMap.entries()) {
     if (pipeHandleTrunkKeys.has(refTrunkKey(outWire.to))) continue;
 
+    // ── Expression chain detection ────────────────────────────────────
+    // If the outermost fork is an expression fork, walk the chain backward
+    // collecting operators and operands to produce infix notation.
+    if (exprForks.has(tk)) {
+      // Element-targeting expressions are handled in serializeArrayElements
+      if (outWire.to.element) continue;
+      const exprParts: { op: string; right: string }[] = [];
+      let currentTk = tk;
+      let actualSourceRef: NodeRef | null = null;
+      let chainForced = !!outWire.force;
+
+      while (exprForks.has(currentTk)) {
+        const info = exprForks.get(currentTk)!;
+        // Serialize the right operand
+        let rightStr: string;
+        if (info.bWire && "value" in info.bWire) {
+          rightStr = info.bWire.value;
+        } else if (info.bWire && "from" in info.bWire) {
+          rightStr = sRef((info.bWire as FW).from, true);
+        } else {
+          rightStr = "0";
+        }
+        exprParts.push({ op: info.op, right: rightStr });
+
+        // Walk backward via the .a input wire
+        const aWire = info.aWire;
+        if (aWire?.force) chainForced = true;
+        if (!aWire) break;
+        const fromTk = refTrunkKey(aWire.from);
+        if (aWire.from.path.length === 0 && exprForks.has(fromTk)) {
+          currentTk = fromTk;
+        } else {
+          actualSourceRef = aWire.from;
+          break;
+        }
+      }
+
+      if (actualSourceRef && exprParts.length > 0) {
+        const destStr = sRef(outWire.to, false);
+        const arrow = chainForced ? "<-!" : "<-";
+        const sourceStr = sRef(actualSourceRef, true);
+        const exprStr = exprParts
+          .reverse()
+          .map(({ op, right }) => `${op} ${right}`)
+          .join(" ");
+        lines.push(`${destStr} ${arrow} ${sourceStr} ${exprStr}`);
+      }
+      continue;
+    }
+
+    // ── Normal pipe chain ─────────────────────────────────────────────
     const handleChain: string[] = [];
     let currentTk = tk;
     let actualSourceRef: NodeRef | null = null;

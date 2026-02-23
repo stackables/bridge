@@ -63,8 +63,6 @@ import type {
   ToolDep,
   ToolWire,
   Wire,
-  ExprOp,
-  ExprOperand,
 } from "../types.js";
 import { SELF_MODULE } from "../types.js";
 
@@ -344,10 +342,9 @@ class BridgeParser extends CstParser {
   });
 
   /**
-   * Merged bridge wire (constant, pull, or expression):
+   * Merged bridge wire (constant or pull/expression):
    *   target = value
-   *   target <-[!] sourceExpr [op operand]
-   *   target <-[!] sourceExpr [[] as iter { ...elements... }]
+   *   target <-[!] sourceExpr [op operand]* [[] as iter { ...elements... }]
    *                           [|| alt]* [?? fallback]
    */
   public bridgeWire = this.RULE("bridgeWire", () => {
@@ -361,15 +358,15 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Pull wire: target <-[!] sourceExpr [modifiers]
+        // Pull wire: target <-[!] sourceExpr [op operand]* [modifiers]
         ALT: () => {
           this.OR2([
             { ALT: () => this.CONSUME(Arrow, { LABEL: "arrow" }) },
             { ALT: () => this.CONSUME(ForceArrow, { LABEL: "forceArrow" }) },
           ]);
           this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
-          // Optional expression operator + operand
-          this.OPTION3(() => {
+          // Optional expression chain: operator + operand, repeatable
+          this.MANY2(() => {
             this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
             this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
           });
@@ -404,7 +401,7 @@ class BridgeParser extends CstParser {
   /**
    * Element line inside array mapping:
    *   .field = value
-   *   .field <- source [op operand]
+   *   .field <- source [op operand]*
    *   .field <- source [|| ...] [?? ...]
    *   .field <- source[] as iter { ...nested elements... }   (nested array)
    */
@@ -422,8 +419,8 @@ class BridgeParser extends CstParser {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "elemArrow" });
           this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
-          // Optional expression operator + operand
-          this.OPTION3(() => {
+          // Optional expression chain
+          this.MANY2(() => {
             this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
             this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
           });
@@ -1111,8 +1108,15 @@ function processElementLines(
     altNode: CstNode,
     lineNum: number,
   ) => { literal: string } | { sourceRef: NodeRef },
-  extractExprOp?: (opNode: CstNode) => ExprOp,
-  extractExprOperand?: (operandNode: CstNode, lineNum: number) => ExprOperand,
+  desugarExprChain?: (
+    leftRef: NodeRef,
+    exprOps: CstNode[],
+    exprRights: CstNode[],
+    lineNum: number,
+    isElement?: boolean,
+    iterName?: string,
+    arrayToPath?: string[],
+  ) => NodeRef,
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1175,31 +1179,25 @@ function processElementLines(
       const { root: elemSrcRoot, segments: elemSrcSegs } =
         extractAddressPath(elemHeadNode);
 
-      // ── Expression wire: .field <- source op operand ──
-      const elemExprOpNode = sub(elemLine, "elemExprOp");
-      if (elemExprOpNode && extractExprOp && extractExprOperand) {
-        const op = extractExprOp(elemExprOpNode);
-        const rightOperand = extractExprOperand(sub(elemLine, "elemExprRight")!, elemLineNum);
-        let leftOperand: ExprOperand;
+      // ── Expression desugaring in element lines ──
+      const elemExprOps = subs(elemLine, "elemExprOp");
+      if (elemExprOps.length > 0 && desugarExprChain) {
+        const elemExprRights = subs(elemLine, "elemExprRight");
+        let leftRef: NodeRef;
         if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-          leftOperand = {
-            kind: "ref",
-            ref: {
-              module: SELF_MODULE,
-              type: bridgeType,
-              field: bridgeField,
-              element: true,
-              path: elemSrcSegs,
-            },
+          leftRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemSrcSegs,
           };
         } else {
-          leftOperand = {
-            kind: "ref",
-            ref: buildSourceExpr(elemSourceNode, elemLineNum, false),
-          };
+          leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
         }
+        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, true, iterName, arrayToPath);
         wires.push({
-          expr: { op, left: leftOperand, right: rightOperand },
+          from: resultRef,
           to: {
             module: SELF_MODULE,
             type: bridgeType,
@@ -1207,6 +1205,7 @@ function processElementLines(
             element: true,
             path: elemToPath,
           },
+          pipe: true,
         });
         continue;
       }
@@ -1257,8 +1256,7 @@ function processElementLines(
           arrayIterators,
           buildSourceExpr,
           extractCoalesceAlt,
-          extractExprOp,
-          extractExprOperand,
+          desugarExprChain,
         );
         continue;
       }
@@ -1966,9 +1964,15 @@ function buildBridgeBody(
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);
   }
 
-  // ── Helper: extract expression operator ────────────────────────────────
+  // ── Helper: operator symbol → std tool function name ──────────────────
 
-  function extractExprOp(opNode: CstNode): ExprOp {
+  /** Map infix operator token to the std tool that implements it. */
+  const OP_TO_FN: Record<string, string> = {
+    "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
+    "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+  };
+
+  function extractExprOpStr(opNode: CstNode): string {
     const c = opNode.children;
     if (c.star) return "*";
     if (c.slash) return "/";
@@ -1983,29 +1987,138 @@ function buildBridgeBody(
     throw new Error("Invalid expression operator");
   }
 
-  // ── Helper: extract expression operand ─────────────────────────────────
-
-  function extractExprOperand(
+  /**
+   * Resolve an exprOperand CST node to either a NodeRef (source) or
+   * a literal string value suitable for a constant wire.
+   */
+  function resolveExprOperand(
     operandNode: CstNode,
     lineNum: number,
-  ): ExprOperand {
+    iterName?: string,
+  ): { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string } {
     const c = operandNode.children;
-    if (c.numberLit) {
-      return { kind: "literal", value: Number((c.numberLit as IToken[])[0].image) };
-    }
+    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       return { kind: "literal", value: raw.slice(1, -1) };
     }
-    if (c.trueLit) return { kind: "literal", value: true };
-    if (c.falseLit) return { kind: "literal", value: false };
-    if (c.nullLit) return { kind: "literal", value: null };
+    if (c.trueLit) return { kind: "literal", value: "1" };
+    if (c.falseLit) return { kind: "literal", value: "0" };
+    if (c.nullLit) return { kind: "literal", value: "0" };
     if (c.sourceRef) {
       const srcNode = (c.sourceRef as CstNode[])[0];
+
+      // Check for element/iterator-relative refs
+      if (iterName) {
+        const headNode = sub(srcNode, "head")!;
+        const pipeSegs = subs(srcNode, "pipeSegment");
+        const { root, segments } = extractAddressPath(headNode);
+        if (root === iterName && pipeSegs.length === 0) {
+          return {
+            kind: "ref",
+            ref: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: segments,
+            },
+          };
+        }
+      }
+
       const ref = buildSourceExpr(srcNode, lineNum, false);
       return { kind: "ref", ref };
     }
     throw new Error(`Line ${lineNum}: Invalid expression operand`);
+  }
+
+  /**
+   * Desugar an infix expression chain into synthetic tool wires.
+   *
+   * Given:  leftRef * rightOperand / 10 > 5
+   * Emits synthetic tools and wires, returns a NodeRef pointing to the
+   * final synthetic tool's output (the result).
+   *
+   * Each step creates a synthetic tool fork (like pipe desugaring):
+   *   __expr fork instance → { a: left, b: right } → result
+   */
+  function desugarExprChain(
+    leftRef: NodeRef,
+    exprOps: CstNode[],
+    exprRights: CstNode[],
+    lineNum: number,
+    _isElement?: boolean,
+    iterName?: string,
+    _arrayToPath?: string[],
+  ): NodeRef {
+    let currentRef = leftRef;
+
+    for (let i = 0; i < exprOps.length; i++) {
+      const opStr = extractExprOpStr(exprOps[i]);
+      const fnName = OP_TO_FN[opStr];
+      if (!fnName) throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
+
+      const rightOperand = resolveExprOperand(exprRights[i], lineNum, iterName);
+
+      // Create a synthetic fork instance for this expression step
+      const forkInstance = 100000 + nextForkSeq++;
+      const forkTrunkModule = SELF_MODULE;
+      const forkTrunkType = "Tools";
+      const forkTrunkField = fnName;
+
+      const forkKey = `${forkTrunkModule}:${forkTrunkType}:${forkTrunkField}:${forkInstance}`;
+
+      // Register the fork as a pipe handle (so the engine can look it up)
+      pipeHandleEntries.push({
+        key: forkKey,
+        handle: `__expr_${forkInstance}`,
+        baseTrunk: {
+          module: forkTrunkModule,
+          type: forkTrunkType,
+          field: forkTrunkField,
+        },
+      });
+
+      // Wire: currentRef → fork.a
+      const forkARef: NodeRef = {
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+        instance: forkInstance,
+        path: ["a"],
+      };
+      wires.push({
+        from: currentRef,
+        to: forkARef,
+        pipe: true,
+      });
+
+      // Wire: rightOperand → fork.b
+      const forkBRef: NodeRef = {
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+        instance: forkInstance,
+        path: ["b"],
+      };
+      if (rightOperand.kind === "literal") {
+        wires.push({ value: rightOperand.value, to: forkBRef });
+      } else {
+        wires.push({ from: rightOperand.ref, to: forkBRef, pipe: true });
+      }
+
+      // The result of this step is the fork's root ref
+      currentRef = {
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+        instance: forkInstance,
+        path: [],
+      };
+    }
+
+    return currentRef;
   }
 
   // ── Step 2: Process wire lines ─────────────────────────────────────────
@@ -2037,17 +2150,17 @@ function buildBridgeBody(
     // ── Pull wire: target <-[!] source [modifiers] ──
     const force = !!wc.forceArrow;
 
-    // ── Expression wire: target <- source op operand ──
-    const exprOpNode = sub(wireNode, "exprOp");
-    if (exprOpNode) {
+    // ── Expression desugaring: target <- source op operand [op operand]* ──
+    const exprOps = subs(wireNode, "exprOp");
+    if (exprOps.length > 0) {
+      const exprRights = subs(wireNode, "exprRight");
       const firstSourceNode = sub(wireNode, "firstSource")!;
       const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
-      const op = extractExprOp(exprOpNode);
-      const rightOperand = extractExprOperand(sub(wireNode, "exprRight")!, lineNum);
-      const leftOperand: ExprOperand = { kind: "ref", ref: leftRef };
+      const resultRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
       wires.push({
-        expr: { op, left: leftOperand, right: rightOperand },
+        from: resultRef,
         to: toRef,
+        pipe: true,
         ...(force ? { force: true as const } : {}),
       });
       continue;
@@ -2076,8 +2189,7 @@ function buildBridgeBody(
         arrayIterators,
         buildSourceExpr,
         extractCoalesceAlt,
-        extractExprOp,
-        extractExprOperand,
+        desugarExprChain,
       );
       continue;
     }
@@ -2240,16 +2352,9 @@ function inlineDefine(
         wire.from = { ...wire.from, module: outModule };
       if (wire.fallbackRef?.module === genericModule)
         wire.fallbackRef = { ...wire.fallbackRef, module: outModule };
-    } else if ("expr" in wire) {
-      if (wire.to.module === genericModule)
-        wire.to = { ...wire.to, module: inModule };
-      if (wire.expr.left.kind === "ref" && wire.expr.left.ref.module === genericModule)
-        wire.expr.left = { ...wire.expr.left, ref: { ...wire.expr.left.ref, module: outModule } };
-      if (wire.expr.right.kind === "ref" && wire.expr.right.ref.module === genericModule)
-        wire.expr.right = { ...wire.expr.right, ref: { ...wire.expr.right.ref, module: outModule } };
-    } else if ("value" in wire && wire.to.module === genericModule) {
-      wire.to = { ...wire.to, module: inModule };
     }
+    if ("value" in wire && wire.to.module === genericModule)
+      wire.to = { ...wire.to, module: inModule };
   }
 
   const forkOffset = nextForkSeqRef.value;
@@ -2294,12 +2399,6 @@ function inlineDefine(
       cloned.to = remapRef(cloned.to, "to");
       if (cloned.fallbackRef)
         cloned.fallbackRef = remapRef(cloned.fallbackRef, "from");
-    } else if ("expr" in cloned) {
-      cloned.to = remapRef(cloned.to, "to");
-      if (cloned.expr.left.kind === "ref")
-        cloned.expr.left = { ...cloned.expr.left, ref: remapRef(cloned.expr.left.ref, "from") };
-      if (cloned.expr.right.kind === "ref")
-        cloned.expr.right = { ...cloned.expr.right, ref: remapRef(cloned.expr.right.ref, "from") };
     } else {
       cloned.to = remapRef(cloned.to, "to");
     }

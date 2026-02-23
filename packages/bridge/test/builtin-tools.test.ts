@@ -149,7 +149,17 @@ describe("builtinTools bundle", () => {
     assert.ok(builtinTools.std.findObject, "findObject present");
     assert.ok(builtinTools.std.pickFirst, "pickFirst present");
     assert.ok(builtinTools.std.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 6);
+    assert.ok(builtinTools.std.multiply, "multiply present");
+    assert.ok(builtinTools.std.divide, "divide present");
+    assert.ok(builtinTools.std.add, "add present");
+    assert.ok(builtinTools.std.subtract, "subtract present");
+    assert.ok(builtinTools.std.eq, "eq present");
+    assert.ok(builtinTools.std.neq, "neq present");
+    assert.ok(builtinTools.std.gt, "gt present");
+    assert.ok(builtinTools.std.gte, "gte present");
+    assert.ok(builtinTools.std.lt, "lt present");
+    assert.ok(builtinTools.std.lte, "lte present");
+    assert.equal(Object.keys(builtinTools.std).length, 16);
   });
 
   test("httpCall is callable with and without std. prefix", () => {

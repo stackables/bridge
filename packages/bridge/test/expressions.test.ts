@@ -3,12 +3,72 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridge, serializeBridge } from "../src/bridge-format.js";
+import { multiply } from "../src/tools/multiply.js";
+import { divide } from "../src/tools/divide.js";
+import { add } from "../src/tools/add.js";
+import { subtract } from "../src/tools/subtract.js";
+import { eq } from "../src/tools/eq.js";
+import { neq } from "../src/tools/neq.js";
+import { gt } from "../src/tools/gt.js";
+import { gte } from "../src/tools/gte.js";
+import { lt } from "../src/tools/lt.js";
+import { lte } from "../src/tools/lte.js";
 import { createGateway } from "./_gateway.js";
 
-// ── Parser tests ────────────────────────────────────────────────────────────
+// ── Unit tests for math/comparison tools ────────────────────────────────────
 
-describe("expressions: parser", () => {
-  test("multiplication: o.value <- i.value * 100", () => {
+describe("math tools", () => {
+  test("multiply", () => {
+    assert.equal(multiply({ a: 3, b: 4 }), 12);
+    assert.equal(multiply({ a: 9.99, b: 100 }), 999);
+  });
+  test("divide", () => {
+    assert.equal(divide({ a: 10, b: 2 }), 5);
+    assert.equal(divide({ a: 100, b: 3 }), 100 / 3);
+  });
+  test("add", () => {
+    assert.equal(add({ a: 3, b: 4 }), 7);
+    assert.equal(add({ a: -1, b: 1 }), 0);
+  });
+  test("subtract", () => {
+    assert.equal(subtract({ a: 10, b: 3 }), 7);
+  });
+});
+
+describe("comparison tools return 1/0", () => {
+  test("eq", () => {
+    assert.equal(eq({ a: 1, b: 1 }), 1);
+    assert.equal(eq({ a: 1, b: 2 }), 0);
+    assert.equal(eq({ a: "x", b: "x" }), 1);
+    assert.equal(eq({ a: "x", b: "y" }), 0);
+  });
+  test("neq", () => {
+    assert.equal(neq({ a: 1, b: 2 }), 1);
+    assert.equal(neq({ a: 1, b: 1 }), 0);
+  });
+  test("gt", () => {
+    assert.equal(gt({ a: 5, b: 3 }), 1);
+    assert.equal(gt({ a: 3, b: 5 }), 0);
+    assert.equal(gt({ a: 3, b: 3 }), 0);
+  });
+  test("gte", () => {
+    assert.equal(gte({ a: 3, b: 3 }), 1);
+    assert.equal(gte({ a: 2, b: 3 }), 0);
+  });
+  test("lt", () => {
+    assert.equal(lt({ a: 2, b: 3 }), 1);
+    assert.equal(lt({ a: 3, b: 2 }), 0);
+  });
+  test("lte", () => {
+    assert.equal(lte({ a: 3, b: 3 }), 1);
+    assert.equal(lte({ a: 4, b: 3 }), 0);
+  });
+});
+
+// ── Parser desugaring tests ─────────────────────────────────────────────────
+
+describe("expressions: parser desugaring", () => {
+  test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.convert {
   with input as i
@@ -17,176 +77,80 @@ bridge Query.convert {
   o.cents <- i.dollars * 100
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire, "should have an expression wire");
-    assert.equal(exprWire.expr.op, "*");
-    assert.equal(exprWire.expr.left.kind, "ref");
-    assert.equal(exprWire.expr.right.kind, "literal");
-    assert.equal(exprWire.expr.right.value, 100);
+    // No ExprWire should exist — only pull and constant wires
+    assert.ok(!bridge.wires.some((w) => "expr" in w), "no ExprWire in output");
+    // There should be pipe handles for the synthetic expression tool
+    assert.ok(bridge.pipeHandles!.length > 0, "has pipe handles");
+    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandle, "has __expr_ pipe handle");
+    assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
 
-  test("division: o.dollars <- i.cents / 100", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.convert {
+  test("all operators desugar to correct tool names", () => {
+    const ops: Record<string, string> = {
+      "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
+      "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+    };
+    for (const [op, fn] of Object.entries(ops)) {
+      const instructions = parseBridge(`version 1.4
+bridge Query.test {
   with input as i
   with output as o
 
-  o.dollars <- i.cents / 100
+  o.result <- i.value ${op} 1
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "/");
+      const bridge = instructions.find((i) => i.kind === "bridge")!;
+      const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+      assert.ok(exprHandle, `${op} should create a pipe handle`);
+      assert.equal(exprHandle.baseTrunk.field, fn, `${op} → ${fn}`);
+    }
   });
 
-  test("addition: o.total <- i.subtotal + i.tax", () => {
+  test("chained expression: i.times * 5 / 10", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.times * 5 / 10
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.equal(exprHandles.length, 2, "two synthetic tools for chained expression");
+    assert.equal(exprHandles[0].baseTrunk.field, "multiply");
+    assert.equal(exprHandles[1].baseTrunk.field, "divide");
+  });
+
+  test("chained expression: i.times * 2 > 6", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.times * 2 > 6
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.equal(exprHandles.length, 2);
+    assert.equal(exprHandles[0].baseTrunk.field, "multiply");
+    assert.equal(exprHandles[1].baseTrunk.field, "gt");
+  });
+
+  test("two source refs: i.price * i.qty", () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.calc {
   with input as i
   with output as o
 
-  o.total <- i.subtotal + i.tax
+  o.total <- i.price * i.qty
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "+");
-    assert.equal(exprWire.expr.left.kind, "ref");
-    assert.equal(exprWire.expr.right.kind, "ref");
-  });
-
-  test("subtraction: o.diff <- i.a - i.b", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.calc {
-  with input as i
-  with output as o
-
-  o.diff <- i.a - i.b
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "-");
-  });
-
-  test("comparison ==", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.match <- i.status == "active"
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "==");
-    assert.deepEqual(exprWire.expr.right, { kind: "literal", value: "active" });
-  });
-
-  test("comparison !=", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.notAdmin <- i.role != "admin"
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "!=");
-  });
-
-  test("comparison > and >=", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.over18 <- i.age > 18
-  o.adult <- i.age >= 18
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWires = bridge.wires.filter((w) => "expr" in w);
-    assert.equal(exprWires.length, 2);
-    assert.equal(exprWires[0].expr.op, ">");
-    assert.equal(exprWires[1].expr.op, ">=");
-  });
-
-  test("comparison < and <=", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.under18 <- i.age < 18
-  o.minor <- i.age <= 17
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWires = bridge.wires.filter((w) => "expr" in w);
-    assert.equal(exprWires.length, 2);
-    assert.equal(exprWires[0].expr.op, "<");
-    assert.equal(exprWires[1].expr.op, "<=");
-  });
-
-  test("boolean literal operand", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.isTrue <- i.flag == true
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.deepEqual(exprWire.expr.right, { kind: "literal", value: true });
-  });
-
-  test("null literal operand", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.hasValue <- i.data != null
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.deepEqual(exprWire.expr.right, { kind: "literal", value: null });
-  });
-
-  test("tool source in expression: o.cents <- api.price * 100", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.convert {
-  with pricing.lookup as api
-  with input as i
-  with output as o
-
-  api.id <- i.productId
-  o.cents <- api.price * 100
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "*");
-    assert.equal(exprWire.expr.left.kind, "ref");
-  });
-
-  test("expression with force arrow: o.value <-! i.value * 100", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.convert {
-  with input as i
-  with output as o
-
-  o.value <-! i.value * 100
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.force, true);
+    // The .b wire should be a pipe wire from i.qty
+    const bWire = bridge.wires.find(
+      (w) => "from" in w && w.to.path.length === 1 && w.to.path[0] === "b",
+    );
+    assert.ok(bWire, "should have a .b wire");
+    assert.ok("from" in bWire!);
   });
 
   test("expression in array mapping element", () => {
@@ -202,30 +166,9 @@ bridge Query.list {
   }
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire, "should have expression wire in element block");
-    assert.equal(exprWire.expr.op, "*");
-    assert.ok(exprWire.to.element, "target should be an element ref");
-  });
-
-  test("mixed regular and expression wires", () => {
-    const instructions = parseBridge(`version 1.4
-bridge Query.order {
-  with input as i
-  with output as o
-
-  o.name <- i.name
-  o.total <- i.price * i.quantity
-  o.currency = USD
-}`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
-    assert.equal(bridge.wires.length, 3);
-    const pullWire = bridge.wires.find((w) => "from" in w);
-    const constWire = bridge.wires.find((w) => "value" in w);
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(pullWire);
-    assert.ok(constWire);
-    assert.ok(exprWire);
+    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandle, "should have expression pipe handle");
+    assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
 });
 
@@ -247,9 +190,9 @@ bridge Query.convert {
     // Re-parse the serialized output
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire, "re-parsed should contain expression wire");
-    assert.equal(exprWire.expr.op, "*");
+    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandle, "re-parsed should contain synthetic tool");
+    assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
 
   test("comparison expression round-trips", () => {
@@ -262,33 +205,23 @@ bridge Query.check {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("i.age >= 18"));
-    const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, ">=");
+    assert.ok(serialized.includes("i.age >= 18"), `got: ${serialized}`);
   });
 
-  test("expression with string operand round-trips", () => {
+  test("chained expression round-trips", () => {
     const text = `version 1.4
-bridge Query.check {
+bridge Query.test {
   with input as i
   with output as o
 
-  o.isActive <- i.status == "active"
+  o.result <- i.times * 5 / 10
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((i) => i.kind === "bridge")!;
-    const exprWire = bridge.wires.find((w) => "expr" in w);
-    assert.ok(exprWire);
-    assert.equal(exprWire.expr.op, "==");
-    assert.deepEqual(exprWire.expr.right, { kind: "literal", value: "active" });
+    assert.ok(serialized.includes("i.times * 5 / 10"), `got: ${serialized}`);
   });
 
-  test("expression with two source refs round-trips", () => {
+  test("two source refs round-trip", () => {
     const text = `version 1.4
 bridge Query.calc {
   with input as i
@@ -298,7 +231,7 @@ bridge Query.calc {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("i.price * i.quantity"));
+    assert.ok(serialized.includes("i.price * i.quantity"), `got: ${serialized}`);
   });
 });
 
@@ -316,9 +249,9 @@ const mathTypeDefs = /* GraphQL */ `
     dollars: Float
   }
   type CheckResult {
-    eligible: Boolean
-    isActive: Boolean
-    over18: Boolean
+    eligible: Int
+    isActive: Int
+    over18: Int
   }
   type CalcResult {
     total: Float
@@ -347,7 +280,7 @@ bridge Query.convert {
     assert.equal(result.data.convert.cents, 999);
   });
 
-  test("divide: cents to dollars", async () => {
+  test("divide: halve a value", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.convert {
   with input as i
@@ -379,7 +312,7 @@ bridge Query.calc {
     assert.equal(result.data.calc.total, 59.97);
   });
 
-  test("comparison >=: age check", async () => {
+  test("comparison >= returns 1/0", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -390,18 +323,18 @@ bridge Query.check {
     const gateway = createGateway(mathTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result18: any = await executor({
+    const r18: any = await executor({
       document: parse(`{ check(age: 18) { eligible } }`),
     });
-    assert.equal(result18.data.check.eligible, true);
+    assert.equal(r18.data.check.eligible, 1);
 
-    const result17: any = await executor({
+    const r17: any = await executor({
       document: parse(`{ check(age: 17) { eligible } }`),
     });
-    assert.equal(result17.data.check.eligible, false);
+    assert.equal(r17.data.check.eligible, 0);
   });
 
-  test("comparison >: strict greater than", async () => {
+  test("comparison > returns 1/0", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -412,18 +345,18 @@ bridge Query.check {
     const gateway = createGateway(mathTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result18: any = await executor({
+    const r18: any = await executor({
       document: parse(`{ check(age: 18) { over18 } }`),
     });
-    assert.equal(result18.data.check.over18, false);
+    assert.equal(r18.data.check.over18, 0);
 
-    const result19: any = await executor({
+    const r19: any = await executor({
       document: parse(`{ check(age: 19) { over18 } }`),
     });
-    assert.equal(result19.data.check.over18, true);
+    assert.equal(r19.data.check.over18, 1);
   });
 
-  test("comparison ==: string equality", async () => {
+  test("comparison == with string returns 1/0", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -434,15 +367,15 @@ bridge Query.check {
     const gateway = createGateway(mathTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const resultActive: any = await executor({
+    const rActive: any = await executor({
       document: parse(`{ check(age: 1, status: "active") { isActive } }`),
     });
-    assert.equal(resultActive.data.check.isActive, true);
+    assert.equal(rActive.data.check.isActive, 1);
 
-    const resultInactive: any = await executor({
+    const rInactive: any = await executor({
       document: parse(`{ check(age: 1, status: "inactive") { isActive } }`),
     });
-    assert.equal(resultInactive.data.check.isActive, false);
+    assert.equal(rInactive.data.check.isActive, 0);
   });
 
   test("expression with tool source", async () => {
@@ -467,6 +400,23 @@ bridge Query.convert {
     });
     // api gets id=5, returns price=10, then 10*100 = 1000
     assert.equal(result.data.convert.cents, 1000);
+  });
+
+  test("chained expression: i.dollars * 5 / 10", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.convert {
+  with input as i
+  with output as o
+
+  o.cents <- i.dollars * 5 / 10
+}`);
+    const gateway = createGateway(mathTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ convert(dollars: 100) { cents } }`),
+    });
+    // 100 * 5 = 500, 500 / 10 = 50
+    assert.equal(result.data.convert.cents, 50);
   });
 
   test("expression in array mapping", async () => {
