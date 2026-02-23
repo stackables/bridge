@@ -1383,7 +1383,8 @@ function processElementLines(
 
         if (segs) {
           const concatOutRef = desugarTemplateStringFn(segs, elemLineNum, iterName);
-          wires.push({ from: concatOutRef, to: elemToRef, pipe: true, ...lastAttrs });
+          const elemToRefWithElement: NodeRef = { ...elemToRef, element: true };
+          wires.push({ from: concatOutRef, to: elemToRefWithElement, pipe: true, ...lastAttrs });
         } else {
           wires.push({ value: raw, to: elemToRef, ...lastAttrs });
         }
