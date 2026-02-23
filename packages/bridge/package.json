@@ -22,7 +22,7 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
     "test": "node --experimental-transform-types --test test/*.test.ts",
-    "release": "semantic-release-monorepo"
+    "release": "npx --no-install semantic-release -e semantic-release-monorepo"
   },
   "repository": {
     "type": "git",

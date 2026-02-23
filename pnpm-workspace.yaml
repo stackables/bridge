@@ -4,6 +4,3 @@ packages:
 
 overrides:
   minimatch@<10.2.1: '>=10.2.1'
-
-patchedDependencies:
-  '@rimac-technology/semantic-release-monorepo@1.2.10': patches/@rimac-technology__semantic-release-monorepo@1.2.10.patch
