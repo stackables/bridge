@@ -1346,6 +1346,7 @@ function processElementLines(
   extractCoalesceAlt: (
     altNode: CstNode,
     lineNum: number,
+    iterName?: string,
   ) => { literal: string } | { sourceRef: NodeRef },
   desugarExprChain?: (
     leftRef: NodeRef,
@@ -1398,7 +1399,7 @@ function processElementLines(
         }
       }
     }
-    return extractCoalesceAlt(altNode, lineNum);
+    return extractCoalesceAlt(altNode, lineNum, iterName);
   }
 
   for (const elemLine of elemLines) {
@@ -2453,14 +2454,85 @@ function buildBridgeBody(
     return prevOutRef;
   }
 
+  // ── Helper: desugar template string into synthetic std.concat fork ─────
+
+  function desugarTemplateString(
+    segs: TemplateSeg[],
+    lineNum: number,
+    iterName?: string,
+  ): NodeRef {
+    const forkInstance = 100000 + nextForkSeq++;
+    const forkModule = SELF_MODULE;
+    const forkType = "Tools";
+    const forkField = "concat";
+    const forkKey = `${forkModule}:${forkType}:${forkField}:${forkInstance}`;
+    pipeHandleEntries.push({
+      key: forkKey,
+      handle: `__concat_${forkInstance}`,
+      baseTrunk: {
+        module: forkModule,
+        type: forkType,
+        field: forkField,
+      },
+    });
+
+    for (let idx = 0; idx < segs.length; idx++) {
+      const seg = segs[idx];
+      const partRef: NodeRef = {
+        module: forkModule,
+        type: forkType,
+        field: forkField,
+        instance: forkInstance,
+        path: ["parts", String(idx)],
+      };
+      if (seg.kind === "text") {
+        wires.push({ value: seg.value, to: partRef });
+      } else {
+        // Parse the ref path: e.g. "i.id" → root="i", segments=["id"]
+        const dotParts = seg.path.split(".");
+        const root = dotParts[0];
+        const segments = dotParts.slice(1);
+
+        // Check for iterator-relative refs
+        if (iterName && root === iterName) {
+          const fromRef: NodeRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: segments,
+          };
+          wires.push({ from: fromRef, to: partRef });
+        } else {
+          const fromRef = resolveAddress(root, segments, lineNum);
+          wires.push({ from: fromRef, to: partRef });
+        }
+      }
+    }
+
+    return {
+      module: forkModule,
+      type: forkType,
+      field: forkField,
+      instance: forkInstance,
+      path: ["value"],
+    };
+  }
+
   // ── Helper: extract coalesce alternative ───────────────────────────────
 
   function extractCoalesceAlt(
     altNode: CstNode,
     lineNum: number,
+    iterName?: string,
   ): { literal: string } | { sourceRef: NodeRef } {
     const c = altNode.children;
-    if (c.stringLit) return { literal: (c.stringLit as IToken[])[0].image };
+    if (c.stringLit) {
+      const raw = (c.stringLit as IToken[])[0].image;
+      const segs = parseTemplateString(raw.slice(1, -1));
+      if (segs) return { sourceRef: desugarTemplateString(segs, lineNum, iterName) };
+      return { literal: raw };
+    }
     if (c.numberLit) return { literal: (c.numberLit as IToken[])[0].image };
     if (c.intLit) return { literal: (c.intLit as IToken[])[0].image };
     if (c.trueLit) return { literal: "true" };
@@ -2488,8 +2560,12 @@ function buildBridgeBody(
     iterName?: string,
   ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
     const c = branchNode.children;
-    if (c.stringLit)
-      return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
+    if (c.stringLit) {
+      const raw = (c.stringLit as IToken[])[0].image;
+      const segs = parseTemplateString(raw.slice(1, -1));
+      if (segs) return { kind: "ref", ref: desugarTemplateString(segs, lineNum, iterName) };
+      return { kind: "literal", value: raw };
+    }
     if (c.numberLit)
       return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.trueLit) return { kind: "literal", value: "true" };
@@ -2575,7 +2651,10 @@ function buildBridgeBody(
       return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
-      return { kind: "literal", value: raw.slice(1, -1) };
+      const content = raw.slice(1, -1);
+      const segs = parseTemplateString(content);
+      if (segs) return { kind: "ref", ref: desugarTemplateString(segs, lineNum, iterName) };
+      return { kind: "literal", value: content };
     }
     if (c.trueLit) return { kind: "literal", value: "1" };
     if (c.falseLit) return { kind: "literal", value: "0" };
@@ -2723,71 +2802,6 @@ function buildBridgeBody(
       );
     }
     return final.ref;
-  }
-
-  // ── Helper: desugar template string into synthetic std.concat fork ─────
-
-  function desugarTemplateString(
-    segs: TemplateSeg[],
-    lineNum: number,
-    iterName?: string,
-  ): NodeRef {
-    const forkInstance = 100000 + nextForkSeq++;
-    const forkModule = SELF_MODULE;
-    const forkType = "Tools";
-    const forkField = "concat";
-    const forkKey = `${forkModule}:${forkType}:${forkField}:${forkInstance}`;
-    pipeHandleEntries.push({
-      key: forkKey,
-      handle: `__concat_${forkInstance}`,
-      baseTrunk: {
-        module: forkModule,
-        type: forkType,
-        field: forkField,
-      },
-    });
-
-    for (let idx = 0; idx < segs.length; idx++) {
-      const seg = segs[idx];
-      const partRef: NodeRef = {
-        module: forkModule,
-        type: forkType,
-        field: forkField,
-        instance: forkInstance,
-        path: ["parts", String(idx)],
-      };
-      if (seg.kind === "text") {
-        wires.push({ value: seg.value, to: partRef });
-      } else {
-        // Parse the ref path: e.g. "i.id" → root="i", segments=["id"]
-        const dotParts = seg.path.split(".");
-        const root = dotParts[0];
-        const segments = dotParts.slice(1);
-
-        // Check for iterator-relative refs
-        if (iterName && root === iterName) {
-          const fromRef: NodeRef = {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: segments,
-          };
-          wires.push({ from: fromRef, to: partRef });
-        } else {
-          const fromRef = resolveAddress(root, segments, lineNum);
-          wires.push({ from: fromRef, to: partRef });
-        }
-      }
-    }
-
-    return {
-      module: forkModule,
-      type: forkType,
-      field: forkField,
-      instance: forkInstance,
-      path: ["value"],
-    };
   }
 
   // ── Helper: recursively process path scoping block lines ───────────────
