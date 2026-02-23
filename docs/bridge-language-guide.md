@@ -27,9 +27,10 @@ keeps your API bill sane.
 11. [Pipe Operator](#11-pipe-operator)
 12. [Inline Expressions](#12-inline-expressions)
 13. [Conditional Wire (`? :`)](#13-conditional-wire--)
-14. [Tool Inheritance](#14-tool-inheritance)
-15. [Force Statement (`force <handle>`)](#15-force-statement-force-handle)
-16. [Built-in Tools](#16-built-in-tools)
+14. [String Interpolation](#14-string-interpolation)
+15. [Tool Inheritance](#15-tool-inheritance)
+16. [Force Statement (`force <handle>`)](#16-force-statement-force-handle)
+17. [Built-in Tools](#17-built-in-tools)
 
 ---
 
@@ -734,7 +735,97 @@ fast-path for input/context reads). It then pulls **only the chosen branch**
 
 ---
 
-## 14. Tool Inheritance
+## 14. String Interpolation
+
+String interpolation lets you build strings from multiple sources using `{…}`
+placeholders inside quoted strings on the right-hand side of a pull wire (`<-`).
+
+```bridge
+bridge Query.userOrders {
+  with ordersApi as api
+  with input as i
+  with output as o
+
+  # REST URL construction
+  api.path <- "/users/{i.id}/orders"
+
+  # Assembling display text
+  o.name <- "{i.firstName} {i.lastName}"
+  o.greeting <- "Hello, {i.firstName}!"
+}
+```
+
+### Syntax
+
+A string on the RHS of `<-` is scanned for `{…}` placeholders. If any are
+found, the string becomes a template — the engine resolves each placeholder
+at runtime and concatenates the result.
+
+Placeholders reference the same source addresses used in regular pull wires:
+`i.field`, `api.field`, `ctx.field`, alias names, etc.
+
+```bridge
+o.url     <- "/api/{api.version}/items/{i.itemId}"
+o.display <- "{i.first} {i.last}"
+```
+
+### Constant wires are not interpolated
+
+The `=` operator assigns verbatim — no interpolation:
+
+```bridge
+o.path = "/users/{id}"       # literal string, braces kept as-is
+o.path <- "/users/{i.id}"    # template — {i.id} is resolved
+```
+
+### Non-string values
+
+Placeholder values are coerced to strings at runtime:
+
+| Source value | Interpolated as |
+|---|---|
+| `"hello"` | `hello` |
+| `42` | `"42"` |
+| `true` | `"true"` |
+| `null` / `undefined` | `""` (empty string) |
+
+### Escaping
+
+Use `\{` to include a literal brace in a template string:
+
+```bridge
+o.json <- "\{key: {i.value}}"    # produces: {key: someValue}
+```
+
+### Inside array mapping
+
+Template strings work inside `[] as iter { }` blocks:
+
+```bridge
+o <- api.items[] as it {
+  .url   <- "/items/{it.id}"
+  .label <- "{it.name} (#{it.id})"
+}
+```
+
+### Combining with fallbacks
+
+Templates support `||` (null coalesce) and `??` (error coalesce):
+
+```bridge
+o.greeting <- "Hello, {i.name}!" || "Hello, stranger!"
+```
+
+### How it works
+
+Under the hood, the parser desugars template strings into a synthetic
+`std.concat` fork — the same pattern used by pipes and inline expressions.
+The engine never learns about template strings; it just resolves tool
+inputs, calls `std.concat`, and wires the result to the target.
+
+---
+
+## 15. Tool Inheritance
 
 Tools can extend other tools to override or add wires:
 
@@ -769,7 +860,7 @@ When a child extends a parent:
 
 ---
 
-## 15. Force Statement (`force <handle>`)
+## 16. Force Statement (`force <handle>`)
 
 The `force` statement eagerly schedules a tool for execution, even if no output
 field demands its data. Use it for side effects — audit logging, analytics,
@@ -795,13 +886,14 @@ bridge Query.search {
 
 ---
 
-## 16. Built-in Tools
+## 17. Built-in Tools
 
 ### `std` namespace — Transform tools
 
 | Tool | Description |
 |---|---|
 | `audit` | Log all inputs via the configured logger |
+| `concat` | Join ordered parts into a single string (used by string interpolation) |
 | `upperCase` | Convert string to UPPER CASE |
 | `lowerCase` | Convert string to lower case |
 | `pickFirst` | Take the first element of an array |

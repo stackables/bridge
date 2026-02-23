@@ -1,7 +1,20 @@
 ## String Interpolation (Template Strings)
 
-**Status:** Planned
+**Status:** ✅ Fully implemented
 **Target Release:** v1.x (Feature Addition)
+
+### Implementation Notes
+
+Implemented as designed. Key details:
+
+- **`std.concat`** built-in tool added to `packages/bridge/src/tools/concat.ts`
+- **Grammar** updated: `StringLiteral` accepted on RHS of `<-` in `bridgeWire` and `elementLine` rules
+- **Parser visitor** detects `{…}` placeholders and desugars into synthetic `__concat_*` fork wires
+- **Formatter** (`bridge-format.ts`) reconstructs template strings from `__concat_*` forks for round-trip formatting
+- **ExecutionTree** updated: `hasElementWires` check extended to detect `to.element` for concat output wires in array mapping context
+- **No new Wire variant, no new engine method, no new AST type** — as planned
+- Constant wires (`=`) remain verbatim (no interpolation)
+- Tests in `test/string-interpolation.test.ts` covering: tool unit tests, basic interpolation, tool interaction, array mapping, fallback chains, and formatter round-trip
 
 ### 📖 The Problem: No Way to Build Strings from Multiple Sources
 
