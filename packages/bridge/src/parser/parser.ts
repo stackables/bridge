@@ -2431,7 +2431,6 @@ function buildBridgeBody(
 
     for (let ci = 0; ci < sourceParts.length; ci++) {
       const { ref: fromRef, isPipeFork: isPipe } = sourceParts[ci];
-      const isFirst = ci === 0;
       const isLast = ci === sourceParts.length - 1;
       const lastAttrs = isLast
         ? {
