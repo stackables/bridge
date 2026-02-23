@@ -444,15 +444,18 @@ export class ExecutionTree {
 
   schedule(target: Trunk): any {
     // Delegate to parent (shadow trees don't schedule directly) unless
-    // the target fork has bridge wires sourced from element data.
+    // the target fork has bridge wires sourced from element data,
+    // or the target is a __local binding (block-scoped with inside array maps).
     if (this.parent) {
-      const forkWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-      const hasElementSource = forkWires.some(
-        (w) => "from" in w && !!w.from.element,
-      );
-      if (!hasElementSource) {
-        return this.parent.schedule(target);
+      if (target.module !== "__local") {
+        const forkWires =
+          this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+        const hasElementSource = forkWires.some(
+          (w) => "from" in w && !!w.from.element,
+        );
+        if (!hasElementSource) {
+          return this.parent.schedule(target);
+        }
       }
     }
 
@@ -541,6 +544,17 @@ export class ExecutionTree {
       // Define pass-through: synthetic trunks created by define inlining
       // act as data containers — bridge wires set their values, no tool needed.
       if (target.module.startsWith("__define_")) {
+        return input;
+      }
+
+      // Local binding: block-scoped `with <source> as <alias>` inside array maps.
+      // The wire resolves the source and stores the result — no tool call needed.
+      // For path=[] wires the resolved value may be a primitive (e.g. string from
+      // a pipe tool like upperCase), so return the resolved value directly.
+      if (target.module === "__local") {
+        for (const [path, value] of resolved) {
+          if (path.length === 0) return value;
+        }
         return input;
       }
 
@@ -1004,10 +1018,12 @@ export class ExecutionTree {
     // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
     // AND element-level wires (from.element === true).  A plain passthrough
     // (`o <- api.user`) only has the root wire.
+    // Local bindings (from.__local) are also element-scoped.
     const hasElementWires = bridge.wires.some(
       (w) =>
         "from" in w &&
-        (w.from as NodeRef).element === true &&
+        ((w.from as NodeRef).element === true ||
+          (w.from as NodeRef).module === "__local") &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
         w.to.field === field,

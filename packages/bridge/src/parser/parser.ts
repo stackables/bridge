@@ -403,15 +403,32 @@ class BridgeParser extends CstParser {
     ]);
   });
 
-  /** [] as <iter> { ...element lines... } */
+  /** [] as <iter> { ...element lines / local with-bindings... } */
   public arrayMapping = this.RULE("arrayMapping", () => {
     this.CONSUME(LSquare);
     this.CONSUME(RSquare);
     this.CONSUME(AsKw);
     this.SUBRULE(this.nameToken, { LABEL: "iterName" });
     this.CONSUME(LCurly);
-    this.MANY(() => this.SUBRULE(this.elementLine));
+    this.MANY(() =>
+      this.OR([
+        { ALT: () => this.SUBRULE(this.elementWithDecl) },
+        { ALT: () => this.SUBRULE(this.elementLine) },
+      ]),
+    );
     this.CONSUME(RCurly);
+  });
+
+  /**
+   * Block-scoped binding inside array mapping:
+   *   with <sourceExpr> as <alias>
+   * Evaluates the source once per element and binds the result to <alias>.
+   */
+  public elementWithDecl = this.RULE("elementWithDecl", () => {
+    this.CONSUME(WithKw);
+    this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
+    this.CONSUME(AsKw);
+    this.SUBRULE(this.nameToken, { LABEL: "elemWithAlias" });
   });
 
   /**
@@ -1159,6 +1176,10 @@ function processElementLines(
     lineNum: number,
     iterName?: string,
   ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  processLocalBindings?: (
+    withDecls: CstNode[],
+    iterName: string,
+  ) => () => void,
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1257,6 +1278,8 @@ function processElementLines(
         arrayIterators[iterKey] = innerIterName;
 
         // Recurse into nested element lines
+        const nestedWithDecls = subs(nestedArrayNode, "elementWithDecl");
+        const nestedCleanup = processLocalBindings?.(nestedWithDecls, innerIterName);
         processElementLines(
           subs(nestedArrayNode, "elementLine"),
           elemToPath,
@@ -1269,7 +1292,9 @@ function processElementLines(
           extractCoalesceAlt,
           desugarExprChain,
           extractTernaryBranchFn,
+          processLocalBindings,
         );
+        nestedCleanup?.();
         continue;
       }
 
@@ -1964,6 +1989,147 @@ function buildBridgeBody(
     }
   }
 
+  // ── Helper: process block-scoped with-declarations inside array maps ──
+
+  /**
+   * Process `with <source> as <alias>` declarations inside an array mapping.
+   * For each declaration:
+   * 1. Build the source ref (iterator-aware: pipe:it becomes a pipe fork ref)
+   * 2. Create a __local trunk for the alias
+   * 3. Register the alias in handleRes so subsequent element lines can reference it
+   * 4. Emit a wire from source to the local trunk
+   *
+   * Returns a cleanup function that removes local aliases from handleRes.
+   */
+  function processLocalBindings(
+    withDecls: CstNode[],
+    iterName: string,
+  ): () => void {
+    const addedAliases: string[] = [];
+    for (const withDecl of withDecls) {
+      const lineNum = line(findFirstToken(withDecl));
+      const sourceNode = sub(withDecl, "elemWithSource")!;
+      const alias = extractNameToken(sub(withDecl, "elemWithAlias")!);
+      assertNotReserved(alias, lineNum, "local binding alias");
+      if (handleRes.has(alias)) {
+        throw new Error(`Line ${lineNum}: Duplicate handle name "${alias}"`);
+      }
+
+      // Build source ref — iterator-aware (handles pipe:iter and plain iter refs)
+      const headNode = sub(sourceNode, "head")!;
+      const pipeSegs = subs(sourceNode, "pipeSegment");
+      const { root: srcRoot, segments: srcSegs } = extractAddressPath(headNode);
+
+      let sourceRef: NodeRef;
+      if (srcRoot === iterName && pipeSegs.length === 0) {
+        // Iterator-relative plain ref (e.g. `with it.data as d`)
+        sourceRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: srcSegs,
+        };
+      } else if (pipeSegs.length > 0) {
+        // Pipe expression — the last segment may be iterator-relative.
+        // Resolve data source (last part), then build pipe fork chain.
+        const allParts = [headNode, ...pipeSegs];
+        const actualSourceNode = allParts[allParts.length - 1];
+        const pipeChainNodes = allParts.slice(0, -1);
+
+        const { root: dataSrcRoot, segments: dataSrcSegs } =
+          extractAddressPath(actualSourceNode);
+
+        let prevOutRef: NodeRef;
+        if (dataSrcRoot === iterName) {
+          // Iterator-relative pipe source (e.g. `pipe:it` or `pipe:it.field`)
+          prevOutRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: dataSrcSegs,
+          };
+        } else {
+          prevOutRef = resolveAddress(dataSrcRoot, dataSrcSegs, lineNum);
+        }
+
+        // Build pipe fork chain (same logic as buildSourceExpr)
+        const reversed = [...pipeChainNodes].reverse();
+        for (let idx = 0; idx < reversed.length; idx++) {
+          const pNode = reversed[idx];
+          const { root: handleName, segments: handleSegs } =
+            extractAddressPath(pNode);
+          if (!handleRes.has(handleName)) {
+            throw new Error(
+              `Line ${lineNum}: Undeclared handle in pipe: "${handleName}". Add 'with <tool> as ${handleName}' to the bridge header.`,
+            );
+          }
+          const fieldName = handleSegs.length > 0 ? handleSegs.join(".") : "in";
+          const res = handleRes.get(handleName)!;
+          const forkInstance = 100000 + nextForkSeq++;
+          const forkKey = `${res.module}:${res.type}:${res.field}:${forkInstance}`;
+          pipeHandleEntries.push({
+            key: forkKey,
+            handle: handleName,
+            baseTrunk: {
+              module: res.module,
+              type: res.type,
+              field: res.field,
+              instance: res.instance,
+            },
+          });
+          const forkInRef: NodeRef = {
+            module: res.module,
+            type: res.type,
+            field: res.field,
+            instance: forkInstance,
+            path: parsePath(fieldName),
+          };
+          const forkRootRef: NodeRef = {
+            module: res.module,
+            type: res.type,
+            field: res.field,
+            instance: forkInstance,
+            path: [],
+          };
+          wires.push({
+            from: prevOutRef,
+            to: forkInRef,
+            pipe: true,
+          });
+          prevOutRef = forkRootRef;
+        }
+        sourceRef = prevOutRef;
+      } else {
+        sourceRef = buildSourceExpr(sourceNode, lineNum);
+      }
+
+      // Create __local trunk for the alias
+      const localRes: HandleResolution = {
+        module: "__local",
+        type: "Shadow",
+        field: alias,
+      };
+      handleRes.set(alias, localRes);
+      addedAliases.push(alias);
+
+      // Emit wire from source to local trunk
+      const localToRef: NodeRef = {
+        module: "__local",
+        type: "Shadow",
+        field: alias,
+        path: [],
+      };
+      wires.push({ from: sourceRef, to: localToRef });
+    }
+    return () => {
+      for (const alias of addedAliases) {
+        handleRes.delete(alias);
+      }
+    };
+  }
+
   // ── Helper: build source expression ────────────────────────────────────
 
   function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
@@ -2353,6 +2519,8 @@ function buildBridgeBody(
       arrayIterators[arrayToPath.join(".")] = iterName;
 
       // Process element lines (supports nested array mappings recursively)
+      const elemWithDecls = subs(arrayMappingNode, "elementWithDecl");
+      const cleanup = processLocalBindings(elemWithDecls, iterName);
       processElementLines(
         subs(arrayMappingNode, "elementLine"),
         arrayToPath,
@@ -2365,7 +2533,9 @@ function buildBridgeBody(
         extractCoalesceAlt,
         desugarExprChain,
         extractTernaryBranch,
+        processLocalBindings,
       );
+      cleanup();
       continue;
     }
 
