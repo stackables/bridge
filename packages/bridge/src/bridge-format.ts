@@ -380,7 +380,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // For a root-level array o <- src[], element paths are like ["name"]
   // For nested arrays, inner element paths are like ["items", "legs", "trainName"]
   const elementPullAll = elementPullWires.filter(
-    (w) => !exprPipeWireSet.has(w),
+    (w) => !exprPipeWireSet.has(w) && !pipeWireSet.has(w),
   );
   const elementConstAll = elementConstWires.filter(
     (w) => !exprPipeWireSet.has(w),
@@ -397,14 +397,35 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
 
-  // ── Exclude pipe, element-pull, element-const, and expression-internal wires from main loop
+  // ── Exclude pipe, element-pull, element-const, expression-internal, and __local wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
       !exprPipeWireSet.has(w) &&
       (!("from" in w) || !w.from.element) &&
-      (!("value" in w) || !w.to.element),
+      (!("value" in w) || !w.to.element) &&
+      w.to.module !== "__local" &&
+      (!("from" in w) || (w.from as NodeRef).module !== "__local"),
   );
+
+  // ── Collect __local binding wires for array-scoped `with` declarations ──
+  type LocalBindingInfo = {
+    alias: string;
+    sourceWire: Extract<Wire, { from: NodeRef }>;
+  };
+  const localBindingsByAlias = new Map<string, LocalBindingInfo>();
+  const localReadWires: Extract<Wire, { from: NodeRef }>[] = [];
+  for (const w of bridge.wires) {
+    if (w.to.module === "__local" && "from" in w) {
+      localBindingsByAlias.set(w.to.field, {
+        alias: w.to.field,
+        sourceWire: w as Extract<Wire, { from: NodeRef }>,
+      });
+    }
+    if ("from" in w && (w.from as NodeRef).module === "__local") {
+      localReadWires.push(w as Extract<Wire, { from: NodeRef }>);
+    }
+  }
 
   const serializedArrays = new Set<string>();
 
@@ -521,6 +542,47 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
 
+    // Emit block-scoped local bindings: with <source> as <alias>
+    for (const [alias, info] of localBindingsByAlias) {
+      const srcWire = info.sourceWire;
+      // Reconstruct the source expression
+      const fromRef = srcWire.from;
+      let sourcePart: string;
+      if (fromRef.element) {
+        sourcePart = parentIterName + (fromRef.path.length > 0 ? "." + serPath(fromRef.path) : "");
+      } else {
+        // Check if the source is a pipe fork — reconstruct pipe:source syntax
+        const srcTk = refTrunkKey(fromRef);
+        if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+          // Walk the pipe chain backward to reconstruct pipe:source
+          const parts: string[] = [];
+          let currentTk = srcTk;
+          while (true) {
+            const handleName = handleMap.get(currentTk);
+            if (!handleName) break;
+            parts.push(handleName);
+            const inWire = toInMap.get(currentTk);
+            if (!inWire) break;
+            if (inWire.from.element) {
+              parts.push(parentIterName + (inWire.from.path.length > 0 ? "." + serPath(inWire.from.path) : ""));
+              break;
+            }
+            const innerTk = refTrunkKey(inWire.from);
+            if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(innerTk)) {
+              currentTk = innerTk;
+            } else {
+              parts.push(sRef(inWire.from, true));
+              break;
+            }
+          }
+          sourcePart = parts.join(":");
+        } else {
+          sourcePart = sRef(fromRef, true);
+        }
+      }
+      lines.push(`${indent}with ${sourcePart} as ${alias}`);
+    }
+
     // Emit constant element wires
     for (const ew of levelConsts) {
       const fieldPath = ew.to.path.slice(pathDepth);
@@ -589,6 +651,26 @@ function serializeBridgeBlock(bridge: Bridge): string {
       // Replace ITER. placeholder with actual iterator name
       const src = eew.sourceStr.replace(/^ITER\./, parentIterName + ".");
       lines.push(`${indent}${elemTo} <- ${src}`);
+    }
+
+    // Emit local-binding read wires at this level (.field <- alias.path)
+    for (const lw of localReadWires) {
+      if (lw.to.path.length < pathDepth + 1) continue;
+      let match = true;
+      for (let i = 0; i < pathDepth; i++) {
+        if (lw.to.path[i] !== arrayPath[i]) {
+          match = false;
+          break;
+        }
+      }
+      if (!match) continue;
+      const fieldPath = lw.to.path.slice(pathDepth);
+      const elemTo = "." + serPath(fieldPath);
+      const alias = lw.from.field; // __local:Shadow:<alias>
+      const fromPart = lw.from.path.length > 0
+        ? alias + "." + serPath(lw.from.path)
+        : alias;
+      lines.push(`${indent}${elemTo} <- ${fromPart}`);
     }
   }
 

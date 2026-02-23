@@ -353,4 +353,29 @@ tool authTool from std.httpCall {
   .apiKey <- c.apiKey
   .userToken <- ctx.auth.token
 }`);
+
+  compat("block-scoped binding with pipe in array map", `version 1.4
+bridge Query.list {
+  with api
+  with enrich
+  with output as o
+
+  o <- api.items[] as it {
+    with enrich:it as resp
+    .a <- resp.a
+    .b <- resp.b
+  }
+}`);
+
+  compat("block-scoped binding with iterator plain ref", `version 1.4
+bridge Query.list {
+  with api
+  with output as o
+
+  o <- api.items[] as it {
+    with it.nested as n
+    .x <- n.a
+    .y <- n.b
+  }
+}`);
 });
