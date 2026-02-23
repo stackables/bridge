@@ -1,8 +1,10 @@
 import { useRef, useEffect, useCallback } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, type Extension, Compartment } from "@codemirror/state";
+import { lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
+import { bridgeLinter } from "@/codemirror/bridge-lint";
 import { graphqlLanguage } from "@/codemirror/graphql-lang";
 import { playgroundTheme } from "@/codemirror/theme";
 import { cn } from "@/lib/utils";
@@ -30,7 +32,7 @@ type Props = {
 function languageExtension(lang: EditorLanguage): Extension[] {
   switch (lang) {
     case "bridge":
-      return [bridgeLanguage];
+      return [bridgeLanguage, bridgeLinter, lintGutter()];
     case "graphql":
       return [graphqlLanguage];
     case "json":

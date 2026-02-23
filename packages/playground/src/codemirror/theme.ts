@@ -46,6 +46,29 @@ const theme = EditorView.theme(
       backgroundColor: "rgba(56, 189, 248, 0.15)",
       outline: "1px solid rgba(56, 189, 248, 0.3)",
     },
+    // ── Lint diagnostics ────────────────────────────────────────────
+    ".cm-diagnostic": {
+      padding: "3px 6px 3px 8px",
+      marginLeft: "-1px",
+      fontSize: "12px",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    },
+    ".cm-diagnostic-error": {
+      borderLeftColor: "#f87171",    // red-400
+      color: "#fca5a5",             // red-300
+      backgroundColor: "#1e1215",
+    },
+    ".cm-diagnostic-warning": {
+      borderLeftColor: "#facc15",    // yellow-400
+      color: "#fde68a",             // amber-200
+      backgroundColor: "#1a1a0e",
+    },
+    ".cm-lint-marker-error": { content: "'●'", color: "#f87171" },
+    ".cm-lint-marker-warning": { content: "'●'", color: "#facc15" },
+    ".cm-tooltip-lint": {
+      backgroundColor: "#0f172a",    // slate-900
+      border: "1px solid #334155",   // slate-700
+    },
   },
   { dark: true },
 );
