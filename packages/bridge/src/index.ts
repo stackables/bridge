@@ -4,6 +4,6 @@ export { bridgeTransform, getBridgeTraces, useBridgeTracing } from "./bridge-tra
 export type { BridgeOptions, InstructionSource } from "./bridge-transform.js";
 export { executeBridge } from "./execute-bridge.js";
 export type { ExecuteBridgeOptions, ExecuteBridgeResult } from "./execute-bridge.js";
-export { builtinTools, std, createHttpCall } from "./tools/index.js";
+export { builtinTools, std, math, createHttpCall } from "./tools/index.js";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.js";
 export type { CacheStore, ConstDef, Instruction, ToolCallFn, ToolDef, ToolMap } from "./types.js";

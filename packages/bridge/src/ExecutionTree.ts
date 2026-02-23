@@ -219,7 +219,10 @@ export class ExecutionTree {
     if (typeof fn === "function") return fn;
     // Fall back to std namespace (builtins are callable without std. prefix)
     const stdFn = (this.toolFns as any)?.std?.[name];
-    return typeof stdFn === "function" ? stdFn : undefined;
+    if (typeof stdFn === "function") return stdFn;
+    // Fall back to math namespace (math/comparison tools)
+    const mathFn = (this.toolFns as any)?.math?.[name];
+    return typeof mathFn === "function" ? mathFn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */
@@ -388,9 +391,17 @@ export class ExecutionTree {
   }
 
   schedule(target: Trunk): any {
-    // Delegate to parent (shadow trees don't schedule directly)
+    // Delegate to parent (shadow trees don't schedule directly) unless
+    // the target fork has bridge wires sourced from element data.
     if (this.parent) {
-      return this.parent.schedule(target);
+      const forkWires =
+        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const hasElementSource = forkWires.some(
+        (w) => "from" in w && !!w.from.element,
+      );
+      if (!hasElementSource) {
+        return this.parent.schedule(target);
+      }
     }
 
     return (async () => {

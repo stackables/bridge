@@ -39,6 +39,16 @@ import {
   TrueLiteral,
   FalseLiteral,
   NullLiteral,
+  Star,
+  Slash,
+  Plus,
+  Minus,
+  GreaterEqual,
+  LessEqual,
+  DoubleEquals,
+  NotEquals,
+  GreaterThan,
+  LessThan,
   BridgeLexer,
 } from "./lexer.js";
 
@@ -332,9 +342,9 @@ class BridgeParser extends CstParser {
   });
 
   /**
-   * Merged bridge wire (constant or pull):
+   * Merged bridge wire (constant or pull/expression):
    *   target = value
-   *   target <-[!] sourceExpr [[] as iter { ...elements... }]
+   *   target <-[!] sourceExpr [op operand]* [[] as iter { ...elements... }]
    *                           [|| alt]* [?? fallback]
    */
   public bridgeWire = this.RULE("bridgeWire", () => {
@@ -348,13 +358,18 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Pull wire: target <-[!] sourceExpr [modifiers]
+        // Pull wire: target <-[!] sourceExpr [op operand]* [modifiers]
         ALT: () => {
           this.OR2([
             { ALT: () => this.CONSUME(Arrow, { LABEL: "arrow" }) },
             { ALT: () => this.CONSUME(ForceArrow, { LABEL: "forceArrow" }) },
           ]);
           this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+          // Optional expression chain: operator + operand, repeatable
+          this.MANY2(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
+          });
           // Optional array mapping: [] as <iter> { ... }
           this.OPTION(() => this.SUBRULE(this.arrayMapping));
           // || coalesce chain
@@ -386,6 +401,7 @@ class BridgeParser extends CstParser {
   /**
    * Element line inside array mapping:
    *   .field = value
+   *   .field <- source [op operand]*
    *   .field <- source [|| ...] [?? ...]
    *   .field <- source[] as iter { ...nested elements... }   (nested array)
    */
@@ -403,6 +419,11 @@ class BridgeParser extends CstParser {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "elemArrow" });
           this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+          // Optional expression chain
+          this.MANY2(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
+          });
           // Optional nested array mapping: [] as <iter> { ... }
           this.OPTION2(() =>
             this.SUBRULE(this.arrayMapping, { LABEL: "nestedArrayMapping" }),
@@ -475,6 +496,34 @@ class BridgeParser extends CstParser {
       this.CONSUME(Colon);
       this.SUBRULE2(this.addressPath, { LABEL: "pipeSegment" });
     });
+  });
+
+  /** Expression operator: arithmetic or comparison */
+  public exprOperator = this.RULE("exprOperator", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(Star, { LABEL: "star" }) },
+      { ALT: () => this.CONSUME(Slash, { LABEL: "slash" }) },
+      { ALT: () => this.CONSUME(Plus, { LABEL: "plus" }) },
+      { ALT: () => this.CONSUME(Minus, { LABEL: "minus" }) },
+      { ALT: () => this.CONSUME(DoubleEquals, { LABEL: "doubleEquals" }) },
+      { ALT: () => this.CONSUME(NotEquals, { LABEL: "notEquals" }) },
+      { ALT: () => this.CONSUME(GreaterEqual, { LABEL: "greaterEqual" }) },
+      { ALT: () => this.CONSUME(LessEqual, { LABEL: "lessEqual" }) },
+      { ALT: () => this.CONSUME(GreaterThan, { LABEL: "greaterThan" }) },
+      { ALT: () => this.CONSUME(LessThan, { LABEL: "lessThan" }) },
+    ]);
+  });
+
+  /** Expression operand: a source reference or a literal value */
+  public exprOperand = this.RULE("exprOperand", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
+      { ALT: () => this.CONSUME(StringLiteral, { LABEL: "stringLit" }) },
+      { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
+      { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
+      { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
+      { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceRef" }) },
+    ]);
   });
 
   /**
@@ -1059,6 +1108,13 @@ function processElementLines(
     altNode: CstNode,
     lineNum: number,
   ) => { literal: string } | { sourceRef: NodeRef },
+  desugarExprChain?: (
+    leftRef: NodeRef,
+    exprOps: CstNode[],
+    exprRights: CstNode[],
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1167,11 +1223,12 @@ function processElementLines(
           arrayIterators,
           buildSourceExpr,
           extractCoalesceAlt,
+          desugarExprChain,
         );
         continue;
       }
 
-      // ── Regular element pull wire ──
+      // ── Element pull wire (expression or plain) ──
       const elemToRef: NodeRef = {
         module: SELF_MODULE,
         type: bridgeType,
@@ -1181,7 +1238,26 @@ function processElementLines(
 
       const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
-      if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+      const elemExprOps = subs(elemLine, "elemExprOp");
+
+      if (elemExprOps.length > 0 && desugarExprChain) {
+        // Expression in element line — desugar then merge with fallback path
+        const elemExprRights = subs(elemLine, "elemExprRight");
+        let leftRef: NodeRef;
+        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+          leftRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemSrcSegs,
+          };
+        } else {
+          leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+        }
+        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        sourceParts.push({ ref: resultRef, isPipeFork: true });
+      } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
         sourceParts.push({
           ref: {
             module: SELF_MODULE,
@@ -1874,6 +1950,194 @@ function buildBridgeBody(
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);
   }
 
+  // ── Helper: operator symbol → std tool function name ──────────────────
+
+  /** Map infix operator token to the std tool that implements it. */
+  const OP_TO_FN: Record<string, string> = {
+    "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
+    "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+  };
+
+  /** Operator precedence: higher number = binds tighter. */
+  const OP_PREC: Record<string, number> = {
+    "*": 3, "/": 3,
+    "+": 2, "-": 2,
+    "==": 1, "!=": 1, ">": 1, ">=": 1, "<": 1, "<=": 1,
+  };
+
+  function extractExprOpStr(opNode: CstNode): string {
+    const c = opNode.children;
+    if (c.star) return "*";
+    if (c.slash) return "/";
+    if (c.plus) return "+";
+    if (c.minus) return "-";
+    if (c.doubleEquals) return "==";
+    if (c.notEquals) return "!=";
+    if (c.greaterEqual) return ">=";
+    if (c.lessEqual) return "<=";
+    if (c.greaterThan) return ">";
+    if (c.lessThan) return "<";
+    throw new Error("Invalid expression operator");
+  }
+
+  /**
+   * Resolve an exprOperand CST node to either a NodeRef (source) or
+   * a literal string value suitable for a constant wire.
+   */
+  function resolveExprOperand(
+    operandNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ): { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string } {
+    const c = operandNode.children;
+    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.stringLit) {
+      const raw = (c.stringLit as IToken[])[0].image;
+      return { kind: "literal", value: raw.slice(1, -1) };
+    }
+    if (c.trueLit) return { kind: "literal", value: "1" };
+    if (c.falseLit) return { kind: "literal", value: "0" };
+    if (c.nullLit) return { kind: "literal", value: "0" };
+    if (c.sourceRef) {
+      const srcNode = (c.sourceRef as CstNode[])[0];
+
+      // Check for element/iterator-relative refs
+      if (iterName) {
+        const headNode = sub(srcNode, "head")!;
+        const pipeSegs = subs(srcNode, "pipeSegment");
+        const { root, segments } = extractAddressPath(headNode);
+        if (root === iterName && pipeSegs.length === 0) {
+          return {
+            kind: "ref",
+            ref: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: segments,
+            },
+          };
+        }
+      }
+
+      const ref = buildSourceExpr(srcNode, lineNum, false);
+      return { kind: "ref", ref };
+    }
+    throw new Error(`Line ${lineNum}: Invalid expression operand`);
+  }
+
+  /**
+   * Desugar an infix expression chain into synthetic tool wires,
+   * respecting operator precedence (* / before + - before comparisons).
+   *
+   * Given:  leftRef + rightA * rightB > 5
+   * Produces: leftRef + (rightA * rightB) > 5
+   *
+   * Each binary node creates a synthetic tool fork (like pipe desugaring):
+   *   __expr fork instance → { a: left, b: right } → result
+   */
+  function desugarExprChain(
+    leftRef: NodeRef,
+    exprOps: CstNode[],
+    exprRights: CstNode[],
+    lineNum: number,
+    iterName?: string,
+  ): NodeRef {
+    // Build flat operand/operator lists for the precedence parser.
+    // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
+    type Operand = { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string };
+    const operands: Operand[] = [{ kind: "ref", ref: leftRef }];
+    const ops: string[] = [];
+
+    for (let i = 0; i < exprOps.length; i++) {
+      ops.push(extractExprOpStr(exprOps[i]));
+      operands.push(resolveExprOperand(exprRights[i], lineNum, iterName));
+    }
+
+    // Emit a synthetic fork for a single binary operation and return
+    // an operand pointing to the fork's result.
+    function emitFork(left: Operand, opStr: string, right: Operand): Operand {
+      const fnName = OP_TO_FN[opStr];
+      if (!fnName) throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
+
+      const forkInstance = 100000 + nextForkSeq++;
+      const forkTrunkModule = SELF_MODULE;
+      const forkTrunkType = "Tools";
+      const forkTrunkField = fnName;
+
+      const forkKey = `${forkTrunkModule}:${forkTrunkType}:${forkTrunkField}:${forkInstance}`;
+      pipeHandleEntries.push({
+        key: forkKey,
+        handle: `__expr_${forkInstance}`,
+        baseTrunk: {
+          module: forkTrunkModule,
+          type: forkTrunkType,
+          field: forkTrunkField,
+        },
+      });
+
+      const makeTarget = (slot: string): NodeRef => ({
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+        instance: forkInstance,
+        path: [slot],
+      });
+
+      // Wire left → fork.a
+      if (left.kind === "literal") {
+        wires.push({ value: left.value, to: makeTarget("a") });
+      } else {
+        wires.push({ from: left.ref, to: makeTarget("a"), pipe: true });
+      }
+
+      // Wire right → fork.b
+      if (right.kind === "literal") {
+        wires.push({ value: right.value, to: makeTarget("b") });
+      } else {
+        wires.push({ from: right.ref, to: makeTarget("b"), pipe: true });
+      }
+
+      return {
+        kind: "ref",
+        ref: {
+          module: forkTrunkModule,
+          type: forkTrunkType,
+          field: forkTrunkField,
+          instance: forkInstance,
+          path: [],
+        },
+      };
+    }
+
+    // Reduce all operators at a given precedence level (left-to-right).
+    // Modifies operands/ops arrays in place, collapsing matched pairs.
+    function reduceLevel(prec: number): void {
+      let i = 0;
+      while (i < ops.length) {
+        if ((OP_PREC[ops[i]] ?? 0) === prec) {
+          const result = emitFork(operands[i], ops[i], operands[i + 1]);
+          operands.splice(i, 2, result);
+          ops.splice(i, 1);
+        } else {
+          i++;
+        }
+      }
+    }
+
+    // Process in precedence order: * / first, then + -, then comparisons.
+    reduceLevel(3); // * /
+    reduceLevel(2); // + -
+    reduceLevel(1); // == != > >= < <=
+
+    // After full reduction, operands[0] holds the final result.
+    const final = operands[0];
+    if (final.kind !== "ref") {
+      throw new Error(`Line ${lineNum}: Expression must contain at least one source reference`);
+    }
+    return final.ref;
+  }
+
   // ── Step 2: Process wire lines ─────────────────────────────────────────
 
   for (const bodyLine of bodyLines) {
@@ -1926,21 +2190,35 @@ function buildBridgeBody(
         arrayIterators,
         buildSourceExpr,
         extractCoalesceAlt,
+        desugarExprChain,
       );
       continue;
     }
 
-    // ── Regular pull wire (non-array) ──
+    // ── Build primary source (expression or plain ref) ──
     const firstSourceNode = sub(wireNode, "firstSource")!;
     const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
-    const pipeSegs = subs(firstSourceNode, "pipeSegment");
-    const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
-    const isPipeFork =
-      firstRef.instance != null &&
-      firstRef.path.length === 0 &&
-      pipeSegs.length > 0;
-    sourceParts.push({ ref: firstRef, isPipeFork });
+    const exprOps = subs(wireNode, "exprOp");
+
+    if (exprOps.length > 0) {
+      // It's a math/comparison expression — desugar it.
+      const exprRights = subs(wireNode, "exprRight");
+      const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const resultRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
+
+      // The expression result acts as the primary source (synthetic pipe fork).
+      sourceParts.push({ ref: resultRef, isPipeFork: true });
+    } else {
+      // Normal pull wire.
+      const pipeSegs = subs(firstSourceNode, "pipeSegment");
+      const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const isPipeFork =
+        firstRef.instance != null &&
+        firstRef.path.length === 0 &&
+        pipeSegs.length > 0;
+      sourceParts.push({ ref: firstRef, isPipeFork });
+    }
 
     let nullFallback: string | undefined;
     for (const alt of subs(wireNode, "nullAlt")) {

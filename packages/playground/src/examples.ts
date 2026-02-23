@@ -169,4 +169,35 @@ bridge Query.echo {
 }`,
     context: `{}`,
   },
+  {
+    name: "Expressions",
+    description: "Use inline math and comparison operators to transform values directly in wire assignments",
+    schema: /* GraphQL */ `type Query {
+  pricing(dollars: Float!, quantity: Int!, minOrder: Float): PricingResult
+}
+
+type PricingResult {
+  cents: Float
+  total: Float
+  eligible: Boolean
+}`,
+    bridge: `version 1.4
+
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.cents <- i.dollars * 100
+  o.total <- i.dollars * i.quantity
+  o.eligible <- i.dollars * i.quantity >= 50
+}`,
+    query: `{
+  pricing(dollars: 9.99, quantity: 3) {
+    cents
+    total
+    eligible
+  }
+}`,
+    context: `{}`,
+  },
 ];
