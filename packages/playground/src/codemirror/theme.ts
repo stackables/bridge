@@ -69,6 +69,25 @@ const theme = EditorView.theme(
       backgroundColor: "#0f172a",    // slate-900
       border: "1px solid #334155",   // slate-700
     },
+    // ── Autocomplete ─────────────────────────────────────────────────
+    ".cm-tooltip-autocomplete": {
+      backgroundColor: "#0f172a",    // slate-900
+      border: "1px solid #334155",   // slate-700
+    },
+    ".cm-tooltip-autocomplete ul li": {
+      color: "#cbd5e1",             // slate-300
+    },
+    ".cm-tooltip-autocomplete ul li[aria-selected]": {
+      backgroundColor: "#1e293b",   // slate-800
+      color: "#f1f5f9",             // slate-100
+    },
+    ".cm-completionLabel": {
+      fontSize: "13px",
+    },
+    ".cm-completionDetail": {
+      color: "#64748b",             // slate-500
+      fontStyle: "italic",
+    },
   },
   { dark: true },
 );

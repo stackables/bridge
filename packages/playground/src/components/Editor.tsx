@@ -3,21 +3,25 @@ import { EditorView, basicSetup } from "codemirror";
 import { EditorState, type Extension, Compartment } from "@codemirror/state";
 import { lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
+import { graphql, updateSchema } from "cm6-graphql";
+import type { GraphQLSchema } from "graphql";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { bridgeLinter } from "@/codemirror/bridge-lint";
 import { graphqlLanguage } from "@/codemirror/graphql-lang";
+import { graphqlSchemaLinter } from "@/codemirror/graphql-schema-lint";
 import { playgroundTheme } from "@/codemirror/theme";
 import { cn } from "@/lib/utils";
 
 /**
  * Language mode for the editor.
  *
- * - "bridge"  — Bridge DSL highlighting via StreamLanguage tokenizer
- * - "graphql" — GraphQL schema/query highlighting via StreamLanguage tokenizer
- * - "json"    — JSON highlighting (context panel)
- * - "plain"   — no language support (fallback)
+ * - "bridge"        — Bridge DSL highlighting + inline linting
+ * - "graphql"       — GraphQL SDL highlighting + inline schema linting
+ * - "graphql-query" — GraphQL query editing with schema-aware autocomplete + linting (cm6-graphql)
+ * - "json"          — JSON highlighting (context panel)
+ * - "plain"         — no language support (fallback)
  */
-export type EditorLanguage = "bridge" | "graphql" | "json" | "plain";
+export type EditorLanguage = "bridge" | "graphql" | "graphql-query" | "json" | "plain";
 
 type Props = {
   label: string;
@@ -27,14 +31,21 @@ type Props = {
   readOnly?: boolean;
   /** When true the editor sizes itself to its content instead of filling the parent. */
   autoHeight?: boolean;
+  /** GraphQL schema for query editors — enables autocomplete & validation. */
+  graphqlSchema?: GraphQLSchema;
 };
 
-function languageExtension(lang: EditorLanguage): Extension[] {
+function languageExtension(
+  lang: EditorLanguage,
+  graphqlSchema?: GraphQLSchema,
+): Extension[] {
   switch (lang) {
     case "bridge":
       return [bridgeLanguage, bridgeLinter, lintGutter()];
     case "graphql":
-      return [graphqlLanguage];
+      return [graphqlLanguage, graphqlSchemaLinter, lintGutter()];
+    case "graphql-query":
+      return [...graphql(graphqlSchema), lintGutter()];
     case "json":
       return [json()];
     case "plain":
@@ -49,6 +60,7 @@ export function Editor({
   language = "plain",
   readOnly = false,
   autoHeight = false,
+  graphqlSchema,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -78,7 +90,7 @@ export function Editor({
       extensions: [
         basicSetup,
         playgroundTheme,
-        ...languageExtension(language),
+        ...languageExtension(language, graphqlSchema),
         updateListener(),
         readOnlyCompartment.current.of([
           EditorState.readOnly.of(readOnly),
@@ -96,6 +108,13 @@ export function Editor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps — intentionally only on mount
   }, [language, updateListener]);
+
+  // Push schema updates into the cm6-graphql extension for query editors
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || language !== "graphql-query") return;
+    updateSchema(view, graphqlSchema);
+  }, [graphqlSchema, language]);
 
   // Sync external value changes (e.g. example picker) into the editor
   useEffect(() => {

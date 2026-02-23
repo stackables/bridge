@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
 import { runBridge, getDiagnostics } from "./engine";
 import type { RunResult } from "./engine";
+import { buildSchema, type GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -29,32 +30,6 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
           : "h-2 cursor-[row-resize]",
       )}
     />
-  );
-}
-
-// ── diagnostics strip ─────────────────────────────────────────────────────────
-function DiagnosticsBar({ bridgeText }: { bridgeText: string }) {
-  const diagnostics = getDiagnostics(bridgeText).diagnostics;
-  if (diagnostics.length === 0) return null;
-  return (
-    <div className="shrink-0 border-t border-slate-800 bg-slate-950 px-3.5 py-1.5 flex flex-col gap-1">
-      {diagnostics.map((d, i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex gap-2 font-mono text-xs",
-            d.severity === "error" ? "text-red-300" : "text-yellow-200",
-          )}
-        >
-          <span className="opacity-60">
-            {d.severity === "error" ? "✗" : "⚠"}
-          </span>
-          <span>
-            {d.message} (line {d.range.start.line + 1})
-          </span>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -178,6 +153,16 @@ export function App() {
   const diagnostics = getDiagnostics(bridge).diagnostics;
   const hasErrors = diagnostics.some((d) => d.severity === "error");
 
+  // Build the GraphQL schema object for the query editor (autocomplete + linting).
+  // Returns undefined when the SDL is invalid so the query editor still works.
+  const graphqlSchema = useMemo<GraphQLSchema | undefined>(() => {
+    try {
+      return buildSchema(schema);
+    } catch {
+      return undefined;
+    }
+  }, [schema]);
+
   return (
     <div className="md:h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
@@ -280,7 +265,6 @@ export function App() {
               autoHeight
             />
           </div>
-          <DiagnosticsBar bridgeText={bridge} />
         </div>
 
         {/* Query / Context panel */}
@@ -300,7 +284,8 @@ export function App() {
                 label=""
                 value={query}
                 onChange={setQuery}
-                language="graphql"
+                language="graphql-query"
+                graphqlSchema={graphqlSchema}
                 autoHeight
               />
             ) : (
@@ -373,7 +358,6 @@ export function App() {
                       language="bridge"
                     />
                   </div>
-                  <DiagnosticsBar bridgeText={bridge} />
                 </PanelBox>
               </Panel>
             </PanelGroup>
@@ -407,7 +391,8 @@ export function App() {
                         label=""
                         value={query}
                         onChange={setQuery}
-                        language="graphql"
+                        language="graphql-query"
+                        graphqlSchema={graphqlSchema}
                       />
                     ) : (
                       <Editor
