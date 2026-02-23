@@ -280,8 +280,10 @@ bridge <Type.field> {
 
   # Array Mapping (brace block per element)
   o.<field> <- <source>[] as <iter> {
-    .<sub_field> <- <iter>.<sub_src>    # Element field via iterator
-    .<sub_field> = "constant"           # Element constant
+    with <pipe>:<iter> as <alias>        # Block-scoped binding (evaluate once per element)
+    .<sub_field> <- <alias>.<sub_src>    # Read from cached binding
+    .<sub_field> <- <iter>.<sub_src>     # Element field via iterator
+    .<sub_field> = "constant"            # Element constant
   }
 
   force <handle>                        # Forced execution
@@ -535,6 +537,7 @@ o <- api.items[] as item {
 | **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
 | **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
+| **`with pipe:i as r`** | Block-scoped binding | Inside `[] as i { }`: evaluates source once per element, caches in local handle `r`. Avoids redundant tool calls when multiple fields read from the same result. |
 
 
 ## Built-in Tools

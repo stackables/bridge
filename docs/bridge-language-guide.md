@@ -456,6 +456,44 @@ Use array mapping blocks instead. Indices on the **source** side are fine:
 o.name <- api.results[0].name     # ← OK: reading first element from source
 ```
 
+### Block-Scoped Bindings (`with ... as` in arrays)
+
+When mapping over arrays, you may need to pass each element through a tool and
+extract multiple fields from the result. Without local bindings, this forces
+the engine to execute the tool once per field — wasteful.
+
+Block-scoped `with` declarations solve this:
+
+```bridge
+o.list <- api.items[] as it {
+  with enrich:it as resp       # evaluate pipe once per element
+  .a <- resp.a                 # cost-0 memory read
+  .b <- resp.b                 # cost-0 memory read
+}
+```
+
+The `with enrich:it as resp` line:
+1. Pipes each element through the `enrich` tool.
+2. Caches the result in a local handle named `resp`.
+3. Makes `resp` available to all subsequent wires in the same block.
+
+The engine evaluates `enrich` exactly **once per element**, regardless of how
+many fields pull from `resp`.
+
+#### Plain iterator bindings
+
+You can also bind a sub-field of the iterator directly:
+
+```bridge
+o.list <- api.items[] as it {
+  with it.metadata as m        # bind a sub-object
+  .author <- m.author
+  .date   <- m.createdAt
+}
+```
+
+This is purely a readability convenience — it doesn't trigger any tool call.
+
 ---
 
 ## 11. Pipe Operator

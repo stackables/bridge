@@ -1,6 +1,6 @@
 ## Block-Scoped Bindings (Local `with` in Array Iterators)
 
-**Status:** Planned
+**Status:** Fully implemented
 **Target Release:** v1.x (Feature Addition)
 
 ### 📖 The Problem: The "Redundant Fan-out" Issue
@@ -46,27 +46,30 @@ bridge Query.getPrice {
 
 ```
 
-### 🛠️ Implementation Plan
+### 🛠️ Implementation Notes
 
 This feature leverages the existing `ExecutionTree.shadow()` mechanics, requiring mostly parser-level changes.
 
-1. **Parser & Lexer Updates:**
-* Update the `elementLine` Chevrotain rule to accept `toolWithDecl` as a valid alternative.
-* When the visitor encounters `with <expr> as <alias>` inside an array map, it registers `<alias>` in the `arrayIterators` tracking map (or a new `localHandles` map).
+1. **Parser & Grammar:**
+   * Added `elementWithDecl` rule to the Chevrotain grammar, matching `with <sourceExpr> as <nameToken>` inside array mapping blocks.
+   * The `arrayMapping` rule now accepts both `elementLine` and `elementWithDecl` as child alternatives.
+   * A `processLocalBindings` helper in `buildBridgeBody` handles iterator-aware source resolution (plain refs, pipe chains with iterator data sources, and regular handle refs).
 
-
-2. **AST Schema Changes:**
-* Array mappings currently just hold a list of child wires. We need the parser to emit a synthetic wire for the `with` declaration targeting a special local trunk.
-* Emit a wire like: `{ from: pipe:it, to: { module: "__local", type: "Shadow", field: "resp" } }`.
-
+2. **AST / Wire Generation:**
+   * For each `with <source> as <alias>`, the parser emits a wire: `{ from: <resolved source>, to: { module: "__local", type: "Shadow", field: "<alias>" } }`.
+   * The alias is temporarily registered in `handleRes` so subsequent element lines can reference it (cleaned up after processing the block).
+   * Pipe chains where the data source is the iterator are handled specially — the iterator reference is converted to an element-scoped `NodeRef`.
 
 3. **Execution Engine (`ExecutionTree.ts`):**
-* The engine's `shadow()` tree already creates an isolated execution scope per row!
-* Ensure `resolveAddress` allows routing to these `__local` trunks. When `.a <- resp.a` is evaluated, the engine will natively find `resp` in the shadow tree's `this.state` and return it without triggering a network call.
+   * `__local` module trunks are always scheduled locally in shadow trees (never delegated to parent), since they are inherently element-scoped.
+   * For path=[] wires (e.g., a pipe returning a primitive like a string), the resolved value is returned directly instead of wrapping in an input object.
+   * The `hasElementWires` detection in `run()` also considers `__local` sources as element-scoped, ensuring array-mapped output is correctly detected.
 
-
+4. **Serializer (`bridge-format.ts`):**
+   * `__local` wires are excluded from regular wire serialization and emitted inside array blocks as `with <source> as <alias>`.
+   * Pipe wire detection for source reconstruction walks the pipe chain backward, correctly handling iterator-relative data sources.
+   * Pipe wires with `from.element=true` are excluded from `elementPullAll` to avoid double-serialization.
 
 ### ⚠️ Migration Path
 
 None. This is a purely additive, non-breaking feature that heavily optimizes existing array-mapping patterns.
-

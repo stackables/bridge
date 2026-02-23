@@ -478,4 +478,50 @@ bridge Mutation.submitFeedback {
     ],
     context: `{}`,
   },
+  {
+    name: "Block-Scoped Bindings",
+    description:
+      "Use 'with <source> as <alias>' inside array mapping to evaluate a tool once per element and reuse the result",
+    schema: `
+type Query {
+  products(category: String!): [Product!]!
+}
+
+type Product {
+  name: String
+  priceLabel: String
+  discountLabel: String
+}
+    `,
+    bridge: `version 1.4
+
+bridge Query.products {
+  with std.httpCall as api
+  with std.upperCase as uc
+  with output as o
+
+  api.baseUrl = "https://dummyjson.com"
+  api.path = "/products/category"
+
+  o <- api.products[] as it {
+    with uc:it.title as upper
+    .name <- upper
+    .priceLabel <- it.price
+    .discountLabel <- it.discountPercentage
+  }
+}`,
+    queries: [
+      {
+        name: "Smartphones",
+        query: `{
+  products(category: "smartphones") {
+    name
+    priceLabel
+    discountLabel
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];
