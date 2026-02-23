@@ -716,8 +716,32 @@ export class ExecutionTree {
 
   /** Resolve a set of matched wires — constants win, then pull from sources.
    *  `||` (nullFallback): fires when all sources resolve to null/undefined.
-   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error). */
+   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error).
+   *  `? :` (cond/thenRef/elseRef): conditional — pulls only the chosen branch. */
   private resolveWires(wires: Wire[]): Promise<any> {
+    // Conditional (ternary) wire: evaluate condition, pull only the chosen branch
+    const conditional = wires.find(
+      (w): w is Extract<Wire, { cond: NodeRef }> => "cond" in w,
+    );
+    if (conditional) {
+      return (async () => {
+        const condValue = await this.pullSingle(conditional.cond);
+        if (condValue) {
+          if (conditional.thenRef !== undefined) return this.pullSingle(conditional.thenRef);
+          if (conditional.thenValue !== undefined) {
+            try { return JSON.parse(conditional.thenValue); } catch { return conditional.thenValue; }
+          }
+          return undefined;
+        } else {
+          if (conditional.elseRef !== undefined) return this.pullSingle(conditional.elseRef);
+          if (conditional.elseValue !== undefined) {
+            try { return JSON.parse(conditional.elseValue); } catch { return conditional.elseValue; }
+          }
+          return undefined;
+        }
+      })();
+    }
+
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );

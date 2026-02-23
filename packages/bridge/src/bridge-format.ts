@@ -560,7 +560,54 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
+  // ── Helper: serialize an expression fork tree for a ref (used for cond) ──
+  function serializeExprOrRef(ref: NodeRef): string {
+    const tk = refTrunkKey(ref);
+    if (ref.path.length === 0 && exprForks.has(tk)) {
+      // Recursively serialize expression fork
+      function serFork(forkTk: string): string {
+        const info = exprForks.get(forkTk);
+        if (!info) return "?";
+        let leftStr: string | null = null;
+        if (info.aWire) {
+          const aTk = refTrunkKey(info.aWire.from);
+          if (info.aWire.from.path.length === 0 && exprForks.has(aTk)) {
+            leftStr = serFork(aTk);
+          } else {
+            leftStr = sRef(info.aWire.from, true);
+          }
+        }
+        let rightStr: string;
+        if (info.bWire && "value" in info.bWire) {
+          rightStr = info.bWire.value;
+        } else if (info.bWire && "from" in info.bWire) {
+          const bFrom = (info.bWire as FW).from;
+          const bTk = refTrunkKey(bFrom);
+          rightStr = bFrom.path.length === 0 && exprForks.has(bTk)
+            ? serFork(bTk)
+            : sRef(bFrom, true);
+        } else {
+          rightStr = "0";
+        }
+        if (leftStr == null) return rightStr;
+        return `${leftStr} ${info.op} ${rightStr}`;
+      }
+      return serFork(tk) ?? sRef(ref, true);
+    }
+    return sRef(ref, true);
+  }
+
   for (const w of regularWires) {
+    // Conditional (ternary) wire
+    if ("cond" in w) {
+      const toStr = sRef(w.to, false);
+      const condStr = serializeExprOrRef(w.cond);
+      const thenStr = w.thenRef ? sRef(w.thenRef, true) : (w.thenValue ?? "null");
+      const elseStr = w.elseRef ? sRef(w.elseRef, true) : (w.elseValue ?? "null");
+      lines.push(`${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}`);
+      continue;
+    }
+
     // Constant wire
     if ("value" in w) {
       const toStr = sRef(w.to, false);

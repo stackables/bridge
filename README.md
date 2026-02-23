@@ -477,6 +477,42 @@ bridge Query.price {
 
 ```
 
+### Conditional Wire (`? :`)
+
+Selects between two sources based on a boolean condition. Only the chosen branch is evaluated — the other branch is never touched.
+
+```bridge
+bridge Query.smartPrice {
+  with stripe
+  with input as i
+  with output as o
+
+  # selects proPrice or basicPrice based on i.isPro
+  o.amount <- i.isPro ? stripe.proPrice : stripe.basicPrice
+}
+```
+
+Branches can be source references or literals (string, number, boolean, null):
+
+```bridge
+o.tier     <- i.isPro ? "premium" : "basic"
+o.discount <- i.isPro ? 20 : 5
+```
+
+The condition can be any expression:
+
+```bridge
+o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
+```
+
+Works inside array mapping blocks:
+
+```bridge
+o <- api.items[] as item {
+  .price <- item.isPro ? item.proPrice : item.basicPrice
+}
+```
+
 ---
 
 ## Syntax Reference
@@ -489,6 +525,7 @@ bridge Query.price {
 | **`:`** | Pipe | Chains data through tools right-to-left. |
 | **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
+| **`? :`** | Conditional | Evaluates condition; pulls only the chosen branch (`then` or `else`). Branches are source refs or literals. |
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
 | **`tool ... from`** | Tool Definition | Configures a function or inherits from a parent tool. |
 | **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |

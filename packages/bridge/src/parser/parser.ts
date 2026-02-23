@@ -49,6 +49,7 @@ import {
   NotEquals,
   GreaterThan,
   LessThan,
+  QuestionMark,
   BridgeLexer,
 } from "./lexer.js";
 
@@ -370,6 +371,13 @@ class BridgeParser extends CstParser {
             this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
             this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
           });
+          // Optional ternary: ? thenBranch : elseBranch
+          this.OPTION3(() => {
+            this.CONSUME(QuestionMark, { LABEL: "ternaryOp" });
+            this.SUBRULE(this.ternaryBranch, { LABEL: "thenBranch" });
+            this.CONSUME(Colon, { LABEL: "ternaryColon" });
+            this.SUBRULE2(this.ternaryBranch, { LABEL: "elseBranch" });
+          });
           // Optional array mapping: [] as <iter> { ... }
           this.OPTION(() => this.SUBRULE(this.arrayMapping));
           // || coalesce chain
@@ -423,6 +431,13 @@ class BridgeParser extends CstParser {
           this.MANY2(() => {
             this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
             this.SUBRULE(this.exprOperand, { LABEL: "elemExprRight" });
+          });
+          // Optional ternary: ? thenBranch : elseBranch
+          this.OPTION3(() => {
+            this.CONSUME(QuestionMark, { LABEL: "elemTernaryOp" });
+            this.SUBRULE(this.ternaryBranch, { LABEL: "elemThenBranch" });
+            this.CONSUME(Colon, { LABEL: "elemTernaryColon" });
+            this.SUBRULE2(this.ternaryBranch, { LABEL: "elemElseBranch" });
           });
           // Optional nested array mapping: [] as <iter> { ... }
           this.OPTION2(() =>
@@ -523,6 +538,22 @@ class BridgeParser extends CstParser {
       { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
       { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
       { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceRef" }) },
+    ]);
+  });
+
+  /**
+   * Ternary branch: the then/else operand in `cond ? then : else`.
+   * Restricted to simple address paths and literals (no pipe chains)
+   * to avoid ambiguity with the `:` separator.
+   */
+  public ternaryBranch = this.RULE("ternaryBranch", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(StringLiteral, { LABEL: "stringLit" }) },
+      { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
+      { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
+      { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
+      { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
+      { ALT: () => this.SUBRULE(this.addressPath, { LABEL: "sourceRef" }) },
     ]);
   });
 
@@ -1115,6 +1146,11 @@ function processElementLines(
     lineNum: number,
     iterName?: string,
   ) => NodeRef,
+  extractTernaryBranchFn?: (
+    branchNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
 ): void {
   /**
    * Wrap extractCoalesceAlt to handle iterator-relative source references
@@ -1224,6 +1260,7 @@ function processElementLines(
           buildSourceExpr,
           extractCoalesceAlt,
           desugarExprChain,
+          extractTernaryBranchFn,
         );
         continue;
       }
@@ -1240,6 +1277,9 @@ function processElementLines(
 
       const elemExprOps = subs(elemLine, "elemExprOp");
 
+      // Compute condition ref (expression chain result or plain source)
+      let elemCondRef: NodeRef;
+      let elemCondIsPipeFork: boolean;
       if (elemExprOps.length > 0 && desugarExprChain) {
         // Expression in element line — desugar then merge with fallback path
         const elemExprRights = subs(elemLine, "elemExprRight");
@@ -1255,27 +1295,39 @@ function processElementLines(
         } else {
           leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
         }
-        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
-        sourceParts.push({ ref: resultRef, isPipeFork: true });
+        elemCondRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        elemCondIsPipeFork = true;
       } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-        sourceParts.push({
-          ref: {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemSrcSegs,
-          },
-          isPipeFork: false,
-        });
+        elemCondRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: elemSrcSegs,
+        };
+        elemCondIsPipeFork = false;
       } else {
-        const ref = buildSourceExpr(elemSourceNode, elemLineNum, false);
-        const isPipeFork =
-          ref.instance != null &&
-          ref.path.length === 0 &&
-          elemPipeSegs.length > 0;
-        sourceParts.push({ ref, isPipeFork });
+        elemCondRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+        elemCondIsPipeFork = elemCondRef.instance != null && elemCondRef.path.length === 0 && elemPipeSegs.length > 0;
       }
+
+      // ── Ternary wire in element context ──
+      const elemTernaryOp = (elemC.elemTernaryOp as IToken[] | undefined)?.[0];
+      if (elemTernaryOp && extractTernaryBranchFn) {
+        const thenNode = sub(elemLine, "elemThenBranch")!;
+        const elseNode = sub(elemLine, "elemElseBranch")!;
+        const thenBranch = extractTernaryBranchFn(thenNode, elemLineNum, iterName);
+        const elseBranch = extractTernaryBranchFn(elseNode, elemLineNum, iterName);
+        wires.push({
+          cond: elemCondRef,
+          ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+          ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+          to: elemToRef,
+        });
+        continue;
+      }
+
+      sourceParts.push({ ref: elemCondRef, isPipeFork: elemCondIsPipeFork });
 
       // || alternatives
       let nullFallback: string | undefined;
@@ -1950,6 +2002,45 @@ function buildBridgeBody(
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);
   }
 
+  // ── Helper: extract ternary branch ────────────────────────────────────
+
+  /**
+   * Resolve a ternaryBranch CST node to either a NodeRef (source) or a
+   * raw literal string suitable for JSON.parse (kept verbatim for numbers
+   * / booleans / null; kept with quotes for strings so JSON.parse works).
+   */
+  function extractTernaryBranch(
+    branchNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
+    const c = branchNode.children;
+    if (c.stringLit) return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
+    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.trueLit) return { kind: "literal", value: "true" };
+    if (c.falseLit) return { kind: "literal", value: "false" };
+    if (c.nullLit) return { kind: "literal", value: "null" };
+    if (c.sourceRef) {
+      const addrNode = (c.sourceRef as CstNode[])[0];
+      const { root, segments } = extractAddressPath(addrNode);
+      // Iterator-relative ref in element context
+      if (iterName && root === iterName) {
+        return {
+          kind: "ref",
+          ref: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: segments,
+          },
+        };
+      }
+      return { kind: "ref", ref: resolveAddress(root, segments, lineNum) };
+    }
+    throw new Error(`Line ${lineNum}: Invalid ternary branch`);
+  }
+
   // ── Helper: operator symbol → std tool function name ──────────────────
 
   /** Map infix operator token to the std tool that implements it. */
@@ -2191,6 +2282,7 @@ function buildBridgeBody(
         buildSourceExpr,
         extractCoalesceAlt,
         desugarExprChain,
+        extractTernaryBranch,
       );
       continue;
     }
@@ -2201,24 +2293,38 @@ function buildBridgeBody(
 
     const exprOps = subs(wireNode, "exprOp");
 
+    // Compute condition ref (expression chain result or plain source)
+    let condRef: NodeRef;
+    let condIsPipeFork: boolean;
     if (exprOps.length > 0) {
       // It's a math/comparison expression — desugar it.
       const exprRights = subs(wireNode, "exprRight");
       const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
-      const resultRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
-
-      // The expression result acts as the primary source (synthetic pipe fork).
-      sourceParts.push({ ref: resultRef, isPipeFork: true });
+      condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
+      condIsPipeFork = true;
     } else {
-      // Normal pull wire.
       const pipeSegs = subs(firstSourceNode, "pipeSegment");
-      const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
-      const isPipeFork =
-        firstRef.instance != null &&
-        firstRef.path.length === 0 &&
-        pipeSegs.length > 0;
-      sourceParts.push({ ref: firstRef, isPipeFork });
+      condRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      condIsPipeFork = condRef.instance != null && condRef.path.length === 0 && pipeSegs.length > 0;
     }
+
+    // ── Ternary wire: cond ? thenBranch : elseBranch ──
+    const ternaryOp = tok(wireNode, "ternaryOp");
+    if (ternaryOp) {
+      const thenNode = sub(wireNode, "thenBranch")!;
+      const elseNode = sub(wireNode, "elseBranch")!;
+      const thenBranch = extractTernaryBranch(thenNode, lineNum);
+      const elseBranch = extractTernaryBranch(elseNode, lineNum);
+      wires.push({
+        cond: condRef,
+        ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+        ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+        to: toRef,
+      });
+      continue;
+    }
+
+    sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
     let nullFallback: string | undefined;
     for (const alt of subs(wireNode, "nullAlt")) {
