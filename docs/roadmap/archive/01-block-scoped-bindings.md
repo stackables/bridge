@@ -1,4 +1,4 @@
-## Block-Scoped Bindings (Local `with` in Array Iterators)
+## Alias Declarations (`alias` keyword)
 
 **Status:** Fully implemented
 **Target Release:** v1.x (Feature Addition)
@@ -27,6 +27,8 @@ By pulling the tool execution into a local handle (`resp`), the engine evaluates
 
 **New Syntax:**
 
+The `alias` keyword (not `with`, to avoid conflict with handle declarations):
+
 ```bridge
 bridge Query.getPrice {
   with input as i
@@ -34,41 +36,53 @@ bridge Query.getPrice {
   with pipe
   with output as o
 
+  # Top-level alias: cache a pipe result
+  alias pipe:i.category as upperCat
+
   o.list <- tool1.list[] as it {
-    # 1. Bring the result of the pipe into this local shadow scope
-    with pipe:it as resp
+    # Array-scoped alias: evaluate once per element
+    alias pipe:it as resp
    
-    # 2. Pull from the local handle (Cost 0 memory reads)
+    # Pull from the local handle (Cost 0 memory reads)
     .a <- resp.a
     .b <- resp.b
+    .cat <- upperCat
   }
 }
+```
 
+Also works as a simple rename for deeply nested paths:
+
+```bridge
+  alias api.company.address as addr
+  o.city <- addr.city
+  o.state <- addr.state
 ```
 
 ### 🛠️ Implementation Notes
 
 This feature leverages the existing `ExecutionTree.shadow()` mechanics, requiring mostly parser-level changes.
 
-1. **Parser & Grammar:**
-   * Added `elementWithDecl` rule to the Chevrotain grammar, matching `with <sourceExpr> as <nameToken>` inside array mapping blocks.
-   * The `arrayMapping` rule now accepts both `elementLine` and `elementWithDecl` as child alternatives.
+1. **Lexer & Grammar:**
+   * Added `AliasKw` token to the lexer. Since `alias` is a dedicated keyword, there is no ambiguity with the existing `with` keyword used for handle declarations.
+   * Added `bridgeNodeAlias` grammar rule (`alias <sourceExpr> as <name>`) in `bridgeBodyLine` for top-level aliases.
+   * Added `elementWithDecl` grammar rule (`alias <sourceExpr> as <name>`) in `arrayMapping` for element-scoped aliases.
    * A `processLocalBindings` helper in `buildBridgeBody` handles iterator-aware source resolution (plain refs, pipe chains with iterator data sources, and regular handle refs).
 
 2. **AST / Wire Generation:**
-   * For each `with <source> as <alias>`, the parser emits a wire: `{ from: <resolved source>, to: { module: "__local", type: "Shadow", field: "<alias>" } }`.
-   * The alias is temporarily registered in `handleRes` so subsequent element lines can reference it (cleaned up after processing the block).
+   * For each `alias <source> as <name>`, the parser emits a wire: `{ from: <resolved source>, to: { module: "__local", type: "Shadow", field: "<name>" } }`.
+   * The alias is registered in `handleRes` so subsequent wires can reference it. Inside array blocks, aliases are cleaned up after processing the block.
    * Pipe chains where the data source is the iterator are handled specially — the iterator reference is converted to an element-scoped `NodeRef`.
 
 3. **Execution Engine (`ExecutionTree.ts`):**
-   * `__local` module trunks are always scheduled locally in shadow trees (never delegated to parent), since they are inherently element-scoped.
+   * `__local` module trunks in shadow trees use transitive element-source detection: if the `__local` trunk's source is a pipe fork with element-sourced wires, it's scheduled locally. Otherwise, it delegates to the parent (for top-level aliases).
    * For path=[] wires (e.g., a pipe returning a primitive like a string), the resolved value is returned directly instead of wrapping in an input object.
    * The `hasElementWires` detection in `run()` also considers `__local` sources as element-scoped, ensuring array-mapped output is correctly detected.
 
 4. **Serializer (`bridge-format.ts`):**
-   * `__local` wires are excluded from regular wire serialization and emitted inside array blocks as `with <source> as <alias>`.
-   * Pipe wire detection for source reconstruction walks the pipe chain backward, correctly handling iterator-relative data sources.
-   * Pipe wires with `from.element=true` are excluded from `elementPullAll` to avoid double-serialization.
+   * `__local` wires are excluded from regular wire serialization.
+   * Element-scoped aliases are emitted as `alias <source> as <name>` inside array blocks.
+   * Top-level aliases are emitted separately, with pipe chain reconstruction walking backward.
 
 ### ⚠️ Migration Path
 

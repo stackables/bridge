@@ -479,45 +479,83 @@ bridge Mutation.submitFeedback {
     context: `{}`,
   },
   {
-    name: "Block-Scoped Bindings",
+    name: "Alias (Rename & Cache)",
     description:
-      "Use 'with <source> as <alias>' inside array mapping to evaluate a tool once per element and reuse the result",
+      "Use 'alias' to rename deep paths or cache pipe results — works at bridge body level and inside array mapping blocks",
     schema: `
 type Query {
-  products(category: String!): [Product!]!
+  searchTrains(from: String!, to: String!): [Journey!]!
 }
 
-type Product {
-  name: String
-  priceLabel: String
-  discountLabel: String
+type Journey {
+  departureTime: String!
+  arrivalTime: String!
+  originStation: String!
+  destinationStation: String!
+  legs: [Leg!]!
+}
+
+type Leg {
+  trainName: String
+  fromStation: String
+  fromTime: String
+  toStation: String
+  toTime: String
 }
     `,
     bridge: `version 1.4
 
-bridge Query.products {
-  with std.httpCall as api
-  with std.upperCase as uc
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  .cache = 60
+  on error = { "connections": [] }
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
   with output as o
 
-  api.baseUrl = "https://dummyjson.com"
-  api.path = "/products/category"
+  api.from <- i.from
+  api.to <- i.to
 
-  o <- api.products[] as it {
-    with uc:it.title as upper
-    .name <- upper
-    .priceLabel <- it.price
-    .discountLabel <- it.discountPercentage
+  o <- api.connections[] as c {
+    # alias renames deeply nested paths for readability
+    alias c.from as dep
+    alias c.to as arr
+
+    .departureTime <- dep.departure
+    .arrivalTime <- arr.arrival
+    .originStation <- dep.station.name
+    .destinationStation <- arr.station.name
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+      .fromStation <- s.departure.station.name
+      .fromTime <- s.departure.departure
+      .toStation <- s.arrival.station.name
+      .toTime <- s.arrival.arrival
+    }
   }
 }`,
     queries: [
       {
-        name: "Smartphones",
+        name: "Bern \u2192 Z\u00fcrich",
         query: `{
-  products(category: "smartphones") {
-    name
-    priceLabel
-    discountLabel
+  searchTrains(from: "Bern", to: "Zürich") {
+    departureTime
+    arrivalTime
+    originStation
+    destinationStation
+    legs {
+      trainName
+      fromStation
+      fromTime
+      toStation
+      toTime
+    }
   }
 }`,
       },

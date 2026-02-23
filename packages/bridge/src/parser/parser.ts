@@ -79,6 +79,7 @@ const RESERVED_KEYWORDS = new Set([
   "tool",
   "version",
   "define",
+  "alias",
 ]);
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
