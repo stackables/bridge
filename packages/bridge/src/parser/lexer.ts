@@ -49,6 +49,7 @@ export const ContextKw = createToken({ name: "ContextKw", pattern: /context/i, l
 export const OnKw      = createToken({ name: "OnKw",      pattern: /on/i,      longer_alt: Identifier });
 export const ErrorKw   = createToken({ name: "ErrorKw",   pattern: /error/i,   longer_alt: Identifier });
 export const ForceKw   = createToken({ name: "ForceKw",   pattern: /force/i,   longer_alt: Identifier });
+export const AliasKw   = createToken({ name: "AliasKw",   pattern: /alias/i,   longer_alt: Identifier });
 
 // ── Operators & punctuation ────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ export const allTokens = [
   OnKw,
   ErrorKw,
   ForceKw,
+  AliasKw,
   TrueLiteral,
   FalseLiteral,
   NullLiteral,

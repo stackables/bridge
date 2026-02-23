@@ -542,7 +542,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
 
-    // Emit block-scoped local bindings: with <source> as <alias>
+    // Emit block-scoped local bindings: alias <source> as <name>
     for (const [alias, info] of localBindingsByAlias) {
       const srcWire = info.sourceWire;
       // Reconstruct the source expression
@@ -580,7 +580,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           sourcePart = sRef(fromRef, true);
         }
       }
-      lines.push(`${indent}with ${sourcePart} as ${alias}`);
+      lines.push(`${indent}alias ${sourcePart} as ${alias}`);
     }
 
     // Emit constant element wires
@@ -765,6 +765,73 @@ function serializeBridgeBlock(bridge: Bridge): string {
         ? ` ?? ${w.fallback}`
         : "";
     lines.push(`${toStr} <- ${fromStr}${nfb}${errf}`);
+  }
+
+  // ── Top-level alias declarations ─────────────────────────────────────
+  // Emit `alias <source> as <name>` for __local bindings that are NOT
+  // element-scoped (those are handled inside serializeArrayElements).
+  for (const [alias, info] of localBindingsByAlias) {
+    const srcWire = info.sourceWire;
+    const fromRef = srcWire.from;
+    // Element-scoped bindings are emitted inside array blocks
+    if (fromRef.element) continue;
+    // Check if source is a pipe fork with element-sourced input (array-scoped)
+    const srcTk = refTrunkKey(fromRef);
+    if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+      const inWire = toInMap.get(srcTk);
+      if (inWire && inWire.from.element) continue;
+    }
+    // Reconstruct source expression
+    let sourcePart: string;
+    if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+      const parts: string[] = [];
+      let currentTk = srcTk;
+      while (true) {
+        const handleName = handleMap.get(currentTk);
+        if (!handleName) break;
+        parts.push(handleName);
+        const inWire = toInMap.get(currentTk);
+        if (!inWire) break;
+        const innerTk = refTrunkKey(inWire.from);
+        if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(innerTk)) {
+          currentTk = innerTk;
+        } else {
+          parts.push(sRef(inWire.from, true));
+          break;
+        }
+      }
+      sourcePart = parts.join(":");
+    } else {
+      sourcePart = sRef(fromRef, true);
+    }
+    lines.push(`alias ${sourcePart} as ${alias}`);
+  }
+  // Also emit wires reading from top-level __local bindings
+  for (const lw of localReadWires) {
+    // Skip element-targeting reads (emitted inside array blocks)
+    if (
+      lw.to.module === SELF_MODULE &&
+      lw.to.type === bridge.type &&
+      lw.to.field === bridge.field
+    ) {
+      // Check if this targets an array element path
+      const toPathStr = lw.to.path.join(".");
+      if (toPathStr in arrayIterators) continue;
+      // Check if any array iterator path is a prefix of this path
+      let isArrayElement = false;
+      for (const iterPath of Object.keys(arrayIterators)) {
+        if (iterPath === "" || toPathStr.startsWith(iterPath + ".")) {
+          isArrayElement = true;
+          break;
+        }
+      }
+      if (isArrayElement) continue;
+    }
+    const alias = lw.from.field;
+    const fromPart =
+      lw.from.path.length > 0 ? alias + "." + serPath(lw.from.path) : alias;
+    const toStr = sRef(lw.to, false);
+    lines.push(`${toStr} <- ${fromPart}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
