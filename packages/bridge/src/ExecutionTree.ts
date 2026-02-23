@@ -716,8 +716,66 @@ export class ExecutionTree {
 
   /** Resolve a set of matched wires — constants win, then pull from sources.
    *  `||` (nullFallback): fires when all sources resolve to null/undefined.
-   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error). */
+   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error).
+   *  `? :` (cond/thenRef/elseRef): conditional — pulls only the chosen branch. */
   private resolveWires(wires: Wire[]): Promise<any> {
+    // Conditional (ternary) wire: evaluate condition, pull only the chosen branch
+    const conditional = wires.find(
+      (w): w is Extract<Wire, { cond: NodeRef }> => "cond" in w,
+    );
+    if (conditional) {
+      // Sibling pull wires from `|| sourceRef` fallbacks
+      const siblingPulls = wires.filter(
+        (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
+      );
+
+      let result: Promise<any> = (async () => {
+        const condValue = await this.pullSingle(conditional.cond);
+        if (condValue) {
+          if (conditional.thenRef !== undefined) return this.pullSingle(conditional.thenRef);
+          if (conditional.thenValue !== undefined) {
+            try { return JSON.parse(conditional.thenValue); } catch { return conditional.thenValue; }
+          }
+          return undefined;
+        } else {
+          if (conditional.elseRef !== undefined) return this.pullSingle(conditional.elseRef);
+          if (conditional.elseValue !== undefined) {
+            try { return JSON.parse(conditional.elseValue); } catch { return conditional.elseValue; }
+          }
+          return undefined;
+        }
+      })();
+
+      // || null-guard: try sibling source refs, then literal nullFallback
+      if (siblingPulls.length > 0) {
+        result = result.then(async (value) => {
+          if (value != null) return value;
+          return this.pull(siblingPulls.map((w) => w.from));
+        });
+      }
+      if (conditional.nullFallback != null) {
+        result = result.then((value) => {
+          if (value != null) return value;
+          try {
+            return JSON.parse(conditional.nullFallback!);
+          } catch {
+            return conditional.nullFallback;
+          }
+        });
+      }
+
+      // ?? error-guard
+      if (!conditional.fallbackRef && !conditional.fallback) return result;
+      return result.catch(() => {
+        if (conditional.fallbackRef) return this.pullSingle(conditional.fallbackRef);
+        try {
+          return JSON.parse(conditional.fallback!);
+        } catch {
+          return conditional.fallback;
+        }
+      });
+    }
+
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );

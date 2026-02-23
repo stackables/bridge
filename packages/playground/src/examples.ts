@@ -301,4 +301,40 @@ bridge Query.pricing {
 }`,
     context: `{}`,
   },
+  {
+    name: "Conditional Wire (Ternary)",
+    description: "Select between two sources based on a condition — only the chosen branch is evaluated",
+    schema: /* GraphQL */ `type Query {
+  pricing(isPro: Boolean!, proPrice: Float!, basicPrice: Float!): PricingResult
+}
+
+type PricingResult {
+  tier: String
+  price: Float
+  discount: Float
+}`,
+    bridge: `version 1.4
+
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  # String literal branches
+  o.tier <- i.isPro ? "premium" : "basic"
+
+  # Numeric literal branches
+  o.discount <- i.isPro ? 20 : 5
+
+  # Source ref branches — selects proPrice or basicPrice
+  o.price <- i.isPro ? i.proPrice : i.basicPrice
+}`,
+    query: `{
+  pricing(isPro: true, proPrice: 49.99, basicPrice: 9.99) {
+    tier
+    price
+    discount
+  }
+}`,
+    context: `{}`,
+  },
 ];

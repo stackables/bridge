@@ -55,6 +55,7 @@ export const ForceArrow    = createToken({ name: "ForceArrow",    pattern: /<-!/
 export const Arrow         = createToken({ name: "Arrow",         pattern: /<-/ });
 export const NullCoalesce  = createToken({ name: "NullCoalesce",  pattern: /\|\|/ });
 export const ErrorCoalesce = createToken({ name: "ErrorCoalesce", pattern: /\?\?/ });
+export const QuestionMark  = createToken({ name: "QuestionMark",  pattern: /\?/ });
 export const GreaterEqual  = createToken({ name: "GreaterEqual",  pattern: />=/ });
 export const LessEqual     = createToken({ name: "LessEqual",     pattern: /<=/ });
 export const DoubleEquals  = createToken({ name: "DoubleEquals",  pattern: /==/ });
@@ -106,6 +107,7 @@ export const allTokens = [
   Arrow,
   NullCoalesce,
   ErrorCoalesce,
+  QuestionMark,
   GreaterEqual,
   LessEqual,
   DoubleEquals,

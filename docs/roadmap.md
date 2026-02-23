@@ -6,30 +6,6 @@ Living document. Ideas start in **Open**, move to a release section when committ
 
 ## Open
 
-### Conditional Wire (Ternary)
-
-A conditional wire selects between two sources based on a boolean predicate.
-Distinct from the existing operators:
-
-- `||` = null-coalescing (try A, if null try B)
-- `??` = error-coalescing (try A, if it throws try B)
-- `? :` = **selection** (check condition, pull exactly one branch)
-
-**Syntax:**
-```bridge
-define smartPrice {
-  with stripe
-  with output as o
-  with input as i
-
-  o.amount <- i.isPro ? stripe.proPrice : stripe.basicPrice
-}
-```
-
-**Semantics:** The condition is itself a pull. The engine pulls `i.isPro` first (cost 0), then pulls **only** the chosen branch. The other branch is never touched.
-
-**Implementation sketch:** ~50-80 lines -- one new Wire variant, one parser rule, one engine path in `resolveWires()`.
-
 ### Browser Playground
 
 A fully client-side interactive playground — no server infra, no proxying, no client secrets leaving the browser.
@@ -120,6 +96,32 @@ A massive upgrade to the Language Server (LSP) that provides deep autocomplete, 
 ## v2.0 (Feb 2026)
 
 Transformed Bridge from a naive script executor into a cost-based declarative dataflow engine, replaced the hand-rolled regex parser with Chevrotain, and shipped a VS Code extension with LSP.
+
+### Conditional Wire (Ternary) -- DONE
+
+A conditional wire selects between two sources based on a boolean predicate.
+Distinct from the existing operators:
+
+- `||` = null-coalescing (try A, if null try B)
+- `??` = error-coalescing (try A, if it throws try B)
+- `? :` = **selection** (check condition, pull exactly one branch)
+
+**Syntax:**
+```bridge
+bridge Query.smartPrice {
+  with stripe
+  with input as i
+  with output as o
+
+  o.amount <- i.isPro ? stripe.proPrice : stripe.basicPrice
+}
+```
+
+**Semantics:** The condition is evaluated first (benefits from cost-0 fast-path for input/context reads), then **only** the chosen branch is pulled. The other branch is never touched — lazy evaluation of each branch prevents unnecessary tool calls.
+
+The condition can be any source expression, including comparison expressions: `i.age >= 18 ? i.proPrice : i.basicPrice`. String, number, boolean, and null literals are supported as branches. Ternary composes naturally with the array mapping syntax (`[] as iter { .price <- item.isPro ? item.proPrice : item.basicPrice }`).
+
+**Implementation:** One new `Wire` variant (`{ cond, thenRef?, thenValue?, elseRef?, elseValue?, to }`), a `ternaryBranch` grammar rule with a `?` token, and a dedicated code path in `ExecutionTree.resolveWires()` that evaluates the condition then pulls the appropriate branch sequentially.
 
 ### Sequential Cost-Sorted Fallbacks -- DONE
 
