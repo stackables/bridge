@@ -417,4 +417,65 @@ bridge Query.pricing {
     ],
     context: `{}`,
   },
+  {
+    name: "Force (Side-Effects)",
+    description:
+      "Use 'force' to guarantee a tool executes as a side-effect even when no output fields come from it",
+    schema: `type Query {
+  _: String
+}
+
+type Mutation {
+  submitFeedback(text: String!, rating: Int!): SubmitResult
+}
+
+type SubmitResult {
+  accepted: Boolean
+  message: String
+}
+    `,
+    bridge: `version 1.4
+
+# This tool POSTs feedback to a webhook.
+# We don't read anything from its response —
+# the call must still happen.
+tool webhook from std.httpCall {
+  .baseUrl = "https://httpbin.org"
+  .path = "/post"
+  .method = POST
+}
+
+bridge Mutation.submitFeedback {
+  with webhook as wh
+  with input as i
+  with output as o
+
+  # Wire the input into the request body
+  wh.body.text <- i.text
+  wh.body.rating <- i.rating
+
+  # Force the webhook to execute even though no output
+  # fields are read from it — this is the key difference
+  # from a regular lazy wire.
+  force wh
+
+  # Output is derived from the input, not the HTTP response.
+  # A 204 No Content or any non-JSON response would still
+  # return these fields correctly.
+  o.accepted = true
+  o.message <- i.text
+}`,
+    queries: [
+      {
+        name: "Submit",
+        query: `mutation {
+  submitFeedback(text: "Great product!", rating: 5) {
+    accepted
+    message
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];

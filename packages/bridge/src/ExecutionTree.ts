@@ -18,10 +18,13 @@ const otelMeter = metrics.getMeter("@stackables/bridge");
 const toolCallCounter = otelMeter.createCounter("bridge.tool.calls", {
   description: "Total number of tool invocations",
 });
-const toolDurationHistogram = otelMeter.createHistogram("bridge.tool.duration", {
-  description: "Tool call duration in milliseconds",
-  unit: "ms",
-});
+const toolDurationHistogram = otelMeter.createHistogram(
+  "bridge.tool.duration",
+  {
+    description: "Tool call duration in milliseconds",
+    unit: "ms",
+  },
+);
 const toolErrorCounter = otelMeter.createCounter("bridge.tool.errors", {
   description: "Total number of tool invocation errors",
 });
@@ -117,14 +120,32 @@ export class TraceCollector {
   }
 
   /** Build a trace entry, omitting input/output for basic level. */
-  entry(base: { tool: string; fn: string; startedAt: number; durationMs: number; input?: Record<string, any>; output?: any; error?: string }): ToolTrace {
+  entry(base: {
+    tool: string;
+    fn: string;
+    startedAt: number;
+    durationMs: number;
+    input?: Record<string, any>;
+    output?: any;
+    error?: string;
+  }): ToolTrace {
     if (this.level === "basic") {
-      const t: ToolTrace = { tool: base.tool, fn: base.fn, durationMs: base.durationMs, startedAt: base.startedAt };
+      const t: ToolTrace = {
+        tool: base.tool,
+        fn: base.fn,
+        durationMs: base.durationMs,
+        startedAt: base.startedAt,
+      };
       if (base.error) t.error = base.error;
       return t;
     }
     // full
-    const t: ToolTrace = { tool: base.tool, fn: base.fn, durationMs: base.durationMs, startedAt: base.startedAt };
+    const t: ToolTrace = {
+      tool: base.tool,
+      fn: base.fn,
+      durationMs: base.durationMs,
+      startedAt: base.startedAt,
+    };
     if (base.input) t.input = structuredClone(base.input);
     if (base.error) t.error = base.error;
     else if (base.output !== undefined) t.output = base.output;
@@ -133,6 +154,23 @@ export class TraceCollector {
 }
 
 /** Set a value at a nested path, creating intermediate objects/arrays as needed */
+/**
+ * Coerce a constant wire value string to its proper JS type.
+ *
+ * The parser stores all bare constants as strings (because the Wire type
+ * uses `value: string`). JSON.parse recovers the original type:
+ *   "true" → true, "false" → false, "null" → null, "42" → 42
+ * Plain strings that aren't valid JSON (like "hello", "/search") fall
+ * through and are returned as-is.
+ */
+function coerceConstant(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
 function setNested(obj: any, path: string[], value: any): void {
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
@@ -152,7 +190,9 @@ export class ExecutionTree {
   bridge: Bridge | undefined;
   private toolDepCache: Map<string, Promise<any>> = new Map();
   private toolDefCache: Map<string, ToolDef | null> = new Map();
-  private pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]> | undefined;
+  private pipeHandleMap:
+    | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
+    | undefined;
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -203,13 +243,18 @@ export class ExecutionTree {
 
   /** Deep-lookup a tool function by dotted name (e.g. "std.upperCase").
    *  Falls back to a flat key lookup for backward compat (e.g. "hereapi.geocode" as literal key). */
-  private lookupToolFn(name: string): ToolCallFn | ((...args: any[]) => any) | undefined {
+  private lookupToolFn(
+    name: string,
+  ): ToolCallFn | ((...args: any[]) => any) | undefined {
     if (name.includes(".")) {
       // Try namespace traversal first
       const parts = name.split(".");
       let current: any = this.toolFns;
       for (const part of parts) {
-        if (current == null || typeof current !== "object") { current = undefined; break; }
+        if (current == null || typeof current !== "object") {
+          current = undefined;
+          break;
+        }
         current = current[part];
       }
       if (typeof current === "function") return current;
@@ -299,7 +344,7 @@ export class ExecutionTree {
     // Constants applied synchronously
     for (const wire of toolDef.wires) {
       if (wire.kind === "constant") {
-        setNested(input, parsePath(wire.target), wire.value);
+        setNested(input, parsePath(wire.target), coerceConstant(wire.value));
       }
     }
 
@@ -343,7 +388,11 @@ export class ExecutionTree {
       }
     } else if (dep.kind === "const") {
       // Walk the full parent chain for const state
-      const constKey = trunkKey({ module: SELF_MODULE, type: "Const", field: "const" });
+      const constKey = trunkKey({
+        module: SELF_MODULE,
+        type: "Const",
+        field: "const",
+      });
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       let cursor: ExecutionTree | undefined = this;
       while (cursor && value === undefined) {
@@ -421,7 +470,8 @@ export class ExecutionTree {
           ) ?? [])
         : [];
       // Fork-specific wires (pipe wires targeting the fork's own instance)
-      const forkWires = this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const forkWires =
+        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
       // Merge: base provides defaults, fork overrides
       const bridgeWires = [...baseWires, ...forkWires];
 
@@ -443,7 +493,10 @@ export class ExecutionTree {
       for (const w of bridgeWires) {
         const key = w.to.path.join(".");
         let group = wireGroups.get(key);
-        if (!group) { group = []; wireGroups.set(key, group); }
+        if (!group) {
+          group = [];
+          wireGroups.set(key, group);
+        }
         group.push(w);
       }
 
@@ -510,7 +563,10 @@ export class ExecutionTree {
     const logger = this.logger;
     const toolContext: ToolContext = { logger: logger ?? {} };
     const traceStart = tracer?.now();
-    const metricAttrs = { "bridge.tool.name": toolName, "bridge.tool.fn": fnName };
+    const metricAttrs = {
+      "bridge.tool.name": toolName,
+      "bridge.tool.fn": fnName,
+    };
     return otelTracer.startActiveSpan(
       `bridge.tool.${toolName}.${fnName}`,
       { attributes: metricAttrs },
@@ -533,7 +589,12 @@ export class ExecutionTree {
               }),
             );
           }
-          logger?.debug?.("[bridge] tool %s (%s) completed in %dms", toolName, fnName, durationMs);
+          logger?.debug?.(
+            "[bridge] tool %s (%s) completed in %dms",
+            toolName,
+            fnName,
+            durationMs,
+          );
           return result;
         } catch (err) {
           const durationMs = roundMs(performance.now() - wallStart);
@@ -557,7 +618,12 @@ export class ExecutionTree {
             code: SpanStatusCode.ERROR,
             message: (err as Error).message,
           });
-          logger?.error?.("[bridge] tool %s (%s) failed: %s", toolName, fnName, (err as Error).message);
+          logger?.error?.(
+            "[bridge] tool %s (%s) failed: %s",
+            toolName,
+            fnName,
+            (err as Error).message,
+          );
           throw err;
         } finally {
           span.end();
@@ -605,8 +671,7 @@ export class ExecutionTree {
       if (ref.path.length > 0 && ref.module.startsWith("__define_")) {
         const fieldWires =
           this.bridge?.wires.filter(
-            (w) =>
-              sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
+            (w) => sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
           ) ?? [];
         if (fieldWires.length > 0) {
           return this.resolveWires(fieldWires);
@@ -655,7 +720,13 @@ export class ExecutionTree {
       // Input/context/const trunks are always cost 0
       if (ref.type === "Context" || ref.type === "Const") return 0;
       // Input args trunk: _:Query:fieldName (same as this.trunk) — cost 0
-      if (ref.module === SELF_MODULE && ref.type === this.trunk.type && ref.field === this.trunk.field && !ref.element) return 0;
+      if (
+        ref.module === SELF_MODULE &&
+        ref.type === this.trunk.type &&
+        ref.field === this.trunk.field &&
+        !ref.element
+      )
+        return 0;
     }
     return 1;
   }
@@ -673,7 +744,9 @@ export class ExecutionTree {
     // Evaluate sequentially. Return the first non-null value.
     // If all return null/undefined → return undefined (lets || fire).
     // If all throw → throw AggregateError (lets ?? fire).
-    const sorted = [...refs].sort((a, b) => this.inferCost(a) - this.inferCost(b));
+    const sorted = [...refs].sort(
+      (a, b) => this.inferCost(a) - this.inferCost(b),
+    );
     const errors: unknown[] = [];
 
     for (const ref of sorted) {
@@ -764,15 +837,25 @@ export class ExecutionTree {
       let result: Promise<any> = (async () => {
         const condValue = await this.pullSingle(conditional.cond);
         if (condValue) {
-          if (conditional.thenRef !== undefined) return this.pullSingle(conditional.thenRef);
+          if (conditional.thenRef !== undefined)
+            return this.pullSingle(conditional.thenRef);
           if (conditional.thenValue !== undefined) {
-            try { return JSON.parse(conditional.thenValue); } catch { return conditional.thenValue; }
+            try {
+              return JSON.parse(conditional.thenValue);
+            } catch {
+              return conditional.thenValue;
+            }
           }
           return undefined;
         } else {
-          if (conditional.elseRef !== undefined) return this.pullSingle(conditional.elseRef);
+          if (conditional.elseRef !== undefined)
+            return this.pullSingle(conditional.elseRef);
           if (conditional.elseValue !== undefined) {
-            try { return JSON.parse(conditional.elseValue); } catch { return conditional.elseValue; }
+            try {
+              return JSON.parse(conditional.elseValue);
+            } catch {
+              return conditional.elseValue;
+            }
           }
           return undefined;
         }
@@ -799,7 +882,8 @@ export class ExecutionTree {
       // ?? error-guard
       if (!conditional.fallbackRef && !conditional.fallback) return result;
       return result.catch(() => {
-        if (conditional.fallbackRef) return this.pullSingle(conditional.fallbackRef);
+        if (conditional.fallbackRef)
+          return this.pullSingle(conditional.fallbackRef);
         try {
           return JSON.parse(conditional.fallback!);
         } catch {
@@ -811,7 +895,7 @@ export class ExecutionTree {
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
-    if (constant) return Promise.resolve(constant.value);
+    if (constant) return Promise.resolve(coerceConstant(constant.value));
 
     const pulls = wires.filter(
       (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
@@ -820,7 +904,9 @@ export class ExecutionTree {
     // First wire with each fallback kind wins
     const nullFallbackWire = pulls.find((w) => w.nullFallback != null);
     // Error fallback: JSON literal (`fallback`) or source/pipe reference (`fallbackRef`)
-    const errorFallbackWire = pulls.find((w) => w.fallback != null || w.fallbackRef != null);
+    const errorFallbackWire = pulls.find(
+      (w) => w.fallback != null || w.fallbackRef != null,
+    );
 
     let result: Promise<any> = this.pull(pulls.map((w) => w.from));
 
@@ -960,7 +1046,7 @@ export class ExecutionTree {
     if (outputFields.size === 0) {
       throw new Error(
         `Bridge "${type}.${field}" has no output wires. ` +
-        `Ensure at least one wire targets the output (e.g. \`o.field <- ...\`).`,
+          `Ensure at least one wire targets the output (e.g. \`o.field <- ...\`).`,
       );
     }
 
@@ -1050,7 +1136,11 @@ export class ExecutionTree {
               await Promise.all(
                 paths.map(async (fullPath) => {
                   const value = await shadow.pullOutputField(fullPath);
-                  setNested(nested, fullPath.slice(pathPrefix.length + 1), value);
+                  setNested(
+                    nested,
+                    fullPath.slice(pathPrefix.length + 1),
+                    value,
+                  );
                 }),
               );
               obj[name] = nested;
@@ -1160,7 +1250,11 @@ export class ExecutionTree {
     if (this.parent) {
       const elementKey = trunkKey({ ...this.trunk, element: true });
       const elementData = this.state[elementKey];
-      if (elementData != null && typeof elementData === "object" && !Array.isArray(elementData)) {
+      if (
+        elementData != null &&
+        typeof elementData === "object" &&
+        !Array.isArray(elementData)
+      ) {
         const fieldName = cleanPath[cleanPath.length - 1];
         if (fieldName !== undefined && fieldName in elementData) {
           const value = (elementData as Record<string, any>)[fieldName];
@@ -1208,8 +1302,7 @@ export class ExecutionTree {
       const fieldWires =
         this.bridge?.wires.filter(
           (w) =>
-            sameTrunk(w.to, defOutTrunk) &&
-            pathEquals(w.to.path, cleanPath),
+            sameTrunk(w.to, defOutTrunk) && pathEquals(w.to.path, cleanPath),
         ) ?? [];
       result.push(...fieldWires);
     }

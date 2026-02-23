@@ -30,22 +30,37 @@ interface State {
  * Returns the token class string, or `undefined` when the expectation
  * doesn't match (resets state and falls through to general parsing).
  */
-function handleExpect(stream: StringStream, state: State): string | null | undefined {
+function handleExpect(
+  stream: StringStream,
+  state: State,
+): string | null | undefined {
   switch (state.expect) {
     // bridge  TYPE
     case "bridgeType":
-      if (stream.match(/^[A-Za-z_]\w*/))  { state.expect = "bridgeDot";  return "type"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "bridgeDot";
+        return "type";
+      }
+      state.expect = "";
+      return undefined;
 
     // bridge Type  .
     case "bridgeDot":
-      if (stream.eat("."))               { state.expect = "bridgeField"; return null; }
-      state.expect = ""; return undefined;
+      if (stream.eat(".")) {
+        state.expect = "bridgeField";
+        return null;
+      }
+      state.expect = "";
+      return undefined;
 
     // bridge Type.  FIELD
     case "bridgeField":
-      if (stream.match(/^[A-Za-z_]\w*/)) { state.expect = "";            return "def"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "";
+        return "def";
+      }
+      state.expect = "";
+      return undefined;
 
     // tool / const / define  NAME
     case "toolName":
@@ -55,7 +70,8 @@ function handleExpect(stream: StringStream, state: State): string | null | undef
         state.expect = state.expect === "toolName" ? "toolFrom" : "";
         return "def";
       }
-      state.expect = ""; return undefined;
+      state.expect = "";
+      return undefined;
     }
 
     // tool name  FROM | EXTENDS
@@ -64,32 +80,65 @@ function handleExpect(stream: StringStream, state: State): string | null | undef
         state.expect = "toolSource";
         return "keyword";
       }
-      state.expect = ""; return undefined;
+      state.expect = "";
+      return undefined;
 
     // tool name from  SOURCE
     case "toolSource":
-      if (stream.match(/^[A-Za-z_][\w.]*/)) { state.expect = ""; return "variable"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^[A-Za-z_][\w.]*/)) {
+        state.expect = "";
+        return "variable";
+      }
+      state.expect = "";
+      return undefined;
 
     // with  TARGET
     case "withTarget":
-      if (stream.match(/^(input|output|context)\b/)) { state.expect = "withAs"; return "builtin"; }
-      if (stream.match(/^const\b/))                  { state.expect = "withAs"; return "keyword"; }
-      if (stream.match(/^[A-Za-z_][\w.]*/))          { state.expect = "withAs"; return "variable"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^(input|output|context)\b/)) {
+        state.expect = "withAs";
+        return "builtin";
+      }
+      if (stream.match(/^const\b/)) {
+        state.expect = "withAs";
+        return "keyword";
+      }
+      if (stream.match(/^[A-Za-z_][\w.]*/)) {
+        state.expect = "withAs";
+        return "variable";
+      }
+      state.expect = "";
+      return undefined;
 
     // with target  AS
     case "withAs":
-      if (stream.match(/^as\b/)) { state.expect = "withAlias"; return "keyword"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^as\b/)) {
+        state.expect = "withAlias";
+        return "keyword";
+      }
+      state.expect = "";
+      return undefined;
 
     // with target as  ALIAS
     case "withAlias":
-      if (stream.match(/^[A-Za-z_]\w*/)) { state.expect = ""; return "def"; }
-      state.expect = ""; return undefined;
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "";
+        return "def";
+      }
+      state.expect = "";
+      return undefined;
+
+    // force  HANDLE
+    case "forceTarget":
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "";
+        return "variable";
+      }
+      state.expect = "";
+      return undefined;
 
     default:
-      state.expect = ""; return undefined;
+      state.expect = "";
+      return undefined;
   }
 }
 
@@ -103,8 +152,14 @@ function token(stream: StringStream, state: State): string | null {
   if (state.inString) {
     while (!stream.eol()) {
       const ch = stream.next();
-      if (ch === "\\") { stream.next(); continue; }
-      if (ch === '"')  { state.inString = false; return "string"; }
+      if (ch === "\\") {
+        stream.next();
+        continue;
+      }
+      if (ch === '"') {
+        state.inString = false;
+        return "string";
+      }
     }
     return "string";
   }
@@ -113,14 +168,23 @@ function token(stream: StringStream, state: State): string | null {
   if (stream.eatSpace()) return null;
 
   // ── Comment ───────────────────────────────────────────────────────────
-  if (stream.eat("#")) { stream.skipToEnd(); return "comment"; }
+  if (stream.eat("#")) {
+    stream.skipToEnd();
+    return "comment";
+  }
 
   // ── Double-quoted string ──────────────────────────────────────────────
   if (stream.eat('"')) {
     while (!stream.eol()) {
       const ch = stream.next();
-      if (ch === "\\") { stream.next(); continue; }
-      if (ch === '"')  { state.lineStart = false; return "string"; }
+      if (ch === "\\") {
+        stream.next();
+        continue;
+      }
+      if (ch === '"') {
+        state.lineStart = false;
+        return "string";
+      }
     }
     state.inString = true;
     state.lineStart = false;
@@ -130,7 +194,10 @@ function token(stream: StringStream, state: State): string | null {
   // ── Contextual (header) tokens ────────────────────────────────────────
   if (state.expect) {
     const result = handleExpect(stream, state);
-    if (result !== undefined) { state.lineStart = false; return result; }
+    if (result !== undefined) {
+      state.lineStart = false;
+      return result;
+    }
   }
 
   // ── Brackets ──────────────────────────────────────────────────────────
@@ -142,20 +209,66 @@ function token(stream: StringStream, state: State): string | null {
   }
 
   // ── Wire operators (order matters: <-! before <-) ─────────────────────
-  if (stream.match("<-!") || stream.match("<-")) { state.lineStart = false; return "operator"; }
-  if (stream.match("||")  || stream.match("??")) { state.lineStart = false; return "operator"; }
-  if (stream.match("="))                          { state.lineStart = false; return "operator"; }
-  if (stream.eat(":"))                            { state.lineStart = false; return "operator"; }
+  if (stream.match("<-!") || stream.match("<-")) {
+    state.lineStart = false;
+    return "operator";
+  }
+  if (stream.match("||") || stream.match("??")) {
+    state.lineStart = false;
+    return "operator";
+  }
+  if (stream.match("=")) {
+    state.lineStart = false;
+    return "operator";
+  }
+  if (stream.eat(":")) {
+    state.lineStart = false;
+    return "operator";
+  }
 
   // ── Keywords (set contextual expectation) ─────────────────────────────
-  if (stream.match(/^on\s+error\b/))  { state.lineStart = false; return "keyword"; }
-  if (stream.match(/^version\b/))     { state.lineStart = false; return "keyword"; }
-  if (stream.match(/^bridge\b/))      { state.expect = "bridgeType";  state.lineStart = false; return "keyword"; }
-  if (stream.match(/^tool\b/))        { state.expect = "toolName";    state.lineStart = false; return "keyword"; }
-  if (stream.match(/^define\b/))      { state.expect = "defineName";  state.lineStart = false; return "keyword"; }
-  if (stream.match(/^const\b/))       { state.expect = "constName";   state.lineStart = false; return "keyword"; }
-  if (stream.match(/^with\b/))        { state.expect = "withTarget";  state.lineStart = false; return "keyword"; }
-  if (stream.match(/^as\b/))          { state.lineStart = false; return "keyword"; }
+  if (stream.match(/^on\s+error\b/)) {
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^version\b/)) {
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^bridge\b/)) {
+    state.expect = "bridgeType";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^tool\b/)) {
+    state.expect = "toolName";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^define\b/)) {
+    state.expect = "defineName";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^const\b/)) {
+    state.expect = "constName";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^with\b/)) {
+    state.expect = "withTarget";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^force\b/)) {
+    state.expect = "forceTarget";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^as\b/)) {
+    state.lineStart = false;
+    return "keyword";
+  }
 
   // ── HTTP method constants ─────────────────────────────────────────────
   if (stream.match(/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b/)) {
@@ -164,16 +277,28 @@ function token(stream: StringStream, state: State): string | null {
   }
 
   // ── Booleans / null ───────────────────────────────────────────────────
-  if (stream.match(/^(true|false|null)\b/)) { state.lineStart = false; return "atom"; }
+  if (stream.match(/^(true|false|null)\b/)) {
+    state.lineStart = false;
+    return "atom";
+  }
 
   // ── Numbers ───────────────────────────────────────────────────────────
-  if (stream.match(/^-?\d+(\.\d+)?/)) { state.lineStart = false; return "number"; }
+  if (stream.match(/^-?\d+(\.\d+)?/)) {
+    state.lineStart = false;
+    return "number";
+  }
 
   // ── URL paths (after = or standalone) ─────────────────────────────────
-  if (stream.match(/^\/[\w/.%-]*/)) { state.lineStart = false; return "string-2"; }
+  if (stream.match(/^\/[\w/.%-]*/)) {
+    state.lineStart = false;
+    return "string-2";
+  }
 
   // ── Reserved handles ──────────────────────────────────────────────────
-  if (stream.match(/^(input|output|context)\b/)) { state.lineStart = false; return "builtin"; }
+  if (stream.match(/^(input|output|context)\b/)) {
+    state.lineStart = false;
+    return "builtin";
+  }
 
   // ── Dot-prefixed property — only when first token on the line ─────────
   //    .baseUrl = "..."   .headers.Authorization <- ctx.token
@@ -188,7 +313,10 @@ function token(stream: StringStream, state: State): string | null {
   if (stream.eat(".")) return null;
 
   // ── Identifier ────────────────────────────────────────────────────────
-  if (stream.match(/^[A-Za-z_]\w*/)) { state.lineStart = false; return "variable"; }
+  if (stream.match(/^[A-Za-z_]\w*/)) {
+    state.lineStart = false;
+    return "variable";
+  }
 
   // ── Fallback — consume one char to avoid infinite loops ───────────────
   stream.next();
@@ -201,5 +329,8 @@ function token(stream: StringStream, state: State): string | null {
 export const bridgeLanguage = StreamLanguage.define({
   startState: (): State => ({ expect: "", inString: false, lineStart: true }),
   token,
-  blankLine(state: State) { state.expect = ""; state.lineStart = true; },
+  blankLine(state: State) {
+    state.expect = "";
+    state.lineStart = true;
+  },
 });
