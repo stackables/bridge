@@ -59,13 +59,25 @@ export function serializeBridge(instructions: Instruction[]): string {
 /**
  * Whether a value string needs quoting to be re-parseable as a bare value.
  * Safe unquoted: number, boolean, null, /path, simple-identifier, keyword.
+ * Already-quoted JSON strings (produced by the updated parser) are also safe.
  */
 function needsQuoting(v: string): boolean {
+  if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) return false; // JSON string literal
   if (v === "" || v === "true" || v === "false" || v === "null") return false;
   if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v)) return false; // number
   if (/^\/[\w./-]*$/.test(v)) return false; // /path
   if (/^[a-zA-Z_][\w-]*$/.test(v)) return false; // identifier / keyword
   return true;
+}
+
+/**
+ * Format a bare-value string for output.
+ * Pre-quoted JSON strings are emitted as-is; everything else goes through
+ * the same quoting logic as needsQuoting.
+ */
+function formatBareValue(v: string): string {
+  if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) return v;
+  return needsQuoting(v) ? `"${v}"` : v;
 }
 
 function serializeToolBlock(tool: ToolDef): string {
@@ -496,7 +508,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     for (const ew of levelConsts) {
       const fieldPath = ew.to.path.slice(pathDepth);
       const elemTo = "." + serPath(fieldPath);
-      lines.push(`${indent}${elemTo} = "${ew.value}"`);
+      lines.push(`${indent}${elemTo} = ${formatBareValue(ew.value)}`);
     }
 
     // Emit pull element wires (direct level only)
@@ -617,7 +629,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     // Constant wire
     if ("value" in w) {
       const toStr = sRef(w.to, false);
-      lines.push(`${toStr} = "${w.value}"`);
+      lines.push(`${toStr} = ${formatBareValue(w.value)}`);
       continue;
     }
 

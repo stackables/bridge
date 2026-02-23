@@ -1303,7 +1303,13 @@ function processElementLines(
         } else {
           leftRef = buildSourceExpr(elemSourceNode, elemLineNum);
         }
-        elemCondRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        elemCondRef = desugarExprChain(
+          leftRef,
+          elemExprOps,
+          elemExprRights,
+          elemLineNum,
+          iterName,
+        );
         elemCondIsPipeFork = true;
       } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
         elemCondRef = {
@@ -1316,7 +1322,10 @@ function processElementLines(
         elemCondIsPipeFork = false;
       } else {
         elemCondRef = buildSourceExpr(elemSourceNode, elemLineNum);
-        elemCondIsPipeFork = elemCondRef.instance != null && elemCondRef.path.length === 0 && elemPipeSegs.length > 0;
+        elemCondIsPipeFork =
+          elemCondRef.instance != null &&
+          elemCondRef.path.length === 0 &&
+          elemPipeSegs.length > 0;
       }
 
       // ── Ternary wire in element context ──
@@ -1324,8 +1333,16 @@ function processElementLines(
       if (elemTernaryOp && extractTernaryBranchFn) {
         const thenNode = sub(elemLine, "elemThenBranch")!;
         const elseNode = sub(elemLine, "elemElseBranch")!;
-        const thenBranch = extractTernaryBranchFn(thenNode, elemLineNum, iterName);
-        const elseBranch = extractTernaryBranchFn(elseNode, elemLineNum, iterName);
+        const thenBranch = extractTernaryBranchFn(
+          thenNode,
+          elemLineNum,
+          iterName,
+        );
+        const elseBranch = extractTernaryBranchFn(
+          elseNode,
+          elemLineNum,
+          iterName,
+        );
 
         // Process || null-coalesce alternatives.
         let elemNullFallback: string | undefined;
@@ -1346,7 +1363,10 @@ function processElementLines(
         const elemErrorAlt = sub(elemLine, "elemErrorAlt");
         if (elemErrorAlt) {
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(elemErrorAlt, elemLineNum);
+          const altResult = extractCoalesceAltIterAware(
+            elemErrorAlt,
+            elemLineNum,
+          );
           if ("literal" in altResult) {
             elemFallback = altResult.literal;
           } else {
@@ -1357,11 +1377,19 @@ function processElementLines(
 
         wires.push({
           cond: elemCondRef,
-          ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
-          ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
-          ...(elemNullFallback !== undefined ? { nullFallback: elemNullFallback } : {}),
+          ...(thenBranch.kind === "ref"
+            ? { thenRef: thenBranch.ref }
+            : { thenValue: thenBranch.value }),
+          ...(elseBranch.kind === "ref"
+            ? { elseRef: elseBranch.ref }
+            : { elseValue: elseBranch.value }),
+          ...(elemNullFallback !== undefined
+            ? { nullFallback: elemNullFallback }
+            : {}),
           ...(elemFallback !== undefined ? { fallback: elemFallback } : {}),
-          ...(elemFallbackRef !== undefined ? { fallbackRef: elemFallbackRef } : {}),
+          ...(elemFallbackRef !== undefined
+            ? { fallbackRef: elemFallbackRef }
+            : {}),
           to: elemToRef,
         });
         for (const ref of elemNullAltRefs) {
@@ -1642,13 +1670,8 @@ function buildDefineDef(node: CstNode): DefineDef {
   assertNotReserved(name, lineNum, "define name");
 
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles, forces } = buildBridgeBody(
-    bodyLines,
-    "Define",
-    name,
-    [],
-    lineNum,
-  );
+  const { handles, wires, arrayIterators, pipeHandles, forces } =
+    buildBridgeBody(bodyLines, "Define", name, [], lineNum);
 
   return {
     kind: "define",
@@ -1696,13 +1719,8 @@ function buildBridge(
 
   // Full bridge block
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles, forces } = buildBridgeBody(
-    bodyLines,
-    typeName,
-    fieldName,
-    previousInstructions,
-    0,
-  );
+  const { handles, wires, arrayIterators, pipeHandles, forces } =
+    buildBridgeBody(bodyLines, typeName, fieldName, previousInstructions, 0);
 
   // Inline define invocations
   const instanceCounters = new Map<string, number>();
@@ -1948,10 +1966,7 @@ function buildBridgeBody(
 
   // ── Helper: build source expression ────────────────────────────────────
 
-  function buildSourceExpr(
-    sourceNode: CstNode,
-    lineNum: number,
-  ): NodeRef {
+  function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
@@ -2059,8 +2074,10 @@ function buildBridgeBody(
     iterName?: string,
   ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
     const c = branchNode.children;
-    if (c.stringLit) return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
-    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.stringLit)
+      return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
+    if (c.numberLit)
+      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.trueLit) return { kind: "literal", value: "true" };
     if (c.falseLit) return { kind: "literal", value: "false" };
     if (c.nullLit) return { kind: "literal", value: "null" };
@@ -2089,15 +2106,30 @@ function buildBridgeBody(
 
   /** Map infix operator token to the std tool that implements it. */
   const OP_TO_FN: Record<string, string> = {
-    "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
-    "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+    "*": "multiply",
+    "/": "divide",
+    "+": "add",
+    "-": "subtract",
+    "==": "eq",
+    "!=": "neq",
+    ">": "gt",
+    ">=": "gte",
+    "<": "lt",
+    "<=": "lte",
   };
 
   /** Operator precedence: higher number = binds tighter. */
   const OP_PREC: Record<string, number> = {
-    "*": 3, "/": 3,
-    "+": 2, "-": 2,
-    "==": 1, "!=": 1, ">": 1, ">=": 1, "<": 1, "<=": 1,
+    "*": 3,
+    "/": 3,
+    "+": 2,
+    "-": 2,
+    "==": 1,
+    "!=": 1,
+    ">": 1,
+    ">=": 1,
+    "<": 1,
+    "<=": 1,
   };
 
   function extractExprOpStr(opNode: CstNode): string {
@@ -2125,7 +2157,8 @@ function buildBridgeBody(
     iterName?: string,
   ): { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string } {
     const c = operandNode.children;
-    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.numberLit)
+      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       return { kind: "literal", value: raw.slice(1, -1) };
@@ -2180,7 +2213,9 @@ function buildBridgeBody(
   ): NodeRef {
     // Build flat operand/operator lists for the precedence parser.
     // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
-    type Operand = { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string };
+    type Operand =
+      | { kind: "ref"; ref: NodeRef }
+      | { kind: "literal"; value: string };
     const operands: Operand[] = [{ kind: "ref", ref: leftRef }];
     const ops: string[] = [];
 
@@ -2193,7 +2228,8 @@ function buildBridgeBody(
     // an operand pointing to the fork's result.
     function emitFork(left: Operand, opStr: string, right: Operand): Operand {
       const fnName = OP_TO_FN[opStr];
-      if (!fnName) throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
+      if (!fnName)
+        throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
 
       const forkInstance = 100000 + nextForkSeq++;
       const forkTrunkModule = SELF_MODULE;
@@ -2268,7 +2304,9 @@ function buildBridgeBody(
     // After full reduction, operands[0] holds the final result.
     const final = operands[0];
     if (final.kind !== "ref") {
-      throw new Error(`Line ${lineNum}: Expression must contain at least one source reference`);
+      throw new Error(
+        `Line ${lineNum}: Expression must contain at least one source reference`,
+      );
     }
     return final.ref;
   }
@@ -2349,7 +2387,10 @@ function buildBridgeBody(
     } else {
       const pipeSegs = subs(firstSourceNode, "pipeSegment");
       condRef = buildSourceExpr(firstSourceNode, lineNum);
-      condIsPipeFork = condRef.instance != null && condRef.path.length === 0 && pipeSegs.length > 0;
+      condIsPipeFork =
+        condRef.instance != null &&
+        condRef.path.length === 0 &&
+        pipeSegs.length > 0;
     }
 
     // ── Ternary wire: cond ? thenBranch : elseBranch ──
@@ -2391,8 +2432,12 @@ function buildBridgeBody(
 
       wires.push({
         cond: condRef,
-        ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
-        ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+        ...(thenBranch.kind === "ref"
+          ? { thenRef: thenBranch.ref }
+          : { thenValue: thenBranch.value }),
+        ...(elseBranch.kind === "ref"
+          ? { elseRef: elseBranch.ref }
+          : { elseValue: elseBranch.value }),
         ...(nullFallback !== undefined ? { nullFallback } : {}),
         ...(fallback !== undefined ? { fallback } : {}),
         ...(fallbackRef !== undefined ? { fallbackRef } : {}),
@@ -2460,7 +2505,9 @@ function buildBridgeBody(
 
   const forces: NonNullable<Bridge["forces"]> = [];
   for (const bodyLine of bodyLines) {
-    const forceNode = (bodyLine.children.bridgeForce as CstNode[] | undefined)?.[0];
+    const forceNode = (
+      bodyLine.children.bridgeForce as CstNode[] | undefined
+    )?.[0];
     if (!forceNode) continue;
     const lineNum = line(findFirstToken(forceNode));
     const handle = extractNameToken(sub(forceNode, "forcedHandle")!);
@@ -2471,8 +2518,13 @@ function buildBridgeBody(
       );
     }
     const fc = forceNode.children;
-    const catchError = !!(fc.forceErrorCoalesce as IToken[] | undefined)?.length;
-    forces.push({ handle, ...res, ...(catchError ? { catchError: true as const } : {}) });
+    const catchError = !!(fc.forceErrorCoalesce as IToken[] | undefined)
+      ?.length;
+    forces.push({
+      handle,
+      ...res,
+      ...(catchError ? { catchError: true as const } : {}),
+    });
   }
 
   return {
