@@ -4,9 +4,9 @@ import {
     parseBridge,
     parsePath,
     serializeBridge,
-} from "../src/bridge-format.js";
-import type { Bridge, Instruction, ToolDef, Wire } from "../src/types.js";
-import { SELF_MODULE } from "../src/types.js";
+} from "../src/bridge-format.ts";
+import type { Bridge, Instruction, ToolDef, Wire } from "../src/types.ts";
+import { SELF_MODULE } from "../src/types.ts";
 
 // ── parsePath ───────────────────────────────────────────────────────────────
 

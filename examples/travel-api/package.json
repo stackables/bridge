@@ -4,15 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import tsx/esm --conditions development server.ts",
-    "e2e": "node --import tsx/esm --conditions development --test e2e.test.ts"
+    "start": "node --experimental-transform-types server.ts",
+    "e2e": "node --experimental-transform-types --test e2e.test.ts"
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*",
     "graphql-yoga": "^5.18.0"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
-    "tsx": "^4.21.0"
+    "@types/node": "^25.3.0"
   }
 }

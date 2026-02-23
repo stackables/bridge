@@ -2,8 +2,8 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.js";
-import { createGateway } from "./_gateway.js";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
+import { createGateway } from "./_gateway.ts";
 
 // ── Missing tool error ──────────────────────────────────────────────────────
 
@@ -641,7 +641,7 @@ o.answer <- a.value
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      tools: { httpCall: (await import("../src/tools/http-call.js")).createHttpCall(mockFetch as any) },
+      tools: { httpCall: (await import("../src/tools/http-call.ts")).createHttpCall(mockFetch as any) },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const doc = parse(`{ lookup(q: "hello") { answer } }`);
@@ -664,7 +664,7 @@ o.answer <- a.value
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      tools: { httpCall: (await import("../src/tools/http-call.js")).createHttpCall(mockFetch as any) },
+      tools: { httpCall: (await import("../src/tools/http-call.ts")).createHttpCall(mockFetch as any) },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 

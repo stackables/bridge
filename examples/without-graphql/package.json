@@ -4,15 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "weather": "node --import tsx/esm --conditions development cli.ts weather.bridge '{\"city\":\"Berlin\"}'",
-    "sbb": "node --import tsx/esm --conditions development cli.ts sbb.bridge '{\"from\":\"Bern\",\"to\":\"Zürich\"}'",
-    "e2e": "node --import tsx/esm --conditions development --test e2e.test.ts"
+    "weather": "node --experimental-transform-types cli.ts weather.bridge '{\"city\":\"Berlin\"}'",
+    "sbb": "node --experimental-transform-types cli.ts sbb.bridge '{\"from\":\"Bern\",\"to\":\"Zürich\"}'",
+    "e2e": "node --experimental-transform-types --test e2e.test.ts"
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
-    "tsx": "^4.21.0"
+    "@types/node": "^25.3.0"
   }
 }

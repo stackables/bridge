@@ -1,5 +1,5 @@
 import { LRUCache } from "lru-cache";
-import type { CacheStore, ToolCallFn } from "../types.js";
+import type { CacheStore, ToolCallFn } from "../types.ts";
 
 /** Default in-memory LRU cache with per-entry TTL. */
 function createMemoryCache(maxEntries = 1024): CacheStore {

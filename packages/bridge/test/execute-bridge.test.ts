@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.js";
-import { executeBridge } from "../src/execute-bridge.js";
+import { parseBridge } from "../src/bridge-format.ts";
+import { executeBridge } from "../src/execute-bridge.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

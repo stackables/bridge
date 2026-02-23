@@ -1,5 +1,5 @@
 import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
-import { parsePath } from "./utils.js";
+import { parsePath } from "./utils.ts";
 import type {
   Bridge,
   Instruction,
@@ -8,8 +8,8 @@ import type {
   ToolDef,
   ToolMap,
   Wire,
-} from "./types.js";
-import { SELF_MODULE } from "./types.js";
+} from "./types.ts";
+import { SELF_MODULE } from "./types.ts";
 
 const otelTracer = trace.getTracer("@stackables/bridge");
 

@@ -2,18 +2,18 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.js";
-import { multiply } from "../src/tools/multiply.js";
-import { divide } from "../src/tools/divide.js";
-import { add } from "../src/tools/add.js";
-import { subtract } from "../src/tools/subtract.js";
-import { eq } from "../src/tools/eq.js";
-import { neq } from "../src/tools/neq.js";
-import { gt } from "../src/tools/gt.js";
-import { gte } from "../src/tools/gte.js";
-import { lt } from "../src/tools/lt.js";
-import { lte } from "../src/tools/lte.js";
-import { createGateway } from "./_gateway.js";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
+import { multiply } from "../src/tools/multiply.ts";
+import { divide } from "../src/tools/divide.ts";
+import { add } from "../src/tools/add.ts";
+import { subtract } from "../src/tools/subtract.ts";
+import { eq } from "../src/tools/eq.ts";
+import { neq } from "../src/tools/neq.ts";
+import { gt } from "../src/tools/gt.ts";
+import { gte } from "../src/tools/gte.ts";
+import { lt } from "../src/tools/lt.ts";
+import { lte } from "../src/tools/lte.ts";
+import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for math/comparison tools ────────────────────────────────────
 

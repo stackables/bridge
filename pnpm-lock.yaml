@@ -27,9 +27,6 @@ importers:
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   examples/composed-gateway:
     dependencies:
@@ -43,9 +40,6 @@ importers:
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   examples/travel-api:
     dependencies:
@@ -59,9 +53,6 @@ importers:
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   examples/weather-api:
     dependencies:
@@ -75,9 +66,6 @@ importers:
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   examples/without-graphql:
     dependencies:
@@ -88,9 +76,6 @@ importers:
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   packages/bridge:
     dependencies:
@@ -122,9 +107,6 @@ importers:
       graphql-yoga:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.12.0)
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -5337,6 +5319,7 @@ snapshots:
   get-tsconfig@4.13.6:
     dependencies:
       resolve-pkg-maps: 1.0.0
+    optional: true
 
   git-log-parser@1.2.1:
     dependencies:
@@ -6015,7 +5998,8 @@ snapshots:
 
   resolve-from@5.0.0: {}
 
-  resolve-pkg-maps@1.0.0: {}
+  resolve-pkg-maps@1.0.0:
+    optional: true
 
   resolve@1.22.11:
     dependencies:
@@ -6337,6 +6321,7 @@ snapshots:
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   tunnel@0.0.6: {}
 

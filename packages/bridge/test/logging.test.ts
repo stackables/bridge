@@ -3,9 +3,9 @@ import { createSchema, createYoga } from "graphql-yoga";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.js";
-import { bridgeTransform } from "../src/bridge-transform.js";
-import type { Logger } from "../src/ExecutionTree.js";
+import { parseBridge } from "../src/bridge-format.ts";
+import { bridgeTransform } from "../src/bridge-transform.ts";
+import type { Logger } from "../src/ExecutionTree.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Logging

@@ -6,10 +6,10 @@ import type {
   NodeRef,
   ToolDef,
   Wire,
-} from "./types.js";
-import { SELF_MODULE } from "./types.js";
-import { parseBridgeChevrotain } from "./parser/index.js";
-export { parsePath } from "./utils.js";
+} from "./types.ts";
+import { SELF_MODULE } from "./types.ts";
+import { parseBridgeChevrotain } from "./parser/index.ts";
+export { parsePath } from "./utils.ts";
 
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.

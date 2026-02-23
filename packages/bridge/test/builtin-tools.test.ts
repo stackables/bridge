@@ -2,15 +2,15 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.js";
-import { builtinTools } from "../src/tools/index.js";
-import { upperCase } from "../src/tools/upper-case.js";
-import { lowerCase } from "../src/tools/lower-case.js";
-import { findObject } from "../src/tools/find-object.js";
-import { pickFirst } from "../src/tools/pick-first.js";
-import { toArray } from "../src/tools/to-array.js";
-import { createHttpCall } from "../src/tools/http-call.js";
-import { createGateway } from "./_gateway.js";
+import { parseBridge } from "../src/bridge-format.ts";
+import { builtinTools } from "../src/tools/index.ts";
+import { upperCase } from "../src/tools/upper-case.ts";
+import { lowerCase } from "../src/tools/lower-case.ts";
+import { findObject } from "../src/tools/find-object.ts";
+import { pickFirst } from "../src/tools/pick-first.ts";
+import { toArray } from "../src/tools/to-array.ts";
+import { createHttpCall } from "../src/tools/http-call.ts";
+import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for individual tools ─────────────────────────────────────────
 
