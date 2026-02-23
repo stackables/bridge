@@ -20,8 +20,10 @@ export interface Env {
 export interface SharePayload {
   schema: string;
   bridge: string;
-  query: string;
+  queries: { name: string; query: string }[];
   context: string;
+  /** @deprecated Legacy single-query field — kept for backward compat */
+  query?: string;
 }
 
 const JSON_HEADERS: HeadersInit = {
@@ -47,12 +49,12 @@ export default {
         });
       }
 
-      // Basic validation — all fields must be strings
+      // Basic validation — accept both legacy single-query and new multi-query formats
       if (
         typeof body.schema !== "string" ||
         typeof body.bridge !== "string" ||
-        typeof body.query  !== "string" ||
-        typeof body.context !== "string"
+        typeof body.context !== "string" ||
+        (!Array.isArray(body.queries) && typeof body.query !== "string")
       ) {
         return new Response(JSON.stringify({ error: "invalid payload" }), {
           status: 400,
@@ -71,7 +73,9 @@ export default {
 
       // 12-char alphanumeric ID from a UUID (collision probability negligible)
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-      await env.SHARES.put(id, JSON.stringify(body), { expirationTtl: TTL_SECONDS });
+      await env.SHARES.put(id, JSON.stringify(body), {
+        expirationTtl: TTL_SECONDS,
+      });
 
       return new Response(JSON.stringify({ id }), { headers: JSON_HEADERS });
     }

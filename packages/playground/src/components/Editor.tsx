@@ -1,13 +1,12 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, type Extension, Compartment } from "@codemirror/state";
-import { lintGutter } from "@codemirror/lint";
+import { diagnosticCount, lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
-import { graphql, updateSchema } from "cm6-graphql";
+import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
 import type { GraphQLSchema } from "graphql";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { bridgeLinter } from "@/codemirror/bridge-lint";
-import { graphqlLanguage } from "@/codemirror/graphql-lang";
 import { graphqlSchemaLinter } from "@/codemirror/graphql-schema-lint";
 import { playgroundTheme } from "@/codemirror/theme";
 import { cn } from "@/lib/utils";
@@ -21,7 +20,12 @@ import { cn } from "@/lib/utils";
  * - "json"          — JSON highlighting (context panel)
  * - "plain"         — no language support (fallback)
  */
-export type EditorLanguage = "bridge" | "graphql" | "graphql-query" | "json" | "plain";
+export type EditorLanguage =
+  | "bridge"
+  | "graphql"
+  | "graphql-query"
+  | "json"
+  | "plain";
 
 type Props = {
   label: string;
@@ -43,7 +47,7 @@ function languageExtension(
     case "bridge":
       return [bridgeLanguage, bridgeLinter, lintGutter()];
     case "graphql":
-      return [graphqlLanguage, graphqlSchemaLinter, lintGutter()];
+      return [graphqlLanguageSupport(), graphqlSchemaLinter, lintGutter()];
     case "graphql-query":
       return [...graphql(graphqlSchema), lintGutter()];
     case "json":
@@ -66,14 +70,18 @@ export function Editor({
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const [hasErrors, setHasErrors] = useState(false);
 
-  // Stable dispatch listener — always calls the latest onChange
+  // Stable dispatch listener — always calls the latest onChange + tracks lint errors
   const updateListener = useCallback(
     () =>
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           onChangeRef.current(update.state.doc.toString());
         }
+        // Track lint diagnostic count for border styling
+        const errorCount = diagnosticCount(update.state);
+        setHasErrors(errorCount > 0);
       }),
     [],
   );
@@ -138,7 +146,10 @@ export function Editor({
       <div
         ref={containerRef}
         className={cn(
-          "w-full rounded-lg border border-slate-800 bg-slate-950",
+          "w-full rounded-lg border bg-slate-950 transition-colors",
+          hasErrors
+            ? "border-red-400/70"
+            : "border-slate-800 focus-within:border-sky-400/70",
           autoHeight
             ? "[&_.cm-editor]:h-auto [&_.cm-scroller]:overflow-visible"
             : "flex-1 min-h-0 overflow-y-auto [&_.cm-editor]:h-full",
