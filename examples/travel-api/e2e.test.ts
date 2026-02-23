@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { yoga } from "./server.js";
+import { yoga } from "./server.ts";
 
 /**
  * Helper — sends a GraphQL request with optional extra headers.

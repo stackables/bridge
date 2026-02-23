@@ -18,7 +18,7 @@ function runCli(bridgeFile: string, input: Record<string, unknown>): unknown {
   const result = spawnSync(
     process.execPath,
     [
-      "--import", "tsx/esm",
+      "--experimental-transform-types",
       "--conditions", "development",
       join(dir, "cli.ts"),
       join(dir, bridgeFile),

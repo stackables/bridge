@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { yoga, savedQuotes } from "./server.js";
+import { yoga, savedQuotes } from "./server.ts";
 
 async function gql(query: string, variables?: Record<string, unknown>) {
   const res = await yoga.fetch("http://test/graphql", {
