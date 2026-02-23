@@ -394,47 +394,53 @@ function serializeBridgeBlock(bridge: Bridge): string {
     );
 
   // ── Pre-compute element expression wires ────────────────────────────
-  // Walk expression chains from fromOutMap that target element refs
+  // Walk expression trees from fromOutMap that target element refs
   for (const [tk, outWire] of fromOutMap.entries()) {
     if (!exprForks.has(tk) || !outWire.to.element) continue;
 
-    const exprParts: { op: string; right: string }[] = [];
-    let currentTk = tk;
-    let actualSourceRef: NodeRef | null = null;
+    // Recursively serialize expression fork tree
+    function serializeElemExprTree(forkTk: string): string | null {
+      const info = exprForks.get(forkTk);
+      if (!info) return null;
 
-    while (exprForks.has(currentTk)) {
-      const info = exprForks.get(currentTk)!;
+      let leftStr: string | null = null;
+      if (info.aWire) {
+        const fromTk = refTrunkKey(info.aWire.from);
+        if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
+          leftStr = serializeElemExprTree(fromTk);
+        } else {
+          leftStr = info.aWire.from.element
+            ? "ITER." + serPath(info.aWire.from.path)
+            : sRef(info.aWire.from, true);
+        }
+      }
+
       let rightStr: string;
       if (info.bWire && "value" in info.bWire) {
         rightStr = info.bWire.value;
       } else if (info.bWire && "from" in info.bWire) {
-        rightStr = sRef((info.bWire as FW).from, true);
+        const bFrom = (info.bWire as FW).from;
+        const bTk = refTrunkKey(bFrom);
+        if (bFrom.path.length === 0 && exprForks.has(bTk)) {
+          rightStr = serializeElemExprTree(bTk) ?? sRef(bFrom, true);
+        } else {
+          rightStr = bFrom.element
+            ? "ITER." + serPath(bFrom.path)
+            : sRef(bFrom, true);
+        }
       } else {
         rightStr = "0";
       }
-      exprParts.push({ op: info.op, right: rightStr });
-      const aWire = info.aWire;
-      if (!aWire) break;
-      const fromTk = refTrunkKey(aWire.from);
-      if (aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-        currentTk = fromTk;
-      } else {
-        actualSourceRef = aWire.from;
-        break;
-      }
+
+      if (leftStr == null) return rightStr;
+      return `${leftStr} ${info.op} ${rightStr}`;
     }
 
-    if (actualSourceRef && exprParts.length > 0) {
-      const sourceStr = actualSourceRef.element
-        ? "ITER." + serPath(actualSourceRef.path)
-        : sRef(actualSourceRef, true);
-      const exprStr = exprParts
-        .reverse()
-        .map(({ op, right }) => `${op} ${right}`)
-        .join(" ");
+    const exprStr = serializeElemExprTree(tk);
+    if (exprStr) {
       elementExprWires.push({
         toPath: outWire.to.path,
-        sourceStr: `${sourceStr} ${exprStr}`,
+        sourceStr: exprStr,
       });
     }
   }
@@ -593,51 +599,65 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (pipeHandleTrunkKeys.has(refTrunkKey(outWire.to))) continue;
 
     // ── Expression chain detection ────────────────────────────────────
-    // If the outermost fork is an expression fork, walk the chain backward
-    // collecting operators and operands to produce infix notation.
+    // If the outermost fork is an expression fork, recursively reconstruct
+    // the infix expression tree, respecting precedence grouping.
     if (exprForks.has(tk)) {
       // Element-targeting expressions are handled in serializeArrayElements
       if (outWire.to.element) continue;
-      const exprParts: { op: string; right: string }[] = [];
-      let currentTk = tk;
-      let actualSourceRef: NodeRef | null = null;
       let chainForced = !!outWire.force;
 
-      while (exprForks.has(currentTk)) {
-        const info = exprForks.get(currentTk)!;
-        // Serialize the right operand
+      // Recursively serialize an expression fork into infix notation.
+      function serializeExprTree(forkTk: string): string | null {
+        const info = exprForks.get(forkTk);
+        if (!info) return null;
+
+        // Serialize left operand (from .a wire)
+        let leftStr: string | null = null;
+        if (info.aWire) {
+          if (info.aWire.force) chainForced = true;
+          const fromTk = refTrunkKey(info.aWire.from);
+          if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
+            leftStr = serializeExprTree(fromTk);
+          } else {
+            leftStr = info.aWire.from.element
+              ? "ITER." + serPath(info.aWire.from.path)
+              : sRef(info.aWire.from, true);
+          }
+        }
+
+        // Serialize right operand (from .b wire)
         let rightStr: string;
         if (info.bWire && "value" in info.bWire) {
           rightStr = info.bWire.value;
         } else if (info.bWire && "from" in info.bWire) {
-          rightStr = sRef((info.bWire as FW).from, true);
+          const bFrom = (info.bWire as FW).from;
+          const bTk = refTrunkKey(bFrom);
+          if (bFrom.path.length === 0 && exprForks.has(bTk)) {
+            rightStr = serializeExprTree(bTk) ?? sRef(bFrom, true);
+          } else {
+            rightStr = bFrom.element
+              ? "ITER." + serPath(bFrom.path)
+              : sRef(bFrom, true);
+          }
         } else {
           rightStr = "0";
         }
-        exprParts.push({ op: info.op, right: rightStr });
 
-        // Walk backward via the .a input wire
-        const aWire = info.aWire;
-        if (aWire?.force) chainForced = true;
-        if (!aWire) break;
-        const fromTk = refTrunkKey(aWire.from);
-        if (aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-          currentTk = fromTk;
-        } else {
-          actualSourceRef = aWire.from;
-          break;
-        }
+        if (leftStr == null) return rightStr;
+        return `${leftStr} ${info.op} ${rightStr}`;
       }
 
-      if (actualSourceRef && exprParts.length > 0) {
+      const exprStr = serializeExprTree(tk);
+      if (exprStr) {
         const destStr = sRef(outWire.to, false);
         const arrow = chainForced ? "<-!" : "<-";
-        const sourceStr = sRef(actualSourceRef, true);
-        const exprStr = exprParts
-          .reverse()
-          .map(({ op, right }) => `${op} ${right}`)
-          .join(" ");
-        lines.push(`${destStr} ${arrow} ${sourceStr} ${exprStr}`);
+        const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
+        const errf = outWire.fallbackRef
+          ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
+          : outWire.fallback
+            ? ` ?? ${outWire.fallback}`
+            : "";
+        lines.push(`${destStr} ${arrow} ${exprStr}${nfb}${errf}`);
       }
       continue;
     }

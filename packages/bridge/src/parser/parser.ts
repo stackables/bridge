@@ -1177,37 +1177,6 @@ function processElementLines(
       const { root: elemSrcRoot, segments: elemSrcSegs } =
         extractAddressPath(elemHeadNode);
 
-      // ── Expression desugaring in element lines ──
-      const elemExprOps = subs(elemLine, "elemExprOp");
-      if (elemExprOps.length > 0 && desugarExprChain) {
-        const elemExprRights = subs(elemLine, "elemExprRight");
-        let leftRef: NodeRef;
-        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-          leftRef = {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemSrcSegs,
-          };
-        } else {
-          leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
-        }
-        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
-        wires.push({
-          from: resultRef,
-          to: {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemToPath,
-          },
-          pipe: true,
-        });
-        continue;
-      }
-
       // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
       const nestedArrayNode = (
         elemC.nestedArrayMapping as CstNode[] | undefined
@@ -1259,7 +1228,7 @@ function processElementLines(
         continue;
       }
 
-      // ── Regular element pull wire ──
+      // ── Element pull wire (expression or plain) ──
       const elemToRef: NodeRef = {
         module: SELF_MODULE,
         type: bridgeType,
@@ -1269,7 +1238,26 @@ function processElementLines(
 
       const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
-      if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+      const elemExprOps = subs(elemLine, "elemExprOp");
+
+      if (elemExprOps.length > 0 && desugarExprChain) {
+        // Expression in element line — desugar then merge with fallback path
+        const elemExprRights = subs(elemLine, "elemExprRight");
+        let leftRef: NodeRef;
+        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
+          leftRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemSrcSegs,
+          };
+        } else {
+          leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+        }
+        const resultRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        sourceParts.push({ ref: resultRef, isPipeFork: true });
+      } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
         sourceParts.push({
           ref: {
             module: SELF_MODULE,
@@ -1970,6 +1958,13 @@ function buildBridgeBody(
     "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
   };
 
+  /** Operator precedence: higher number = binds tighter. */
+  const OP_PREC: Record<string, number> = {
+    "*": 3, "/": 3,
+    "+": 2, "-": 2,
+    "==": 1, "!=": 1, ">": 1, ">=": 1, "<": 1, "<=": 1,
+  };
+
   function extractExprOpStr(opNode: CstNode): string {
     const c = opNode.children;
     if (c.star) return "*";
@@ -2032,13 +2027,13 @@ function buildBridgeBody(
   }
 
   /**
-   * Desugar an infix expression chain into synthetic tool wires.
+   * Desugar an infix expression chain into synthetic tool wires,
+   * respecting operator precedence (* / before + - before comparisons).
    *
-   * Given:  leftRef * rightOperand / 10 > 5
-   * Emits synthetic tools and wires, returns a NodeRef pointing to the
-   * final synthetic tool's output (the result).
+   * Given:  leftRef + rightA * rightB > 5
+   * Produces: leftRef + (rightA * rightB) > 5
    *
-   * Each step creates a synthetic tool fork (like pipe desugaring):
+   * Each binary node creates a synthetic tool fork (like pipe desugaring):
    *   __expr fork instance → { a: left, b: right } → result
    */
   function desugarExprChain(
@@ -2048,24 +2043,29 @@ function buildBridgeBody(
     lineNum: number,
     iterName?: string,
   ): NodeRef {
-    let currentRef = leftRef;
+    // Build flat operand/operator lists for the precedence parser.
+    // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
+    type Operand = { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string };
+    const operands: Operand[] = [{ kind: "ref", ref: leftRef }];
+    const ops: string[] = [];
 
     for (let i = 0; i < exprOps.length; i++) {
-      const opStr = extractExprOpStr(exprOps[i]);
+      ops.push(extractExprOpStr(exprOps[i]));
+      operands.push(resolveExprOperand(exprRights[i], lineNum, iterName));
+    }
+
+    // Emit a synthetic fork for a single binary operation and return
+    // an operand pointing to the fork's result.
+    function emitFork(left: Operand, opStr: string, right: Operand): Operand {
       const fnName = OP_TO_FN[opStr];
       if (!fnName) throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
 
-      const rightOperand = resolveExprOperand(exprRights[i], lineNum, iterName);
-
-      // Create a synthetic fork instance for this expression step
       const forkInstance = 100000 + nextForkSeq++;
       const forkTrunkModule = SELF_MODULE;
       const forkTrunkType = "Tools";
       const forkTrunkField = fnName;
 
       const forkKey = `${forkTrunkModule}:${forkTrunkType}:${forkTrunkField}:${forkInstance}`;
-
-      // Register the fork as a pipe handle (so the engine can look it up)
       pipeHandleEntries.push({
         key: forkKey,
         handle: `__expr_${forkInstance}`,
@@ -2076,45 +2076,66 @@ function buildBridgeBody(
         },
       });
 
-      // Wire: currentRef → fork.a
-      const forkARef: NodeRef = {
+      const makeTarget = (slot: string): NodeRef => ({
         module: forkTrunkModule,
         type: forkTrunkType,
         field: forkTrunkField,
         instance: forkInstance,
-        path: ["a"],
-      };
-      wires.push({
-        from: currentRef,
-        to: forkARef,
-        pipe: true,
+        path: [slot],
       });
 
-      // Wire: rightOperand → fork.b
-      const forkBRef: NodeRef = {
-        module: forkTrunkModule,
-        type: forkTrunkType,
-        field: forkTrunkField,
-        instance: forkInstance,
-        path: ["b"],
-      };
-      if (rightOperand.kind === "literal") {
-        wires.push({ value: rightOperand.value, to: forkBRef });
+      // Wire left → fork.a
+      if (left.kind === "literal") {
+        wires.push({ value: left.value, to: makeTarget("a") });
       } else {
-        wires.push({ from: rightOperand.ref, to: forkBRef, pipe: true });
+        wires.push({ from: left.ref, to: makeTarget("a"), pipe: true });
       }
 
-      // The result of this step is the fork's root ref
-      currentRef = {
-        module: forkTrunkModule,
-        type: forkTrunkType,
-        field: forkTrunkField,
-        instance: forkInstance,
-        path: [],
+      // Wire right → fork.b
+      if (right.kind === "literal") {
+        wires.push({ value: right.value, to: makeTarget("b") });
+      } else {
+        wires.push({ from: right.ref, to: makeTarget("b"), pipe: true });
+      }
+
+      return {
+        kind: "ref",
+        ref: {
+          module: forkTrunkModule,
+          type: forkTrunkType,
+          field: forkTrunkField,
+          instance: forkInstance,
+          path: [],
+        },
       };
     }
 
-    return currentRef;
+    // Reduce all operators at a given precedence level (left-to-right).
+    // Modifies operands/ops arrays in place, collapsing matched pairs.
+    function reduceLevel(prec: number): void {
+      let i = 0;
+      while (i < ops.length) {
+        if ((OP_PREC[ops[i]] ?? 0) === prec) {
+          const result = emitFork(operands[i], ops[i], operands[i + 1]);
+          operands.splice(i, 2, result);
+          ops.splice(i, 1);
+        } else {
+          i++;
+        }
+      }
+    }
+
+    // Process in precedence order: * / first, then + -, then comparisons.
+    reduceLevel(3); // * /
+    reduceLevel(2); // + -
+    reduceLevel(1); // == != > >= < <=
+
+    // After full reduction, operands[0] holds the final result.
+    const final = operands[0];
+    if (final.kind !== "ref") {
+      throw new Error(`Line ${lineNum}: Expression must contain at least one source reference`);
+    }
+    return final.ref;
   }
 
   // ── Step 2: Process wire lines ─────────────────────────────────────────
@@ -2146,22 +2167,6 @@ function buildBridgeBody(
     // ── Pull wire: target <-[!] source [modifiers] ──
     const force = !!wc.forceArrow;
 
-    // ── Expression desugaring: target <- source op operand [op operand]* ──
-    const exprOps = subs(wireNode, "exprOp");
-    if (exprOps.length > 0) {
-      const exprRights = subs(wireNode, "exprRight");
-      const firstSourceNode = sub(wireNode, "firstSource")!;
-      const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
-      const resultRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
-      wires.push({
-        from: resultRef,
-        to: toRef,
-        pipe: true,
-        ...(force ? { force: true as const } : {}),
-      });
-      continue;
-    }
-
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
@@ -2190,17 +2195,30 @@ function buildBridgeBody(
       continue;
     }
 
-    // ── Regular pull wire (non-array) ──
+    // ── Build primary source (expression or plain ref) ──
     const firstSourceNode = sub(wireNode, "firstSource")!;
     const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
-    const pipeSegs = subs(firstSourceNode, "pipeSegment");
-    const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
-    const isPipeFork =
-      firstRef.instance != null &&
-      firstRef.path.length === 0 &&
-      pipeSegs.length > 0;
-    sourceParts.push({ ref: firstRef, isPipeFork });
+    const exprOps = subs(wireNode, "exprOp");
+
+    if (exprOps.length > 0) {
+      // It's a math/comparison expression — desugar it.
+      const exprRights = subs(wireNode, "exprRight");
+      const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const resultRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
+
+      // The expression result acts as the primary source (synthetic pipe fork).
+      sourceParts.push({ ref: resultRef, isPipeFork: true });
+    } else {
+      // Normal pull wire.
+      const pipeSegs = subs(firstSourceNode, "pipeSegment");
+      const firstRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const isPipeFork =
+        firstRef.instance != null &&
+        firstRef.path.length === 0 &&
+        pipeSegs.length > 0;
+      sourceParts.push({ ref: firstRef, isPipeFork });
+    }
 
     let nullFallback: string | undefined;
     for (const alt of subs(wireNode, "nullAlt")) {

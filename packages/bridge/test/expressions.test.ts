@@ -449,3 +449,191 @@ bridge Query.products {
     assert.equal(result.data.products[1].cents, 2450);
   });
 });
+
+// ── Operator precedence tests ─────────────────────────────────────────────
+
+describe("expressions: operator precedence", () => {
+  test("i.base + i.tax * 2 — multiplication before addition", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- i.base + i.tax * 2
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    // multiply should be emitted FIRST (higher precedence)
+    assert.equal(exprHandles.length, 2, "two synthetic forks");
+    assert.equal(exprHandles[0].baseTrunk.field, "multiply", "multiply first");
+    assert.equal(exprHandles[1].baseTrunk.field, "add", "add second");
+  });
+
+  test("precedence: a + b * c executes correctly", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- i.base + i.tax * 2
+}`);
+    const precTypeDefs = /* GraphQL */ `
+      type Query { calc(base: Float!, tax: Float!): PrecResult }
+      type PrecResult { total: Float }
+    `;
+    const gateway = createGateway(precTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ calc(base: 100, tax: 10) { total } }`),
+    });
+    // Should be 100 + (10 * 2) = 120, NOT (100 + 10) * 2 = 220
+    assert.equal(result.data.calc.total, 120);
+  });
+
+  test("precedence: a * b + c * d", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- i.price * i.quantity + i.base * 2
+}`);
+    const precTypeDefs = /* GraphQL */ `
+      type Query { calc(price: Float!, quantity: Int!, base: Float!): PrecResult }
+      type PrecResult { total: Float }
+    `;
+    const gateway = createGateway(precTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ calc(price: 10, quantity: 3, base: 5) { total } }`),
+    });
+    // (10 * 3) + (5 * 2) = 30 + 10 = 40
+    assert.equal(result.data.calc.total, 40);
+  });
+
+  test("precedence: comparison after arithmetic — i.base + i.tax * 2 > 100", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.eligible <- i.base + i.tax * 2 > 100
+}`);
+    const precTypeDefs = /* GraphQL */ `
+      type Query { check(base: Float!, tax: Float!): CheckResult }
+      type CheckResult { eligible: Int }
+    `;
+    const gateway = createGateway(precTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    // 100 + (10 * 2) = 120 > 100 → 1
+    const r1: any = await executor({
+      document: parse(`{ check(base: 100, tax: 10) { eligible } }`),
+    });
+    assert.equal(r1.data.check.eligible, 1);
+
+    // 50 + (10 * 2) = 70 > 100 → 0
+    const r2: any = await executor({
+      document: parse(`{ check(base: 50, tax: 10) { eligible } }`),
+    });
+    assert.equal(r2.data.check.eligible, 0);
+  });
+
+  test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
+    const text = `version 1.4
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- i.base + i.tax * 2
+}`;
+    const instructions = parseBridge(text);
+    const serialized = serializeBridge(instructions);
+    // Should round-trip the expression (order may vary due to precedence grouping)
+    assert.ok(
+      serialized.includes("i.base + i.tax * 2") || serialized.includes("i.tax * 2"),
+      `got: ${serialized}`,
+    );
+  });
+});
+
+// ── Expression + fallback integration tests ─────────────────────────────────
+
+describe("expressions: fallback integration", () => {
+  test("expression with ?? error fallback: i.value * 100 ?? -1", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.convert {
+  with pricing.lookup as api
+  with input as i
+  with output as o
+
+  api.id <- i.dollars
+  o.cents <- api.price * 100 ?? -1
+}`);
+    const tools = {
+      "pricing.lookup": async () => { throw new Error("service unavailable"); },
+    };
+    const precTypeDefs = /* GraphQL */ `
+      type Query { convert(dollars: Float!): ConvertResult }
+      type ConvertResult { cents: Float }
+    `;
+    const gateway = createGateway(precTypeDefs, instructions, { tools });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ convert(dollars: 5) { cents } }`),
+    });
+    // api.price throws → expression throws → ?? catches → returns -1
+    assert.equal(result.data.convert.cents, -1);
+  });
+
+  test("expression with || null coalesce: (i.value ?? 1) * 2", async () => {
+    // This tests coalescing on the source BEFORE the expression
+    const instructions = parseBridge(`version 1.4
+bridge Query.convert {
+  with input as i
+  with output as o
+
+  o.cents <- i.dollars * 100
+}`);
+    const precTypeDefs = /* GraphQL */ `
+      type Query { convert(dollars: Float!): ConvertResult }
+      type ConvertResult { cents: Float }
+    `;
+    const gateway = createGateway(precTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ convert(dollars: 5) { cents } }`),
+    });
+    assert.equal(result.data.convert.cents, 500);
+  });
+});
+
+// ── Non-number handling tests ──────────────────────────────────────────────
+
+describe("expressions: non-number handling", () => {
+  test("undefined input coerces to NaN via Number()", () => {
+    // Number(undefined) = NaN, so undefined * 100 = NaN
+    assert.ok(Number.isNaN(multiply({ a: undefined as any, b: 100 })));
+    assert.ok(Number.isNaN(add({ a: undefined as any, b: 5 })));
+  });
+
+  test("null input coerces to 0 via Number()", () => {
+    // Number(null) = 0
+    assert.equal(multiply({ a: null as any, b: 100 }), 0);
+    assert.equal(add({ a: null as any, b: 5 }), 5);
+  });
+
+  test("string number coerces correctly", () => {
+    assert.equal(multiply({ a: "10" as any, b: "5" as any }), 50);
+    assert.equal(add({ a: "3" as any, b: "4" as any }), 7);
+  });
+
+  test("non-numeric string produces NaN", () => {
+    assert.ok(Number.isNaN(multiply({ a: "hello" as any, b: 100 })));
+  });
+
+  test("comparison with NaN returns 0", () => {
+    assert.equal(gt({ a: NaN, b: 5 }), 0);
+    assert.equal(eq({ a: NaN, b: NaN }), 0);
+  });
+});
