@@ -60,6 +60,7 @@ type QueryTabBarProps = {
   onRun: () => void;
   runDisabled: boolean;
   running: boolean;
+  showRunButton?: boolean;
 };
 function QueryTabBar({
   queries,
@@ -70,6 +71,7 @@ function QueryTabBar({
   onRun,
   runDisabled,
   running,
+  showRunButton = true,
 }: QueryTabBarProps) {
   const isQueryTab = activeTabId !== "context";
   const canRemove = queries.length > 1;
@@ -152,7 +154,7 @@ function QueryTabBar({
       <div className="flex-1" />
 
       {/* Run button — visible only when a query tab is active */}
-      {isQueryTab && (
+      {showRunButton && isQueryTab && (
         <Button
           size="sm"
           onClick={onRun}
@@ -468,6 +470,7 @@ export function App() {
               onRun={handleRun}
               runDisabled={isActiveRunning || hasErrors}
               running={isActiveRunning}
+              showRunButton={false}
             />
           </div>
           <div className="p-3 pt-2">
@@ -492,6 +495,17 @@ export function App() {
             ) : null}
           </div>
         </div>
+
+        {/* Run button — full-width below query panel, mobile only */}
+        {activeTabId !== "context" && (
+          <Button
+            onClick={handleRun}
+            disabled={isActiveRunning || hasErrors}
+            className="w-full"
+          >
+            {isActiveRunning ? "Running…" : "▶  Run"}
+          </Button>
+        )}
 
         {/* Result panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
