@@ -22,7 +22,7 @@ import {
   OnKw,
   ErrorKw,
   Arrow,
-  ForceArrow,
+  ForceKw,
   NullCoalesce,
   ErrorCoalesce,
   LCurly,
@@ -275,8 +275,19 @@ class BridgeParser extends CstParser {
   public bridgeBodyLine = this.RULE("bridgeBodyLine", () => {
     this.OR([
       { ALT: () => this.SUBRULE(this.bridgeWithDecl) },
+      { ALT: () => this.SUBRULE(this.bridgeForce) },
       { ALT: () => this.SUBRULE(this.bridgeWire) }, // merged constant + pull
     ]);
+  });
+
+  /** force <handle> [?? null] */
+  public bridgeForce = this.RULE("bridgeForce", () => {
+    this.CONSUME(ForceKw);
+    this.SUBRULE(this.nameToken, { LABEL: "forcedHandle" });
+    this.OPTION(() => {
+      this.CONSUME(ErrorCoalesce, { LABEL: "forceErrorCoalesce" });
+      this.CONSUME(NullLiteral, { LABEL: "forceNullFallback" });
+    });
   });
 
   /** with input/output/context/const/tool [as handle] */
@@ -361,10 +372,7 @@ class BridgeParser extends CstParser {
       {
         // Pull wire: target <-[!] sourceExpr [op operand]* [modifiers]
         ALT: () => {
-          this.OR2([
-            { ALT: () => this.CONSUME(Arrow, { LABEL: "arrow" }) },
-            { ALT: () => this.CONSUME(ForceArrow, { LABEL: "forceArrow" }) },
-          ]);
+          this.CONSUME(Arrow, { LABEL: "arrow" });
           this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
           // Optional expression chain: operator + operand, repeatable
           this.MANY2(() => {
@@ -1134,7 +1142,7 @@ function processElementLines(
   bridgeField: string,
   wires: Wire[],
   arrayIterators: Record<string, string>,
-  buildSourceExpr: (node: CstNode, lineNum: number, force: boolean) => NodeRef,
+  buildSourceExpr: (node: CstNode, lineNum: number) => NodeRef,
   extractCoalesceAlt: (
     altNode: CstNode,
     lineNum: number,
@@ -1229,7 +1237,7 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          innerFromRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+          innerFromRef = buildSourceExpr(elemSourceNode, elemLineNum);
         }
         const innerToRef: NodeRef = {
           module: SELF_MODULE,
@@ -1293,9 +1301,15 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          leftRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
+          leftRef = buildSourceExpr(elemSourceNode, elemLineNum);
         }
-        elemCondRef = desugarExprChain(leftRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        elemCondRef = desugarExprChain(
+          leftRef,
+          elemExprOps,
+          elemExprRights,
+          elemLineNum,
+          iterName,
+        );
         elemCondIsPipeFork = true;
       } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
         elemCondRef = {
@@ -1307,8 +1321,11 @@ function processElementLines(
         };
         elemCondIsPipeFork = false;
       } else {
-        elemCondRef = buildSourceExpr(elemSourceNode, elemLineNum, false);
-        elemCondIsPipeFork = elemCondRef.instance != null && elemCondRef.path.length === 0 && elemPipeSegs.length > 0;
+        elemCondRef = buildSourceExpr(elemSourceNode, elemLineNum);
+        elemCondIsPipeFork =
+          elemCondRef.instance != null &&
+          elemCondRef.path.length === 0 &&
+          elemPipeSegs.length > 0;
       }
 
       // ── Ternary wire in element context ──
@@ -1316,8 +1333,16 @@ function processElementLines(
       if (elemTernaryOp && extractTernaryBranchFn) {
         const thenNode = sub(elemLine, "elemThenBranch")!;
         const elseNode = sub(elemLine, "elemElseBranch")!;
-        const thenBranch = extractTernaryBranchFn(thenNode, elemLineNum, iterName);
-        const elseBranch = extractTernaryBranchFn(elseNode, elemLineNum, iterName);
+        const thenBranch = extractTernaryBranchFn(
+          thenNode,
+          elemLineNum,
+          iterName,
+        );
+        const elseBranch = extractTernaryBranchFn(
+          elseNode,
+          elemLineNum,
+          iterName,
+        );
 
         // Process || null-coalesce alternatives.
         let elemNullFallback: string | undefined;
@@ -1338,7 +1363,10 @@ function processElementLines(
         const elemErrorAlt = sub(elemLine, "elemErrorAlt");
         if (elemErrorAlt) {
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(elemErrorAlt, elemLineNum);
+          const altResult = extractCoalesceAltIterAware(
+            elemErrorAlt,
+            elemLineNum,
+          );
           if ("literal" in altResult) {
             elemFallback = altResult.literal;
           } else {
@@ -1349,11 +1377,19 @@ function processElementLines(
 
         wires.push({
           cond: elemCondRef,
-          ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
-          ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
-          ...(elemNullFallback !== undefined ? { nullFallback: elemNullFallback } : {}),
+          ...(thenBranch.kind === "ref"
+            ? { thenRef: thenBranch.ref }
+            : { thenValue: thenBranch.value }),
+          ...(elseBranch.kind === "ref"
+            ? { elseRef: elseBranch.ref }
+            : { elseValue: elseBranch.value }),
+          ...(elemNullFallback !== undefined
+            ? { nullFallback: elemNullFallback }
+            : {}),
           ...(elemFallback !== undefined ? { fallback: elemFallback } : {}),
-          ...(elemFallbackRef !== undefined ? { fallbackRef: elemFallbackRef } : {}),
+          ...(elemFallbackRef !== undefined
+            ? { fallbackRef: elemFallbackRef }
+            : {}),
           to: elemToRef,
         });
         for (const ref of elemNullAltRefs) {
@@ -1634,13 +1670,8 @@ function buildDefineDef(node: CstNode): DefineDef {
   assertNotReserved(name, lineNum, "define name");
 
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles } = buildBridgeBody(
-    bodyLines,
-    "Define",
-    name,
-    [],
-    lineNum,
-  );
+  const { handles, wires, arrayIterators, pipeHandles, forces } =
+    buildBridgeBody(bodyLines, "Define", name, [], lineNum);
 
   return {
     kind: "define",
@@ -1649,6 +1680,7 @@ function buildDefineDef(node: CstNode): DefineDef {
     wires,
     ...(Object.keys(arrayIterators).length > 0 ? { arrayIterators } : {}),
     ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
+    ...(forces.length > 0 ? { forces } : {}),
   };
 }
 
@@ -1687,13 +1719,8 @@ function buildBridge(
 
   // Full bridge block
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles } = buildBridgeBody(
-    bodyLines,
-    typeName,
-    fieldName,
-    previousInstructions,
-    0,
-  );
+  const { handles, wires, arrayIterators, pipeHandles, forces } =
+    buildBridgeBody(bodyLines, typeName, fieldName, previousInstructions, 0);
 
   // Inline define invocations
   const instanceCounters = new Map<string, number>();
@@ -1760,6 +1787,7 @@ function buildBridge(
     arrayIterators:
       Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
     pipeHandles: pipeHandles.length > 0 ? pipeHandles : undefined,
+    forces: forces.length > 0 ? forces : undefined,
   });
   return instructions;
 }
@@ -1779,6 +1807,7 @@ function buildBridgeBody(
   wires: Wire[];
   arrayIterators: Record<string, string>;
   pipeHandles: NonNullable<Bridge["pipeHandles"]>;
+  forces: NonNullable<Bridge["forces"]>;
 } {
   const handleRes = new Map<string, HandleResolution>();
   const handleBindings: HandleBinding[] = [];
@@ -1937,11 +1966,7 @@ function buildBridgeBody(
 
   // ── Helper: build source expression ────────────────────────────────────
 
-  function buildSourceExpr(
-    sourceNode: CstNode,
-    lineNum: number,
-    forceOnOutermost: boolean,
-  ): NodeRef {
+  function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
@@ -2004,12 +2029,10 @@ function buildBridgeBody(
         instance: forkInstance,
         path: [],
       };
-      const isOutermost = idx === reversed.length - 1;
       wires.push({
         from: prevOutRef,
         to: forkInRef,
         pipe: true,
-        ...(forceOnOutermost && isOutermost ? { force: true as const } : {}),
       });
       prevOutRef = forkRootRef;
     }
@@ -2033,7 +2056,7 @@ function buildBridgeBody(
       return { literal: reconstructJson((c.objectLit as CstNode[])[0]) };
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
-      return { sourceRef: buildSourceExpr(srcNode, lineNum, false) };
+      return { sourceRef: buildSourceExpr(srcNode, lineNum) };
     }
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);
   }
@@ -2051,8 +2074,10 @@ function buildBridgeBody(
     iterName?: string,
   ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
     const c = branchNode.children;
-    if (c.stringLit) return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
-    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.stringLit)
+      return { kind: "literal", value: (c.stringLit as IToken[])[0].image };
+    if (c.numberLit)
+      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.trueLit) return { kind: "literal", value: "true" };
     if (c.falseLit) return { kind: "literal", value: "false" };
     if (c.nullLit) return { kind: "literal", value: "null" };
@@ -2081,15 +2106,30 @@ function buildBridgeBody(
 
   /** Map infix operator token to the std tool that implements it. */
   const OP_TO_FN: Record<string, string> = {
-    "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
-    "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+    "*": "multiply",
+    "/": "divide",
+    "+": "add",
+    "-": "subtract",
+    "==": "eq",
+    "!=": "neq",
+    ">": "gt",
+    ">=": "gte",
+    "<": "lt",
+    "<=": "lte",
   };
 
   /** Operator precedence: higher number = binds tighter. */
   const OP_PREC: Record<string, number> = {
-    "*": 3, "/": 3,
-    "+": 2, "-": 2,
-    "==": 1, "!=": 1, ">": 1, ">=": 1, "<": 1, "<=": 1,
+    "*": 3,
+    "/": 3,
+    "+": 2,
+    "-": 2,
+    "==": 1,
+    "!=": 1,
+    ">": 1,
+    ">=": 1,
+    "<": 1,
+    "<=": 1,
   };
 
   function extractExprOpStr(opNode: CstNode): string {
@@ -2117,7 +2157,8 @@ function buildBridgeBody(
     iterName?: string,
   ): { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string } {
     const c = operandNode.children;
-    if (c.numberLit) return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
+    if (c.numberLit)
+      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       return { kind: "literal", value: raw.slice(1, -1) };
@@ -2147,7 +2188,7 @@ function buildBridgeBody(
         }
       }
 
-      const ref = buildSourceExpr(srcNode, lineNum, false);
+      const ref = buildSourceExpr(srcNode, lineNum);
       return { kind: "ref", ref };
     }
     throw new Error(`Line ${lineNum}: Invalid expression operand`);
@@ -2172,7 +2213,9 @@ function buildBridgeBody(
   ): NodeRef {
     // Build flat operand/operator lists for the precedence parser.
     // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
-    type Operand = { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string };
+    type Operand =
+      | { kind: "ref"; ref: NodeRef }
+      | { kind: "literal"; value: string };
     const operands: Operand[] = [{ kind: "ref", ref: leftRef }];
     const ops: string[] = [];
 
@@ -2185,7 +2228,8 @@ function buildBridgeBody(
     // an operand pointing to the fork's result.
     function emitFork(left: Operand, opStr: string, right: Operand): Operand {
       const fnName = OP_TO_FN[opStr];
-      if (!fnName) throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
+      if (!fnName)
+        throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
 
       const forkInstance = 100000 + nextForkSeq++;
       const forkTrunkModule = SELF_MODULE;
@@ -2260,7 +2304,9 @@ function buildBridgeBody(
     // After full reduction, operands[0] holds the final result.
     const final = operands[0];
     if (final.kind !== "ref") {
-      throw new Error(`Line ${lineNum}: Expression must contain at least one source reference`);
+      throw new Error(
+        `Line ${lineNum}: Expression must contain at least one source reference`,
+      );
     }
     return final.ref;
   }
@@ -2270,6 +2316,7 @@ function buildBridgeBody(
   for (const bodyLine of bodyLines) {
     const c = bodyLine.children;
     if (c.bridgeWithDecl) continue; // already processed
+    if (c.bridgeForce) continue; // handled below
 
     const wireNode = (c.bridgeWire as CstNode[] | undefined)?.[0];
     if (!wireNode) continue;
@@ -2291,14 +2338,13 @@ function buildBridgeBody(
       continue;
     }
 
-    // ── Pull wire: target <-[!] source [modifiers] ──
-    const force = !!wc.forceArrow;
+    // ── Pull wire: target <- source [modifiers] ──
 
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
       const firstSourceNode = sub(wireNode, "firstSource")!;
-      const srcRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const srcRef = buildSourceExpr(firstSourceNode, lineNum);
       wires.push({ from: srcRef, to: toRef });
 
       const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
@@ -2335,13 +2381,16 @@ function buildBridgeBody(
     if (exprOps.length > 0) {
       // It's a math/comparison expression — desugar it.
       const exprRights = subs(wireNode, "exprRight");
-      const leftRef = buildSourceExpr(firstSourceNode, lineNum, force);
+      const leftRef = buildSourceExpr(firstSourceNode, lineNum);
       condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
       condIsPipeFork = true;
     } else {
       const pipeSegs = subs(firstSourceNode, "pipeSegment");
-      condRef = buildSourceExpr(firstSourceNode, lineNum, force);
-      condIsPipeFork = condRef.instance != null && condRef.path.length === 0 && pipeSegs.length > 0;
+      condRef = buildSourceExpr(firstSourceNode, lineNum);
+      condIsPipeFork =
+        condRef.instance != null &&
+        condRef.path.length === 0 &&
+        pipeSegs.length > 0;
     }
 
     // ── Ternary wire: cond ? thenBranch : elseBranch ──
@@ -2383,8 +2432,12 @@ function buildBridgeBody(
 
       wires.push({
         cond: condRef,
-        ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
-        ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+        ...(thenBranch.kind === "ref"
+          ? { thenRef: thenBranch.ref }
+          : { thenValue: thenBranch.value }),
+        ...(elseBranch.kind === "ref"
+          ? { elseRef: elseBranch.ref }
+          : { elseValue: elseBranch.value }),
         ...(nullFallback !== undefined ? { nullFallback } : {}),
         ...(fallback !== undefined ? { fallback } : {}),
         ...(fallbackRef !== undefined ? { fallbackRef } : {}),
@@ -2427,7 +2480,6 @@ function buildBridgeBody(
 
     for (let ci = 0; ci < sourceParts.length; ci++) {
       const { ref: fromRef, isPipeFork: isPipe } = sourceParts[ci];
-      const isFirst = ci === 0;
       const isLast = ci === sourceParts.length - 1;
       const lastAttrs = isLast
         ? {
@@ -2442,7 +2494,6 @@ function buildBridgeBody(
         wires.push({
           from: fromRef,
           to: toRef,
-          ...(force && isFirst ? { force: true as const } : {}),
           ...lastAttrs,
         });
       }
@@ -2450,11 +2501,38 @@ function buildBridgeBody(
     wires.push(...fallbackInternalWires);
   }
 
+  // ── Step 3: Collect force statements ──────────────────────────────────
+
+  const forces: NonNullable<Bridge["forces"]> = [];
+  for (const bodyLine of bodyLines) {
+    const forceNode = (
+      bodyLine.children.bridgeForce as CstNode[] | undefined
+    )?.[0];
+    if (!forceNode) continue;
+    const lineNum = line(findFirstToken(forceNode));
+    const handle = extractNameToken(sub(forceNode, "forcedHandle")!);
+    const res = handleRes.get(handle);
+    if (!res) {
+      throw new Error(
+        `Line ${lineNum}: Cannot force undeclared handle "${handle}". Add 'with ${handle}' to the bridge header.`,
+      );
+    }
+    const fc = forceNode.children;
+    const catchError = !!(fc.forceErrorCoalesce as IToken[] | undefined)
+      ?.length;
+    forces.push({
+      handle,
+      ...res,
+      ...(catchError ? { catchError: true as const } : {}),
+    });
+  }
+
   return {
     handles: handleBindings,
     wires,
     arrayIterators,
     pipeHandles: pipeHandleEntries,
+    forces,
   };
 }
 

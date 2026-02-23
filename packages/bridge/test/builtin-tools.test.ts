@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridge } from "../src/bridge-format.ts";
 import { builtinTools } from "../src/tools/index.ts";
+import { audit } from "../src/tools/audit.ts";
 import { upperCase } from "../src/tools/upper-case.ts";
 import { lowerCase } from "../src/tools/lower-case.ts";
 import { findObject } from "../src/tools/find-object.ts";
@@ -143,13 +144,14 @@ describe("builtinTools bundle", () => {
   });
 
   test("std namespace contains transform tools", () => {
+    assert.ok(builtinTools.std.audit, "audit present");
     assert.ok(builtinTools.std.httpCall, "httpCall present");
     assert.ok(builtinTools.std.upperCase, "upperCase present");
     assert.ok(builtinTools.std.lowerCase, "lowerCase present");
     assert.ok(builtinTools.std.findObject, "findObject present");
     assert.ok(builtinTools.std.pickFirst, "pickFirst present");
     assert.ok(builtinTools.std.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 6);
+    assert.equal(Object.keys(builtinTools.std).length, 7);
   });
 
   test("math namespace contains math/comparison tools", () => {
@@ -598,5 +600,187 @@ o.lower <- lo:i.text
 
     assert.equal(result.data.format.upper, "HELLO");
     assert.equal(result.data.format.lower, "hello");
+  });
+});
+
+// ── audit tool ──────────────────────────────────────────────────────────────
+
+describe("audit tool", () => {
+  test("uses ToolContext logger when provided", () => {
+    const logged: any[] = [];
+    const logger = { info: (...args: any[]) => logged.push(args) };
+
+    const input = { action: "login", userId: "u42" };
+    const result = audit(input, { logger });
+
+    assert.deepEqual(result, input, "returns input as-is (including level default)");
+    assert.equal(logged.length, 1, "logged exactly once");
+    // structured: data first, message last
+    assert.deepEqual(logged[0][0], { action: "login", userId: "u42" });
+    assert.equal(logged[0][1], "[bridge:audit]");
+  });
+
+  test("no-op when no ToolContext logger", () => {
+    assert.equal(typeof audit, "function");
+    // No logger → noop, should not throw
+    assert.deepEqual(audit({ x: 1 }), { x: 1 });
+  });
+
+  test("level input selects logger method", () => {
+    const warns: any[] = [];
+    const infos: any[] = [];
+    const logger = {
+      info: (...a: any[]) => infos.push(a),
+      warn: (...a: any[]) => warns.push(a),
+    };
+
+    audit({ action: "risky", level: "warn" }, { logger });
+
+    assert.equal(infos.length, 0, "info not called");
+    assert.equal(warns.length, 1, "warn called");
+    assert.deepEqual(warns[0][0], { action: "risky" });
+    assert.equal(warns[0][1], "[bridge:audit]");
+  });
+
+  test("ToolContext logger receives all wired inputs", () => {
+    const entries: any[] = [];
+    const logger = { info: (...a: any[]) => entries.push(a) };
+
+    audit({ action: "order", userId: "u1", amount: 99.5, item: "widget" }, { logger });
+
+    assert.equal(entries.length, 1);
+    const payload = entries[0][0];
+    assert.equal(payload.action, "order");
+    assert.equal(payload.userId, "u1");
+    assert.equal(payload.amount, 99.5);
+    assert.equal(payload.item, "widget");
+  });
+
+});
+
+// ── audit + force e2e ───────────────────────────────────────────────────────
+
+describe("audit tool with force (e2e)", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      search(q: String!): SearchResult
+    }
+    type SearchResult {
+      title: String
+    }
+  `;
+
+  test("forced audit logs via engine logger (ToolContext flow)", async () => {
+    const logged: any[] = [];
+    const logger = { info: (...args: any[]) => logged.push(args) };
+
+    const bridgeText = `version 1.4
+bridge Query.search {
+  with searchApi as api
+  with std.audit as audit
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  audit.action = "search"
+  audit.query <- i.q
+  audit.resultTitle <- api.title
+  force audit
+  o.title <- api.title
+
+}`;
+
+    const tools: Record<string, any> = {
+      searchApi: async (input: any) => ({ title: `Result for ${input.q}` }),
+    };
+
+    const instructions = parseBridge(bridgeText);
+    // Logger is passed via gateway options — audit receives it through ToolContext
+    const gateway = createGateway(typeDefs, instructions, { tools, logger });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ search(q: "bridge") { title } }`),
+    });
+
+    assert.equal(result.data.search.title, "Result for bridge");
+    // The engine logger.info is called by the audit tool (structured: data first)
+    const auditEntry = logged.find((l) => l[1] === "[bridge:audit]");
+    assert.ok(auditEntry, "audit logged via engine logger");
+    const payload = auditEntry[0];
+    assert.equal(payload.action, "search");
+    assert.equal(payload.query, "bridge");
+    assert.equal(payload.resultTitle, "Result for bridge");
+  });
+
+  test("fire-and-forget audit failure does not break response", async () => {
+    const failAudit = () => { throw new Error("audit down"); };
+
+    const bridgeText = `version 1.4
+bridge Query.search {
+  with searchApi as api
+  with std.audit as audit
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  audit.query <- i.q
+  force audit ?? null
+  o.title <- api.title
+
+}`;
+
+    const tools: Record<string, any> = {
+      searchApi: async (input: any) => ({ title: "OK" }),
+      std: { ...builtinTools.std, audit: failAudit },
+      math: builtinTools.math,
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, { tools });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ search(q: "test") { title } }`),
+    });
+
+    // Fire-and-forget: main response succeeds despite audit failure
+    assert.equal(result.data.search.title, "OK");
+  });
+
+  test("critical audit failure propagates error", async () => {
+    const failAudit = () => { throw new Error("audit down"); };
+
+    const bridgeText = `version 1.4
+bridge Query.search {
+  with searchApi as api
+  with std.audit as audit
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  audit.query <- i.q
+  force audit
+  o.title <- api.title
+
+}`;
+
+    const tools: Record<string, any> = {
+      searchApi: async (input: any) => ({ title: "OK" }),
+      std: { ...builtinTools.std, audit: failAudit },
+      math: builtinTools.math,
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, { tools });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ search(q: "test") { title } }`),
+    });
+
+    // Critical force: error propagates into GraphQL errors
+    assert.ok(result.errors, "should have errors");
+    assert.ok(result.errors.length > 0, "should have at least one error");
   });
 });

@@ -55,11 +55,14 @@ const myNull = null`);
   compat("const with array value", `version 1.4
 const myArr = ["a", "b", "c"]`);
 
-  compat("force wire", `version 1.4
+  compat("force statement", `version 1.4
 bridge Query.test {
+  with myTool as t
   with input
   with output as o
-  o.x <-! input.y
+  t.x <- input.y
+  force t
+  o.z <- t.result
 }`);
 
   compat("pipe chain", `version 1.4

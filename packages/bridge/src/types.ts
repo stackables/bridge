@@ -31,7 +31,7 @@ export type NodeRef = {
  * back to pipe notation.
  */
 export type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
+  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef }
   | { cond: NodeRef; thenRef?: NodeRef; thenValue?: string; elseRef?: NodeRef; elseValue?: string; to: NodeRef; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef };
 
@@ -53,6 +53,19 @@ export type Bridge = {
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
+  /** Handles to eagerly evaluate (e.g. side-effect tools).
+   *  Critical by default — a forced handle that throws aborts the bridge.
+   *  Add `catchError: true` (written as `force <handle> ?? null`) to
+   *  swallow the error for fire-and-forget side-effects. */
+  forces?: Array<{
+    handle: string;
+    module: string;
+    type: string;
+    field: string;
+    instance?: number;
+    /** When true, errors from this forced handle are silently caught (`?? null`). */
+    catchError?: true;
+  }>;
   arrayIterators?: Record<string, string>;
   pipeHandles?: Array<{
     key: string;
@@ -131,10 +144,27 @@ export type ToolWire =
   | { kind: "onError"; source: string };
 
 /**
+ * Context passed to every tool function as the second argument.
+ *
+ * Provides access to engine services (logger, etc.) without polluting the
+ * input object.  Tools that don't need it simply ignore the second arg.
+ */
+export type ToolContext = {
+  /** Structured logger — same instance configured via `BridgeOptions.logger`.
+   *  Defaults to silent no-ops when no logger is configured. */
+  logger: {
+    debug?: (...args: any[]) => void;
+    info?: (...args: any[]) => void;
+    warn?: (...args: any[]) => void;
+    error?: (...args: any[]) => void;
+  };
+};
+
+/**
  * Tool call function — the signature for registered tool functions.
  *
- * Receives a fully-built nested input object and returns the response.
- * The engine builds the input from tool wires + bridge wires.
+ * Receives a fully-built nested input object and an optional `ToolContext`
+ * providing access to the engine's logger and other services.
  *
  * Example (httpCall):
  *   input = { baseUrl: "https://...", method: "GET", path: "/geocode",
@@ -142,6 +172,7 @@ export type ToolWire =
  */
 export type ToolCallFn = (
   input: Record<string, any>,
+  context?: ToolContext,
 ) => Promise<Record<string, any>>;
 
 /**

@@ -1,10 +1,4 @@
 export {
-  parseBridgeChevrotain,
-  parseBridgeChevrotain as parseBridge,
-  parseBridgeDiagnostics,
-} from "./parser/index.ts";
-export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
-export {
   bridgeTransform,
   getBridgeTraces,
   useBridgeTracing,
@@ -15,24 +9,7 @@ export type {
   ExecuteBridgeOptions,
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
-export {
-  builtinTools,
-  builtinToolNames,
-  std,
-  math,
-  createHttpCall,
-} from "./tools/index.ts";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
-export type {
-  CacheStore,
-  ConstDef,
-  HandleBinding,
-  Instruction,
-  ToolCallFn,
-  ToolDef,
-  ToolDep,
-  ToolMap,
-} from "./types.ts";
 export { BridgeLanguageService } from "./language-service.ts";
 export type {
   BridgeCompletion,
@@ -41,3 +18,27 @@ export type {
   Position,
   Range,
 } from "./language-service.ts";
+export {
+  parseBridgeChevrotain as parseBridge,
+  parseBridgeChevrotain,
+  parseBridgeDiagnostics,
+} from "./parser/index.ts";
+export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
+export {
+  builtinToolNames,
+  builtinTools,
+  createHttpCall,
+  math,
+  std,
+} from "./tools/index.ts";
+export type {
+  CacheStore,
+  ConstDef,
+  HandleBinding,
+  Instruction,
+  ToolCallFn,
+  ToolContext,
+  ToolDef,
+  ToolDep,
+  ToolMap,
+} from "./types.ts";

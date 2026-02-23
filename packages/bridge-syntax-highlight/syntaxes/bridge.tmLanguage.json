@@ -7,6 +7,7 @@
     { "include": "#version-line" },
     { "include": "#block-headers" },
     { "include": "#block-braces" },
+    { "include": "#force-lines" },
     { "include": "#wire-lines" },
     { "include": "#const-lines" },
     { "include": "#reserved-handles" },
@@ -144,9 +145,20 @@
       ]
     },
 
+    "force-lines": {
+      "comment": "Force statement: force <handle> [?? null]",
+      "match": "^\\s*(force)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s*(\\?\\?)\\s*(null))?",
+      "captures": {
+        "1": { "name": "keyword.control.bridge" },
+        "2": { "name": "variable.other.handle.bridge" },
+        "3": { "name": "keyword.operator.error-fallback.bridge" },
+        "4": { "name": "constant.language.null.bridge" }
+      }
+    },
+
     "wire-lines": {
       "comment": "Wire line: target <- source [|| …] [?? …]  — target may be dot-prefixed (.field) inside array-map blocks",
-      "begin": "^(\\s*)(\\.?[A-Za-z_][A-Za-z0-9_.]*)\\s*(<-!|<-)",
+      "begin": "^(\\s*)(\\.?[A-Za-z_][A-Za-z0-9_.]*)\\s*(<-)",
       "end": "$",
       "beginCaptures": {
         "2": { "name": "variable.other.target.bridge" },

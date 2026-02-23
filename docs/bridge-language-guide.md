@@ -28,7 +28,7 @@ keeps your API bill sane.
 12. [Inline Expressions](#12-inline-expressions)
 13. [Conditional Wire (`? :`)](#13-conditional-wire--)
 14. [Tool Inheritance](#14-tool-inheritance)
-15. [Force Wires (`<-!`)](#15-force-wires--)
+15. [Force Statement (`force <handle>`)](#15-force-statement-force-handle)
 16. [Built-in Tools](#16-built-in-tools)
 
 ---
@@ -699,17 +699,29 @@ When a child extends a parent:
 
 ---
 
-## 15. Force Wires (`<-!`)
+## 15. Force Statement (`force <handle>`)
 
-Force wires trigger tool execution eagerly, even if the output field is never
-requested by the GraphQL query:
+The `force` statement eagerly schedules a tool for execution, even if no output
+field demands its data. Use it for side effects — audit logging, analytics,
+cache warming.
+
+A bare `force` is **critical**: if the forced tool throws, the error propagates
+into the response just like a regular tool failure.
 
 ```bridge
-o.auditId <-! auditLog.id
-```
+bridge Query.search {
+  with searchApi as s
+  with audit.log as audit
+  with input as i
+  with output as o
 
-Use for side effects (logging, analytics, cache warming). The tool is scheduled
-immediately when the bridge starts, not when the field is demanded.
+  s.q <- i.q
+  audit.action <- i.q
+  force audit            # critical — error breaks the response
+  force audit ?? null.   # fire-and-forget — errors are silently swallowed
+  o.title <- s.title
+}
+```
 
 ---
 
@@ -719,6 +731,7 @@ immediately when the bridge starts, not when the field is demanded.
 
 | Tool | Description |
 |---|---|
+| `audit` | Log all inputs via the configured logger |
 | `upperCase` | Convert string to UPPER CASE |
 | `lowerCase` | Convert string to lower case |
 | `pickFirst` | Take the first element of an array |
@@ -732,6 +745,30 @@ transforms:
 o.name <- upperCase:api.name
 o.first <- pickFirst:api.results
 ```
+
+### `std.audit` — Side-effect logging tool
+
+The `audit` tool logs every input it receives through the configured logger. Wire any number of inputs to it and force the handle:
+
+```bridge
+bridge Mutation.createOrder {
+  with std.audit as audit
+  with orderApi as api
+  with input as i
+  with output as o
+
+  api.product <- i.product
+  audit.action = "createOrder"
+  audit.userId <- i.userId
+  audit.orderId <- api.id
+  force audit
+
+  o.id <- api.id
+}
+```
+
+The tool returns its input as a passthrough, so output wires *can* read from
+it (e.g. `o.auditId <- audit.id`)
 
 ### `math` namespace — Math and comparison tools
 

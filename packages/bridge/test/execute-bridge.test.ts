@@ -11,7 +11,9 @@ function run(
   input: Record<string, unknown>,
   tools: Record<string, any> = {},
 ) {
-  const instructions = parseBridge(bridgeText);
+  const raw = parseBridge(bridgeText);
+  // instructions must survive serioalisation
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<typeof parseBridge>;
   return executeBridge({ instructions, operation, input, tools });
 }
 

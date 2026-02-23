@@ -130,18 +130,32 @@ export function bridgeTransform(
             source.push(args);
           }
 
-          // Kick off forced wires (<-!) at the root entry point
+          // Kick off forced handles (force <handle>) at the root entry point
           if (source instanceof ExecutionTree && !info.path.prev) {
             // Ensure input state exists even with no args (prevents
             // recursive scheduling of the input trunk → stack overflow).
             if (!args || Object.keys(args).length === 0) {
               source.push({});
             }
-            source.executeForced();
+            const criticalForces = source.executeForced();
+            if (criticalForces.length > 0) {
+              source.setForcedExecution(
+                Promise.all(criticalForces).then(() => {}),
+              );
+            }
           }
 
           if (source instanceof ExecutionTree) {
-            return source.response(info.path, array);
+            const result = source.response(info.path, array);
+            // At the leaf level (not root), race data pull with critical
+            // force promises so errors propagate into GraphQL `errors[]`
+            // while still allowing parallel execution.
+            if (info.path.prev && source.getForcedExecution()) {
+              return Promise.all([result, source.getForcedExecution()]).then(
+                ([data]) => data,
+              );
+            }
+            return result;
           }
 
           return resolve(source, args, context, info);

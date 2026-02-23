@@ -7,7 +7,7 @@
 > * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
 > * Versioning: We follow strict SemVer starting from v2.0.0.
 > 
-> [See our roadmap](./docs/roadmap.md) \
+> [See our roadmap](./docs/roadmap/) \
 > [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
@@ -138,11 +138,10 @@ bridge Mutation.sendEmail {
   sg.content[0].type = "text/plain"
   sg.content[0].value <- i.textBody
 
-  # Force execution (<-!) to ensure the side-effect happens, 
-  # even if the client doesn't query the messageId field.
-  o.messageId <-! sg.headers.x-message-id
+  o.messageId <- sg.headers.x-message-id
   
-  # If the forced wire above succeeds without throwing, we can safely return true.
+  # Ensure the send operation actually happens (as nothing puls this by default)
+  force sg
   o.success = true
 }
 
@@ -271,7 +270,6 @@ bridge <Type.field> {
   # Field Mapping
   o.<field> = <json>                    # Constant output value
   o.<field> <- <source>                 # Standard Pull (lazy)
-  o.<field> <-! <source>               # Forced Push (eager/side-effect)
 
   # Pipe chain (tool transformation)
   o.<field> <- handle:source            # Route source through tool handle
@@ -285,6 +283,8 @@ bridge <Type.field> {
     .<sub_field> <- <iter>.<sub_src>    # Element field via iterator
     .<sub_field> = "constant"           # Element constant
   }
+
+  force <handle>                        # Forced execution
 }
 
 ```
@@ -405,18 +405,23 @@ o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorSt
 
 Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
 
-### Forced Wires (`<-!`)
+### Force Statement (`force <handle>`)
 
-By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
+By default, the engine is **lazy**. Use `force <handle>` to eagerly schedule a tool regardless of demand—perfect for side-effects like analytics, audit logging, or payment capture.
+
+**Critical by default:** If the forced tool throws, the error propagates into the GraphQL response. Use `force <handle> ?? null` to make it fire-and-forget (errors are silently swallowed).
 
 ```bridge
 bridge Mutation.updateUser {
   with audit.logger as log
+  with analytics as stats
   with input as in
   with output as out
 
   # 'log' runs even if the client doesn't query the 'status' field
-  out.status <-! log:in.changeData
+  out.status <- log:in.changeData
+  force log              # critical — error breaks the response
+  force stats ?? null    # fire-and-forget — OK if analytics fails
 }
 
 ```
@@ -520,9 +525,9 @@ o <- api.items[] as item {
 | --- | --- | --- |
 | **`=`** | Constant | Sets a static value. |
 | **`<-`** | Wire | Pulls data from a source at runtime. |
-| **`<-!`** | Force | Eagerly schedules a tool (for side-effects). |
+| **`force`** | Force | Eagerly schedules a handle. **Critical by default** — errors propagate. Append `?? null` for fire-and-forget. |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
-| **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
+| **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
 | **`? :`** | Conditional | Evaluates condition; pulls only the chosen branch (`then` or `else`). Branches are source refs or literals. |
 | **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
@@ -538,6 +543,7 @@ The Bridge ships with built-in tools under the `std` namespace, always available
 
 | Tool | Input | Output | Description |
 | --- | --- | --- | --- |
+| `audit` | `{ ...any, level?: string }` | passthrough (same object) | Logs all inputs via the engine logger (`BridgeOptions.logger`). Level defaults to `info`; override with `audit.level = "warn"`. |
 | `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
 | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
 | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |

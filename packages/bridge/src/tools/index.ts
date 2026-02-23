@@ -1,3 +1,4 @@
+import { audit } from "./audit.ts";
 import { createHttpCall } from "./http-call.ts";
 import { upperCase } from "./upper-case.ts";
 import { lowerCase } from "./lower-case.ts";
@@ -23,6 +24,7 @@ import { lte } from "./lte.ts";
 const httpCallFn = createHttpCall();
 
 export const std = {
+  audit,
   httpCall: httpCallFn,
   upperCase,
   lowerCase,
@@ -68,6 +70,8 @@ export const builtinTools = {
   std,
   math,
 } as const;
+
+export { audit } from "./audit.ts";
 
 /**
  * All known built-in tool names as "namespace.tool" strings.

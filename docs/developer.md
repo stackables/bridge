@@ -52,7 +52,8 @@ The lexer tokenizes `.bridge` source text using [Chevrotain](https://chevrotain.
 
 - Keywords (`tool`, `bridge`, `with`, `on`, …) are defined with `longer_alt: Identifier` so they don't conflict with user-defined names that start with the same characters
 - Whitespace, newlines, and `#` comments are put on `Lexer.SKIPPED` — the parser never sees them
-- Operator tokens (`<-!`, `<-`, `||`, `??`) are ordered from longest to shortest so Chevrotain matches the right one
+- Operator tokens (`<-`, `||`, `??`) are ordered from longest to shortest so Chevrotain matches the right one
+- The `force` keyword is defined with `longer_alt: Identifier` like other keywords
 
 ```typescript
 // Adding a new keyword — always set longer_alt to avoid stealing identifiers:
@@ -99,10 +100,28 @@ type NodeRef = {
 };
 ```
 
+**`ToolContext`** — communication channel from engine to every tool function:
+```typescript
+type ToolContext = {
+  logger: {
+    debug?: (...args: any[]) => void;
+    info?: (...args: any[]) => void;
+    warn?: (...args: any[]) => void;
+    error?: (...args: any[]) => void;
+  };
+};
+```
+Constructed by `callTool()` from `BridgeOptions.logger` and passed as the second argument to every tool function. Tools that need logging (like `std.audit`) read `context.logger.info` instead of requiring factory injection.
+
+**`ToolCallFn`** — the function signature for all tools:
+```typescript
+type ToolCallFn = (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>;
+```
+
 **`Wire`** — a directed data connection:
 ```typescript
 type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
+  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef };  // constant wire: value
 ```
 
@@ -114,6 +133,14 @@ type Bridge = {
   field: string;         // GraphQL field name
   handles: HandleBinding[];  // declared sources (tools, input, output, context)
   wires: Wire[];
+  forces?: Array<{       // force statements — eagerly scheduled tools
+    handle: string;
+    module: string;
+    type: string;
+    field: string;
+    instance?: number;
+    catchError?: true;   // true = fire-and-forget (force handle ?? null)
+  }>;
   arrayIterators?: Record<string, string>;  // for array mapping blocks
   pipeHandles?: Array<{ key: string; handle: string; baseTrunk: … }>;
   passthrough?: string;  // set when using shorthand: bridge Type.field with tool
@@ -167,7 +194,7 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 1. Calls `buildHandleMap` to map canonical trunk keys back to human-readable handle names
 2. Serializes each `Bridge` block with its `with` declarations and wire body
-3. Converts `Wire` entries back to `<-`, `<-!`, `=` syntax
+3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements (`force handle` for critical, `force handle ?? null` for fire-and-forget)
 4. Handles pipe notation, array mapping blocks, fallback chains
 
 ---
@@ -190,11 +217,17 @@ Child fields receive the parent `ExecutionTree` as their `source` and call `sour
 1. Create `src/tools/my-tool.ts`:
 
 ```typescript
-export function myTool(input: Record<string, any>): Promise<Record<string, any>> {
+import type { ToolContext } from "../types.ts";
+
+export function myTool(input: Record<string, any>, context?: ToolContext): Promise<Record<string, any>> {
   const { thing } = input;
+  // Tools can access the engine logger via context:
+  // context?.logger?.info?.("myTool called", input);
   return Promise.resolve({ result: String(thing).toUpperCase() });
 }
 ```
+
+Every tool receives `(input, context?)`. The `context.logger` is the engine’s logger from `BridgeOptions.logger`. If you don’t need logging, ignore the second argument.
 
 2. Export from `src/tools/index.ts` and add to the `std` object:
 
