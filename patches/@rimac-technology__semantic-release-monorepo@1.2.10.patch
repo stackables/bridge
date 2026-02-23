@@ -1,0 +1,113 @@
+diff --git a/dist/cli.js b/dist/cli.js
+index 3cb856b13e445263e0812e9e825aadefcdf3f14a..1efe9b956e06dcbd28b34f14f6d700b77cf7625d 100755
+--- a/dist/cli.js
++++ b/dist/cli.js
+@@ -110,8 +110,9 @@ var package_default = {
+ 
+ // src/utils.ts
+ import { execSync } from "node:child_process";
++import { existsSync, readFileSync } from "node:fs";
+ import { EOL } from "node:os";
+-import { dirname, extname, normalize, sep } from "node:path";
++import { dirname, extname, join, normalize, relative, sep } from "node:path";
+ import { cwd } from "node:process";
+ import memize from "memize";
+ var memoizedIsPathWithin = memize((path, childPath) => {
+@@ -135,25 +136,80 @@ function modifyContextReleaseVersion(context) {
+     }
+   };
+ }
++function getPnpmWorkspaceManifest() {
++  const workingDirectory = cwd();
++  // Walk up to find the workspace root (where pnpm-workspace.yaml lives)
++  let rootDir = workingDirectory;
++  while (rootDir !== dirname(rootDir)) {
++    if (existsSync(join(rootDir, "pnpm-workspace.yaml"))) break;
++    rootDir = dirname(rootDir);
++  }
++  if (!existsSync(join(rootDir, "pnpm-workspace.yaml"))) return null;
++
++  // Use pnpm ls to get all workspace packages
++  const pnpmOutput = JSON.parse(
++    execSync("pnpm ls -r --json --depth=-1", { cwd: rootDir }).toString()
++  );
++
++  // pnpm ls -r --json returns an array of workspace packages
++  // Each entry has: name, version, path, dependencies, devDependencies, etc.
++  const currentPkg = pnpmOutput.find((pkg) => {
++    return normalize(pkg.path) === normalize(workingDirectory);
++  });
++
++  if (!currentPkg) return null;
++
++  // Compute a relative location from the workspace root (matching git paths)
++  const location = relative(rootDir, currentPkg.path);
++
++  // Read the current package's package.json for dependency info
++  let pkgJson = {};
++  try {
++    pkgJson = JSON.parse(readFileSync(join(workingDirectory, "package.json"), "utf-8"));
++  } catch {}
++  const allDeps = {
++    ...(pkgJson.dependencies ?? {}),
++    ...(pkgJson.devDependencies ?? {}),
++    ...(pkgJson.peerDependencies ?? {}),
++  };
++
++  const dependantWorkspaces = pnpmOutput
++    .filter((pkg) => normalize(pkg.path) !== normalize(workingDirectory) && pkg.name in allDeps)
++    .map((pkg) => ({ location: relative(rootDir, pkg.path) }));
++
++  return { location, dependantWorkspaces };
++}
++
++function getNpmWorkspaceManifest() {
++  const workspaces = JSON.parse(execSync("npm query .workspace").toString());
++  const workingDirectory = cwd();
++  const currentWorkspace = workspaces.find((workspace) => {
++    return workspace.path.startsWith(workingDirectory);
++  });
++  if (!currentWorkspace) {
++    return null;
++  }
++  const currentWorkspaceDependencies = workspaces.filter((workspace) => {
++    return workspace.name in (currentWorkspace.dependencies ?? {}) || workspace.name in (currentWorkspace.devDependencies ?? {}) || workspace.name in (currentWorkspace.peerDependencies ?? {});
++  });
++  return {
++    location: currentWorkspace.location,
++    dependantWorkspaces: currentWorkspaceDependencies.map((currentWorkspaceDependency) => {
++      return { location: currentWorkspaceDependency.location };
++    })
++  };
++}
++
+ var memoizedGetWorkspaceManifest = memize(() => {
++  // Try pnpm first (check for pnpm-workspace.yaml)
+   try {
+-    const workspaces = JSON.parse(execSync("npm query .workspace").toString());
+-    const workingDirectory = cwd();
+-    const currentWorkspace = workspaces.find((workspace) => {
+-      return workspace.path.startsWith(workingDirectory);
+-    });
+-    if (!currentWorkspace) {
+-      return null;
+-    }
+-    const currentWorkspaceDependencies = workspaces.filter((workspace) => {
+-      return workspace.name in (currentWorkspace.dependencies ?? {}) || workspace.name in (currentWorkspace.devDependencies ?? {}) || workspace.name in (currentWorkspace.peerDependencies ?? {});
+-    });
+-    return {
+-      location: currentWorkspace.location,
+-      dependantWorkspaces: currentWorkspaceDependencies.map((currentWorkspaceDependency) => {
+-        return { location: currentWorkspaceDependency.location };
+-      })
+-    };
++    const result = getPnpmWorkspaceManifest();
++    if (result) return result;
++  } catch {}
++
++  // Fall back to npm
++  try {
++    return getNpmWorkspaceManifest();
+   } catch {
+     return null;
+   }

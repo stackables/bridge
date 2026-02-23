@@ -7,13 +7,18 @@ settings:
 overrides:
   minimatch@<10.2.1: '>=10.2.1'
 
+patchedDependencies:
+  '@rimac-technology/semantic-release-monorepo@1.2.10':
+    hash: d40eb9bf3b00c10cb8ba52703de6826af2e06b7b47b74b8b68e95e343e64a08f
+    path: patches/@rimac-technology__semantic-release-monorepo@1.2.10.patch
+
 importers:
 
   .:
     devDependencies:
       '@rimac-technology/semantic-release-monorepo':
         specifier: ^1.2.10
-        version: 1.2.10(semantic-release@25.0.3(typescript@5.9.3))(typescript@5.9.3)
+        version: 1.2.10(patch_hash=d40eb9bf3b00c10cb8ba52703de6826af2e06b7b47b74b8b68e95e343e64a08f)(semantic-release@25.0.3(typescript@5.9.3))(typescript@5.9.3)
 
   examples/builtin-tools:
     dependencies:
@@ -4280,7 +4285,7 @@ snapshots:
 
   '@repeaterjs/repeater@3.0.6': {}
 
-  '@rimac-technology/semantic-release-monorepo@1.2.10(semantic-release@25.0.3(typescript@5.9.3))(typescript@5.9.3)':
+  '@rimac-technology/semantic-release-monorepo@1.2.10(patch_hash=d40eb9bf3b00c10cb8ba52703de6826af2e06b7b47b74b8b68e95e343e64a08f)(semantic-release@25.0.3(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       cosmiconfig: 9.0.0(typescript@5.9.3)
       memize: 2.1.1
