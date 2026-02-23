@@ -19,7 +19,6 @@ import { lte } from "./lte.js";
  * Standard built-in tools — available under the `std` namespace.
  *
  * Referenced in `.bridge` files as `std.upperCase`, `std.pickFirst`, etc.
- * Math and comparison tools are used by the parser to desugar infix expressions.
  */
 const httpCallFn = createHttpCall();
 
@@ -30,6 +29,15 @@ export const std = {
   findObject,
   pickFirst,
   toArray,
+} as const;
+
+/**
+ * Math and comparison tools — available under the `math` namespace.
+ *
+ * Used by the parser to desugar infix expressions (e.g. `o.total <- i.price * i.qty`).
+ * Can also be used explicitly as pipe transforms.
+ */
+export const math = {
   multiply,
   divide,
   add,
@@ -45,19 +53,20 @@ export const std = {
 /**
  * Built-in tools bundle.
  *
- * Used as the base for `BridgeOptions.tools`. The `std` namespace is always
- * included; user-provided tools are merged on top.
+ * Used as the base for `BridgeOptions.tools`. The `std` and `math` namespaces
+ * are always included; user-provided tools are merged on top.
  *
  * ```ts
  * import { builtinTools } from "@stackables/bridge";
  *
  * bridgeTransform(schema, instructions, {
- *   tools: { myCustomTool }  // std + httpCall are still available
+ *   tools: { myCustomTool }  // std + math + httpCall are still available
  * });
  * ```
  */
 export const builtinTools = {
   std,
+  math,
 } as const;
 
 export { createHttpCall } from "./http-call.js";

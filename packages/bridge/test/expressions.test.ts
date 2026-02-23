@@ -35,33 +35,33 @@ describe("math tools", () => {
   });
 });
 
-describe("comparison tools return 1/0", () => {
+describe("comparison tools return boolean", () => {
   test("eq", () => {
-    assert.equal(eq({ a: 1, b: 1 }), 1);
-    assert.equal(eq({ a: 1, b: 2 }), 0);
-    assert.equal(eq({ a: "x", b: "x" }), 1);
-    assert.equal(eq({ a: "x", b: "y" }), 0);
+    assert.equal(eq({ a: 1, b: 1 }), true);
+    assert.equal(eq({ a: 1, b: 2 }), false);
+    assert.equal(eq({ a: "x", b: "x" }), true);
+    assert.equal(eq({ a: "x", b: "y" }), false);
   });
   test("neq", () => {
-    assert.equal(neq({ a: 1, b: 2 }), 1);
-    assert.equal(neq({ a: 1, b: 1 }), 0);
+    assert.equal(neq({ a: 1, b: 2 }), true);
+    assert.equal(neq({ a: 1, b: 1 }), false);
   });
   test("gt", () => {
-    assert.equal(gt({ a: 5, b: 3 }), 1);
-    assert.equal(gt({ a: 3, b: 5 }), 0);
-    assert.equal(gt({ a: 3, b: 3 }), 0);
+    assert.equal(gt({ a: 5, b: 3 }), true);
+    assert.equal(gt({ a: 3, b: 5 }), false);
+    assert.equal(gt({ a: 3, b: 3 }), false);
   });
   test("gte", () => {
-    assert.equal(gte({ a: 3, b: 3 }), 1);
-    assert.equal(gte({ a: 2, b: 3 }), 0);
+    assert.equal(gte({ a: 3, b: 3 }), true);
+    assert.equal(gte({ a: 2, b: 3 }), false);
   });
   test("lt", () => {
-    assert.equal(lt({ a: 2, b: 3 }), 1);
-    assert.equal(lt({ a: 3, b: 2 }), 0);
+    assert.equal(lt({ a: 2, b: 3 }), true);
+    assert.equal(lt({ a: 3, b: 2 }), false);
   });
   test("lte", () => {
-    assert.equal(lte({ a: 3, b: 3 }), 1);
-    assert.equal(lte({ a: 4, b: 3 }), 0);
+    assert.equal(lte({ a: 3, b: 3 }), true);
+    assert.equal(lte({ a: 4, b: 3 }), false);
   });
 });
 
@@ -249,9 +249,9 @@ const mathTypeDefs = /* GraphQL */ `
     dollars: Float
   }
   type CheckResult {
-    eligible: Int
-    isActive: Int
-    over18: Int
+    eligible: Boolean
+    isActive: Boolean
+    over18: Boolean
   }
   type CalcResult {
     total: Float
@@ -312,7 +312,7 @@ bridge Query.calc {
     assert.equal(result.data.calc.total, 59.97);
   });
 
-  test("comparison >= returns 1/0", async () => {
+  test("comparison >= returns true/false", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -326,15 +326,15 @@ bridge Query.check {
     const r18: any = await executor({
       document: parse(`{ check(age: 18) { eligible } }`),
     });
-    assert.equal(r18.data.check.eligible, 1);
+    assert.equal(r18.data.check.eligible, true);
 
     const r17: any = await executor({
       document: parse(`{ check(age: 17) { eligible } }`),
     });
-    assert.equal(r17.data.check.eligible, 0);
+    assert.equal(r17.data.check.eligible, false);
   });
 
-  test("comparison > returns 1/0", async () => {
+  test("comparison > returns true/false", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -348,15 +348,15 @@ bridge Query.check {
     const r18: any = await executor({
       document: parse(`{ check(age: 18) { over18 } }`),
     });
-    assert.equal(r18.data.check.over18, 0);
+    assert.equal(r18.data.check.over18, false);
 
     const r19: any = await executor({
       document: parse(`{ check(age: 19) { over18 } }`),
     });
-    assert.equal(r19.data.check.over18, 1);
+    assert.equal(r19.data.check.over18, true);
   });
 
-  test("comparison == with string returns 1/0", async () => {
+  test("comparison == with string returns true/false", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.check {
   with input as i
@@ -370,12 +370,12 @@ bridge Query.check {
     const rActive: any = await executor({
       document: parse(`{ check(age: 1, status: "active") { isActive } }`),
     });
-    assert.equal(rActive.data.check.isActive, 1);
+    assert.equal(rActive.data.check.isActive, true);
 
     const rInactive: any = await executor({
       document: parse(`{ check(age: 1, status: "inactive") { isActive } }`),
     });
-    assert.equal(rInactive.data.check.isActive, 0);
+    assert.equal(rInactive.data.check.isActive, false);
   });
 
   test("expression with tool source", async () => {
@@ -521,22 +521,22 @@ bridge Query.check {
 }`);
     const precTypeDefs = /* GraphQL */ `
       type Query { check(base: Float!, tax: Float!): CheckResult }
-      type CheckResult { eligible: Int }
+      type CheckResult { eligible: Boolean }
     `;
     const gateway = createGateway(precTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    // 100 + (10 * 2) = 120 > 100 → 1
+    // 100 + (10 * 2) = 120 > 100 → true
     const r1: any = await executor({
       document: parse(`{ check(base: 100, tax: 10) { eligible } }`),
     });
-    assert.equal(r1.data.check.eligible, 1);
+    assert.equal(r1.data.check.eligible, true);
 
-    // 50 + (10 * 2) = 70 > 100 → 0
+    // 50 + (10 * 2) = 70 > 100 → false
     const r2: any = await executor({
       document: parse(`{ check(base: 50, tax: 10) { eligible } }`),
     });
-    assert.equal(r2.data.check.eligible, 0);
+    assert.equal(r2.data.check.eligible, false);
   });
 
   test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
@@ -632,8 +632,8 @@ describe("expressions: non-number handling", () => {
     assert.ok(Number.isNaN(multiply({ a: "hello" as any, b: 100 })));
   });
 
-  test("comparison with NaN returns 0", () => {
-    assert.equal(gt({ a: NaN, b: 5 }), 0);
-    assert.equal(eq({ a: NaN, b: NaN }), 0);
+  test("comparison with NaN returns false", () => {
+    assert.equal(gt({ a: NaN, b: 5 }), false);
+    assert.equal(eq({ a: NaN, b: NaN }), false);
   });
 });

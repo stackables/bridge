@@ -138,28 +138,32 @@ describe("toArray tool", () => {
 // ── builtinTools bundle ─────────────────────────────────────────────────────
 
 describe("builtinTools bundle", () => {
-  test("has one top-level key: std", () => {
-    assert.deepEqual(Object.keys(builtinTools), ["std"]);
+  test("has two top-level keys: std and math", () => {
+    assert.deepEqual(Object.keys(builtinTools).sort(), ["math", "std"]);
   });
 
-  test("std namespace contains all built-in tools", () => {
+  test("std namespace contains transform tools", () => {
     assert.ok(builtinTools.std.httpCall, "httpCall present");
     assert.ok(builtinTools.std.upperCase, "upperCase present");
     assert.ok(builtinTools.std.lowerCase, "lowerCase present");
     assert.ok(builtinTools.std.findObject, "findObject present");
     assert.ok(builtinTools.std.pickFirst, "pickFirst present");
     assert.ok(builtinTools.std.toArray, "toArray present");
-    assert.ok(builtinTools.std.multiply, "multiply present");
-    assert.ok(builtinTools.std.divide, "divide present");
-    assert.ok(builtinTools.std.add, "add present");
-    assert.ok(builtinTools.std.subtract, "subtract present");
-    assert.ok(builtinTools.std.eq, "eq present");
-    assert.ok(builtinTools.std.neq, "neq present");
-    assert.ok(builtinTools.std.gt, "gt present");
-    assert.ok(builtinTools.std.gte, "gte present");
-    assert.ok(builtinTools.std.lt, "lt present");
-    assert.ok(builtinTools.std.lte, "lte present");
-    assert.equal(Object.keys(builtinTools.std).length, 16);
+    assert.equal(Object.keys(builtinTools.std).length, 6);
+  });
+
+  test("math namespace contains math/comparison tools", () => {
+    assert.ok(builtinTools.math.multiply, "multiply present");
+    assert.ok(builtinTools.math.divide, "divide present");
+    assert.ok(builtinTools.math.add, "add present");
+    assert.ok(builtinTools.math.subtract, "subtract present");
+    assert.ok(builtinTools.math.eq, "eq present");
+    assert.ok(builtinTools.math.neq, "neq present");
+    assert.ok(builtinTools.math.gt, "gt present");
+    assert.ok(builtinTools.math.gte, "gte present");
+    assert.ok(builtinTools.math.lt, "lt present");
+    assert.ok(builtinTools.math.lte, "lte present");
+    assert.equal(Object.keys(builtinTools.math).length, 10);
   });
 
   test("httpCall is callable with and without std. prefix", () => {

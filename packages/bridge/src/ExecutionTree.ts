@@ -219,7 +219,10 @@ export class ExecutionTree {
     if (typeof fn === "function") return fn;
     // Fall back to std namespace (builtins are callable without std. prefix)
     const stdFn = (this.toolFns as any)?.std?.[name];
-    return typeof stdFn === "function" ? stdFn : undefined;
+    if (typeof stdFn === "function") return stdFn;
+    // Fall back to math namespace (math/comparison tools)
+    const mathFn = (this.toolFns as any)?.math?.[name];
+    return typeof mathFn === "function" ? mathFn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */

@@ -1,4 +1,4 @@
-/** Strict equality. Returns `1` if `a === b`, `0` otherwise. */
-export function eq(opts: { a: any; b: any }): number {
-  return opts.a === opts.b ? 1 : 0;
+/** Strict equality. Returns `true` if `a === b`, `false` otherwise. */
+export function eq(opts: { a: any; b: any }): boolean {
+  return opts.a === opts.b;
 }
