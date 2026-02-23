@@ -11,5 +11,8 @@
   },
   "devDependencies": {
     "@rimac-technology/semantic-release-monorepo": "^1.2.10"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }
