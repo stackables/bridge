@@ -2788,7 +2788,6 @@ function buildBridgeBody(
     scopeLines: CstNode[],
     targetRoot: string,
     pathPrefix: string[],
-    _parentLineNum: number,
   ): void {
     for (const scopeLine of scopeLines) {
       const sc = scopeLine.children;
@@ -2800,7 +2799,7 @@ function buildBridgeBody(
       // ── Nested scope: .field { ... } ──
       const nestedScopeLines = subs(scopeLine, "pathScopeLine");
       if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
-        processScopeLines(nestedScopeLines, targetRoot, fullSegs, scopeLineNum);
+        processScopeLines(nestedScopeLines, targetRoot, fullSegs);
         continue;
       }
 
@@ -3028,7 +3027,7 @@ function buildBridgeBody(
     // ── Path scoping block: target { .field ... } ──
     if (wc.scopeBlock) {
       const scopeLines = subs(wireNode, "pathScopeLine");
-      processScopeLines(scopeLines, targetRoot, targetSegs, lineNum);
+      processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;
     }
 
