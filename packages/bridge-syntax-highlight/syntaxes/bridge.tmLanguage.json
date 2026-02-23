@@ -135,6 +135,16 @@
           }
         },
         {
+          "comment": "alias <source> as <name>  (node alias / rename)",
+          "match": "^\\s*(alias)\\s+(.+?)\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.bridge" },
+            "2": { "name": "entity.name.function.bridge" },
+            "3": { "name": "keyword.control.bridge" },
+            "4": { "name": "variable.other.handle.bridge" }
+          }
+        },
+        {
           "comment": "on error = value  /  on error <- source",
           "match": "^\\s*(on error)\\s*(<-|=)",
           "captures": {

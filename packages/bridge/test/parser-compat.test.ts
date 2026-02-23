@@ -353,4 +353,53 @@ tool authTool from std.httpCall {
   .apiKey <- c.apiKey
   .userToken <- ctx.auth.token
 }`);
+
+  compat("alias with pipe in array map", `version 1.4
+bridge Query.list {
+  with api
+  with enrich
+  with output as o
+
+  o <- api.items[] as it {
+    alias enrich:it as resp
+    .a <- resp.a
+    .b <- resp.b
+  }
+}`);
+
+  compat("alias with iterator plain ref in array map", `version 1.4
+bridge Query.list {
+  with api
+  with output as o
+
+  o <- api.items[] as it {
+    alias it.nested as n
+    .x <- n.a
+    .y <- n.b
+  }
+}`);
+
+  compat("top-level alias with pipe", `version 1.4
+bridge Query.test {
+  with std.upperCase as uc
+  with input as i
+  with output as o
+
+  alias uc:i.name as upper
+
+  o.label <- upper
+}`);
+
+  compat("top-level alias simple rename", `version 1.4
+bridge Query.test {
+  with myTool as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  alias api.result.data as d
+
+  o.name <- d.name
+  o.email <- d.email
+}`);
 });

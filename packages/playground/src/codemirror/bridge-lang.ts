@@ -127,6 +127,50 @@ function handleExpect(
       state.expect = "";
       return undefined;
 
+    // alias  SOURCE (pipe:handle.path or handle.path)
+    case "aliasSource":
+      if (stream.match(/^[A-Za-z_][\w.]*/)) {
+        state.expect = "aliasColon";
+        return "variable";
+      }
+      state.expect = "";
+      return undefined;
+
+    // alias source  : (pipe separator — optional, loop back)
+    case "aliasColon":
+      if (stream.match(/^as\b/)) {
+        state.expect = "aliasName";
+        return "keyword";
+      }
+      if (stream.eat(":")) {
+        state.expect = "aliasSource";
+        return "operator";
+      }
+      if (stream.eat(".")) {
+        state.expect = "aliasDotField";
+        return null;
+      }
+      state.expect = "";
+      return undefined;
+
+    // alias source.  FIELD
+    case "aliasDotField":
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "aliasColon";
+        return "variable";
+      }
+      state.expect = "";
+      return undefined;
+
+    // alias source as  NAME
+    case "aliasName":
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "";
+        return "def";
+      }
+      state.expect = "";
+      return undefined;
+
     // force  HANDLE
     case "forceTarget":
       if (stream.match(/^[A-Za-z_]\w*/)) {
@@ -257,6 +301,11 @@ function token(stream: StringStream, state: State): string | null {
   }
   if (stream.match(/^with\b/)) {
     state.expect = "withTarget";
+    state.lineStart = false;
+    return "keyword";
+  }
+  if (stream.match(/^alias\b/)) {
+    state.expect = "aliasSource";
     state.lineStart = false;
     return "keyword";
   }

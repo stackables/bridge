@@ -240,6 +240,199 @@ bridge Query.searchTrains {
   });
 });
 
+// ── Alias declarations (alias <source> as <name>) ──────────────────────────
+
+describe("executeBridge: alias declarations", () => {
+  test("alias pipe:iter as name — evaluates pipe once per element", async () => {
+    let enrichCallCount = 0;
+    const bridgeText = `version 1.4
+bridge Query.list {
+  with api
+  with enrich
+  with output as o
+
+  o <- api.items[] as it {
+    alias enrich:it as resp
+    .a <- resp.a
+    .b <- resp.b
+  }
+}`;
+    const tools: Record<string, any> = {
+      api: async () => ({
+        items: [
+          { id: 1, name: "x" },
+          { id: 2, name: "y" },
+        ],
+      }),
+      enrich: async (input: any) => {
+        enrichCallCount++;
+        return { a: input.in.id * 10, b: input.in.name.toUpperCase() };
+      },
+    };
+
+    const { data } = await run(bridgeText, "Query.list", {}, tools);
+    assert.deepEqual(data, [
+      { a: 10, b: "X" },
+      { a: 20, b: "Y" },
+    ]);
+    // enrich is called once per element (2 items = 2 calls), NOT twice per element
+    assert.equal(enrichCallCount, 2);
+  });
+
+  test("alias iter.subfield as name — iterator-relative plain ref", async () => {
+    const bridgeText = `version 1.4
+bridge Query.list {
+  with api
+  with output as o
+
+  o <- api.items[] as it {
+    alias it.nested as n
+    .x <- n.a
+    .y <- n.b
+  }
+}`;
+    const tools: Record<string, any> = {
+      api: async () => ({
+        items: [
+          { nested: { a: 1, b: 2 } },
+          { nested: { a: 3, b: 4 } },
+        ],
+      }),
+    };
+
+    const { data } = await run(bridgeText, "Query.list", {}, tools);
+    assert.deepEqual(data, [
+      { x: 1, y: 2 },
+      { x: 3, y: 4 },
+    ]);
+  });
+
+  test("alias tool:iter as name — tool handle ref in array", async () => {
+    const bridgeText = `version 1.4
+bridge Query.items {
+  with api
+  with std.upperCase as uc
+  with output as o
+
+  o <- api.items[] as it {
+    alias uc:it.name as upper
+    .label <- upper
+    .id <- it.id
+  }
+}`;
+    const tools: Record<string, any> = {
+      api: async () => ({
+        items: [
+          { id: 1, name: "alice" },
+          { id: 2, name: "bob" },
+        ],
+      }),
+    };
+
+    const { data } = await run(bridgeText, "Query.items", {}, tools);
+    assert.deepEqual(data, [
+      { label: "ALICE", id: 1 },
+      { label: "BOB", id: 2 },
+    ]);
+  });
+
+  test("top-level alias pipe:source as name — caches result", async () => {
+    let ucCallCount = 0;
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with myUC
+  with input as i
+  with output as o
+
+  alias myUC:i.name as upper
+
+  o.greeting <- upper
+  o.label <- upper
+  o.title <- upper
+}`;
+    const tools: Record<string, any> = {
+      myUC: (input: any) => {
+        ucCallCount++;
+        return input.in.toUpperCase();
+      },
+    };
+
+    const { data } = await run(bridgeText, "Query.test", { name: "alice" }, tools);
+    assert.deepEqual(data, { greeting: "ALICE", label: "ALICE", title: "ALICE" });
+    // pipe tool called only once despite 3 reads
+    assert.equal(ucCallCount, 1);
+  });
+
+  test("top-level alias handle.path as name — simple rename", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with myTool as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  alias api.result.data as d
+
+  o.name <- d.name
+  o.email <- d.email
+}`;
+    const tools: Record<string, any> = {
+      myTool: async () => ({
+        result: { data: { name: "Alice", email: "alice@test.com" } },
+      }),
+    };
+
+    const { data } = await run(bridgeText, "Query.test", { q: "hi" }, tools);
+    assert.deepEqual(data, { name: "Alice", email: "alice@test.com" });
+  });
+
+  test("top-level alias reused inside array — not re-evaluated per element", async () => {
+    let ucCallCount = 0;
+    const bridgeText = `version 1.4
+bridge Query.products {
+  with api
+  with myUC
+  with output as o
+  with input as i
+
+  api.cat <- i.category
+  alias myUC:i.category as upperCat
+
+  o <- api.products[] as it {
+    alias myUC:it.title as upper
+    .name <- upper
+    .price <- it.price
+    .category <- upperCat
+  }
+}`;
+    const tools: Record<string, any> = {
+      api: async () => ({
+        products: [
+          { title: "Phone", price: 999 },
+          { title: "Laptop", price: 1999 },
+        ],
+      }),
+      myUC: (input: any) => {
+        ucCallCount++;
+        return input.in.toUpperCase();
+      },
+    };
+
+    const { data } = await run(
+      bridgeText,
+      "Query.products",
+      { category: "electronics" },
+      tools,
+    );
+    assert.deepEqual(data, [
+      { name: "PHONE", price: 999, category: "ELECTRONICS" },
+      { name: "LAPTOP", price: 1999, category: "ELECTRONICS" },
+    ]);
+    // 1 call for top-level upperCat + 2 calls for per-element upper = 3 total
+    assert.equal(ucCallCount, 3);
+  });
+});
+
 // ── Constant wires ──────────────────────────────────────────────────────────
 
 describe("executeBridge: constant wires", () => {

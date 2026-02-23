@@ -478,4 +478,88 @@ bridge Mutation.submitFeedback {
     ],
     context: `{}`,
   },
+  {
+    name: "Alias (Rename & Cache)",
+    description:
+      "Use 'alias' to rename deep paths or cache pipe results — works at bridge body level and inside array mapping blocks",
+    schema: `
+type Query {
+  searchTrains(from: String!, to: String!): [Journey!]!
+}
+
+type Journey {
+  departureTime: String!
+  arrivalTime: String!
+  originStation: String!
+  destinationStation: String!
+  legs: [Leg!]!
+}
+
+type Leg {
+  trainName: String
+  fromStation: String
+  fromTime: String
+  toStation: String
+  toTime: String
+}
+    `,
+    bridge: `version 1.4
+
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  .cache = 60
+  on error = { "connections": [] }
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.connections[] as c {
+    # alias renames deeply nested paths for readability
+    alias c.from as dep
+    alias c.to as arr
+
+    .departureTime <- dep.departure
+    .arrivalTime <- arr.arrival
+    .originStation <- dep.station.name
+    .destinationStation <- arr.station.name
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+      .fromStation <- s.departure.station.name
+      .fromTime <- s.departure.departure
+      .toStation <- s.arrival.station.name
+      .toTime <- s.arrival.arrival
+    }
+  }
+}`,
+    queries: [
+      {
+        name: "Bern \u2192 Z\u00fcrich",
+        query: `{
+  searchTrains(from: "Bern", to: "Zürich") {
+    departureTime
+    arrivalTime
+    originStation
+    destinationStation
+    legs {
+      trainName
+      fromStation
+      fromTime
+      toStation
+      toTime
+    }
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];

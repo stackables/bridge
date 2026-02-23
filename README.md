@@ -280,9 +280,14 @@ bridge <Type.field> {
 
   # Array Mapping (brace block per element)
   o.<field> <- <source>[] as <iter> {
+    alias <pipe>:<iter> as <name>       # Alias: evaluate pipe once per element
+    .<sub_field> <- <name>.<sub_src>    # Read from cached alias
     .<sub_field> <- <iter>.<sub_src>    # Element field via iterator
     .<sub_field> = "constant"           # Element constant
   }
+
+  # Alias (rename or cache a source expression)
+  alias <source> as <name>
 
   force <handle>                        # Forced execution
 }
@@ -306,7 +311,7 @@ bridge <Type.field> with namedOperation
 
 **Keywords** — cannot be used as tool names, handle aliases, or const names:
 
-> `bridge` `with` `as` `from` `const` `tool` `version` `define`
+> `bridge` `with` `as` `from` `const` `tool` `version` `define` `alias`
 
 **Source identifiers** — reserved for their specific role inside `bridge` and `tool` blocks:
 
@@ -535,6 +540,7 @@ o <- api.items[] as item {
 | **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |
 | **`const`** | Named Value | Declares reusable JSON constants. |
 | **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
+| **`alias src as r`** | Alias | Caches a source expression in a local handle `r`. Works at bridge body level and inside array maps. Avoids redundant tool calls when multiple wires read from the same result. |
 
 
 ## Built-in Tools
