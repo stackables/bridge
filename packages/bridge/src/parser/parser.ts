@@ -600,7 +600,12 @@ class BridgeParser extends CstParser {
         // Nested scope: .field { ... }
         ALT: () => {
           this.CONSUME(LCurly);
-          this.MANY3(() => this.SUBRULE(this.pathScopeLine));
+          this.MANY3(() =>
+            this.OR3([
+              { ALT: () => this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }) },
+              { ALT: () => this.SUBRULE(this.pathScopeLine) },
+            ]),
+          );
           this.CONSUME(RCurly);
         },
       },
@@ -2804,6 +2809,31 @@ function buildBridgeBody(
       // ── Nested scope: .field { ... } ──
       const nestedScopeLines = subs(scopeLine, "pathScopeLine");
       if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+        // Process alias declarations inside the nested scope block first
+        const scopeAliases = subs(scopeLine, "scopeAlias");
+        for (const aliasNode of scopeAliases) {
+          const aliasLineNum = line(findFirstToken(aliasNode));
+          const sourceNode = sub(aliasNode, "nodeAliasSource")!;
+          const alias = extractNameToken(sub(aliasNode, "nodeAliasName")!);
+          assertNotReserved(alias, aliasLineNum, "node alias");
+          if (handleRes.has(alias)) {
+            throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
+          }
+          const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+          const localRes: HandleResolution = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+          };
+          handleRes.set(alias, localRes);
+          const localToRef: NodeRef = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+            path: [],
+          };
+          wires.push({ from: sourceRef, to: localToRef });
+        }
         processScopeLines(nestedScopeLines, targetRoot, fullSegs);
         continue;
       }

@@ -489,4 +489,38 @@ bridge Query.test {
     const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
     assert.ok(qWire, "wire to api.q should exist");
   });
+
+  test("alias inside nested scope blocks parses correctly", () => {
+    const bridge = `version 1.4
+
+bridge Query.user {
+  with std.upperCase as uc
+  with input as i
+  with output as o
+
+  o {
+    .info {
+      alias uc:i.name as upper
+      .displayName <- upper
+      .email <- i.email
+    }
+  }
+}`;
+    const parsed = parseBridge(bridge);
+    const br = parsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const pullWires = br.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    // Alias creates a __local wire
+    const localWire = pullWires.find((w) => w.to.module === "__local" && w.to.field === "upper");
+    assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
+    // displayName wire reads from alias
+    const displayWire = pullWires.find((w) => w.to.path.join(".") === "info.displayName");
+    assert.ok(displayWire, "wire to o.info.displayName should exist");
+    assert.equal(displayWire!.from.module, "__local");
+    assert.equal(displayWire!.from.field, "upper");
+    // email wire reads from input
+    const emailWire = pullWires.find((w) => w.to.path.join(".") === "info.email");
+    assert.ok(emailWire, "wire to o.info.email should exist");
+  });
 });
