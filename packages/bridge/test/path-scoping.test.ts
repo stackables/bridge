@@ -524,3 +524,153 @@ bridge Query.user {
     assert.ok(emailWire, "wire to o.info.email should exist");
   });
 });
+
+// ── Array mapper path scoping tests ─────────────────────────────────────────
+
+describe("path scoping – array mapper blocks", () => {
+  test("scope block with constant inside array mapper produces element wire", () => {
+    const result = parseBridge(`version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .obj {
+      .etc = 1
+    }
+  }
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const constWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { value: string }> => "value" in w,
+    );
+    assert.equal(constWires.length, 1);
+    const wire = constWires[0];
+    assert.equal(wire.value, "1");
+    assert.deepStrictEqual(wire.to.path, ["obj", "etc"]);
+    assert.equal(wire.to.element, true);
+  });
+
+  test("scope block with pull wire inside array mapper references iterator", () => {
+    const result = parseBridge(`version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .obj {
+      .name <- item.title
+    }
+  }
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const nameWire = pullWires.find((w) => w.to.path.join(".") === "obj.name");
+    assert.ok(nameWire, "wire to obj.name should exist");
+    assert.equal(nameWire!.from.element, true);
+    assert.deepStrictEqual(nameWire!.from.path, ["title"]);
+  });
+
+  test("nested scope blocks inside array mapper flatten to correct paths", () => {
+    const result = parseBridge(`version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .a {
+      .b {
+        .c = "deep"
+      }
+    }
+  }
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const constWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { value: string }> => "value" in w,
+    );
+    assert.equal(constWires.length, 1);
+    assert.deepStrictEqual(constWires[0].to.path, ["a", "b", "c"]);
+    assert.equal(constWires[0].to.element, true);
+  });
+
+  test("array mapper scope block and flat element lines coexist", () => {
+    const result = parseBridge(`version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .flat <- item.id
+    .nested {
+      .x = 1
+      .y <- item.val
+    }
+  }
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const constWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { value: string }> => "value" in w,
+    );
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    assert.ok(constWires.find((w) => w.to.path.join(".") === "nested.x"), "nested.x constant should exist");
+    assert.ok(pullWires.find((w) => w.to.path.join(".") === "flat"), "flat pull wire should exist");
+    assert.ok(pullWires.find((w) => w.to.path.join(".") === "nested.y"), "nested.y pull wire should exist");
+  });
+
+  test("array mapper scope block executes correctly at runtime", async () => {
+    const bridge = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .obj {
+      .name <- item.title
+      .code = 42
+    }
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      items: [{ title: "Hello" }, { title: "World" }],
+    });
+    assert.deepStrictEqual(result.data, [
+      { obj: { name: "Hello", code: 42 } },
+      { obj: { name: "World", code: 42 } },
+    ]);
+  });
+
+  test("nested scope blocks inside array mapper execute correctly", async () => {
+    const bridge = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    .level1 {
+      .level2 {
+        .name <- item.title
+        .fixed = "ok"
+      }
+    }
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      items: [{ title: "Alice" }, { title: "Bob" }],
+    });
+    assert.deepStrictEqual(result.data, [
+      { level1: { level2: { name: "Alice", fixed: "ok" } } },
+      { level1: { level2: { name: "Bob", fixed: "ok" } } },
+    ]);
+  });
+});
