@@ -33,7 +33,7 @@ export type NodeRef = {
 export type Wire =
   | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef }
-  | { cond: NodeRef; thenRef?: NodeRef; thenValue?: string; elseRef?: NodeRef; elseValue?: string; to: NodeRef };
+  | { cond: NodeRef; thenRef?: NodeRef; thenValue?: string; elseRef?: NodeRef; elseValue?: string; to: NodeRef; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef };
 
 /**
  * Bridge definition — wires one GraphQL field to its data sources.

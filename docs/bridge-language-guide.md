@@ -26,9 +26,10 @@ keeps your API bill sane.
 10. [Array Mapping](#10-array-mapping)
 11. [Pipe Operator](#11-pipe-operator)
 12. [Inline Expressions](#12-inline-expressions)
-13. [Tool Inheritance](#13-tool-inheritance)
-14. [Force Wires (`<-!`)](#14-force-wires--)
-15. [Built-in Tools](#15-built-in-tools)
+13. [Conditional Wire (`? :`)](#13-conditional-wire--)
+14. [Tool Inheritance](#14-tool-inheritance)
+15. [Force Wires (`<-!`)](#15-force-wires--)
+16. [Built-in Tools](#16-built-in-tools)
 
 ---
 
@@ -595,7 +596,75 @@ Wire: math.multiply → o.total
 
 ---
 
-## 13. Tool Inheritance
+## 13. Conditional Wire (`? :`)
+
+Select between two sources based on a boolean condition. Only the chosen
+branch is evaluated — the other branch is never touched.
+
+```bridge
+o.amount <- i.isPro ? i.proPrice : i.basicPrice
+```
+
+### Syntax
+
+```
+<target> <- <condition> ? <then> : <else>
+```
+
+- **`condition`** — any source reference or expression (e.g. `i.flag`, `i.age >= 18`)
+- **`then`** — source reference or literal (string, number, boolean, null)
+- **`else`** — source reference or literal
+
+### Literal branches
+
+```bridge
+o.tier     <- i.isPro ? "premium" : "basic"
+o.discount <- i.isPro ? 20 : 5
+o.active   <- i.isPro ? true : false
+```
+
+### Expression conditions
+
+The condition can be a full expression, including comparisons:
+
+```bridge
+o.result <- i.age >= 18 ? i.adultPrice : i.childPrice
+o.flag   <- i.score * 2 > 100 ? "pass" : "fail"
+```
+
+### Combining with fallbacks
+
+`||` (null-coalesce) and `??` (error-coalesce) can follow the ternary:
+
+```bridge
+# || fires when the chosen branch is null/undefined
+o.price <- i.isPro ? i.proPrice : i.basicPrice || 0
+
+# ?? fires when the chosen branch throws
+o.price <- i.isPro ? proTool.price : basicTool.price ?? -1
+
+# || with a source reference
+o.price <- i.isPro ? i.proPrice : i.basicPrice || fallback.getPrice
+```
+
+### Inside array mapping
+
+```bridge
+o.items <- api.results[] as item {
+  .name  <- item.name
+  .price <- item.isPro ? item.proPrice : item.basicPrice
+}
+```
+
+### Semantics
+
+The engine evaluates the **condition first** (benefiting from the cost-0
+fast-path for input/context reads). It then pulls **only the chosen branch**
+— the other branch is never scheduled, preventing unnecessary tool calls.
+
+---
+
+## 14. Tool Inheritance
 
 Tools can extend other tools to override or add wires:
 
@@ -630,7 +699,7 @@ When a child extends a parent:
 
 ---
 
-## 14. Force Wires (`<-!`)
+## 15. Force Wires (`<-!`)
 
 Force wires trigger tool execution eagerly, even if the output field is never
 requested by the GraphQL query:
@@ -644,7 +713,7 @@ immediately when the bridge starts, not when the field is demanded.
 
 ---
 
-## 15. Built-in Tools
+## 16. Built-in Tools
 
 ### `std` namespace — Transform tools
 

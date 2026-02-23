@@ -604,7 +604,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const condStr = serializeExprOrRef(w.cond);
       const thenStr = w.thenRef ? sRef(w.thenRef, true) : (w.thenValue ?? "null");
       const elseStr = w.elseRef ? sRef(w.elseRef, true) : (w.elseValue ?? "null");
-      lines.push(`${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}`);
+      const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
+      const errf = w.fallbackRef
+        ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
+        : w.fallback
+          ? ` ?? ${w.fallback}`
+          : "";
+      lines.push(`${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${errf}`);
       continue;
     }
 

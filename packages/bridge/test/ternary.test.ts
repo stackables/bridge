@@ -1,9 +1,19 @@
-import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.js";
-import { createGateway } from "./_gateway.js";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
+import { executeBridge } from "../src/execute-bridge.ts";
+
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+function run(
+  bridgeText: string,
+  operation: string,
+  input: Record<string, unknown> = {},
+  tools: Record<string, any> = {},
+) {
+  const instructions = parseBridge(bridgeText);
+  return executeBridge({ instructions, operation, input, tools });
+}
 
 // ── Parser / desugaring tests ─────────────────────────────────────────────
 
@@ -97,13 +107,39 @@ bridge Query.check {
     const bridge = instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
-    // The cond should point to the expression fork result
     assert.ok(condWire.cond.instance != null && condWire.cond.instance >= 100000,
       "cond should be an expression fork result");
-    // Expression fork should exist for >=
     const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
     assert.ok(exprHandle, "should have expression fork");
     assert.equal(exprHandle.baseTrunk.field, "gte");
+  });
+
+  test("|| literal fallback stored on conditional wire", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
+}`);
+    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const condWire = bridge.wires.find((w) => "cond" in w);
+    assert.ok(condWire && "cond" in condWire);
+    assert.equal(condWire.nullFallback, "0");
+  });
+
+  test("?? literal fallback stored on conditional wire", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice ?? -1
+}`);
+    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const condWire = bridge.wires.find((w) => "cond" in w);
+    assert.ok(condWire && "cond" in condWire);
+    assert.equal(condWire.fallback, "-1");
   });
 });
 
@@ -121,7 +157,6 @@ bridge Query.pricing {
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("? i.proPrice : i.basicPrice"), `got: ${serialized}`);
-    // Re-parse
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
@@ -161,145 +196,150 @@ bridge Query.check {
       `got: ${serialized}`,
     );
   });
+
+  test("|| literal fallback round-trips", () => {
+    const text = `version 1.4
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
+}`;
+    const instructions = parseBridge(text);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("? i.proPrice : i.basicPrice || 0"), `got: ${serialized}`);
+  });
+
+  test("?? literal fallback round-trips", () => {
+    const text = `version 1.4
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice ?? -1
+}`;
+    const instructions = parseBridge(text);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("? i.proPrice : i.basicPrice ?? -1"), `got: ${serialized}`);
+  });
 });
 
 // ── Execution tests ───────────────────────────────────────────────────────
 
-const ternaryTypeDefs = /* GraphQL */ `
-  type Query {
-    pricing(isPro: Boolean!, proPrice: Float!, basicPrice: Float!): PricingResult
-    label(isPro: Boolean!): LabelResult
-    check(age: Int!): CheckResult
-    smartPrice(isPro: Boolean!): SmartPriceResult
-    products: [ProductResult!]!
-  }
-  type PricingResult {
-    amount: Float
-    discount: Float
-  }
-  type LabelResult {
-    tier: String
-  }
-  type CheckResult {
-    result: Float
-    eligible: Boolean
-  }
-  type SmartPriceResult {
-    price: Float
-  }
-  type ProductResult {
-    name: String
-    price: Float
-  }
-`;
-
 describe("ternary: execution — truthy condition", () => {
   test("selects then branch when condition is truthy", async () => {
-    const instructions = parseBridge(`version 1.4
+    const { data } = await run(
+      `version 1.4
 bridge Query.pricing {
   with input as i
   with output as o
-
   o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`);
-    const gateway = createGateway(ternaryTypeDefs, instructions);
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-    const result: any = await executor({
-      document: parse(`{ pricing(isPro: true, proPrice: 99.99, basicPrice: 9.99) { amount } }`),
-    });
-    assert.equal(result.data.pricing.amount, 99.99);
+}`,
+      "Query.pricing",
+      { isPro: true, proPrice: 99.99, basicPrice: 9.99 },
+    );
+    assert.equal((data as any).amount, 99.99);
   });
 
   test("selects else branch when condition is falsy", async () => {
-    const instructions = parseBridge(`version 1.4
+    const { data } = await run(
+      `version 1.4
 bridge Query.pricing {
   with input as i
   with output as o
-
   o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`);
-    const gateway = createGateway(ternaryTypeDefs, instructions);
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-    const result: any = await executor({
-      document: parse(`{ pricing(isPro: false, proPrice: 99.99, basicPrice: 9.99) { amount } }`),
-    });
-    assert.equal(result.data.pricing.amount, 9.99);
+}`,
+      "Query.pricing",
+      { isPro: false, proPrice: 99.99, basicPrice: 9.99 },
+    );
+    assert.equal((data as any).amount, 9.99);
   });
 });
 
 describe("ternary: execution — literal branches", () => {
   test("string literal then branch", async () => {
-    const instructions = parseBridge(`version 1.4
+    const bridge = `version 1.4
 bridge Query.label {
   with input as i
   with output as o
-
   o.tier <- i.isPro ? "premium" : "basic"
-}`);
-    const gateway = createGateway(ternaryTypeDefs, instructions);
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+}`;
+    const pro = await run(bridge, "Query.label", { isPro: true });
+    assert.equal((pro.data as any).tier, "premium");
 
-    const pro: any = await executor({
-      document: parse(`{ label(isPro: true) { tier } }`),
-    });
-    assert.equal(pro.data.label.tier, "premium");
-
-    const basic: any = await executor({
-      document: parse(`{ label(isPro: false) { tier } }`),
-    });
-    assert.equal(basic.data.label.tier, "basic");
+    const basic = await run(bridge, "Query.label", { isPro: false });
+    assert.equal((basic.data as any).tier, "basic");
   });
 
   test("numeric literal branches", async () => {
-    const instructions = parseBridge(`version 1.4
+    const bridge = `version 1.4
 bridge Query.pricing {
   with input as i
   with output as o
-
   o.discount <- i.isPro ? 20 : 0
-}`);
-    const gateway = createGateway(ternaryTypeDefs, instructions);
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+}`;
+    const pro = await run(bridge, "Query.pricing", { isPro: true });
+    assert.equal((pro.data as any).discount, 20);
 
-    const pro: any = await executor({
-      document: parse(`{ pricing(isPro: true, proPrice: 1, basicPrice: 1) { discount } }`),
-    });
-    assert.equal(pro.data.pricing.discount, 20);
-
-    const basic: any = await executor({
-      document: parse(`{ pricing(isPro: false, proPrice: 1, basicPrice: 1) { discount } }`),
-    });
-    assert.equal(basic.data.pricing.discount, 0);
+    const basic = await run(bridge, "Query.pricing", { isPro: false });
+    assert.equal((basic.data as any).discount, 0);
   });
 });
 
 describe("ternary: execution — expression condition", () => {
-  test("i.age >= 18 ? i.proPrice : i.basicPrice", async () => {
-    const instructions = parseBridge(`version 1.4
+  test("i.age >= 18 selects then branch for adult", async () => {
+    const bridge = `version 1.4
 bridge Query.check {
   with input as i
   with output as o
-
   o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
-}`);
-    const checkTypeDefs = /* GraphQL */ `
-      type Query {
-        check(age: Int!, proPrice: Float!, basicPrice: Float!): CheckResult
-      }
-      type CheckResult { result: Float }
-    `;
-    const gateway = createGateway(checkTypeDefs, instructions);
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+}`;
+    const adult = await run(bridge, "Query.check", { age: 20, proPrice: 99, basicPrice: 9 });
+    assert.equal((adult.data as any).result, 99);
 
-    const adult: any = await executor({
-      document: parse(`{ check(age: 20, proPrice: 99, basicPrice: 9) { result } }`),
-    });
-    assert.equal(adult.data.check.result, 99);
+    const minor = await run(bridge, "Query.check", { age: 15, proPrice: 99, basicPrice: 9 });
+    assert.equal((minor.data as any).result, 9);
+  });
+});
 
-    const minor: any = await executor({
-      document: parse(`{ check(age: 15, proPrice: 99, basicPrice: 9) { result } }`),
-    });
-    assert.equal(minor.data.check.result, 9);
+describe("ternary: execution — fallbacks", () => {
+  test("|| literal fallback fires when chosen branch is null", async () => {
+    const bridge = `version 1.4
+bridge Query.pricing {
+  with input as i
+  with output as o
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
+}`;
+    // basicPrice is absent (null/undefined) → fallback 0
+    const { data } = await run(bridge, "Query.pricing", { isPro: false, proPrice: 99 });
+    assert.equal((data as any).amount, 0);
+  });
+
+  test("?? literal fallback fires when chosen branch throws", async () => {
+    const bridge = `version 1.4
+bridge Query.pricing {
+  with pro.getPrice as proTool
+  with input as i
+  with output as o
+  o.amount <- i.isPro ? proTool.price : i.basicPrice ?? -1
+}`;
+    const tools = { "pro.getPrice": async () => { throw new Error("api down"); } };
+    const { data } = await run(bridge, "Query.pricing", { isPro: true, basicPrice: 9 }, tools);
+    assert.equal((data as any).amount, -1);
+  });
+
+  test("|| sourceRef fallback fires when chosen branch is null", async () => {
+    const bridge = `version 1.4
+bridge Query.pricing {
+  with fallback.getPrice as fb
+  with input as i
+  with output as o
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice || fb.defaultPrice
+}`;
+    const tools = { "fallback.getPrice": async () => ({ defaultPrice: 5 }) };
+    // basicPrice absent → chosen branch null → fallback tool fires
+    const { data } = await run(bridge, "Query.pricing", { isPro: false, proPrice: 99 }, tools);
+    assert.equal((data as any).amount, 5);
   });
 });
 
@@ -308,41 +348,28 @@ describe("ternary: execution — tool branches (lazy evaluation)", () => {
     let proCalls = 0;
     let basicCalls = 0;
 
-    const instructions = parseBridge(`version 1.4
+    const bridge = `version 1.4
 bridge Query.smartPrice {
   with pro.getPrice as proTool
   with basic.getPrice as basicTool
   with input as i
   with output as o
-
   o.price <- i.isPro ? proTool.price : basicTool.price
-}`);
+}`;
     const tools = {
-      "pro.getPrice": async () => {
-        proCalls++;
-        return { price: 99.99 };
-      },
-      "basic.getPrice": async () => {
-        basicCalls++;
-        return { price: 9.99 };
-      },
+      "pro.getPrice": async () => { proCalls++; return { price: 99.99 }; },
+      "basic.getPrice": async () => { basicCalls++; return { price: 9.99 }; },
     };
-    const gateway = createGateway(ternaryTypeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // When isPro=true: only proTool should be called
-    const pro: any = await executor({
-      document: parse(`{ smartPrice(isPro: true) { price } }`),
-    });
-    assert.equal(pro.data.smartPrice.price, 99.99);
+    const pro = await run(bridge, "Query.smartPrice", { isPro: true }, tools);
+    assert.equal((pro.data as any).price, 99.99);
     assert.equal(proCalls, 1, "proTool called once");
     assert.equal(basicCalls, 0, "basicTool not called");
 
     // When isPro=false: only basicTool should be called
-    const basic: any = await executor({
-      document: parse(`{ smartPrice(isPro: false) { price } }`),
-    });
-    assert.equal(basic.data.smartPrice.price, 9.99);
+    const basic = await run(bridge, "Query.smartPrice", { isPro: false }, tools);
+    assert.equal((basic.data as any).price, 9.99);
     assert.equal(proCalls, 1, "proTool still called only once");
     assert.equal(basicCalls, 1, "basicTool called once");
   });
@@ -350,16 +377,15 @@ bridge Query.smartPrice {
 
 describe("ternary: execution — in array mapping", () => {
   test("ternary works inside array element mapping", async () => {
-    const instructions = parseBridge(`version 1.4
+    const bridge = `version 1.4
 bridge Query.products {
   with catalog.list as api
   with output as o
-
   o <- api.items[] as item {
     .name <- item.name
     .price <- item.isPro ? item.proPrice : item.basicPrice
   }
-}`);
+}`;
     const tools = {
       "catalog.list": async () => ({
         items: [
@@ -368,14 +394,12 @@ bridge Query.products {
         ],
       }),
     };
-    const gateway = createGateway(ternaryTypeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-    const result: any = await executor({
-      document: parse(`{ products { name price } }`),
-    });
-    assert.equal(result.data.products[0].name, "Widget");
-    assert.equal(result.data.products[0].price, 99, "isPro=true → proPrice");
-    assert.equal(result.data.products[1].name, "Gadget");
-    assert.equal(result.data.products[1].price, 19, "isPro=false → basicPrice");
+    const { data } = await run(bridge, "Query.products", {}, tools);
+    const products = data as any[];
+    assert.equal(products[0].name, "Widget");
+    assert.equal(products[0].price, 99, "isPro=true → proPrice");
+    assert.equal(products[1].name, "Gadget");
+    assert.equal(products[1].price, 19, "isPro=false → basicPrice");
   });
 });
+

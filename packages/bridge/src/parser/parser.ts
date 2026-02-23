@@ -1318,12 +1318,48 @@ function processElementLines(
         const elseNode = sub(elemLine, "elemElseBranch")!;
         const thenBranch = extractTernaryBranchFn(thenNode, elemLineNum, iterName);
         const elseBranch = extractTernaryBranchFn(elseNode, elemLineNum, iterName);
+
+        // Process || null-coalesce alternatives.
+        let elemNullFallback: string | undefined;
+        const elemNullAltRefs: NodeRef[] = [];
+        for (const alt of subs(elemLine, "elemNullAlt")) {
+          const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
+          if ("literal" in altResult) {
+            elemNullFallback = altResult.literal;
+          } else {
+            elemNullAltRefs.push(altResult.sourceRef);
+          }
+        }
+
+        // Process ?? error fallback.
+        let elemFallback: string | undefined;
+        let elemFallbackRef: NodeRef | undefined;
+        let elemFallbackInternalWires: Wire[] = [];
+        const elemErrorAlt = sub(elemLine, "elemErrorAlt");
+        if (elemErrorAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAltIterAware(elemErrorAlt, elemLineNum);
+          if ("literal" in altResult) {
+            elemFallback = altResult.literal;
+          } else {
+            elemFallbackRef = altResult.sourceRef;
+            elemFallbackInternalWires = wires.splice(preLen);
+          }
+        }
+
         wires.push({
           cond: elemCondRef,
           ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
           ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+          ...(elemNullFallback !== undefined ? { nullFallback: elemNullFallback } : {}),
+          ...(elemFallback !== undefined ? { fallback: elemFallback } : {}),
+          ...(elemFallbackRef !== undefined ? { fallbackRef: elemFallbackRef } : {}),
           to: elemToRef,
         });
+        for (const ref of elemNullAltRefs) {
+          wires.push({ from: ref, to: elemToRef });
+        }
+        wires.push(...elemFallbackInternalWires);
         continue;
       }
 
@@ -2315,12 +2351,50 @@ function buildBridgeBody(
       const elseNode = sub(wireNode, "elseBranch")!;
       const thenBranch = extractTernaryBranch(thenNode, lineNum);
       const elseBranch = extractTernaryBranch(elseNode, lineNum);
+
+      // Process || null-coalesce alternatives.
+      // Literals → stored on the ternary wire; source refs → sibling pull wires.
+      let nullFallback: string | undefined;
+      const nullAltRefs: NodeRef[] = [];
+      for (const alt of subs(wireNode, "nullAlt")) {
+        const altResult = extractCoalesceAlt(alt, lineNum);
+        if ("literal" in altResult) {
+          nullFallback = altResult.literal;
+        } else {
+          nullAltRefs.push(altResult.sourceRef);
+        }
+      }
+
+      // Process ?? error fallback.
+      let fallback: string | undefined;
+      let fallbackRef: NodeRef | undefined;
+      let fallbackInternalWires: Wire[] = [];
+      const errorAlt = sub(wireNode, "errorAlt");
+      if (errorAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(errorAlt, lineNum);
+        if ("literal" in altResult) {
+          fallback = altResult.literal;
+        } else {
+          fallbackRef = altResult.sourceRef;
+          fallbackInternalWires = wires.splice(preLen);
+        }
+      }
+
       wires.push({
         cond: condRef,
         ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
         ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+        ...(nullFallback !== undefined ? { nullFallback } : {}),
+        ...(fallback !== undefined ? { fallback } : {}),
+        ...(fallbackRef !== undefined ? { fallbackRef } : {}),
         to: toRef,
       });
+      // Sibling pull wires for || sourceRef fallbacks
+      for (const ref of nullAltRefs) {
+        wires.push({ from: ref, to: toRef });
+      }
+      wires.push(...fallbackInternalWires);
       continue;
     }
 
