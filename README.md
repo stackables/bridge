@@ -135,11 +135,12 @@ bridge Mutation.sendEmail {
   sg.content[0].type = "text/plain"
   sg.content[0].value <- i.textBody
 
-  # Force execution (<-!) to ensure the side-effect happens, 
+  # Force sg to ensure the side-effect happens, 
   # even if the client doesn't query the messageId field.
-  o.messageId <-! sg.headers.x-message-id
+  o.messageId <- sg.headers.x-message-id
+  force sg
   
-  # If the forced wire above succeeds without throwing, we can safely return true.
+  # If the forced tool above succeeds without throwing, we can safely return true.
   o.success = true
 }
 
@@ -270,7 +271,7 @@ bridge <Type.field> {
   # Field Mapping
   o.<field> = <json>                    # Constant output value
   o.<field> <- <source>                 # Standard Pull (lazy)
-  o.<field> <-! <source>               # Forced Push (eager/side-effect)
+  force <handle>                        # Eagerly schedule handle (side-effects)
 
   # Pipe chain (tool transformation)
   o.<field> <- handle:source            # Route source through tool handle
@@ -406,9 +407,9 @@ o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorSt
 
 Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
 
-### Forced Wires (`<-!`)
+### Force Statement (`force <handle>`)
 
-By default, the engine is **lazy**. Use `<-!` to force execution regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
+By default, the engine is **lazy**. Use `force <handle>` to eagerly schedule a tool regardless of demand—perfect for side-effects like analytics, audit logging, or cache warming.
 
 ```bridge
 bridge Mutation.updateUser {
@@ -417,7 +418,8 @@ bridge Mutation.updateUser {
   with output as out
 
   # 'log' runs even if the client doesn't query the 'status' field
-  out.status <-! log:in.changeData
+  out.status <- log:in.changeData
+  force log
 }
 
 ```
@@ -521,7 +523,7 @@ o <- api.items[] as item {
 | --- | --- | --- |
 | **`=`** | Constant | Sets a static value. |
 | **`<-`** | Wire | Pulls data from a source at runtime. |
-| **`<-!`** | Force | Eagerly schedules a tool (for side-effects). |
+| **`force`** | Force | Eagerly schedules a handle (for side-effects). |
 | **`:`** | Pipe | Chains data through tools right-to-left. |
 | **`||`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
 | **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |

@@ -52,7 +52,8 @@ The lexer tokenizes `.bridge` source text using [Chevrotain](https://chevrotain.
 
 - Keywords (`tool`, `bridge`, `with`, `on`, …) are defined with `longer_alt: Identifier` so they don't conflict with user-defined names that start with the same characters
 - Whitespace, newlines, and `#` comments are put on `Lexer.SKIPPED` — the parser never sees them
-- Operator tokens (`<-!`, `<-`, `||`, `??`) are ordered from longest to shortest so Chevrotain matches the right one
+- Operator tokens (`<-`, `||`, `??`) are ordered from longest to shortest so Chevrotain matches the right one
+- The `force` keyword is defined with `longer_alt: Identifier` like other keywords
 
 ```typescript
 // Adding a new keyword — always set longer_alt to avoid stealing identifiers:
@@ -167,7 +168,7 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 1. Calls `buildHandleMap` to map canonical trunk keys back to human-readable handle names
 2. Serializes each `Bridge` block with its `with` declarations and wire body
-3. Converts `Wire` entries back to `<-`, `<-!`, `=` syntax
+3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements
 4. Handles pipe notation, array mapping blocks, fallback chains
 
 ---

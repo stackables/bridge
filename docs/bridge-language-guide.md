@@ -28,7 +28,7 @@ keeps your API bill sane.
 12. [Inline Expressions](#12-inline-expressions)
 13. [Conditional Wire (`? :`)](#13-conditional-wire--)
 14. [Tool Inheritance](#14-tool-inheritance)
-15. [Force Wires (`<-!`)](#15-force-wires--)
+15. [Force Statement (`force <handle>`)](#15-force-statement-force-handle)
 16. [Built-in Tools](#16-built-in-tools)
 
 ---
@@ -699,13 +699,14 @@ When a child extends a parent:
 
 ---
 
-## 15. Force Wires (`<-!`)
+## 15. Force Statement (`force <handle>`)
 
-Force wires trigger tool execution eagerly, even if the output field is never
+The `force` statement eagerly schedules a tool for execution, even if the output field is never
 requested by the GraphQL query:
 
 ```bridge
-o.auditId <-! auditLog.id
+o.auditId <- auditLog.id
+force auditLog
 ```
 
 Use for side effects (logging, analytics, cache warming). The tool is scheduled

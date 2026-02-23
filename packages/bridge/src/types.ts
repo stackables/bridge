@@ -31,7 +31,7 @@ export type NodeRef = {
  * back to pipe notation.
  */
 export type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; force?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
+  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
   | { value: string; to: NodeRef }
   | { cond: NodeRef; thenRef?: NodeRef; thenValue?: string; elseRef?: NodeRef; elseValue?: string; to: NodeRef; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef };
 
@@ -53,6 +53,14 @@ export type Bridge = {
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
+  /** Handles to eagerly evaluate (e.g. side-effect tools). */
+  forces?: Array<{
+    handle: string;
+    module: string;
+    type: string;
+    field: string;
+    instance?: number;
+  }>;
   arrayIterators?: Record<string, string>;
   pipeHandles?: Array<{
     key: string;

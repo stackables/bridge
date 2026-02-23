@@ -174,7 +174,7 @@ The condition can be any source expression, including comparison expressions: `i
 
 Expressions are **parser-level syntactic sugar**: the Chevrotain parser desugars them into synthetic tool forks using built-in `math` namespace tools (`multiply`, `divide`, `add`, `subtract`, `eq`, `neq`, `gt`, `gte`, `lt`, `lte`). The execution engine never sees expression syntax — it processes standard pull/constant wires. This keeps `inferCost`, `pull`, and OpenTelemetry logic clean.
 
-Expressions compose with existing operators: `||` null coalesce, `??` error coalesce, `<-!` force wires, and `[] as iter { }` array mapping all work with expression results.
+Expressions compose with existing operators: `||` null coalesce, `??` error coalesce, `force` statements, and `[] as iter { }` array mapping all work with expression results.
 
 ### ~~Fat Wire IR Refactor~~ -- DROPPED
 

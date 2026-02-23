@@ -692,22 +692,23 @@ export class ExecutionTree {
     this.state[trunkKey(this.trunk)] = args;
   }
 
-  /** Eagerly schedule tools targeted by forced (<-!) wires. */
+  /** Eagerly schedule tools targeted by `force <handle>` statements. */
   executeForced(): void {
-    const forcedWires = this.bridge?.wires.filter(
-      (w): w is Extract<Wire, { from: NodeRef }> & { force: true } =>
-        "from" in w && !!w.force,
-    ) ?? [];
+    const forces = this.bridge?.forces;
+    if (!forces || forces.length === 0) return;
 
     const scheduled = new Set<string>();
-    for (const wire of forcedWires) {
-      // For pipe wires the target is the fork trunk; for regular wires it's
-      // the tool trunk.  In both cases scheduling the target kicks off
-      // resolution of all its input wires (including the forced source).
-      const key = trunkKey(wire.to);
+    for (const f of forces) {
+      const trunk: Trunk = {
+        module: f.module,
+        type: f.type,
+        field: f.field,
+        instance: f.instance,
+      };
+      const key = trunkKey(trunk);
       if (scheduled.has(key) || this.state[key] !== undefined) continue;
       scheduled.add(key);
-      this.state[key] = this.schedule(wire.to);
+      this.state[key] = this.schedule(trunk);
       // Fire-and-forget: suppress unhandled rejection for side-effect tools
       // whose output is never consumed.
       Promise.resolve(this.state[key]).catch(() => {});

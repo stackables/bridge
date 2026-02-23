@@ -7,10 +7,10 @@ import type { Bridge } from "../src/types.ts";
 import { SELF_MODULE } from "../src/types.ts";
 import { createGateway } from "./_gateway.ts";
 
-// ── Parser: <-! creates force wires ─────────────────────────────────────────
+// ── Parser: `force <handle>` creates forces entries ─────────────────────────
 
-describe("parseBridge: force wire (<-!)", () => {
-  test("regular pull wire has no force flag", () => {
+describe("parseBridge: force <handle>", () => {
+  test("regular bridge has no forces", () => {
     const [bridge] = parseBridge(`version 1.4
 
 bridge Query.demo {
@@ -23,40 +23,30 @@ o.result <- t.output
 
 }`) as Bridge[];
 
-    // Wire targeting tool input
-    const toolWire = bridge.wires.find(
-      (w) => "from" in w && w.to.field === "demo" === false,
-    );
-    // None of the wires should have force
-    for (const w of bridge.wires) {
-      if ("from" in w) {
-        assert.equal(w.force, undefined, "regular wires should not have force");
-      }
-    }
+    assert.equal(bridge.forces, undefined);
   });
 
-  test("<-! sets force: true on pull wire", () => {
+  test("force statement creates a forces entry", () => {
     const [bridge] = parseBridge(`version 1.4
 
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
 
-lg.action <-! i.event
+lg.action <- i.event
+force lg
 
 }`) as Bridge[];
 
-    const forcedWire = bridge.wires.find(
-      (w) => "from" in w && w.to.module === "logger",
-    );
-    assert.ok(forcedWire, "should find the forced wire");
-    assert.ok("from" in forcedWire!, "should be a pull wire");
-    if ("from" in forcedWire!) {
-      assert.equal(forcedWire.force, true, "force flag should be true");
-    }
+    assert.ok(bridge.forces, "should have forces");
+    assert.equal(bridge.forces!.length, 1);
+    assert.equal(bridge.forces![0].handle, "lg");
+    assert.equal(bridge.forces![0].module, "logger");
+    assert.equal(bridge.forces![0].field, "log");
+    assert.equal(bridge.forces![0].instance, 1);
   });
 
-  test("<-! and <- can coexist on the same bridge", () => {
+  test("force and regular wires coexist", () => {
     const [bridge] = parseBridge(`version 1.4
 
 bridge Query.demo {
@@ -66,85 +56,114 @@ bridge Query.demo {
   with output as o
 
 m.q <- i.query
-audit.action <-! i.query
+audit.action <- i.query
+force audit
 o.result <- m.data
 
 }`) as Bridge[];
 
-    const regularWires = bridge.wires.filter(
-      (w) => "from" in w && !w.force,
-    );
-    const forcedWires = bridge.wires.filter(
-      (w) => "from" in w && w.force,
-    );
-    assert.ok(regularWires.length >= 2, "should have at least 2 regular wires");
-    assert.equal(forcedWires.length, 1, "should have exactly 1 forced wire");
-  });
-
-  test("<-! on pipe chain sets force on outermost fork", () => {
-    const [bridge] = parseBridge(`version 1.4
-
-bridge Query.demo {
-  with transform as t
-  with input as i
-  with output as o
-
-o.result <-! t:i.text
-
-}`) as Bridge[];
-
-    // The outermost fork's input wire should have force: true
-    const forcedWire = bridge.wires.find(
-      (w) => "from" in w && w.force === true,
-    );
-    assert.ok(forcedWire, "should have a forced wire in the pipe chain");
-    assert.ok("from" in forcedWire!);
-    // It should be a pipe wire
-    if ("from" in forcedWire!) {
-      assert.equal(forcedWire.pipe, true, "forced wire should be a pipe wire");
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces!.length, 1);
+    assert.equal(bridge.forces![0].handle, "audit");
+    // No wire should have a force flag
+    for (const w of bridge.wires) {
+      if ("from" in w) {
+        assert.equal((w as any).force, undefined, "wires should not have force");
+      }
     }
   });
 
-  test("<-! on multi-handle pipe chain sets force only on outermost fork", () => {
+  test("multiple force statements", () => {
     const [bridge] = parseBridge(`version 1.4
 
-bridge Query.demo {
-  with a as a
-  with b as b
+bridge Mutation.multi {
+  with logger.log as lg
+  with metrics.emit as mt
   with input as i
-  with output as o
 
-o.result <-! a:b:i.text
+lg.action <- i.event
+mt.name <- i.event
+force lg
+force mt
 
 }`) as Bridge[];
 
-    // Exactly one wire should have force
-    const forcedWires = bridge.wires.filter(
-      (w) => "from" in w && w.force === true,
-    );
-    assert.equal(forcedWires.length, 1, "exactly one wire should be forced");
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces!.length, 2);
+    assert.equal(bridge.forces![0].handle, "lg");
+    assert.equal(bridge.forces![1].handle, "mt");
+  });
 
-    // That wire should target the outermost fork (a), not inner (b)
-    const fw = forcedWires[0]!;
-    if ("from" in fw) {
-      // The outermost fork (a) gets the highest instance number in the reversed loop
-      // Its input wire comes FROM b_fork root
-      assert.equal(fw.pipe, true, "forced wire should be a pipe wire");
-    }
+  test("force on undeclared handle throws", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.4
+
+bridge Query.demo {
+  with input as i
+  with output as o
+
+force unknown
+
+}`),
+      /Cannot force undeclared handle "unknown"/,
+    );
+  });
+
+  test("force on simple (non-dotted) tool handle", () => {
+    const [bridge] = parseBridge(`version 1.4
+
+bridge Query.demo {
+  with myTool as t
+  with input as i
+  with output as o
+
+t.in <- i.name
+force t
+o.result <- t.out
+
+}`) as Bridge[];
+
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces!.length, 1);
+    assert.equal(bridge.forces![0].handle, "t");
+    assert.equal(bridge.forces![0].module, SELF_MODULE);
+    assert.equal(bridge.forces![0].type, "Tools");
+    assert.equal(bridge.forces![0].field, "myTool");
+  });
+
+  test("force without any wires to the handle", () => {
+    // The whole point of force — handle has no output wires, just triggers execution
+    const [bridge] = parseBridge(`version 1.4
+
+bridge Mutation.fire {
+  with sideEffect as se
+  with input as i
+  with output as o
+
+se.action = "fire"
+force se
+o.ok = "true"
+
+}`) as Bridge[];
+
+    assert.ok(bridge.forces);
+    assert.equal(bridge.forces![0].handle, "se");
   });
 });
 
 // ── Serializer roundtrip ─────────────────────────────────────────────────────
 
-describe("serializeBridge: force wire roundtrip", () => {
-  test("regular force wire roundtrips", () => {
+describe("serializeBridge: force statement roundtrip", () => {
+  test("force statement roundtrips", () => {
     const input = `version 1.4
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
 
-lg.action <-! i.event
-lg.userId <-! i.userId
+lg.action <- i.event
+lg.userId <- i.userId
+force lg
 
 }`;
     const instructions = parseBridge(input);
@@ -162,7 +181,8 @@ bridge Query.demo {
   with output as o
 
 m.q <- i.query
-audit.action <-! i.query
+audit.action <- i.query
+force audit
 o.result <- m.data
 
 }`;
@@ -172,14 +192,32 @@ o.result <- m.data
     assert.deepStrictEqual(reparsed, instructions);
   });
 
-  test("force pipe chain roundtrips", () => {
+  test("serialized output contains force syntax", () => {
     const input = `version 1.4
-bridge Query.demo {
-  with transform as t
+bridge Mutation.audit {
+  with logger.log as lg
   with input as i
-  with output as o
 
-o.result <-! t:i.text
+lg.action <- i.event
+force lg
+
+}`;
+    const output = serializeBridge(parseBridge(input));
+    assert.ok(output.includes("force lg"), "serialized output should contain 'force lg'");
+    assert.ok(!output.includes("<-!"), "serialized output should NOT contain <-!");
+  });
+
+  test("multiple force statements roundtrip", () => {
+    const input = `version 1.4
+bridge Mutation.multi {
+  with logger.log as lg
+  with metrics.emit as mt
+  with input as i
+
+lg.action <- i.event
+mt.name <- i.event
+force lg
+force mt
 
 }`;
     const instructions = parseBridge(input);
@@ -187,24 +225,11 @@ o.result <-! t:i.text
     const reparsed = parseBridge(serialized);
     assert.deepStrictEqual(reparsed, instructions);
   });
-
-  test("serialized output contains <-! syntax", () => {
-    const input = `version 1.4
-bridge Mutation.audit {
-  with logger.log as lg
-  with input as i
-
-lg.action <-! i.event
-
-}`;
-    const output = serializeBridge(parseBridge(input));
-    assert.ok(output.includes("<-!"), "serialized output should contain <-!");
-  });
 });
 
 // ── End-to-end: forced tool runs without output demand ──────────────────────
 
-describe("forced wire: end-to-end execution", () => {
+describe("force statement: end-to-end execution", () => {
   const typeDefs = /* GraphQL */ `
     type Query {
       search(q: String!): SearchResult
@@ -226,7 +251,8 @@ bridge Query.search {
   with output as o
 
 m.q <- i.q
-audit.action <-! i.q
+audit.action <- i.q
+force audit
 o.title <- m.title
 
 }`;
@@ -277,7 +303,8 @@ bridge Mutation.createUser {
 
 u.name <- i.name
 audit.action = "createUser"
-audit.userName <-! i.name
+audit.userName <- i.name
+force audit
 o.id <- u.id
 
 }`;
@@ -301,7 +328,7 @@ o.id <- u.id
     assert.equal(result.data.createUser.id, "usr_123");
     assert.ok(auditInput, "audit tool must be called");
     assert.equal(auditInput.action, "createUser", "constant wire feeds audit");
-    assert.equal(auditInput.userName, "Alice", "forced wire feeds audit");
+    assert.equal(auditInput.userName, "Alice", "pull wire feeds audit");
   });
 
   test("forced tool runs in parallel with demand-driven tools", async () => {
@@ -317,7 +344,8 @@ bridge Query.search {
   with output as o
 
 m.q <- i.q
-audit.action <-! i.q
+audit.action <- i.q
+force audit
 o.title <- m.title
 
 }`;
@@ -351,56 +379,49 @@ o.title <- m.title
     );
   });
 
-  test("forced pipe chain runs even when output is not queried", async () => {
-    let transformCalled = false;
-    let transformInput: any = null;
+  test("force without output wires (204 No Content scenario)", async () => {
+    let sideEffectCalled = false;
 
-    const typeDefs3 = /* GraphQL */ `
-      type Query {
-        process(text: String!): ProcessResult
+    const typeDefs4 = /* GraphQL */ `
+      type Query { _unused: String }
+      type Mutation {
+        fire(action: String!): FireResult
       }
-      type ProcessResult {
-        status: String
-        transformed: String
+      type FireResult {
+        ok: String
       }
     `;
 
     const bridgeText = `version 1.4
-bridge Query.process {
-  with mainWork as m
+bridge Mutation.fire {
   with sideEffect as se
   with input as i
   with output as o
 
-m.text <- i.text
-o.status <- m.status
-o.transformed <-! se:i.text
+se.action <- i.action
+force se
+o.ok = "true"
 
 }`;
 
     const tools: Record<string, any> = {
-      mainWork: async (input: any) => {
-        return { status: "done" };
-      },
       sideEffect: async (input: any) => {
-        transformCalled = true;
-        transformInput = input;
-        return `processed: ${input.in}`;
+        sideEffectCalled = true;
+        // Returns nothing — 204 No Content scenario
+        return null;
       },
     };
 
     const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs3, instructions, { tools });
+    const gateway = createGateway(typeDefs4, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    // Only query status — NOT transformed
     const result: any = await executor({
-      document: parse(`{ process(text: "hello") { status } }`),
+      document: parse(`mutation { fire(action: "deploy") { ok } }`),
     });
 
-    assert.equal(result.data.process.status, "done");
-    assert.ok(transformCalled, "forced pipe tool must run even when transformed is not queried");
-    assert.deepStrictEqual(transformInput, { in: "hello" });
+    assert.equal(result.data.fire.ok, "true");
+    assert.ok(sideEffectCalled, "side-effect tool must run even with no output wires");
   });
 
   test("forced tool error does not break demand-driven response", async () => {
@@ -412,7 +433,8 @@ bridge Query.search {
   with output as o
 
 m.q <- i.q
-audit.action <-! i.q
+audit.action <- i.q
+force audit
 o.title <- m.title
 
 }`;

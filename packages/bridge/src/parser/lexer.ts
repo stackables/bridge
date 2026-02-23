@@ -48,10 +48,10 @@ export const OutputKw  = createToken({ name: "OutputKw",  pattern: /output/i,  l
 export const ContextKw = createToken({ name: "ContextKw", pattern: /context/i, longer_alt: Identifier });
 export const OnKw      = createToken({ name: "OnKw",      pattern: /on/i,      longer_alt: Identifier });
 export const ErrorKw   = createToken({ name: "ErrorKw",   pattern: /error/i,   longer_alt: Identifier });
+export const ForceKw   = createToken({ name: "ForceKw",   pattern: /force/i,   longer_alt: Identifier });
 
 // ── Operators & punctuation ────────────────────────────────────────────────
 
-export const ForceArrow    = createToken({ name: "ForceArrow",    pattern: /<-!/ });
 export const Arrow         = createToken({ name: "Arrow",         pattern: /<-/ });
 export const NullCoalesce  = createToken({ name: "NullCoalesce",  pattern: /\|\|/ });
 export const ErrorCoalesce = createToken({ name: "ErrorCoalesce", pattern: /\?\?/ });
@@ -103,7 +103,6 @@ export const allTokens = [
   WS,
   Comment,
   Newline,
-  ForceArrow,
   Arrow,
   NullCoalesce,
   ErrorCoalesce,
@@ -139,6 +138,7 @@ export const allTokens = [
   ContextKw,
   OnKw,
   ErrorKw,
+  ForceKw,
   TrueLiteral,
   FalseLiteral,
   NullLiteral,
