@@ -1,6 +1,12 @@
-import { TraceDialog } from "./TraceDialog";
+import { useState } from "react";
+import {
+  TracesToggle,
+  TracesContent,
+  LogsToggle,
+  LogsContent,
+} from "./TraceDialog";
 import { Editor } from "./Editor";
-import type { ToolTrace } from "../engine";
+import type { ToolTrace, LogEntry } from "../engine";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -8,12 +14,31 @@ type Props = {
   errors: string[] | undefined;
   loading: boolean;
   traces?: ToolTrace[];
+  logs?: LogEntry[];
   /** When true the result view sizes itself to its content instead of filling the parent. */
   autoHeight?: boolean;
 };
 
-export function ResultView({ result, errors, loading, traces, autoHeight = false }: Props) {
-  const hasContent = loading || result !== undefined || (errors && errors.length > 0);
+export function ResultView({
+  result,
+  errors,
+  loading,
+  traces,
+  logs,
+  autoHeight = false,
+}: Props) {
+  const hasContent =
+    loading || result !== undefined || (errors && errors.length > 0);
+  const [activePanel, setActivePanel] = useState<"traces" | "logs" | null>(
+    null,
+  );
+
+  const hasTraces = traces && traces.length > 0;
+  const hasLogs = logs && logs.length > 0;
+
+  function toggle(panel: "traces" | "logs") {
+    setActivePanel((v) => (v === panel ? null : panel));
+  }
 
   return (
     <div className={cn(!autoHeight && "flex flex-col h-full")}>
@@ -35,13 +60,20 @@ export function ResultView({ result, errors, loading, traces, autoHeight = false
               Errors
             </p>
             {errors.map((err, i) => (
-              <p key={i} className="font-mono text-[13px] text-red-300">{err}</p>
+              <p key={i} className="font-mono text-[13px] text-red-300">
+                {err}
+              </p>
             ))}
           </div>
         )}
 
         {!loading && result !== undefined && (
-          <div className={cn("rounded-lg border border-slate-800 overflow-hidden", !autoHeight && "h-full")}>
+          <div
+            className={cn(
+              "rounded-lg border border-slate-800 overflow-hidden",
+              !autoHeight && "h-full",
+            )}
+          >
             <Editor
               label=""
               value={JSON.stringify(result, null, 2)}
@@ -54,14 +86,36 @@ export function ResultView({ result, errors, loading, traces, autoHeight = false
         )}
       </div>
 
-      {/* Trace badge pinned to bottom */}
-      {traces && traces.length > 0 && (
-        <div className="shrink-0 pt-2.5">
-          <TraceDialog traces={traces} />
+      {/* Badges row + expanded panel pinned to bottom */}
+      {(hasTraces || hasLogs) && (
+        <div className="shrink-0 pt-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            {hasTraces && (
+              <TracesToggle
+                traces={traces}
+                expanded={activePanel === "traces"}
+                onToggle={() => toggle("traces")}
+              />
+            )}
+            {hasLogs && (
+              <LogsToggle
+                logs={logs}
+                expanded={activePanel === "logs"}
+                onToggle={() => toggle("logs")}
+              />
+            )}
+          </div>
+          {activePanel === "traces" && hasTraces && (
+            <TracesContent
+              traces={traces}
+              onClose={() => setActivePanel(null)}
+            />
+          )}
+          {activePanel === "logs" && hasLogs && (
+            <LogsContent logs={logs} onClose={() => setActivePanel(null)} />
+          )}
         </div>
       )}
     </div>
   );
 }
-
-

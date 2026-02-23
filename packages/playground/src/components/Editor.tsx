@@ -1,6 +1,8 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, type Extension, Compartment } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
+import { indentWithTab } from "@codemirror/commands";
 import { diagnosticCount, lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
 import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
@@ -97,6 +99,7 @@ export function Editor({
       doc: value,
       extensions: [
         basicSetup,
+        keymap.of([indentWithTab]),
         playgroundTheme,
         ...languageExtension(language, graphqlSchema),
         updateListener(),

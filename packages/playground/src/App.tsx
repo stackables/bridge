@@ -36,6 +36,20 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
 // ── query tab type ────────────────────────────────────────────────────────────
 type QueryTab = { id: string; name: string; query: string };
 
+// ── extract GraphQL operation name from query text ───────────────────────────
+function extractOperationName(query: string): string | null {
+  // Named operation: query/mutation/subscription OpName
+  const named =
+    /^\s*(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/m.exec(
+      query,
+    );
+  if (named) return named[1]!;
+  // Anonymous shorthand { fieldName ... } — use first root field
+  const anon = /^\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)/m.exec(query);
+  if (anon) return anon[1]!;
+  return null;
+}
+
 // ── query tab bar ─────────────────────────────────────────────────────────────
 type QueryTabBarProps = {
   queries: QueryTab[];
@@ -254,7 +268,11 @@ export function App() {
 
   const updateQuery = useCallback((id: string, text: string) => {
     setQueries((prev) =>
-      prev.map((q) => (q.id === id ? { ...q, query: text } : q)),
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const opName = extractOperationName(text);
+        return { ...q, query: text, ...(opName ? { name: opName } : {}) };
+      }),
     );
   }, []);
 
@@ -473,6 +491,7 @@ export function App() {
               errors={displayResult?.errors}
               loading={displayRunning}
               traces={displayResult?.traces}
+              logs={displayResult?.logs}
               autoHeight
             />
           </div>
@@ -586,6 +605,7 @@ export function App() {
                       errors={displayResult?.errors}
                       loading={displayRunning}
                       traces={displayResult?.traces}
+                      logs={displayResult?.logs}
                     />
                   </div>
                 </PanelBox>
