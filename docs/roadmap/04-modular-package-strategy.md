@@ -3,70 +3,109 @@
 **Status:** Planned
 **Target Release:** v2.0 (Architecture Finalization)
 
-### 📖 The Problem: The Monolith Penalty
+### 📖 The Problem: Everything Ships Together
 
-The Bridge has evolved into a highly capable toolchain: a Chevrotain compiler, a cost-based execution engine, a GraphQL adapter, and a CLI.
+Today the entire Bridge lives in one package (`@stackables/bridge`, ~10k LoC). Every consumer — a full GraphQL server, an Edge worker running a single bridge, the VS Code extension, the playground — pulls the same bundle containing Chevrotain, graphql-js, @graphql-tools/utils, @opentelemetry/api, and lru-cache.
 
-Currently, these are tightly coupled. If a developer wants to run a `.bridge` file natively in a serverless Edge function (without GraphQL), they are still forced to bundle `chevrotain` and `graphql-js`. This introduces unnecessary bloat, security surface area, and cold-start latency.
+The dependency graph already has clean internal boundaries:
 
-We need a modular package strategy that isolates dependencies, combined with an ergonomic developer workflow for Ahead-Of-Time (AOT) compilation.
+| File(s) | External deps |
+|---|---|
+| `parser/lexer.ts`, `parser/parser.ts` | `chevrotain` |
+| `bridge-transform.ts` | `graphql`, `@graphql-tools/utils` |
+| `ExecutionTree.ts` | `@opentelemetry/api` |
+| `tools/http-call.ts` | `lru-cache` |
+| `execute-bridge.ts`, `language-service.ts`, `bridge-lint.ts`, `types.ts`, `tools/*` | none (internal only) |
 
-### ✨ Proposed Solution: The Bridge Ecosystem
+These boundaries mean the split is already implied by the code — it just isn't formalised in the package structure yet.
 
-We will split the monolith into discrete, purpose-built packages (or strict subpath exports). The core engine will become a hyper-lightweight, dependency-free runner that accepts pre-compiled JSON ASTs. Framework-specific logic (like GraphQL) and heavy dev-tools (like the Compiler) will be strictly opt-in.
+### Why it matters
 
-### 📦 The Package Strategy
+1. **Edge / serverless cold-start.** A Cloudflare Worker that runs pre-compiled bridges via `executeBridge()` should not bundle Chevrotain or graphql-js. Today it must.
+2. **VS Code extension size.** The language server only needs the parser and `BridgeLanguageService`. It currently esbuild-bundles the entire package (868 KB server.js).
+3. **Peer-dep flexibility.** GraphQL servers should declare `graphql` as a peer dependency, not force a specific version.
+4. **AOT deployment.** Compiling `.bridge` → JSON at build time and shipping only the runtime is a natural workflow, but today there is no clean package boundary between "parse" and "run".
 
-1. **`@stackables/bridge-core` (The Runtime)**
-* **What it is:** The pure `ExecutionTree`, cost-scheduler, and `std` tools.
-* **Dependencies:** ZERO. (No `chevrotain`, no `graphql-js`).
-* **Size:** < 10kb gzipped.
-* **Input:** Accepts a serialized JSON AST (`Instruction[]`).
-* **Use Case:** Embedded directly in Edge workers, browsers, or internal microservices using the `tree.run(input)` standalone mode.
+### 📦 Proposed Package Split
 
+**`@stackables/bridge-core` — The Runtime**
+- `ExecutionTree`, cost scheduler, `ToolContext`, `std` + `math` tools, `executeBridge()`
+- Dependencies: `@opentelemetry/api` (optional peer), `lru-cache` (for httpCall cache)
+- Input: `Instruction[]` (pre-parsed JSON AST)
+- Use case: Edge workers, CLI tools, background jobs, any non-GraphQL consumer
 
-2. **`@stackables/bridge-compiler` (The Parser)**
-* **What it is:** The Chevrotain Lexer, Parser, and AST Visitor.
-* **Input/Output:** Takes `string` (`.bridge` text), outputs `Instruction[]` (JSON AST).
+**`@stackables/bridge-compiler` — The Parser**
+- Chevrotain lexer, parser, AST visitor, serializer (`bridge-format.ts`)
+- Dependencies: `chevrotain`
+- Input/Output: `.bridge` text → `Instruction[]`
+- Also exports: `parseBridgeDiagnostics`, `BridgeLanguageService` (diagnostics, completions, hover)
 
+**`@stackables/bridge-graphql` — The GraphQL Adapter**
+- `bridgeTransform()`, tracing helpers (`useBridgeTracing`, `getBridgeTraces`)
+- Peer dependencies: `graphql`, `@graphql-tools/utils`, `@stackables/bridge-core`
+- Use case: Apollo, Yoga, or any GraphQL server
 
-3. **`@stackables/bridge-graphql` (The Adapter)**
-* **What it is:** The GraphQL field resolver wrapper (the `response(ipath)` method).
-* **Dependencies:** Peer dependency on `graphql-js` and `@stackables/bridge-core`.
-* **Use Case:** Developers running standard Apollo/Yoga servers.
+**`@stackables/bridge` — The Meta-Package (Optional Convenience)**
+- Re-exports everything from core + compiler + graphql
+- For developers who want one import and don't care about bundle size
+- Equivalent to today's single package
 
+**`@stackables/bridge-cli` — Dev Tools**
+- `bridge lint` (replaces current `bridge-lint` bin)
+- `bridge build` — compile `.bridge` files to `.bridge.json` for AOT deployment
+- Dependencies: compiler (dev-time only)
 
-4. **`@stackables/bridge-cli` (The Dev Tools)**
-* **What it is:** The command-line interface utilizing the Compiler.
-* **Commands:**
-* `bridge check`: Lints the graph in CI/CD pipelines.
-* `bridge build`: Compiles `.bridge` files into `.bridge.json` artifacts for AOT deployments.
+### 🧑‍💻 Developer Workflows
 
+**Workflow A: Full GraphQL Server (JIT, current default)**
+```
+npm install @stackables/bridge-graphql @stackables/bridge-compiler graphql
+```
+Parse `.bridge` files at startup, wire into the schema via `bridgeTransform()`. Same as today.
 
+**Workflow B: Standalone Edge API (AOT)**
+```
+# CI build step
+npx @stackables/bridge-cli build src/*.bridge -o routes.json
 
+# Production — only the runtime, no parser, no graphql
+npm install @stackables/bridge-core
+```
+```ts
+import { executeBridge } from "@stackables/bridge-core";
+import instructions from "./routes.json" assert { type: "json" };
 
+const { data } = await executeBridge({
+  instructions,
+  operation: "Query.search",
+  input: { q: req.query.q },
+});
+```
 
-### 🧑‍💻 Developer Ergonomics (How it gets used)
+**Workflow C: VS Code Extension / Playground**
+```
+npm install @stackables/bridge-compiler
+```
+Only the parser and `BridgeLanguageService` — no runtime, no GraphQL.
 
-By splitting the packages, we unlock two distinct, highly ergonomic workflows:
+### 🛠️ Implementation Plan
 
-**Workflow A: The Full GraphQL Server (JIT Parsing)**
-For standard backend devs who want the easiest setup.
+The monorepo (`pnpm-workspace.yaml`) is already in place. The split is mechanical:
 
-1. `npm install @stackables/bridge-graphql graphql`
-2. At server startup, they pass the `.bridge` file strings to a setup function.
-3. The package parses the text Just-In-Time (JIT) and maps the execution engine to the GraphQL schema.
+1. **Extract shared types.** `types.ts` and `utils.ts` move to `bridge-core`. Both compiler and GraphQL adapter import from core.
 
-**Workflow B: The Standalone Edge API (AOT Compilation)**
-For performance-obsessed devs deploying to Cloudflare Workers or AWS Lambda.
+2. **Extract the parser.** `parser/`, `bridge-format.ts`, `language-service.ts` become `bridge-compiler`. Its only external dep is `chevrotain`.
 
-1. During their GitHub Actions build step, they run `npx @stackables/bridge build`. It outputs `routes.bridge.json`.
-2. The production worker *only* installs `@stackables/bridge-core`.
-3. At runtime, the worker imports the JSON artifact and feeds it to the `ExecutionTree`. **Zero parsing time, zero GraphQL overhead.** 
+3. **Extract the GraphQL adapter.** `bridge-transform.ts` becomes `bridge-graphql`. Peer-depends on `graphql`, `@graphql-tools/utils`, and `bridge-core`.
 
-### 🛠️ Implementation Sketch
-4. **Monorepo Setup:** Migrate the codebase to an npm/pnpm workspace to manage the split packages.
-5. **Isolate `graphql`:** Move the GraphQL `Path` types and the `response()` method out of `ExecutionTree.ts` and into the new adapter package.
-6. **Formalize the AST:** Since the core engine and compiler will now live in separate packages, extract the AST types (`Instruction`, `Bridge`, `Wire`) into a shared `@stackables/bridge-types` package to ensure strict contract compatibility.
-7. **Wire up the CLI:** Connect the existing linter and parsing logic to standard `yargs` or `commander` CLI commands for the `build` and `check` lifecycle.
+4. **Core keeps the engine.** `ExecutionTree.ts`, `execute-bridge.ts`, `tools/` stay in `bridge-core`.
+
+5. **Subpath exports first.** Before splitting into separate npm packages, expose the boundaries via `package.json` `"exports"` subpaths (`@stackables/bridge/core`, `@stackables/bridge/compiler`, `@stackables/bridge/graphql`). This lets consumers opt in incrementally without a breaking change.
+
+6. **Wire up the CLI.** Connect `bridge-lint.ts` and a new `bridge build` command to a proper CLI entry point in `bridge-cli`.
+
+### ⚠️ Migration Path
+
+The convenience meta-package (`@stackables/bridge`) continues to re-export everything, so existing `import { bridgeTransform, parseBridge } from "@stackables/bridge"` code keeps working. The split is opt-in for consumers who want smaller bundles.
+
 
