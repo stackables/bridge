@@ -10,6 +10,11 @@ This document is the single source of truth for Bridge language semantics. It
 covers syntax, execution model, and the cost-aware resolution strategy that
 keeps your API bill sane.
 
+**Related documentation:**
+- [Tools & Extensions](./tools.md) — built-in tools, custom tools, `httpCall` configuration, and response caching
+- [Observability](./observability.md) — OpenTelemetry spans & metrics, structured logging, and `extensions.traces`
+- [Dynamic Routing](./dynamic-routing.md) — per-request topology switching for multi-tenant and region-aware deployments
+
 ---
 
 ## Table of Contents
@@ -959,3 +964,7 @@ o.first <- pickFirst:api.results
 The `httpCall` tool is registered separately and provides HTTP client
 functionality with configurable method, headers, path, query parameters, and
 caching.
+
+👉 **[Read the Tools & Extensions Guide](./tools.md)** for full `httpCall`
+documentation, response caching configuration, custom cache stores, and how
+to inject your own tools into the engine.

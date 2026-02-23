@@ -3,8 +3,8 @@
 
 
 > **Developer Preview**
-> The Bridge v1.x is a public preview and is not recommended for production use.
-> * Stability: Breaking changes to the .bridge language and TypeScript API will occur frequently.
+> The Bridge v1.x is a public preview.
+> * Stability: The .bridge language and TypeScript API is largely stable.
 > * Versioning: We follow strict SemVer starting from v2.0.0.
 > 
 > [See our roadmap](./docs/roadmap/) \
@@ -13,636 +13,200 @@
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
 
-**Browser based interactive playground with examples at https://bridge.sdk42.com 🎉**
-
 # The Bridge
 
+**Declarative dataflow for API integrations.**
 
-**Declarative dataflow for controlled egress.**
+Stop hardcoding third-party SDKs and API keys into every application. The Bridge is a hyper-lightweight execution engine that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
 
-Stop hardcoding third-party SDKs and API keys into every microservice. The Bridge allows you to build a unified internal gateway that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
-
-We use GraphQL strictly as a clean, strongly-typed interface for internal services. Your internal apps just make a standard HTTP POST request—no complex client needed. The Bridge is the engine that actually wires that interface to the outside world.
+Run it as a **GraphQL Egress Gateway** to give your internal teams a clean unified API, or use the **Standalone Runner** to execute declarative data pipelines directly in Node, Edge Workers, or the browser.
 
 **Best fit when your architecture needs:**
 
-* **Controlled Egress:** Funnel all external API calls through a single gateway to enforce uniform rate-limiting, caching, and a single Egress IP for vendor allowlisting.
-* **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES, Stripe ↔ Braintree) without touching a single line of your calling services' code.
-* **Centralized Secrets:** Inject external API keys at the gateway level instead of distributing them across your internal microservices.
-* **Unified Internal API:** Give your internal teams a clean, single-endpoint graph to interact with messy external REST APIs.
+* **Controlled Egress:** Funnel external API calls through a single point to enforce uniform rate-limiting, caching, and IP allowlisting.
+* **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES) by changing a `.bridge` text file, without touching your calling services' code.
+* **Centralized Secrets:** Inject external API keys at the gateway/execution level.
+* **Messy REST abstraction:** Morph complex, undocumented REST payloads into clean, strongly-typed internal interfaces.
 
 **Not best fit when you need:**
 
-* Heavy business logic or domain modeling.
-* Multi-step database transactions or sagas.
-* Very high-performance per-field computation.
+* Heavy domain modeling or multi-step database sagas.
+* Imperative, line-by-line programming logic (The Bridge is a topology graph, not a script).
+
+---
 
 ## The Playground
 
 Try The Bridge instantly in your browser at **[bridge.sdk42.com](https://bridge.sdk42.com)**.
 
-The playground is fully client-side. **Your API keys, schemas, and data are NEVER sent to our servers.** All parsing, routing, and HTTP execution happens directly inside your browser. 
+The playground is fully client-side. **Your API keys, schemas, and data are NEVER sent to our servers.** All parsing, routing, and HTTP execution happens directly inside your browser.
 
 Want to run it offline or within your own VPN? You can spin up the playground locally by building the `./packages/playground` workspace directly from this repository.
 
 ![Playground Screenshot](./docs/images/screenshot-playground.png)
 
-## The Architecture
+## Core Concepts: Wiring, not Programming
 
-If internal Service A and Service B both need to send an email, the standard approach is to install the SendGrid SDK and inject the API key into both services. This creates tight coupling.
+The Bridge is a **Data Topology Language**. You don't write scripts; you wire circuits.
 
-Instead, you stand up a lightweight Egress Gateway powered by The Bridge. Service A and B simply make a standard GraphQL request to the gateway. The gateway uses your `.bridge` files to map the request, inject the credentials, and route the traffic. To your internal services, the external provider is completely invisible.
-
-### What it is (and isn't)
-
-The Bridge is a **Smart Mapping Outgoing Proxy**, not a replacement for your application logic.
-
-* **Use it to:** Morph external API shapes, enforce single exit points for security, and manage vendor integrations independently of your core services.
-* **Don't use it for:** Complex business logic. Keep the "intelligence" in your microservices; keep the "connectivity" in your Bridge.
-
-### Wiring, not Programming
-
-The Bridge is not a programming language. It is a Data Topology Language.
-
-Unlike JavaScript or Python, where you write sequential instructions, a `.bridge` file describes a static circuit. There is no "execution pointer".
-
-* **No Sequential Logic:** Shuffling the lines inside a block changes nothing. The engine uses your file to understand how internal fields physically wire to external tools.
-* **Pull, Don't Push:** Your microservices "pull" data through the wires. If a client doesn't ask for a field, the wire is "dead"—no code runs, and no API is called.
-* **Declarative Connections:** When you write `o.name <- api.name`, you aren't commanding a copy operation; you are soldering a permanent link between your internal interface and an external response.
+* **Pull, Don't Push:** The engine is strictly lazy. If a client doesn't ask for a specific output field, the wires connected to it are "dead"—no code runs, and no external APIs are called.
+* **Cost-Optimized Fallbacks:** The engine knows the difference between a cheap memory read and an expensive network call, automatically evaluating them in the optimal order.
+* **LLM Friendly:** The language is visually distinct and heavily structural, making it incredibly easy for LLMs to generate correct API mappings from standard JSON schemas or OpenAPI specs.
 
 **Don't think in scripts. Think in schematics.**
 
-### Usage with LLMs
+## Getting Started
 
-The Bridge language is deliberately designed to be simple for LLMs to generate and visually easy for humans to review. It supports inline documentation and works well with Git or other source control systems.
+The Bridge separates your mapping logic (`.bridge` files) from your execution environment. You define the logic once, and run it wherever you need.
 
-Most of the time, it’s enough to give your LLM this README and the GraphQL schema file. Based on that, the LLM can generate the mapping for any API it knows. For non-public or undocumented APIs, you should provide the LLM with the JSON schema or API documentation to avoid hallucinations.
-
-## The Workflow
-
-You define your internal interface in standard GraphQL SDL, then use `.bridge` files to wire those types to your external providers.
-
-Read more about:
-- [Observability (tracing, metrics and logging)](./docs/observability.md)
-- [Dynamic routing](./docs/dynamic-routing.md)
-
-### 1. Define your Schema
-
-Start with `schema.graphql`. This is the clean interface your internal microservices will call.
-
-```graphql
-type EmailResult {
-  success: Boolean
-  messageId: String
-}
-
-type Mutation {
-  sendEmail(to: String!, subject: String!, textBody: String!): EmailResult
-}
-
-```
-
-### 2. Wire the Bridge
-
-Create your `logic.bridge` file to map the schema to an external provider (e.g., SendGrid). This is your routing implementation.
+### 1. Write the logic (`logic.bridge`)
 
 ```bridge
-# VSCode langauge support
+# VSCode extension
 # https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight
 
 version 1.4
 
+# 1. Configure an external tool
 tool sendgrid from httpCall {
-  with context as ctx
-
+  with context
   .baseUrl = "https://api.sendgrid.com/v3"
   .path = "/mail/send"
   .method = POST
-  
-  # Inject the API key directly from the reserved context handle
-  .headers.Authorization = ctx.env.SENDGRID_API_KEY
+  .headers.Authorization <- context.SENDGRID_API_KEY
 }
 
+# 2. Wire inputs to the tool, and the tool to the output
 bridge Mutation.sendEmail {
   with sendgrid as sg
   with input as i
   with output as o
 
-  # Map our clean input to SendGrid's specific JSON structure
+  # Map our clean input to SendGrid's deeply nested JSON
   sg.personalizations[0].to[0].email <- i.to
-  
-  # SendGrid requires a 'from' address
   sg.from.email = "no-reply@yourdomain.com"
-  
   sg.subject <- i.subject
   sg.content[0].type = "text/plain"
   sg.content[0].value <- i.textBody
 
-  o.messageId <- sg.headers.x-message-id
-  
-  # Ensure the send operation actually happens (as nothing puls this by default)
+  # Eagerly force the side-effect, throw if it fails
   force sg
+
+  o.messageId <- sg.headers.x-message-id
   o.success = true
 }
 
 ```
 
-### 3. Initialize the Engine
+### 2. Choose your Runner
 
-The Bridge engine takes your schema, attaches the routing logic, and exposes the gateway.
+#### Option A: Standalone Mode (Edge / Serverless)
+
+Execute `.bridge` files programmatically. Perfect for Cloudflare Workers, AWS Lambda, or embedding inside existing microservices.
+
+```typescript
+import { executeBridge, parseBridge } from "@stackables/bridge";
+import { readFileSync } from "node:fs";
+
+// 1. Parse the .bridge file
+const instructions = parseBridge(readFileSync("logic.bridge", "utf-8"));
+
+// 2. Execute the bridge with an input payload
+const { data } = await executeBridge({
+  instructions,
+  operation: "Mutation.sendEmail",
+  input: {
+    to: "user@example.com",
+    subject: "Hello!",
+    textBody: "Welcome to our app.",
+  },
+  context: { SENDGRID_API_KEY: process.env.SENDGRID_KEY },
+});
+
+console.log(data.messageId);
+
+```
+
+#### Option B: GraphQL Gateway Mode
+
+Automatically wrap The Bridge around a GraphQL schema to create an instant API Gateway.
 
 ```typescript
 import { bridgeTransform, parseBridge } from "@stackables/bridge";
 import { createSchema, createYoga } from "graphql-yoga";
+import { readFileSync } from "node:fs";
 
-const typeDefs = /* load schema.graphql */;
-const bridgeFile = /* load logic.bridge */;
+const typeDefs = readFileSync("schema.graphql", "utf-8");
+const instructions = parseBridge(readFileSync("logic.bridge", "utf-8"));
 
 const schema = bridgeTransform(
-  createSchema({ typeDefs }), 
-  parseBridge(bridgeFile)
+  createSchema({ typeDefs }),
+  instructions,
 );
 
 const yoga = createYoga({
   schema,
-  context: () => ({
-    env: { SENDGRID_API_KEY: process.env.SENDGRID_API_KEY },
-  }),
+  context: () => ({ SENDGRID_API_KEY: process.env.SENDGRID_KEY }),
 });
 
 ```
 
-If you ever need to switch from SendGrid to AWS SES, you only rewrite `logic.bridge`. Your internal services and your GraphQL schema remain completely untouched.
+## Syntax Cheat Sheet
 
-## The Bridge Language
+The `.bridge` language is designed to be scannable.
 
-Get syntax highlighting for [Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight). [Full language guide is here.](./docs//bridge-language-guide.md)
+* `.` prefix means a property.
+* `=` means static constant assignment.
+* `<-` means dynamic data flow.
 
-Every `.bridge` file must begin with a version declaration (`version 1.4`). This is the first non-blank, non-comment line.
-
-### 1. Const Blocks (`const`)
-
-Named JSON values reusable across tools and bridges. Avoids repetition for fallback payloads, defaults, and config fragments. Access them via `with const as c`.
-
-```bridge
-const defaultCurrency = "EUR"
-const maxRetries = 3
-
-```
-
-### 2. Tool Blocks (`tool ... from`)
-
-Defines the "Where" and the "How." Takes a function (or parent tool) and configures it, giving it a new name.
-
-```bridge
-tool <name> from <source> {
-  [with context]                  # Injects GraphQL context (auth, secrets)
-  [on error = <json_fallback>]    # Fallback value if tool fails
-  [on error <- <source>]          # Pull fallback from context/tool
-
-  .<param> = <value>              # Constant/Default value (dot = "this tool's param")
-  .<param> <- <source>            # Dynamic wire
-}
-
-```
-
-Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines do not use a dot; they are control flow, not param assignments.
-
-When `<source>` is a function name (e.g. `httpCall`), a new tool is created.
-When `<source>` is an existing tool name, the new tool inherits its configuration.
-
-### 3. Define Blocks (`define`)
-
-Reusable named subgraphs — compose tools and wires into a pipeline, then invoke it from any bridge.
-
-```bridge
-define <name> {
-  with <tool> as <handle>     # Tools used inside the pipeline
-  with input as <handle>      # Inputs provided by the caller
-  with output as <handle>     # Outputs returned to the caller
-
-  <handle>.<param> <- <source>  # Wiring (same syntax as bridge)
-  <handle>.<param> = <value>    # Constants
-}
-
-```
-
-Use a define in a bridge with `with <define> as <handle>`:
-
-```bridge
-define geocode {
-  with std.httpCall as geo
-  with input as i
-  with output as o
-
-  geo.baseUrl = "https://nominatim.openstreetmap.org"
-  geo.method = GET
-  geo.path = /search
-  geo.q <- i.city
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
-}
-
-bridge Query.location {
-  with geocode as g
-  with input as i
-  with output as o
-
-  g.city <- i.city
-  o.lat <- g.lat
-  o.lon <- g.lon
-}
-
-```
-
-Each invocation is fully isolated — calling the same define twice creates independent tool instances with no namespace collisions.
-
-### 4. Bridge Blocks (`bridge`)
-
-The routing logic connecting your internal schema fields to your tools.
-
-```bridge
-bridge <Type.field> {
-  with <tool> [as <alias>]
-  with input as i
-  with output as o
-
-  # Field Mapping
-  o.<field> = <json>                    # Constant output value
-  o.<field> <- <source>                 # Standard Pull (lazy)
-
-  # Pipe chain (tool transformation)
-  o.<field> <- handle:source            # Route source through tool handle
-
-  # Fallbacks
-  o.<field> <- <source> || <alt> || <alt> # Null-coalesce: use alt if source is null
-  o.<field> <- <source> ?? <fallback>     # Error-fallback: use fallback if chain throws
-
-  # Array Mapping (brace block per element)
-  o.<field> <- <source>[] as <iter> {
-    alias <pipe>:<iter> as <name>       # Alias: evaluate pipe once per element
-    .<sub_field> <- <name>.<sub_src>    # Read from cached alias
-    .<sub_field> <- <iter>.<sub_src>    # Element field via iterator
-    .<sub_field> = "constant"           # Element constant
-  }
-
-  # Alias (rename or cache a source expression)
-  alias <source> as <name>
-
-  force <handle>                        # Forced execution
-}
-
-```
-
-Bridge can be fully implemented in the defined pipeline.
-
-```bridge
-define namedOperation {
-  ....
-}
-
-bridge <Type.field> with namedOperation
-
-```
-
-## Key Features
-
-### Reserved Words
-
-**Keywords** — cannot be used as tool names, handle aliases, or const names:
-
-> `bridge` `with` `as` `from` `const` `tool` `version` `define` `alias`
-
-**Source identifiers** — reserved for their specific role inside `bridge` and `tool` blocks:
-
-> `input` `output` `context`
-
-A parse error is thrown immediately if any of these appear where a user-defined name is expected.
-
-### Scope Rules
-
-Bridge uses explicit scoping. Any entity referenced inside a `bridge` or `tool` block must first be introduced into scope using a `with` clause.
-
-This includes:
-
-* `tools`
-* `input`
-* `output`
-* `context`
-* `tool aliases`
-
-The `input` and `output` handles represents GraphQL field arguments and output type. They exists **only inside `bridge` blocks**.
-
-Because `tool` blocks are evaluated before any GraphQL execution occurs, they cannot reference `input` or `output`.
-
-> **Rule of thumb:**
-> `tool ... from` defines tools, `bridge` executes the graph.
-> Since `input` and `output` belong to GraphQL execution, they only exist inside bridges.
-
-### Resiliency
-
-Each layer handles a different failure mode. They compose freely.
-
-#### Layer 1 — Tool `on error` (execution errors)
-
-Declared inside the `tool` block. Catches any exception thrown by the tool's `fn(input)`. All tools that inherit from this tool inherit the fallback.
-
-```bridge
-tool geo from httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .method = GET
-  .path = /search
-  on error = { "lat": 0, "lon": 0 }   # tool-level default
-}
-
-```
-
-#### Layer 2 — Wire `||` (null / absent values)
-
-Fires when a source resolves **successfully but returns `null` or `undefined`**. The fallback can be a JSON literal or another source expression (handle path or pipe chain). Multiple `||` alternatives chain left-to-right like `COALESCE`.
-
-```bridge
-with output as o
-
-# JSON literal fallback
-o.lat <- geo.lat || 0.0
-
-# Alternative source fallback
-o.label <- api.label || backup.label || "unknown"
-
-# Pipe chain as alternative
-o.textPart <- i.textBody || convert:i.htmlBody || "empty"
-
-```
-
-#### Layer 3 — Wire `??` (errors and exceptions)
-
-Fires when the **entire resolution chain throws** (network failure, tool down, dependency error). Does not fire on null values — that's `||`'s job. The fallback can be a JSON literal or a source/pipe expression (evaluated lazily, only when the error fires).
-
-```bridge
-with output as o
-
-# JSON literal error fallback
-o.lat <- geo.lat ?? 0.0
-
-# Error fallback pulls from another source
-o.label <- api.label ?? errorHandler:i.fallbackMsg
-
-```
-
-#### Full COALESCE — composing all three layers
-
-`||` and `??` compose into a Postgres-style `COALESCE` with an error guard at the end:
-
-```bridge
-with output as o
-
-# o.label <- A || B || C || "literal" ?? errorSource
-o.label <- api.label || tool:api.backup.label || "unknown" ?? tool:const.errorString
-
-# Evaluation order:
-# api.label non-null     → use it immediately
-# api.label null         → try toolIfNeeded(api.backup.label)
-# that null              → "unknown"  (|| json literal always succeeds)
-# any source throws      → toolIfNeeded(const.errorString)  (?? fires last)
-
-```
-
-Multiple `||` sources desugar to **parallel wires** — all sources are evaluated concurrently and the first that resolves to a non-null value wins. Cheaper/faster sources (like `input` fields) naturally win without any priority hints.
-
-### Force Statement (`force <handle>`)
-
-By default, the engine is **lazy**. Use `force <handle>` to eagerly schedule a tool regardless of demand—perfect for side-effects like analytics, audit logging, or payment capture.
-
-**Critical by default:** If the forced tool throws, the error propagates into the GraphQL response. Use `force <handle> ?? null` to make it fire-and-forget (errors are silently swallowed).
-
-```bridge
-bridge Mutation.updateUser {
-  with audit.logger as log
-  with analytics as stats
-  with input as in
-  with output as out
-
-  # 'log' runs even if the client doesn't query the 'status' field
-  out.status <- log:in.changeData
-  force log              # critical — error breaks the response
-  force stats ?? null    # fire-and-forget — OK if analytics fails
-}
-
-```
-
-### The Pipe Operator (`:`)
-
-Routes data right-to-left through one or more tool handles: `dest <- handle:source`.
-
-```bridge
-with output as o
-
-# i.rawData → normalize → transform → result
-o.result <- transform:normalize:i.rawData
-
-```
-
-Full example with a tool that has 2 input parameters:
-
-```bridge
-tool convert from currencyConverter {
-  .currency = EUR   # default currency
-}
-
-# example with pipe syntax
-bridge Query.price {
-  with convert as c
-  with input as i
-  with output as o
-
-  c.currency <- i.currency   # overrides the default per request
-
-  # Safe to use repeatedly — each is an independent tool call
-  o.itemPrice  <- c:i.itemPrice
-  o.totalPrice <- c:i.totalPrice
-}
-
-# same without the pipe syntax
-tool c1 from convert
-tool c2 from convert
-
-bridge Query.price {
-  with c1
-  with c2
-  with input as i
-  with output as o
-
-  c1.currency <- i.currency   # overrides the default per request
-  c2.currency <- i.currency   # overrides the default per request
-
-  c1.in <- i.itemPrice
-  c2.in <- i.totalPrice
-
-  # Safe to use repeatedly — each is an independent tool call
-  o.itemPrice  <- c1
-  o.totalPrice <- c2
-}
-
-```
-
-### Conditional Wire (`? :`)
-
-Selects between two sources based on a boolean condition. Only the chosen branch is evaluated — the other branch is never touched.
-
-```bridge
-bridge Query.smartPrice {
-  with stripe
-  with input as i
-  with output as o
-
-  # selects proPrice or basicPrice based on i.isPro
-  o.amount <- i.isPro ? stripe.proPrice : stripe.basicPrice
-}
-```
-
-Branches can be source references or literals (string, number, boolean, null):
-
-```bridge
-o.tier     <- i.isPro ? "premium" : "basic"
-o.discount <- i.isPro ? 20 : 5
-```
-
-The condition can be any expression:
-
-```bridge
-o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
-```
-
-Works inside array mapping blocks:
-
-```bridge
-o <- api.items[] as item {
-  .price <- item.isPro ? item.proPrice : item.basicPrice
-}
-```
-
----
-
-### String Interpolation (`"{…}"`)
-
-Build strings from multiple sources using `{…}` placeholders inside quoted strings on pull wires (`<-`):
-
-```bridge
-bridge Query.userProfile {
-  with input as i
-  with output as o
-
-  o.url  <- "/users/{i.id}/profile"
-  o.name <- "{i.first} {i.last}"
-  o.greeting <- "Hello, {i.first}!"
-}
-```
-
-Placeholder values are coerced to strings automatically — numbers become `"42"`, booleans become `"true"`, and null/undefined become `""`.
-
-Plain strings without `{…}` are treated as constants. The `=` operator is never interpolated.
-
-Works inside array mapping blocks:
-
-```bridge
-o <- api.items[] as it {
-  .url   <- "/items/{it.id}"
-  .label <- "{it.name} (#{it.id})"
-}
-```
-
----
-
-## Syntax Reference
-
-| Operator | Type | Behavior |
+| Concept | Syntax Example | Description |
 | --- | --- | --- |
-| **`=`** | Constant | Sets a static value. |
-| **`<-`** | Wire | Pulls data from a source at runtime. |
-| **`<- "...{ref}..."`** | Template | String interpolation — `{…}` placeholders are resolved at runtime. |
-| **`force`** | Force | Eagerly schedules a handle. **Critical by default** — errors propagate. Append `?? null` for fire-and-forget. |
-| **`:`** | Pipe | Chains data through tools right-to-left. |
-| **`\|\|`** | Null-coalesce | Next alternative if current source is `null`/`undefined`. Fires on absent values, not errors. |
-| **`??`** | Error-fallback | Alternative used when the resolution chain **throws**. Fires on errors, not null values. |
-| **`? :`** | Conditional | Evaluates condition; pulls only the chosen branch (`then` or `else`). Branches are source refs or literals. |
-| **`on error`** | Tool Fallback | Returns a default if the tool's `fn(input)` throws. |
-| **`tool ... from`** | Tool Definition | Configures a function or inherits from a parent tool. |
-| **`define`** | Reusable Subgraph | Declares a named pipeline template invocable from bridges. |
-| **`const`** | Named Value | Declares reusable JSON constants. |
-| **`<- src[] as i { }`** | Map | Iterates over source array; each element accessed via the named iterator `i`. `i.field` references the current element. `.field = "value"` sets an element constant. |
-| **`alias src as r`** | Alias | Caches a source expression in a local handle `r`. Works at bridge body level and inside array maps. Avoids redundant tool calls when multiple wires read from the same result. |
+| **Constants** | `.method = "POST"` | Sets a static configuration value. |
+| **Wires** | `.body <- i.userData` | Pulls data from a source at runtime. |
+| **Side Effects** | `force api ?? null` | Eagerly schedules a handle. Critical by default; `?? null` makes it fire-and-forget. |
+| **Pipes** | `o.name <- uc:i.name` | Chains data through a tool right-to-left. |
+| **Null Coalesce** | `o.name <- i.name \|\| "N/A"` | Alternative used if the current source resolves to `null`. |
+| **Error Guard** | `o.price <- api.price ?? 0` | Alternative used if the current source **throws** an exception. |
+| **Ternary** | `o.val <- i.isPro ? a : b` | Evaluates condition; strictly pulls only the chosen branch. |
+| **Node Alias** | `alias uc:i.name as name` | Evaluates an expression once and caches it as a local graph node. |
+| **Arrays** | `o <- items[] as it { }` | Iterates over an array, creating a local shadow scope for each element. |
 
+👉 **[Read the Full Language Guide](./docs/bridge-language-guide.md)** for deep dives into `define` blocks, overdefinition optimization, and advanced fallbacks.
 
-## Built-in Tools
+## Tools
 
-The Bridge ships with built-in tools under the `std` namespace, always available by default. All tools (including `httpCall`) live under `std` and can be referenced with or without the `std.` prefix.
+To The Bridge engine, everything external is just a "Tool". A Tool is simply a JavaScript function that takes a JSON object as input, and returns a JSON object (or Promise) as output.
 
-| Tool | Input | Output | Description |
-| --- | --- | --- | --- |
-| `audit` | `{ ...any, level?: string }` | passthrough (same object) | Logs all inputs via the engine logger (`BridgeOptions.logger`). Level defaults to `info`; override with `audit.level = "warn"`. |
-| `concat` | `{ parts: any[] }` | `{ value: string }` | Joins ordered parts into a string. Used internally by string interpolation. |
-| `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
-| `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
-| `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
-| `findObject` | `{ in: any[], ...criteria }` | `object | undefined` | Finds the first object in `in` where all criteria match. |
-| `pickFirst` | `{ in: any[], strict?: bool }` | `any` | Returns the first array element. With `strict = true`, throws if the array is empty or has more than one item. |
-| `toArray` | `{ in: any }` | `any[]` | Wraps a single value in an array. Returns as-is if already an array. |
+The Bridge ships with a standard library (`std`) that includes tools for HTTP requests, array manipulation, and basic string formatting.
 
-### Adding Custom Tools
+You can inject your own custom tools into the engine in three lines of code:
 
 ```typescript
-import { bridgeTransform } from "@stackables/bridge";
+const myTools = {
+  // A simple synchronous tool
+  calculateTax: (input) => ({ total: input.price * 1.2 }),
 
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
-  tools: {
-    myCustomTool: (input) => ({ result: input.value * 2 }),
-  },
-});
-// std.upperCase, std.lowerCase, etc. are still available
-
-```
-
-To override a `std` tool, replace the namespace (shallow merge):
-
-```typescript
-import { bridgeTransform, std } from "@stackables/bridge";
-
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
-  tools: {
-    std: { ...std, upperCase: myCustomUpperCase },
-  },
-});
-
-```
-
-### Response Caching
-
-Add `cache = <seconds>` to any `httpCall` tool to enable TTL-based response caching. Identical requests (same method + URL + params) return the cached result without hitting the network.
-
-```bridge
-tool geo from httpCall {
-  .cache = 300          # cache for 5 minutes
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .method = GET
-  .path = /search
-}
-
-```
-
-The default is an in-memory store. For Redis or other backends, pass a custom `CacheStore` to `createHttpCall`:
-
-```typescript
-import { createHttpCall, std } from "@stackables/bridge";
-import type { CacheStore } from "@stackables/bridge";
-
-const redisCache: CacheStore = {
-  async get(key) { return redis.get(key).then(v => v ? JSON.parse(v) : undefined); },
-  async set(key, value, ttl) { await redis.set(key, JSON.stringify(value), "EX", ttl); },
+  // An asynchronous database call
+  fetchUser: async (input) => await db.users.findById(input.id),
 };
 
-bridgeTransform(schema, instructions, {
-  tools: { std: { ...std, httpCall: createHttpCall(fetch, redisCache) } },
-});
+// Standalone mode:
+const { data } = await executeBridge({ instructions, operation, input, tools: myTools });
+
+// Gateway mode:
+const schema = bridgeTransform(createSchema({ typeDefs }), instructions, { tools: myTools });
 
 ```
+
+👉 **[Read the Tools & Extensions Guide](./docs/tools.md)** to learn about the `std.httpCall` tool, response caching, and custom tool injection.
+
+## Further Reading
+
+| Document | Description |
+| --- | --- |
+| **[Language Guide](./docs/bridge-language-guide.md)** | Full syntax reference — tool blocks, define blocks, expressions, array mapping, and more. |
+| **[Tools & Extensions](./docs/tools.md)** | Built-in tools, custom tools, `httpCall` configuration, and response caching. |
+| **[Observability](./docs/observability.md)** | OpenTelemetry spans & metrics, structured logging, and `extensions.traces`. |
+| **[Dynamic Routing](./docs/dynamic-routing.md)** | Per-request topology switching for multi-tenant, region-aware, and A/B deployments. |
+| **[LLM Notes](./docs/llm-notes.md)** | Internal development notes and architecture reference. |
+| **[Developer Guide](./docs/developer.md)** | Internals walkthrough for contributors — parser pipeline, execution engine, test setup. |
