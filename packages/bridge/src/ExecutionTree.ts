@@ -5,6 +5,7 @@ import type {
   Instruction,
   NodeRef,
   ToolCallFn,
+  ToolContext,
   ToolDef,
   ToolMap,
   Wire,
@@ -507,6 +508,7 @@ export class ExecutionTree {
   ): Promise<any> {
     const tracer = this.tracer;
     const logger = this.logger;
+    const toolContext: ToolContext = { logger: logger ?? {} };
     const traceStart = tracer?.now();
     const metricAttrs = { "bridge.tool.name": toolName, "bridge.tool.fn": fnName };
     return otelTracer.startActiveSpan(
@@ -515,7 +517,7 @@ export class ExecutionTree {
       async (span) => {
         const wallStart = performance.now();
         try {
-          const result = await fnImpl(input);
+          const result = await fnImpl(input, toolContext);
           const durationMs = roundMs(performance.now() - wallStart);
           toolCallCounter.add(1, metricAttrs);
           toolDurationHistogram.record(durationMs, metricAttrs);

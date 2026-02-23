@@ -32,6 +32,7 @@ src/
   types.ts            — all shared types (NodeRef, Wire, Bridge, ToolDef, etc.)
   tools/
     index.ts          — builtinTools bundle (std namespace + httpCall) + re-exports
+    audit.ts          — audit (side-effect logging tool for use with force)
     http-call.ts      — createHttpCall (REST API tool)
     upper-case.ts     — upperCase string tool
     lower-case.ts     — lowerCase string tool
@@ -55,14 +56,17 @@ import { parseBridge } from "@stackables/bridge";
 import { bridgeTransform } from "@stackables/bridge";
 // bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
 
-import { builtinTools, std, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
-// builtinTools — namespaced tool bundle: { std: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }
+import { builtinTools, std, audit, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
+// builtinTools — namespaced tool bundle: { std: { audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }
 // std — the std namespace object (for spreading into overrides)
+// audit(input, context?): ToolCallFn — logs inputs via ToolContext logger; level defaults to "info", configurable via input
 // createHttpCall(fetchFn?, cacheStore?): ToolCallFn
 // upperCase, lowerCase, findObject — individual tool functions (for direct JS use)
 
 // Types
-import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolDef, ConstDef, ToolMap } from "@stackables/bridge";
+import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolContext, ToolDef, ConstDef, ToolMap } from "@stackables/bridge";
+// ToolContext — { logger: { debug?, info?, warn?, error? } } — passed as second arg to every tool function by the engine
+// ToolCallFn — (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>
 ```
 
 ### `InstructionSource`
@@ -76,9 +80,12 @@ Can be a static array or a **per-request function** for multi-provider routing. 
 type BridgeOptions = {
   tools?: ToolMap;
   contextMapper?: (context: any) => Record<string, any>;
+  trace?: "off" | "basic" | "full";
+  logger?: Logger;  // { debug?, info?, warn?, error? } — passed to tools via ToolContext
 }
 ```
-- `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (httpCall, upperCase, lowerCase, findObject, pickFirst, toArray) is always included; user-provided tools are shallow-merged on top. All `std` tools are callable with or without the `std.` prefix. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, httpCall: createHttpCall(fetch, myCache) } }`.
+- `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray) is always included; user-provided tools are shallow-merged on top. All `std` tools are callable with or without the `std.` prefix. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, myTool: fn } }`.
+- `logger` — structured logger (pino, winston, `console`, or any compatible interface with `debug`, `info`, `warn`, `error` methods). Passed to every tool via `ToolContext`. Defaults to silent no-ops. The `std.audit` tool uses `context.logger.info` automatically — no factory needed.
 - `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
 ### Context access
@@ -321,7 +328,7 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all force entries in `bridge.forces` and eagerly schedules their target trunks via `schedule()`. **Critical forces** (no `catchError`) return their promises; the engine awaits them alongside data resolution and propagates errors. **Fire-and-forget forces** (`catchError: true`, from `force handle ?? null` syntax) have `.catch(() => {})` to suppress errors
 3. `response()` finds matching wires for the current path
 4. For each wire source, calls `pullSingle(ref)` which calls `schedule(target)` if not yet in state
-5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function
+5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function with `(input, toolContext)` — `toolContext` carries the engine logger
 6. Result stored in state, downstream resolvers pick from it
 
 ### Multi-wire null-coalescing (was: `Promise.any()`)
@@ -369,7 +376,10 @@ Firing order when all three are present: `on error` → `||` → `??`. Each laye
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
 ### Namespaced tools and `std` is always bundled
-`builtinTools` is a nested object: `{ std: { httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, all built-in tools are callable with or without the `std.` prefix (e.g. both `httpCall` and `std.httpCall` work). The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map, falling back to `std.*` for unqualified names.
+`builtinTools` is a nested object: `{ std: { audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, all built-in tools are callable with or without the `std.` prefix (e.g. both `httpCall` and `std.httpCall` work). The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map, falling back to `std.*` for unqualified names.
+
+### ToolContext — unified tool communication channel
+Every tool function receives a second argument `context?: ToolContext` containing `{ logger }`. The engine constructs this from `BridgeOptions.logger` and passes it to every `callTool()` invocation. Tools that need logging (like `std.audit`) read `context.logger[level]` — no factory injection needed. All tools share the same `(input, context?) => result` signature.
 
 ### httpCall caching
 `createHttpCall(fetchFn?, cacheStore?)` accepts an optional `CacheStore` for response caching. When a tool sets `cache = <seconds>`, httpCall caches responses by `method + URL + body` with TTL eviction. Default store: in-memory `Map`. Users can pass Redis or any key-value store implementing `{ get(key): any, set(key, value, ttl): void }` — both sync and async are supported.
@@ -390,7 +400,7 @@ test/
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
   force-wire.test.ts      — force statement: parser tests (force <handle>, force <handle> ?? null), serializer roundtrip, critical-by-default error propagation, fire-and-forget error suppression, parallel timing
   resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
-  builtin-tools.test.ts   — built-in tools: unit tests, bundle shape, default/override behaviour, e2e with bridge, inline with syntax
+  builtin-tools.test.ts   — built-in tools: unit tests, bundle shape, default/override behaviour, e2e with bridge, inline with syntax, audit tool + force e2e
   _gateway.ts             — test helper (not a test file, not picked up by test runner)
   property-search.bridge  — fixture .bridge file used by property-search.test.ts
 ```
@@ -398,7 +408,7 @@ test/
 Test runner command: `node --import tsx/esm --test test/*.test.ts`  
 `_gateway.ts` starts with `_` so it does NOT match `test/*.test.ts` glob. That's intentional.
 
-**224 tests, all passing.**
+**409 tests, all passing.**
 
 ---
 

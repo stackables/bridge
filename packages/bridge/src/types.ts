@@ -144,10 +144,27 @@ export type ToolWire =
   | { kind: "onError"; source: string };
 
 /**
+ * Context passed to every tool function as the second argument.
+ *
+ * Provides access to engine services (logger, etc.) without polluting the
+ * input object.  Tools that don't need it simply ignore the second arg.
+ */
+export type ToolContext = {
+  /** Structured logger — same instance configured via `BridgeOptions.logger`.
+   *  Defaults to silent no-ops when no logger is configured. */
+  logger: {
+    debug?: (...args: any[]) => void;
+    info?: (...args: any[]) => void;
+    warn?: (...args: any[]) => void;
+    error?: (...args: any[]) => void;
+  };
+};
+
+/**
  * Tool call function — the signature for registered tool functions.
  *
- * Receives a fully-built nested input object and returns the response.
- * The engine builds the input from tool wires + bridge wires.
+ * Receives a fully-built nested input object and an optional `ToolContext`
+ * providing access to the engine's logger and other services.
  *
  * Example (httpCall):
  *   input = { baseUrl: "https://...", method: "GET", path: "/geocode",
@@ -155,6 +172,7 @@ export type ToolWire =
  */
 export type ToolCallFn = (
   input: Record<string, any>,
+  context?: ToolContext,
 ) => Promise<Record<string, any>>;
 
 /**

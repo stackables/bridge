@@ -776,6 +776,7 @@ critical and fire-and-forget forces can coexist:
 
 | Tool | Description |
 |---|---|
+| `audit` | Log all inputs via the configured logger |
 | `upperCase` | Convert string to UPPER CASE |
 | `lowerCase` | Convert string to lower case |
 | `pickFirst` | Take the first element of an array |
@@ -789,6 +790,30 @@ transforms:
 o.name <- upperCase:api.name
 o.first <- pickFirst:api.results
 ```
+
+### `std.audit` — Side-effect logging tool
+
+The `audit` tool logs every input it receives through the configured logger. Wire any number of inputs to it and force the handle:
+
+```bridge
+bridge Mutation.createOrder {
+  with std.audit as audit
+  with orderApi as api
+  with input as i
+  with output as o
+
+  api.product <- i.product
+  audit.action = "createOrder"
+  audit.userId <- i.userId
+  audit.orderId <- api.id
+  force audit
+
+  o.id <- api.id
+}
+```
+
+The tool returns its input as a passthrough, so output wires *can* read from
+it (e.g. `o.auditId <- audit.id`)
 
 ### `math` namespace — Math and comparison tools
 

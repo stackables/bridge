@@ -6,4 +6,4 @@ export { executeBridge } from "./execute-bridge.ts";
 export type { ExecuteBridgeOptions, ExecuteBridgeResult } from "./execute-bridge.ts";
 export { builtinTools, std, math, createHttpCall } from "./tools/index.ts";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
-export type { CacheStore, ConstDef, Instruction, ToolCallFn, ToolDef, ToolMap } from "./types.ts";
+export type { CacheStore, ConstDef, Instruction, ToolCallFn, ToolContext, ToolDef, ToolMap } from "./types.ts";

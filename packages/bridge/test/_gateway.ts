@@ -2,13 +2,15 @@ import { createSchema, createYoga } from "graphql-yoga";
 import type { InstructionSource } from "../src/bridge-transform.ts";
 import { bridgeTransform, useBridgeTracing } from "../src/bridge-transform.ts";
 import type { ToolMap } from "../src/types.ts";
-import type { TraceLevel } from "../src/ExecutionTree.ts";
+import type { Logger, TraceLevel } from "../src/ExecutionTree.ts";
 
 type GatewayOptions = {
   context?: Record<string, any>;
   tools?: ToolMap;
   /** Enable tool-call tracing — `"basic"` for timings only, `"full"` for everything, `"off"` to disable (default) */
   trace?: TraceLevel;
+  /** Structured logger passed to the engine (and to tools via ToolContext) */
+  logger?: Logger;
 };
 
 export function createGateway(
@@ -23,6 +25,7 @@ export function createGateway(
     schema: bridgeTransform(schema, instructions, {
       tools: options?.tools,
       trace: tracing,
+      logger: options?.logger,
     }),
     plugins: tracing !== "off" ? [useBridgeTracing()] : [],
     context: () => ({

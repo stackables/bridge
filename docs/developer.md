@@ -100,6 +100,24 @@ type NodeRef = {
 };
 ```
 
+**`ToolContext`** — communication channel from engine to every tool function:
+```typescript
+type ToolContext = {
+  logger: {
+    debug?: (...args: any[]) => void;
+    info?: (...args: any[]) => void;
+    warn?: (...args: any[]) => void;
+    error?: (...args: any[]) => void;
+  };
+};
+```
+Constructed by `callTool()` from `BridgeOptions.logger` and passed as the second argument to every tool function. Tools that need logging (like `std.audit`) read `context.logger.info` instead of requiring factory injection.
+
+**`ToolCallFn`** — the function signature for all tools:
+```typescript
+type ToolCallFn = (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>;
+```
+
 **`Wire`** — a directed data connection:
 ```typescript
 type Wire =
@@ -199,11 +217,17 @@ Child fields receive the parent `ExecutionTree` as their `source` and call `sour
 1. Create `src/tools/my-tool.ts`:
 
 ```typescript
-export function myTool(input: Record<string, any>): Promise<Record<string, any>> {
+import type { ToolContext } from "../types.ts";
+
+export function myTool(input: Record<string, any>, context?: ToolContext): Promise<Record<string, any>> {
   const { thing } = input;
+  // Tools can access the engine logger via context:
+  // context?.logger?.info?.("myTool called", input);
   return Promise.resolve({ result: String(thing).toUpperCase() });
 }
 ```
+
+Every tool receives `(input, context?)`. The `context.logger` is the engine’s logger from `BridgeOptions.logger`. If you don’t need logging, ignore the second argument.
 
 2. Export from `src/tools/index.ts` and add to the `std` object:
 

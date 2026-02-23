@@ -548,8 +548,7 @@ o <- api.items[] as item {
 The Bridge ships with built-in tools under the `std` namespace, always available by default. All tools (including `httpCall`) live under `std` and can be referenced with or without the `std.` prefix.
 
 | Tool | Input | Output | Description |
-| --- | --- | --- | --- |
-| `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
+| --- | --- | --- | --- || `audit` | `{ ...any, level?: string }` | passthrough (same object) | Logs all inputs via the engine logger (`BridgeOptions.logger`). Level defaults to `info`; override with `audit.level = "warn"`. || `httpCall` | `{ baseUrl, method?, path?, headers?, cache?, ...fields }` | JSON response | REST API caller. GET fields → query params; POST/PUT/PATCH/DELETE → JSON body. `cache` = TTL in seconds (0 = off). |
 | `upperCase` | `{ in: string }` | `string` | Converts `in` to UPPER CASE. |
 | `lowerCase` | `{ in: string }` | `string` | Converts `in` to lower case. |
 | `findObject` | `{ in: any[], ...criteria }` | `object | undefined` | Finds the first object in `in` where all criteria match. |
