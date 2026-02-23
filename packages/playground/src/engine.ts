@@ -8,12 +8,55 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
 } from "@stackables/bridge";
-import type { BridgeDiagnostic, ToolTrace, Logger } from "@stackables/bridge";
+import type {
+  BridgeDiagnostic,
+  ToolTrace,
+  Logger,
+  CacheStore,
+} from "@stackables/bridge";
 import {
   bridgeTransform,
   builtinTools,
   getBridgeTraces,
+  createHttpCall,
 } from "@stackables/bridge";
+
+// ── Playground HTTP cache: module-level, clearable from the UI ────────────────
+
+const _httpCacheMap = new Map<string, { value: unknown; expiresAt: number }>();
+
+/** Per-run callback — set before each runBridge(), cleared after. */
+let _onCacheHit: ((key: string) => void) | null = null;
+
+const playgroundHttpCache: CacheStore = {
+  get(key) {
+    const entry = _httpCacheMap.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      _httpCacheMap.delete(key);
+      return undefined;
+    }
+    _onCacheHit?.(key);
+    return entry.value;
+  },
+  set(key, value, ttlSeconds) {
+    if (ttlSeconds <= 0) return;
+    _httpCacheMap.set(key, {
+      value,
+      expiresAt: Date.now() + ttlSeconds * 1000,
+    });
+  },
+};
+
+const playgroundHttpCall = createHttpCall(
+  globalThis.fetch,
+  playgroundHttpCache,
+);
+
+/** Flush all cached HTTP responses in the playground. */
+export function clearHttpCache(): void {
+  _httpCacheMap.clear();
+}
 import { buildSchema, execute, parse as parseGql } from "graphql";
 
 export type { ToolTrace };
@@ -131,7 +174,10 @@ export async function runBridge(
   let transformedSchema;
   try {
     transformedSchema = bridgeTransform(schema, instructions, {
-      tools: builtinTools,
+      tools: {
+        ...builtinTools,
+        std: { ...builtinTools.std, httpCall: playgroundHttpCall },
+      },
       trace: "full",
       logger: collectingLogger,
     });
@@ -170,6 +216,18 @@ export async function runBridge(
   }
 
   // 6. Execute
+  // Wire cache-hit notifications into this run's log stream (cleared in finally)
+  _onCacheHit = (key: string) => {
+    try {
+      const url = new URL(key);
+      logs.push({
+        level: "info",
+        message: `⚡ cache hit: ${url.pathname}${url.search}`,
+      });
+    } catch {
+      logs.push({ level: "info", message: `⚡ cache hit: ${key}` });
+    }
+  };
   try {
     const result = await execute({
       schema: transformedSchema,
@@ -196,5 +254,7 @@ export async function runBridge(
         `Execution error: ${err instanceof Error ? err.message : String(err)}`,
       ],
     };
+  } finally {
+    _onCacheHit = null;
   }
 }

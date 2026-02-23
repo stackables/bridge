@@ -12,16 +12,16 @@ export const examples: Example[] = [
     name: "String Transform",
     description:
       "Use std.upperCase and std.lowerCase to transform string fields using pipe syntax",
-    schema: /* GraphQL */ `
-      type Query {
-        greet(name: String!): Greeting
-      }
+    schema: `
+type Query {
+  greet(name: String!): Greeting
+}
 
-      type Greeting {
-        message: String
-        upper: String
-        lower: String
-      }
+type Greeting {
+  message: String
+  upper: String
+  lower: String
+}
     `,
     bridge: `version 1.4
 
@@ -53,16 +53,16 @@ bridge Query.greet {
     name: "Constants",
     description:
       "Hardcode constant values directly in bridge files using the = assignment syntax",
-    schema: /* GraphQL */ `
-      type Query {
-        config: Config
-      }
+    schema: `
+type Query {
+  config: Config
+}
 
-      type Config {
-        version: String
-        env: String
-        label: String
-      }
+type Config {
+  version: String
+  env: String
+  label: String
+}
     `,
     bridge: `version 1.4
 
@@ -91,15 +91,15 @@ bridge Query.config {
     name: "Context",
     description:
       "Access the GraphQL context inside bridge files using 'with context'",
-    schema: /* GraphQL */ `
-      type Query {
-        profile: Profile
-      }
+    schema: `
+type Query {
+  profile: Profile
+}
 
-      type Profile {
-        userId: String
-        role: String
-      }
+type Profile {
+  userId: String
+  role: String
+}
     `,
     bridge: `version 1.4
 
@@ -132,15 +132,15 @@ bridge Query.profile {
     name: "HTTP Tool",
     description:
       "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
-    schema: /* GraphQL */ `
-      type Query {
-        location(city: String!): Location
-      }
+    schema: `
+type Query {
+  location(city: String!): Location
+}
 
-      type Location {
-        lat: Float
-        lon: Float
-      }
+type Location {
+  lat: Float
+  lon: Float
+}
     `,
     bridge: `version 1.4
 
@@ -177,38 +177,38 @@ bridge Query.location {
     name: "SBB Train Search",
     description:
       "Query the Swiss public transport API to find train connections between two stations",
-    schema: /* GraphQL */ `
-      type Station {
-        id: ID
-        name: String!
-      }
+    schema: `
+type Station {
+  id: ID
+  name: String!
+}
 
-      type StopEvent {
-        station: Station!
-        plannedTime: String!
-        actualTime: String
-        delayMinutes: Int
-        platform: String
-      }
+type StopEvent {
+  station: Station!
+  plannedTime: String!
+  actualTime: String
+  delayMinutes: Int
+  platform: String
+}
 
-      type Leg {
-        origin: StopEvent!
-        destination: StopEvent!
-        trainName: String
-      }
+type Leg {
+  origin: StopEvent!
+  destination: StopEvent!
+  trainName: String
+}
 
-      type Journey {
-        id: ID!
-        provider: String!
-        departureTime: String!
-        arrivalTime: String!
-        transfers: Int!
-        legs: [Leg!]!
-      }
+type Journey {
+  id: ID!
+  provider: String!
+  departureTime: String!
+  arrivalTime: String!
+  transfers: Int!
+  legs: [Leg!]!
+}
 
-      type Query {
-        searchTrains(from: String!, to: String!): [Journey!]!
-      }
+type Query {
+  searchTrains(from: String!, to: String!): [Journey!]!
+}
     `,
     bridge: `version 1.4
 
@@ -216,6 +216,7 @@ tool sbbApi from std.httpCall {
   .baseUrl = "https://transport.opendata.ch/v1"
   .method = GET
   .path = "/connections"
+  .cache = 60
   on error = { "connections": [] }
 }
 
@@ -297,15 +298,15 @@ bridge Query.searchTrains {
     name: "Passthrough",
     description:
       "Pass input arguments directly to output fields with no transformation",
-    schema: /* GraphQL */ `
-      type Query {
-        echo(text: String!, count: Int): EchoResult
-      }
+    schema: `
+type Query {
+  echo(text: String!, count: Int): EchoResult
+}
 
-      type EchoResult {
-        text: String
-        count: Int
-      }
+type EchoResult {
+  text: String
+  count: Int
+}
     `,
     bridge: `version 1.4
 
@@ -333,16 +334,16 @@ bridge Query.echo {
     name: "Expressions",
     description:
       "Use inline math and comparison operators to transform values directly in wire assignments",
-    schema: /* GraphQL */ `
-      type Query {
-        pricing(dollars: Float!, quantity: Int!, minOrder: Float): PricingResult
-      }
+    schema: `
+type Query {
+  pricing(dollars: Float!, quantity: Int!, minOrder: Float): PricingResult
+}
 
-      type PricingResult {
-        cents: Float
-        total: Float
-        eligible: Boolean
-      }
+type PricingResult {
+  cents: Float
+  total: Float
+  eligible: Boolean
+}
     `,
     bridge: `version 1.4
 
@@ -372,20 +373,20 @@ bridge Query.pricing {
     name: "Conditional Wire (Ternary)",
     description:
       "Select between two sources based on a condition — only the chosen branch is evaluated",
-    schema: /* GraphQL */ `
-      type Query {
-        pricing(
-          isPro: Boolean!
-          proPrice: Float!
-          basicPrice: Float!
-        ): PricingResult
-      }
+    schema: `
+type Query {
+  pricing(
+    isPro: Boolean!
+    proPrice: Float!
+    basicPrice: Float!
+  ): PricingResult
+}
 
-      type PricingResult {
-        tier: String
-        price: Float
-        discount: Float
-      }
+type PricingResult {
+  tier: String
+  price: Float
+  discount: Float
+}
     `,
     bridge: `version 1.4
 
