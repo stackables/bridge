@@ -164,6 +164,16 @@ Transformed Bridge from a naive script executor into a cost-based declarative da
 
 **API:** `trace?: "off" | "basic" | "full"` (default `"off"`). All instrumentation funnels through a single `callTool()` method — one instrumentation site, three tool-call paths covered.
 
+### Inline Expressions (Math & Comparisons) -- DONE
+
+**Problem:** E-commerce and business logic use cases require arithmetic transformations and boolean conditions directly in wire assignments. Without expressions, users must create custom tools for trivial operations like `price * 100` or `age >= 18`.
+
+**Solution:** Infix expression syntax on the right side of `<-`: `o.cents <- i.dollars * 100`, `o.eligible <- i.age >= 18`. Supports `*`, `/`, `+`, `-` (arithmetic) and `==`, `!=`, `>`, `>=`, `<`, `<=` (comparison). Standard operator precedence applies (`*`/`/` before `+`/`-` before comparisons). Comparisons return native booleans (`true`/`false`).
+
+Expressions are **parser-level syntactic sugar**: the Chevrotain parser desugars them into synthetic tool forks using built-in `math` namespace tools (`multiply`, `divide`, `add`, `subtract`, `eq`, `neq`, `gt`, `gte`, `lt`, `lte`). The execution engine never sees expression syntax — it processes standard pull/constant wires. This keeps `inferCost`, `pull`, and OpenTelemetry logic clean.
+
+Expressions compose with existing operators: `||` null coalesce, `??` error coalesce, `<-!` force wires, and `[] as iter { }` array mapping all work with expression results.
+
 ### ~~Fat Wire IR Refactor~~ -- DROPPED
 
 **Original concern:** The Wire type carries logic (`nullFallback`, `fallbackRef`, `force`, `pipe`), forcing heavy branching in the execution loop. Proposed splitting into separate `GraphNode` and `Edge` types.
