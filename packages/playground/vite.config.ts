@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@stackables/bridge": fileURLToPath(new URL("../bridge/src/index.ts", import.meta.url)),
     },
-    conditions: ["development", "import", "module", "browser", "default"],
   },
 });
