@@ -25,9 +25,10 @@ keeps your API bill sane.
 9. [Execution Model](#9-execution-model)
 10. [Array Mapping](#10-array-mapping)
 11. [Pipe Operator](#11-pipe-operator)
-12. [Tool Inheritance](#12-tool-inheritance)
-13. [Force Wires (`<-!`)](#13-force-wires--)
-14. [Built-in Tools](#14-built-in-tools)
+12. [Inline Expressions](#12-inline-expressions)
+13. [Tool Inheritance](#13-tool-inheritance)
+14. [Force Wires (`<-!`)](#14-force-wires--)
+15. [Built-in Tools](#15-built-in-tools)
 
 ---
 
@@ -495,7 +496,106 @@ The `convert` tool receives both the piped value and the `currency` parameter.
 
 ---
 
-## 12. Tool Inheritance
+## 12. Inline Expressions
+
+Perform arithmetic and comparison operations directly in wire assignments:
+
+```bridge
+o.cents <- i.dollars * 100
+o.total <- i.price * i.quantity
+o.eligible <- i.age >= 18
+o.isActive <- i.status == "active"
+```
+
+### Supported operators
+
+| Category | Operators | Description |
+|---|---|---|
+| Arithmetic | `*` `/` `+` `-` | Multiply, divide, add, subtract |
+| Comparison | `==` `!=` `>` `>=` `<` `<=` | Returns `true` or `false` |
+
+### Operator precedence
+
+Standard math precedence applies:
+
+1. `*` `/` — highest precedence (evaluated first)
+2. `+` `-` — medium precedence
+3. `==` `!=` `>` `>=` `<` `<=` — lowest precedence (evaluated last)
+
+```bridge
+o.total <- i.base + i.tax * 2       // = i.base + (i.tax * 2)
+o.flag  <- i.price * i.qty > 100    // = (i.price * i.qty) > 100
+```
+
+### Chained expressions
+
+Multiple operators can be chained:
+
+```bridge
+o.result <- i.times * 5 / 10
+o.flag   <- i.times * 2 > 6
+```
+
+### Expressions with fallbacks
+
+Expressions work with `||` (null coalesce) and `??` (error coalesce):
+
+```bridge
+o.cents <- api.price * 100 ?? -1
+```
+
+If `api.price` throws, the `??` fallback catches the error and returns `-1`.
+
+### Operand types
+
+The right-hand operand of each operator can be:
+
+- **Number literal**: `100`, `1.2`, `-5`
+- **String literal**: `"active"` (for equality comparisons)
+- **Boolean literal**: `true` (coerced to `1`), `false` (coerced to `0`)
+- **Source reference**: `i.quantity`, `api.price`
+
+### Non-number handling
+
+All arithmetic operands are coerced via JavaScript `Number()`:
+
+| Input | Coerced to | Example |
+|---|---|---|
+| `null` | `0` | `null * 100 = 0` |
+| `undefined` | `NaN` | `undefined + 5 = NaN` |
+| Numeric string | Number | `"10" * 5 = 50` |
+| Non-numeric string | `NaN` | `"hello" + 1 = NaN` |
+
+Comparison operators with `NaN` always return `false`.
+
+### Expressions in array mapping
+
+Expressions work inside `[] as iter { }` element blocks:
+
+```bridge
+o.items <- api.items[] as item {
+  .name  <- item.name
+  .cents <- item.price * 100
+}
+```
+
+### How it works
+
+Expressions are **syntactic sugar**. The parser desugars them into synthetic
+tool forks using the built-in `math` namespace tools. The execution engine
+never sees expression syntax — it processes standard pull and constant wires.
+
+For example, `o.total <- i.price * i.qty` becomes:
+
+```
+Wire: i.price → math.multiply.a
+Wire: i.qty   → math.multiply.b
+Wire: math.multiply → o.total
+```
+
+---
+
+## 13. Tool Inheritance
 
 Tools can extend other tools to override or add wires:
 
@@ -530,7 +630,7 @@ When a child extends a parent:
 
 ---
 
-## 13. Force Wires (`<-!`)
+## 14. Force Wires (`<-!`)
 
 Force wires trigger tool execution eagerly, even if the output field is never
 requested by the GraphQL query:
@@ -544,9 +644,9 @@ immediately when the bridge starts, not when the field is demanded.
 
 ---
 
-## 14. Built-in Tools
+## 15. Built-in Tools
 
-The `std` namespace provides built-in transform tools:
+### `std` namespace — Transform tools
 
 | Tool | Description |
 |---|---|
@@ -558,6 +658,30 @@ The `std` namespace provides built-in transform tools:
 
 These are available without explicit registration and can be used as pipe
 transforms:
+
+```bridge
+o.name <- upperCase:api.name
+o.first <- pickFirst:api.results
+```
+
+### `math` namespace — Math and comparison tools
+
+| Tool | Description |
+|---|---|
+| `multiply` | Multiply two numbers (`a * b`) |
+| `divide` | Divide two numbers (`a / b`) |
+| `add` | Add two numbers (`a + b`) |
+| `subtract` | Subtract two numbers (`a - b`) |
+| `eq` | Strict equality (`a === b`), returns `true` or `false` |
+| `neq` | Strict inequality (`a !== b`), returns `true` or `false` |
+| `gt` | Greater than (`a > b`), returns `true` or `false` |
+| `gte` | Greater than or equal (`a >= b`), returns `true` or `false` |
+| `lt` | Less than (`a < b`), returns `true` or `false` |
+| `lte` | Less than or equal (`a <= b`), returns `true` or `false` |
+
+The `math` tools are used automatically by inline expression syntax
+(see [Section 12](#12-inline-expressions)). They can also be used
+explicitly as pipe transforms.
 
 ```bridge
 o.name <- upperCase:api.name

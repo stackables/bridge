@@ -55,6 +55,14 @@ export const ForceArrow    = createToken({ name: "ForceArrow",    pattern: /<-!/
 export const Arrow         = createToken({ name: "Arrow",         pattern: /<-/ });
 export const NullCoalesce  = createToken({ name: "NullCoalesce",  pattern: /\|\|/ });
 export const ErrorCoalesce = createToken({ name: "ErrorCoalesce", pattern: /\?\?/ });
+export const GreaterEqual  = createToken({ name: "GreaterEqual",  pattern: />=/ });
+export const LessEqual     = createToken({ name: "LessEqual",     pattern: /<=/ });
+export const DoubleEquals  = createToken({ name: "DoubleEquals",  pattern: /==/ });
+export const NotEquals     = createToken({ name: "NotEquals",     pattern: /!=/ });
+export const GreaterThan   = createToken({ name: "GreaterThan",   pattern: />/ });
+export const LessThan      = createToken({ name: "LessThan",      pattern: /</ });
+export const Star          = createToken({ name: "Star",          pattern: /\*/ });
+export const Plus          = createToken({ name: "Plus",          pattern: /\+/ });
 export const LCurly        = createToken({ name: "LCurly",        pattern: /\{/ });
 export const RCurly        = createToken({ name: "RCurly",        pattern: /\}/ });
 export const LSquare       = createToken({ name: "LSquare",       pattern: /\[/ });
@@ -82,8 +90,11 @@ export const NullLiteral  = createToken({ name: "NullLiteral",  pattern: /null/,
 
 export const PathToken = createToken({
   name: "PathToken",
-  pattern: /\/[\w./-]*/,
+  pattern: /\/[\w./-]+/,
 });
+
+export const Slash = createToken({ name: "Slash", pattern: /\// });
+export const Minus = createToken({ name: "Minus", pattern: /-/ });
 
 // ── Token ordering ─────────────────────────────────────────────────────────
 
@@ -95,6 +106,14 @@ export const allTokens = [
   Arrow,
   NullCoalesce,
   ErrorCoalesce,
+  GreaterEqual,
+  LessEqual,
+  DoubleEquals,
+  NotEquals,
+  GreaterThan,
+  LessThan,
+  Star,
+  Plus,
   LCurly,
   RCurly,
   LSquare,
@@ -122,7 +141,9 @@ export const allTokens = [
   FalseLiteral,
   NullLiteral,
   PathToken,
+  Slash,
   NumberLiteral,
+  Minus,
   Identifier,
 ];
 

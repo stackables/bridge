@@ -1,0 +1,43 @@
+version 1.4
+
+# Swiss public transport API — connects to transport.opendata.ch
+# Returns an array of journey connections with full leg details.
+# No authentication required.
+
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  on error = { "connections": [] }
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.connections[] as c {
+    .id <- c.from.station.id
+    .provider = "SBB"
+    .departureTime <- c.from.departure
+    .arrivalTime <- c.to.arrival
+    .transfers <- c.transfers || 0
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+
+      .origin.station.id <- s.departure.station.id
+      .origin.station.name <- s.departure.station.name
+      .origin.plannedTime <- s.departure.departure
+      .origin.platform <- s.departure.platform
+
+      .destination.station.id <- s.arrival.station.id
+      .destination.station.name <- s.arrival.station.name
+      .destination.plannedTime <- s.arrival.arrival
+      .destination.platform <- s.arrival.platform
+    }
+  }
+}

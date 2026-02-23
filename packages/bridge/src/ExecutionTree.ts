@@ -36,10 +36,10 @@ function roundMs(ms: number): number {
  * All methods default to silent no-ops when no logger is provided.
  */
 export interface Logger {
-  debug: (...args: any[]) => void;
-  info: (...args: any[]) => void;
-  warn: (...args: any[]) => void;
-  error: (...args: any[]) => void;
+  debug?: (...args: any[]) => void;
+  info?: (...args: any[]) => void;
+  warn?: (...args: any[]) => void;
+  error?: (...args: any[]) => void;
 }
 
 /** Matches graphql's internal Path type (not part of the public exports map) */
@@ -219,7 +219,10 @@ export class ExecutionTree {
     if (typeof fn === "function") return fn;
     // Fall back to std namespace (builtins are callable without std. prefix)
     const stdFn = (this.toolFns as any)?.std?.[name];
-    return typeof stdFn === "function" ? stdFn : undefined;
+    if (typeof stdFn === "function") return stdFn;
+    // Fall back to math namespace (math/comparison tools)
+    const mathFn = (this.toolFns as any)?.math?.[name];
+    return typeof mathFn === "function" ? mathFn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */
@@ -388,9 +391,17 @@ export class ExecutionTree {
   }
 
   schedule(target: Trunk): any {
-    // Delegate to parent (shadow trees don't schedule directly)
+    // Delegate to parent (shadow trees don't schedule directly) unless
+    // the target fork has bridge wires sourced from element data.
     if (this.parent) {
-      return this.parent.schedule(target);
+      const forkWires =
+        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const hasElementSource = forkWires.some(
+        (w) => "from" in w && !!w.from.element,
+      );
+      if (!hasElementSource) {
+        return this.parent.schedule(target);
+      }
     }
 
     return (async () => {
@@ -518,7 +529,7 @@ export class ExecutionTree {
               }),
             );
           }
-          logger?.debug("[bridge] tool %s (%s) completed in %dms", toolName, fnName, durationMs);
+          logger?.debug?.("[bridge] tool %s (%s) completed in %dms", toolName, fnName, durationMs);
           return result;
         } catch (err) {
           const durationMs = roundMs(performance.now() - wallStart);
@@ -542,7 +553,7 @@ export class ExecutionTree {
             code: SpanStatusCode.ERROR,
             message: (err as Error).message,
           });
-          logger?.error("[bridge] tool %s (%s) failed: %s", toolName, fnName, (err as Error).message);
+          logger?.error?.("[bridge] tool %s (%s) failed: %s", toolName, fnName, (err as Error).message);
           throw err;
         } finally {
           span.end();
@@ -612,7 +623,7 @@ export class ExecutionTree {
     let result: any = resolved;
     for (const segment of ref.path) {
       if (Array.isArray(result) && !/^\d+$/.test(segment)) {
-        this.logger?.warn(
+        this.logger?.warn?.(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
         );
       }
@@ -750,6 +761,209 @@ export class ExecutionTree {
         return errorFallbackWire.fallback;
       }
     });
+  }
+
+  /**
+   * Resolve an output field by path for use outside of a GraphQL resolver.
+   *
+   * This is the non-GraphQL equivalent of what `response()` does per field:
+   * it finds all wires targeting `this.trunk` at `path` and resolves them.
+   *
+   * Used by `executeBridge()` so standalone bridge execution does not need to
+   * fabricate GraphQL Path objects to pull output data.
+   *
+   * @param path - Output field path, e.g. `["lat"]`. Pass `[]` for whole-output
+   *               array bridges (`o <- items[] as x { ... }`).
+   * @param array - When `true` and the result is an array, wraps each element
+   *               in a shadow tree (mirrors `response()` array handling).
+   */
+  async pullOutputField(path: string[], array = false): Promise<unknown> {
+    const matches =
+      this.bridge?.wires.filter(
+        (w) => sameTrunk(w.to, this.trunk) && pathEquals(w.to.path, path),
+      ) ?? [];
+    if (matches.length === 0) return undefined;
+    const result = this.resolveWires(matches);
+    if (!array) return result;
+    const items = (await result) as any[];
+    return items.map((item) => {
+      const s = this.shadow();
+      s.state[trunkKey({ ...this.trunk, element: true })] = item;
+      return s;
+    });
+  }
+
+  /**
+   * Execute the bridge end-to-end without GraphQL.
+   *
+   * Injects `input` as the trunk arguments, runs forced wires, then pulls
+   * and materialises every output field into a plain JS object (or array of
+   * objects for array-mapped bridges).
+   *
+   * This is the single entry-point used by `executeBridge()`.
+   */
+  async run(input: Record<string, unknown>): Promise<unknown> {
+    const bridge = this.bridge;
+    if (!bridge) {
+      throw new Error(
+        `No bridge definition found for ${this.trunk.type}.${this.trunk.field}`,
+      );
+    }
+
+    this.push(input);
+    this.executeForced();
+
+    const { type, field } = this.trunk;
+
+    // Is there a root-level wire targeting the output with path []?
+    const hasRootWire = bridge.wires.some(
+      (w) =>
+        "from" in w &&
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field &&
+        w.to.path.length === 0,
+    );
+
+    // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
+    // AND element-level wires (from.element === true).  A plain passthrough
+    // (`o <- api.user`) only has the root wire.
+    const hasElementWires = bridge.wires.some(
+      (w) =>
+        "from" in w &&
+        (w.from as NodeRef).element === true &&
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field,
+    );
+
+    if (hasRootWire && hasElementWires) {
+      const shadows = (await this.pullOutputField([], true)) as ExecutionTree[];
+      return this.materializeShadows(shadows, []);
+    }
+
+    // Whole-object passthrough: `o <- api.user`
+    if (hasRootWire) {
+      return this.pullOutputField([]);
+    }
+
+    // Object output — collect unique top-level field names
+    const outputFields = new Set<string>();
+    for (const wire of bridge.wires) {
+      if (
+        wire.to.module === SELF_MODULE &&
+        wire.to.type === type &&
+        wire.to.field === field &&
+        wire.to.path.length > 0
+      ) {
+        outputFields.add(wire.to.path[0]!);
+      }
+    }
+
+    if (outputFields.size === 0) {
+      throw new Error(
+        `Bridge "${type}.${field}" has no output wires. ` +
+        `Ensure at least one wire targets the output (e.g. \`o.field <- ...\`).`,
+      );
+    }
+
+    const result: Record<string, unknown> = {};
+    await Promise.all(
+      [...outputFields].map(async (name) => {
+        result[name] = await this.pullOutputField([name]);
+      }),
+    );
+    return result;
+  }
+
+  /**
+   * Recursively convert shadow trees into plain JS objects.
+   *
+   * Wire categories at each level (prefix = P):
+   *   Leaf  — `to.path = [...P, name]`, no deeper paths → scalar
+   *   Array — direct wire AND deeper paths → pull as array, recurse
+   *   Nested object — only deeper paths, no direct wire → pull each
+   *             full path and assemble via setNested
+   */
+  private async materializeShadows(
+    items: ExecutionTree[],
+    pathPrefix: string[],
+  ): Promise<unknown[]> {
+    const wires = this.bridge!.wires;
+    const { type, field } = this.trunk;
+
+    const directFields = new Set<string>();
+    const deepPaths = new Map<string, string[][]>();
+
+    for (const wire of wires) {
+      const p = wire.to.path;
+      if (
+        wire.to.module !== SELF_MODULE ||
+        wire.to.type !== type ||
+        wire.to.field !== field
+      )
+        continue;
+      if (p.length <= pathPrefix.length) continue;
+      if (!pathPrefix.every((seg, i) => p[i] === seg)) continue;
+
+      const name = p[pathPrefix.length]!;
+      if (p.length === pathPrefix.length + 1) {
+        directFields.add(name);
+      } else {
+        let arr = deepPaths.get(name);
+        if (!arr) {
+          arr = [];
+          deepPaths.set(name, arr);
+        }
+        arr.push(p);
+      }
+    }
+
+    return Promise.all(
+      items.map(async (shadow) => {
+        const obj: Record<string, unknown> = {};
+        const tasks: Promise<void>[] = [];
+
+        for (const name of directFields) {
+          const fullPath = [...pathPrefix, name];
+          const hasDeeper = deepPaths.has(name);
+          tasks.push(
+            (async () => {
+              if (hasDeeper) {
+                const children = await shadow.pullOutputField(fullPath, true);
+                obj[name] = Array.isArray(children)
+                  ? await this.materializeShadows(
+                      children as ExecutionTree[],
+                      fullPath,
+                    )
+                  : children;
+              } else {
+                obj[name] = await shadow.pullOutputField(fullPath);
+              }
+            })(),
+          );
+        }
+
+        for (const [name, paths] of deepPaths) {
+          if (directFields.has(name)) continue;
+          tasks.push(
+            (async () => {
+              const nested: Record<string, unknown> = {};
+              await Promise.all(
+                paths.map(async (fullPath) => {
+                  const value = await shadow.pullOutputField(fullPath);
+                  setNested(nested, fullPath.slice(pathPrefix.length + 1), value);
+                }),
+              );
+              obj[name] = nested;
+            })(),
+          );
+        }
+
+        await Promise.all(tasks);
+        return obj;
+      }),
+    );
   }
 
   async response(ipath: Path, array: boolean): Promise<any> {

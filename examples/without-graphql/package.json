@@ -1,0 +1,18 @@
+{
+  "name": "@stackables/bridge-example-without-graphql",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "weather": "node --import tsx/esm --conditions development cli.ts weather.bridge '{\"city\":\"Berlin\"}'",
+    "sbb": "node --import tsx/esm --conditions development cli.ts sbb.bridge '{\"from\":\"Bern\",\"to\":\"Zürich\"}'",
+    "e2e": "node --import tsx/esm --conditions development --test e2e.test.ts"
+  },
+  "dependencies": {
+    "@stackables/bridge": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "tsx": "^4.21.0"
+  }
+}
