@@ -445,17 +445,34 @@ export class ExecutionTree {
   schedule(target: Trunk): any {
     // Delegate to parent (shadow trees don't schedule directly) unless
     // the target fork has bridge wires sourced from element data,
-    // or the target is a __local binding (block-scoped with inside array maps).
+    // or a __local binding whose source chain touches element data.
     if (this.parent) {
-      if (target.module !== "__local") {
-        const forkWires =
-          this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-        const hasElementSource = forkWires.some(
-          (w) => "from" in w && !!w.from.element,
-        );
-        if (!hasElementSource) {
-          return this.parent.schedule(target);
-        }
+      const forkWires =
+        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const hasElementSource = forkWires.some(
+        (w) => "from" in w && !!w.from.element,
+      );
+      // For __local trunks, also check transitively: if the source is a
+      // pipe fork whose own wires reference element data, keep it local.
+      const hasTransitiveElementSource =
+        target.module === "__local" &&
+        forkWires.some((w) => {
+          if (!("from" in w)) return false;
+          const srcTrunk = {
+            module: w.from.module,
+            type: w.from.type,
+            field: w.from.field,
+            instance: w.from.instance,
+          };
+          return (
+            this.bridge?.wires.some(
+              (iw) =>
+                sameTrunk(iw.to, srcTrunk) && "from" in iw && !!iw.from.element,
+            ) ?? false
+          );
+        });
+      if (!hasElementSource && !hasTransitiveElementSource) {
+        return this.parent.schedule(target);
       }
     }
 

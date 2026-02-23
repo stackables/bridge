@@ -271,13 +271,55 @@ class BridgeParser extends CstParser {
    * Ambiguity fix: `target = value` and `target <- source` share the prefix
    * `addressPath`, so they're merged into `bridgeWire`.
    * `with` declarations start with WithKw and are unambiguous.
+   *
+   * `bridgeNodeAlias` handles `with <sourceExpr> as <alias>` where the source
+   * expression contains a pipe (`:`) — e.g. `with uc:i.category as upper`.
+   * It must come before `bridgeWithDecl` so the pipe syntax isn't mistaken
+   * for a plain tool declaration.
    */
   public bridgeBodyLine = this.RULE("bridgeBodyLine", () => {
     this.OR([
+      {
+        // Node alias with pipe: with <pipe:source> as <alias>
+        // GATE looks ahead for `:` before `{`, `}`, or end of tokens
+        // to distinguish from plain tool declarations.
+        GATE: () => {
+          if (this.LA(1).tokenType !== WithKw) return false;
+          // Scan ahead for a Colon (pipe separator) before AsKw
+          for (let i = 2; i <= 20; i++) {
+            const t = this.LA(i);
+            if (
+              t.tokenType === AsKw ||
+              t.tokenType === LCurly ||
+              t.tokenType === RCurly
+            )
+              return false;
+            if (t.isInsertedInRecovery !== undefined && t.isInsertedInRecovery)
+              return false;
+            if (t.tokenType === Colon) return true;
+          }
+          return false;
+        },
+        ALT: () => this.SUBRULE(this.bridgeNodeAlias),
+      },
       { ALT: () => this.SUBRULE(this.bridgeWithDecl) },
       { ALT: () => this.SUBRULE(this.bridgeForce) },
       { ALT: () => this.SUBRULE(this.bridgeWire) }, // merged constant + pull
     ]);
+  });
+
+  /**
+   * Node alias at bridge body level:
+   *   with <sourceExpr> as <alias>
+   *
+   * Creates a local __local binding that caches the result of the source
+   * expression. Subsequent wires can reference the alias as a handle.
+   */
+  public bridgeNodeAlias = this.RULE("bridgeNodeAlias", () => {
+    this.CONSUME(WithKw);
+    this.SUBRULE(this.sourceExpr, { LABEL: "nodeAliasSource" });
+    this.CONSUME(AsKw);
+    this.SUBRULE(this.nameToken, { LABEL: "nodeAliasName" });
   });
 
   /** force <handle> [?? null] */
@@ -1841,6 +1883,7 @@ function buildBridgeBody(
   const arrayIterators: Record<string, string> = {};
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
+  const deferredNodeAliases = new Set<CstNode>();
 
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
@@ -1909,6 +1952,14 @@ function buildBridgeBody(
       const handle = wc.refAlias
         ? extractNameToken((wc.refAlias as CstNode[])[0])
         : defaultHandle;
+
+      // Simple node alias: `with api.some.field as alias` where the root
+      // ("api") is already a declared handle. Defer to Step 1.5.
+      const rootName = lastDot !== -1 ? name.substring(0, name.indexOf(".")) : name;
+      if (wc.refAlias && handleRes.has(rootName)) {
+        deferredNodeAliases.add(withNode);
+        continue;
+      }
 
       checkDuplicate(handle);
       if (wc.refAlias) assertNotReserved(handle, lineNum, "handle alias");
@@ -2477,11 +2528,103 @@ function buildBridgeBody(
     return final.ref;
   }
 
+  // ── Step 1.5: Process top-level node alias declarations ────────────────
+  // `with <sourceExpr> as <alias>` at bridge body level (pipe-based).
+  // Also detect simple renames via bridgeWithDecl when the root is already
+  // a declared handle (e.g. `with api.some.complex.field as alias`).
+
+  for (const bodyLine of bodyLines) {
+    const c = bodyLine.children;
+
+    // Handle pipe-based node aliases: with uc:i.category as upper
+    const nodeAliasNode = (
+      c.bridgeNodeAlias as CstNode[] | undefined
+    )?.[0];
+    if (nodeAliasNode) {
+      const lineNum = line(findFirstToken(nodeAliasNode));
+      const sourceNode = sub(nodeAliasNode, "nodeAliasSource")!;
+      const alias = extractNameToken(sub(nodeAliasNode, "nodeAliasName")!);
+      assertNotReserved(alias, lineNum, "node alias");
+      if (handleRes.has(alias)) {
+        throw new Error(`Line ${lineNum}: Duplicate handle name "${alias}"`);
+      }
+
+      const sourceRef = buildSourceExpr(sourceNode, lineNum);
+
+      // Create __local trunk for the alias
+      const localRes: HandleResolution = {
+        module: "__local",
+        type: "Shadow",
+        field: alias,
+      };
+      handleRes.set(alias, localRes);
+
+      // Emit wire from source to local trunk
+      const localToRef: NodeRef = {
+        module: "__local",
+        type: "Shadow",
+        field: alias,
+        path: [],
+      };
+      wires.push({ from: sourceRef, to: localToRef });
+      continue;
+    }
+
+    // Handle simple renames deferred from Step 1:
+    // `with api.some.complex.field as alias` where root is already declared
+    const withNode = (
+      c.bridgeWithDecl as CstNode[] | undefined
+    )?.[0];
+    if (withNode && deferredNodeAliases.has(withNode)) {
+      const wc = withNode.children;
+      if (wc.refName && wc.refAlias) {
+        const name = extractDottedName((wc.refName as CstNode[])[0]);
+        const rootName = name.indexOf(".") !== -1
+          ? name.substring(0, name.indexOf("."))
+          : name;
+        if (handleRes.has(rootName)) {
+          const lineNum = line(findFirstToken(withNode));
+          const alias = extractNameToken((wc.refAlias as CstNode[])[0]);
+          assertNotReserved(alias, lineNum, "node alias");
+          if (handleRes.has(alias)) {
+            throw new Error(
+              `Line ${lineNum}: Duplicate handle name "${alias}"`,
+            );
+          }
+
+          // Parse dotted name as segments
+          const segments = name.split(".");
+          const sourceRoot = segments[0];
+          const sourceSegs = segments.slice(1);
+          const sourceRef = resolveAddress(sourceRoot, sourceSegs, lineNum);
+
+          // Create __local trunk for the alias
+          const localRes: HandleResolution = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+          };
+          handleRes.set(alias, localRes);
+
+          // Emit wire from source to local trunk
+          const localToRef: NodeRef = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+            path: [],
+          };
+          wires.push({ from: sourceRef, to: localToRef });
+        }
+      }
+    }
+  }
+
   // ── Step 2: Process wire lines ─────────────────────────────────────────
 
   for (const bodyLine of bodyLines) {
     const c = bodyLine.children;
     if (c.bridgeWithDecl) continue; // already processed
+    if (c.bridgeNodeAlias) continue; // already processed in Step 1.5
     if (c.bridgeForce) continue; // handled below
 
     const wireNode = (c.bridgeWire as CstNode[] | undefined)?.[0];
