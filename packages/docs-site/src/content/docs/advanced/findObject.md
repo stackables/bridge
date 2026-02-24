@@ -17,7 +17,7 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
     geocoder: async (input) => await geocodeService.lookup(input.q),
   },
 });
-// std.upperCase, std.lowerCase, httpCall, etc. are still available
+// std.str.toUpperCase, std.str.toLowerCase, httpCall, etc. are still available
 ```
 
 ### Standalone Mode

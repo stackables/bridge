@@ -28,10 +28,10 @@ need to register an OTel SDK in your application.
 
 Each tool call produces one span named **`bridge.tool`** with these attributes:
 
-| Attribute          | Value                                                                      |
-| ------------------ | -------------------------------------------------------------------------- |
-| `bridge.tool.name` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.upperCase"`) |
-| `bridge.tool.fn`   | Registered function that was called (e.g. `"httpCall"`, `"upperCase"`)     |
+| Attribute          | Value                                                                            |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `bridge.tool.name` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.str.toUpperCase"`) |
+| `bridge.tool.fn`   | Registered function that was called (e.g. `"httpCall"`, `"upperCase"`)           |
 
 On error the span status is set to `ERROR` and the exception is recorded with
 `span.recordException()`.
@@ -182,7 +182,7 @@ When `extensions.traces` is active, the GraphQL response includes:
 
 | Field        | Type     | Description                                                                         |
 | ------------ | -------- | ----------------------------------------------------------------------------------- |
-| `tool`       | `string` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.upperCase"`)          |
+| `tool`       | `string` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.str.toUpperCase"`)    |
 | `fn`         | `string` | The registered function that was called (e.g. `"httpCall"`, `"upperCase"`)          |
 | `input`      | `object` | Input object passed to the tool function, after all wire resolution (`"full"` only) |
 | `output`     | `any`    | Return value of the tool — present on success (`"full"` only)                       |
@@ -200,7 +200,7 @@ The engine instruments **all** tool invocations via all three pillars:
 
 - **Bridge-wired tools** — tools scheduled via `with <tool> as <alias>` in bridge blocks
 - **Tool-def tools** — tools defined in `tool <name> from <fn> { … }` blocks (traced with both the tool name _and_ the underlying `fn`)
-- **Direct tool functions** — namespace tools like `std.upperCase`
+- **Direct tool functions** — namespace tools like `std.str.toUpperCase`
 - **Error paths** — when a tool throws, the span is marked ERROR, the error counter increments, and `logger.error` fires; if a `??` fallback or `on error` handler fires, the fallback tool gets its own instrumentation
 
 ### Execution-Order Semantics (traces)

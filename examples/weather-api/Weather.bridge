@@ -19,7 +19,7 @@ tool weather from std.httpCall {
 }
 
 # Nominatim returns an array — pick the first result
-tool first from std.pickFirst
+tool first from std.arr.first
 
 # Reusable definition to get weather by coordinates
 define weatherByCoordinates {
@@ -71,7 +71,7 @@ bridge Query.getWeather {
   with first as f
   with input as i
   with output as o
-  with std.upperCase as upper
+  with std.str.toUpperCase as upper
 
   g.q <- i.cityName # Only used if lat/lon not provided
   g.format = "json"

@@ -22,7 +22,7 @@ When developers map data to external REST APIs, the required JSON payloads are o
 ```bridge
 # Current syntax requires heavy repetition
 api.body.user.profile.id <- i.id
-api.body.user.profile.name <- std.upperCase:i.name
+api.body.user.profile.name <- std.str.toUpperCase:i.name
 api.body.user.settings.theme = "dark"
 api.body.user.settings.notifications = true
 
@@ -49,7 +49,7 @@ bridge Mutation.createUser {
   api.body.user {
     .profile {
       .id <- i.id
-      .name <- std.upperCase:i.name
+      .name <- std.str.toUpperCase:i.name
     }
     .settings {
       .theme = "dark"
@@ -65,16 +65,17 @@ bridge Mutation.createUser {
 The most powerful aspect of this feature is that **the Execution Engine requires absolutely zero changes.** This is purely parser-level syntactic sugar.
 
 1. **Lexer Updates:**
-* NONE. We reuse the exact same `Dot`, `Arrow`, `Equals`, `LCurly`, and `RCurly` tokens already in the grammar.
 
+- NONE. We reuse the exact same `Dot`, `Arrow`, `Equals`, `LCurly`, and `RCurly` tokens already in the grammar.
 
 2. **Parser Grammar (`BridgeParser`):**
-* Introduce a new rule: `pathScopeBlock`.
-* It matches an `addressPath` followed by a block `{ ... }`.
-* Inside the block, it accepts either standard element lines (`.field <- source`) or nested `pathScopeBlock`s.
 
+- Introduce a new rule: `pathScopeBlock`.
+- It matches an `addressPath` followed by a block `{ ... }`.
+- Inside the block, it accepts either standard element lines (`.field <- source`) or nested `pathScopeBlock`s.
 
 3. **CST → AST Visitor (`toBridgeAst`):**
-* When the visitor enters a `pathScopeBlock`, it pushes the parent path (e.g., `["api", "body", "user"]`) onto a local `pathPrefix` stack.
-* When it visits a wire inside the block (e.g., `.profile.id <- i.id`), it prepends the stack to the target path.
-* The visitor emits a perfectly flat list of standard `Wire` objects to the engine. The engine natively executes them as deep `setNested` operations, completely unaware that a block was ever used.
+
+- When the visitor enters a `pathScopeBlock`, it pushes the parent path (e.g., `["api", "body", "user"]`) onto a local `pathPrefix` stack.
+- When it visits a wire inside the block (e.g., `.profile.id <- i.id`), it prepends the stack to the target path.
+- The visitor emits a perfectly flat list of standard `Wire` objects to the engine. The engine natively executes them as deep `setNested` operations, completely unaware that a block was ever used.

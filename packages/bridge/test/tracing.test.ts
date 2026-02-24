@@ -101,7 +101,11 @@ o.label <- g.label
       document: parse(`{ lookup(q: "x") { label } }`),
     });
 
-    assert.equal(result.extensions?.traces, undefined, "no traces in extensions");
+    assert.equal(
+      result.extensions?.traces,
+      undefined,
+      "no traces in extensions",
+    );
   });
 });
 
@@ -121,14 +125,10 @@ b.q <- i.q
 o.label <- p.label || b.label
 
 }`;
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      {
-        primary: async () => ({ label: null }),
-        backup: async () => ({ label: "B" }),
-      },
-    );
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      primary: async () => ({ label: null }),
+      backup: async () => ({ label: "B" }),
+    });
 
     assert.equal(traces.length, 2);
     assert.equal(traces[0].tool, "primary");
@@ -152,14 +152,10 @@ b.q <- i.q
 o.label <- p.label || b.label
 
 }`;
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      {
-        primary: async () => ({ label: "P" }),
-        backup: async () => ({ label: "B" }),
-      },
-    );
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      primary: async () => ({ label: "P" }),
+      backup: async () => ({ label: "B" }),
+    });
 
     assert.equal(traces.length, 1, "only primary was called");
     assert.equal(traces[0].tool, "primary");
@@ -216,16 +212,12 @@ f.q <- i.q
 o.label <- p.label ?? f.label
 
 }`;
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      {
-        primary: async () => {
-          throw new Error("boom");
-        },
-        fallback: async () => ({ label: "safe" }),
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      primary: async () => {
+        throw new Error("boom");
       },
-    );
+      fallback: async () => ({ label: "safe" }),
+    });
 
     assert.equal(traces.length, 2);
     assert.equal(traces[0].tool, "primary");
@@ -352,16 +344,12 @@ s.q <- i.q
 o.label <- s.label
 
 }`;
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      {
-        slow: async () => {
-          await new Promise((r) => setTimeout(r, 50));
-          return { label: "done" };
-        },
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      slow: async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return { label: "done" };
       },
-    );
+    });
 
     assert.equal(traces.length, 1);
     assert.ok(
@@ -383,17 +371,13 @@ s.q <- i.q
 o.label <- f.label || s.label
 
 }`;
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      {
-        first: async () => {
-          await new Promise((r) => setTimeout(r, 10));
-          return { label: null };
-        },
-        second: async () => ({ label: "ok" }),
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      first: async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return { label: null };
       },
-    );
+      second: async () => ({ label: "ok" }),
+    });
 
     assert.equal(traces.length, 2);
     assert.ok(
@@ -432,8 +416,16 @@ o.label <- g.label
     assert.equal(traces.length, 1);
     assert.equal(traces[0].tool, "geocoder");
     assert.equal(traces[0].fn, "geocoder");
-    assert.equal(traces[0].input, undefined, "basic level should not include input");
-    assert.equal(traces[0].output, undefined, "basic level should not include output");
+    assert.equal(
+      traces[0].input,
+      undefined,
+      "basic level should not include input",
+    );
+    assert.equal(
+      traces[0].output,
+      undefined,
+      "basic level should not include output",
+    );
     assert.equal(typeof traces[0].durationMs, "number");
     assert.equal(typeof traces[0].startedAt, "number");
   });
@@ -477,11 +469,9 @@ o.label <- g.label
   });
 
   test("true is equivalent to full", async () => {
-    const { traces } = await execute(
-      bridge,
-      `{ lookup(q: "x") { label } }`,
-      { geocoder: async () => ({ label: "Z" }) },
-    );
+    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      geocoder: async () => ({ label: "Z" }),
+    });
 
     assert.equal(traces.length, 1);
     assert.ok(traces[0].input !== undefined, "true → full → includes input");
@@ -525,7 +515,7 @@ tool weather from httpCall {
   .path = "/forecast"
 }
 
-tool first from std.pickFirst
+tool first from std.arr.first
 
 define weatherByCoordinates {
   with weather as w
@@ -549,7 +539,7 @@ bridge Query.getWeather {
   with first as f
   with input as i
   with output as o
-  with std.upperCase as upper
+  with std.str.toUpperCase as upper
 
   g.q <- i.cityName
   g.format = "json"
@@ -570,7 +560,9 @@ bridge Query.getWeather {
         if (input.baseUrl.includes("nominatim")) {
           callLog.push("geo");
           // Nominatim returns an array; empty for no-query
-          return input.q ? [{ lat: 52.52, lon: 13.405, display_name: "Berlin" }] : [];
+          return input.q
+            ? [{ lat: 52.52, lon: 13.405, display_name: "Berlin" }]
+            : [];
         }
         if (input.baseUrl.includes("open-meteo")) {
           callLog.push("weather");
@@ -611,16 +603,22 @@ bridge Query.getWeather {
 
     // geo is called: cityName is null → upper(null) → null →
     // falls through to f.display_name → needs geo
-    assert.ok(toolNames.includes("geo"), "geo called (cityName null, needs f.display_name)");
+    assert.ok(
+      toolNames.includes("geo"),
+      "geo called (cityName null, needs f.display_name)",
+    );
 
     // weather is NOT called: lazy resolution only resolves the city wire,
     // which doesn't depend on the weather tool
-    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define skips it)");
+    assert.ok(
+      !toolNames.includes("weather"),
+      "weather NOT called (lazy define skips it)",
+    );
 
     assert.equal(result.data.getWeather.city, "Unknown");
   });
 
-  test("{ getWeather(cityName: \"Berlin\") { city } } no geo needed", async () => {
+  test('{ getWeather(cityName: "Berlin") { city } } no geo needed', async () => {
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
@@ -634,19 +632,27 @@ bridge Query.getWeather {
     // upper:i.cityName → "BERLIN" (non-null) → short-circuits.
     // geo is NOT called: lat/lon wires never fire, cityName doesn't
     // fall through to f.display_name.
-    assert.ok(!toolNames.includes("geo"), "geo NOT called (cityName short-circuits)");
+    assert.ok(
+      !toolNames.includes("geo"),
+      "geo NOT called (cityName short-circuits)",
+    );
 
     // weather NOT called: only city was requested
-    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define)");
+    assert.ok(
+      !toolNames.includes("weather"),
+      "weather NOT called (lazy define)",
+    );
 
     assert.equal(result.data.getWeather.city, "BERLIN");
   });
 
-  test("{ getWeather(lat: 52.52, lon: 13.4, cityName: \"Berlin\") { city } } no tools called", async () => {
+  test('{ getWeather(lat: 52.52, lon: 13.4, cityName: "Berlin") { city } } no tools called', async () => {
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
-      document: parse(`{ getWeather(lat: 52.52, lon: 13.4, cityName: "Berlin") { city } }`),
+      document: parse(
+        `{ getWeather(lat: 52.52, lon: 13.4, cityName: "Berlin") { city } }`,
+      ),
     });
 
     const traces: ToolTrace[] = result.extensions?.traces ?? [];
@@ -655,8 +661,14 @@ bridge Query.getWeather {
     // All inputs provided → all || chains short-circuit on input values
     // → geo is NOT called (no fallback needed)
     // → weather is NOT called (only city was requested, lazy define)
-    assert.ok(!toolNames.includes("geo"), "geo NOT called (all inputs short-circuit)");
-    assert.ok(!toolNames.includes("weather"), "weather NOT called (lazy define)");
+    assert.ok(
+      !toolNames.includes("geo"),
+      "geo NOT called (all inputs short-circuit)",
+    );
+    assert.ok(
+      !toolNames.includes("weather"),
+      "weather NOT called (lazy define)",
+    );
     assert.deepStrictEqual(callLog, [], "no tool calls at all");
 
     assert.equal(result.data.getWeather.city, "BERLIN");
@@ -668,7 +680,9 @@ bridge Query.getWeather {
     const { executor, callLog } = createWeatherGateway();
 
     const result: any = await executor({
-      document: parse(`{ getWeather(cityName: "Berlin") { city currentTemp } }`),
+      document: parse(
+        `{ getWeather(cityName: "Berlin") { city currentTemp } }`,
+      ),
     });
 
     const traces: ToolTrace[] = result.extensions?.traces ?? [];
