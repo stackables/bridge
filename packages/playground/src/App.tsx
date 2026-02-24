@@ -1,5 +1,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Panel, Group, Separator, useDefaultLayout } from "react-resizable-panels";
+import {
+  Panel,
+  Group,
+  Separator,
+  useDefaultLayout,
+} from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
@@ -7,7 +12,6 @@ import { runBridge, getDiagnostics, clearHttpCache } from "./engine";
 import type { RunResult } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -366,12 +370,9 @@ export function App() {
       <header className="shrink-0 border-b border-slate-800">
         {/* Row 1: logo + (desktop: example picker + info) + share */}
         <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
-          <a
-            href="/"
-            className="flex items-center gap-2.5 no-underline"
-          >
+          <a href="/" className="flex items-center gap-2.5 no-underline">
             <span className="text-xl font-bold text-sky-400 tracking-tight flex items-center">
-              <ChevronLeftIcon/> Documentation
+              <ChevronLeftIcon /> Documentation
             </span>
           </a>
 
