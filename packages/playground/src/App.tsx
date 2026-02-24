@@ -2,22 +2,39 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Panel, Group, Separator, useDefaultLayout } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
-import { examples } from "./examples";
 import { runBridge, getDiagnostics, clearHttpCache } from "./engine";
 import type { RunResult } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ShareDialog } from "./components/ShareDialog";
-import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
+
+// ── playground state type ─────────────────────────────────────────────────────
+export type PlaygroundState = {
+  schema: string;
+  bridge: string;
+  context: string;
+  queries: { name: string; query: string }[];
+};
+
+export type PlaygroundProps = {
+  initialState?: PlaygroundState;
+  onStateChange?: (state: PlaygroundState) => void;
+};
+
+const DEFAULT_STATE: PlaygroundState = {
+  schema: `type Query {
+  hello: String
+}`,
+  bridge: `version 1.4
+
+bridge Query.hello {
+  with output as o
+
+  o.hello = "Hello, World!"
+}`,
+  context: `{}`,
+  queries: [{ name: "Query 1", query: `{\n  hello\n}` }],
+};
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -38,13 +55,11 @@ type QueryTab = { id: string; name: string; query: string };
 
 // ── extract GraphQL operation name from query text ───────────────────────────
 function extractOperationName(query: string): string | null {
-  // Named operation: query/mutation/subscription OpName
   const named =
     /^\s*(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/m.exec(
       query,
     );
   if (named) return named[1]!;
-  // Anonymous shorthand { fieldName ... } — use first root field
   const anon = /^\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)/m.exec(query);
   if (anon) return anon[1]!;
   return null;
@@ -198,13 +213,15 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
-export function App() {
-  const [exampleIndex, setExampleIndex] = useState(0);
-  const ex = examples[exampleIndex] ?? examples[0]!;
+export function App({
+  initialState = DEFAULT_STATE,
+  onStateChange,
+}: PlaygroundProps = {}) {
+  const init = initialState;
 
-  const [schema, setSchema] = useState(ex.schema);
-  const [bridge, setBridge] = useState(ex.bridge);
-  const [context, setContext] = useState(ex.context);
+  const [schema, setSchema] = useState(init.schema);
+  const [bridge, setBridge] = useState(init.bridge);
+  const [context, setContext] = useState(init.context);
 
   // ── persisted panel layouts ──
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
@@ -212,9 +229,9 @@ export function App() {
   const rightVLayout = useDefaultLayout({ id: "bridge-playground-right-v" });
 
   // ── multi-query state ──
-  const queryCounterRef = useRef(ex.queries.length);
+  const queryCounterRef = useRef(init.queries.length);
   const [queries, setQueries] = useState<QueryTab[]>(() =>
-    ex.queries.map((q) => ({
+    init.queries.map((q) => ({
       id: crypto.randomUUID(),
       name: q.name,
       query: q.query,
@@ -240,49 +257,19 @@ export function App() {
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
 
-  // Load shared playground state from ?s=<id> on first mount
+  // Notify parent of state changes (use ref to avoid stale-closure issues)
+  const onStateChangeRef = useRef(onStateChange);
   useEffect(() => {
-    const id = getShareIdFromUrl();
-    if (!id) return;
-    clearShareIdFromUrl();
-    loadShare(id)
-      .then((payload) => {
-        setSchema(payload.schema);
-        setBridge(payload.bridge);
-        queryCounterRef.current = payload.queries.length;
-        const newQ = payload.queries.map((q) => ({
-          id: crypto.randomUUID(),
-          name: q.name,
-          query: q.query,
-        }));
-        setQueries(newQ);
-        setContext(payload.context);
-        setResults({});
-        setRunningIds(new Set());
-        setActiveTabId(newQ[0]?.id ?? "context");
-      })
-      .catch(() => {
-        // silently ignore — invalid/expired share id
-      });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const selectExample = useCallback((index: number) => {
-    const e = examples[index] ?? examples[0]!;
-    setExampleIndex(index);
-    setSchema(e.schema);
-    setBridge(e.bridge);
-    queryCounterRef.current = e.queries.length;
-    const newQ = e.queries.map((q) => ({
-      id: crypto.randomUUID(),
-      name: q.name,
-      query: q.query,
-    }));
-    setQueries(newQ);
-    setContext(e.context);
-    setResults({});
-    setRunningIds(new Set());
-    setActiveTabId(newQ[0]?.id ?? "context");
-  }, []);
+    onStateChangeRef.current = onStateChange;
+  });
+  useEffect(() => {
+    onStateChangeRef.current?.({
+      schema,
+      bridge,
+      context,
+      queries: queries.map((q) => ({ name: q.name, query: q.query })),
+    });
+  }, [schema, bridge, context, queries]);
 
   const updateQuery = useCallback((id: string, text: string) => {
     setQueries((prev) =>
@@ -360,79 +347,7 @@ export function App() {
   }, [schema]);
 
   return (
-    <div className="md:h-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
-      {/* ── Header ── */}
-      <header className="shrink-0 border-b border-slate-800">
-        {/* Row 1: logo + (desktop: example picker + info) + share */}
-        <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
-          <a
-            href="https://github.com/stackables/bridge"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2.5 no-underline"
-          >
-            <span className="text-xl font-bold text-sky-400 tracking-tight">
-              Bridge
-            </span>
-            <Badge className="text-[10px] tracking-wider uppercase">
-              Playground
-            </Badge>
-          </a>
-
-          {/* Example picker — desktop only (row 1) */}
-          <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs text-slate-600">Example:</span>
-            <Select
-              value={String(exampleIndex)}
-              onValueChange={(v) => selectExample(Number(v))}
-            >
-              <SelectTrigger className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {examples.map((ex, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {ex.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2 md:gap-3">
-            <span className="hidden md:block text-xs text-slate-700">
-              All code runs in-browser · no server required
-            </span>
-            <ShareDialog
-              schema={schema}
-              bridge={bridge}
-              queries={queries.map((q) => ({ name: q.name, query: q.query }))}
-              context={context}
-            />
-          </div>
-        </div>
-
-        {/* Row 2: example picker — mobile only */}
-        <div className="md:hidden px-4 pb-2 flex items-center gap-2">
-          <span className="text-xs text-slate-600">Example:</span>
-          <Select
-            value={String(exampleIndex)}
-            onValueChange={(v) => selectExample(Number(v))}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {examples.map((ex, i) => (
-                <SelectItem key={i} value={String(i)}>
-                  {ex.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </header>
-
+    <div className="md:h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Mobile layout: vertical scrollable stack ── */}
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 md:hidden">
         {/* Schema panel */}
@@ -530,10 +445,10 @@ export function App() {
       </div>
 
       {/* ── Desktop layout: resizable panels ── */}
-      <div className="flex-1 min-h-0 p-3 overflow-hidden hidden md:block">
+      <div className="flex-1 min-h-0 p-3 overflow-hidden hidden md:flex">
         <Group
           orientation="horizontal"
-          className="h-full"
+          className="h-full w-full"
           defaultLayout={hLayout.defaultLayout}
           onLayoutChanged={hLayout.onLayoutChanged}
         >

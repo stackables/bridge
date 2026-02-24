@@ -1,18 +1,11 @@
 ---
-// Standalone playground page — no Starlight layout so the playground can own
-// the full viewport with its own Tailwind styles.
+// Playground page — uses the Starlight header; the playground fills the space below it.
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import PlaygroundWrapper from "../components/PlaygroundWrapper";
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Playground · The Bridge</title>
-  </head>
-  <body>
-    <div id="playground-root" style="height:100vh">
-      <PlaygroundWrapper client:only="react" />
-    </div>
-  </body>
-</html>
+<StarlightPage frontmatter={{ title: 'Playground · Bridge', template: 'splash' }}>
+  <div class="not-content" style="margin: calc(-1 * var(--sl-content-pad-y, 1.5rem)) calc(-1 * var(--sl-content-pad-x, 1rem))">
+    <PlaygroundWrapper client:only="react" />
+  </div>
+</StarlightPage>

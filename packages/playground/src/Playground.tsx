@@ -6,3 +6,4 @@
  *   import "@stackables/bridge-playground/style.css";
  */
 export { App as Playground } from "./App";
+export type { PlaygroundState, PlaygroundProps } from "./App";
