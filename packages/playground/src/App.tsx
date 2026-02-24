@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, Group, Separator, useDefaultLayout } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
@@ -22,9 +22,9 @@ import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
   return (
-    <PanelResizeHandle
+    <Separator
       className={cn(
-        "shrink-0",
+        "shrink-0 outline-none",
         direction === "horizontal"
           ? "w-2 cursor-[col-resize]"
           : "h-2 cursor-[row-resize]",
@@ -205,6 +205,11 @@ export function App() {
   const [schema, setSchema] = useState(ex.schema);
   const [bridge, setBridge] = useState(ex.bridge);
   const [context, setContext] = useState(ex.context);
+
+  // ── persisted panel layouts ──
+  const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
+  const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
+  const rightVLayout = useDefaultLayout({ id: "bridge-playground-right-v" });
 
   // ── multi-query state ──
   const queryCounterRef = useRef(ex.queries.length);
@@ -526,17 +531,19 @@ export function App() {
 
       {/* ── Desktop layout: resizable panels ── */}
       <div className="flex-1 min-h-0 p-3 overflow-hidden hidden md:block">
-        <PanelGroup
-          direction="horizontal"
-          autoSaveId="bridge-playground-h"
+        <Group
+          orientation="horizontal"
           className="h-full"
+          defaultLayout={hLayout.defaultLayout}
+          onLayoutChanged={hLayout.onLayoutChanged}
         >
           {/* ── LEFT column: Schema + Bridge ── */}
           <Panel defaultSize={50} minSize={20}>
-            <PanelGroup
-              direction="vertical"
-              autoSaveId="bridge-playground-left-v"
+            <Group
+              orientation="vertical"
               className="h-full"
+              defaultLayout={leftVLayout.defaultLayout}
+              onLayoutChanged={leftVLayout.onLayoutChanged}
             >
               {/* Schema panel */}
               <Panel defaultSize={35} minSize={15}>
@@ -569,17 +576,18 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-            </PanelGroup>
+            </Group>
           </Panel>
 
           <ResizeHandle direction="horizontal" />
 
           {/* ── RIGHT column: Query/Context + Results ── */}
           <Panel defaultSize={50} minSize={20}>
-            <PanelGroup
-              direction="vertical"
-              autoSaveId="bridge-playground-right-v"
+            <Group
+              orientation="vertical"
               className="h-full"
+              defaultLayout={rightVLayout.defaultLayout}
+              onLayoutChanged={rightVLayout.onLayoutChanged}
             >
               {/* Query / Context tabbed panel */}
               <Panel defaultSize={40} minSize={15}>
@@ -637,9 +645,9 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-            </PanelGroup>
+            </Group>
           </Panel>
-        </PanelGroup>
+        </Group>
       </div>
     </div>
   );

@@ -3,9 +3,21 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightCatppuccin from '@catppuccin/starlight'
 import bridgeGrammar from '../bridge-syntax-highlight/syntaxes/bridge.tmLanguage.json' assert { type: 'json' };
+import react from '@astrojs/react';
+import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath, URL } from 'node:url';
 
 // https://astro.build/config
 export default defineConfig({
+	vite: {
+		plugins: [tailwindcss()],
+		resolve: {
+			alias: {
+				'@': fileURLToPath(new URL('../playground/src', import.meta.url)),
+				'@stackables/bridge': fileURLToPath(new URL('../bridge/src/index.ts', import.meta.url)),
+			},
+		},
+	},
 	integrations: [
 		starlight({
 			title: 'The Bridge',
@@ -49,5 +61,6 @@ export default defineConfig({
 				},
 			})],
 		}),
+		react(),
 	],
 });
