@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "The Bridge",
+  "name": "bridge",
   "scopeName": "source.bridge",
   "patterns": [
     { "include": "#comments" },
