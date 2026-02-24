@@ -11,10 +11,13 @@ Because logging is a side-effect that the client doesn't explicitly request in t
 
 ### Input Fields
 
-| Field               | Default  | Description                                                                             |
-| :------------------ | :------- | :-------------------------------------------------------------------------------------- |
-| `level`             | `"info"` | The log level method to call on your logger (`"debug"`, `"info"`, `"warn"`, `"error"`). |
-| _(Any other field)_ | —        | Aggregated into a single structured JSON object and sent to the logger.                 |
+| Field   | Default  | Description    |
+| :------ | :------- | :------------- |
+| `level` | `"info"` | The log level. |
+
+### Dynamic Fields (Payload & Query Parameters)
+
+Any other field is aggregated into a single structured JSON object and sent to the logger.
 
 <Aside>
   **Passthrough Behavior:** The `audit` tool returns its exact input object unmodified. This means output wires can read directly from the audit tool if you want to chain data (e.g., `o.id <- audit.orderId`).
@@ -70,7 +73,3 @@ bridge Mutation.deleteAccount {
 ### Engine Configuration
 
 For the `audit` tool to output anything, you must provide a logger to your execution environment (either to `BridgeOptions` in the Gateway, or directly to the `ExecutionTree` in Standalone mode).
-
-If no logger is provided, the tool safely acts as a fast no-op.
-
-/advanced/observability/#structured-logging

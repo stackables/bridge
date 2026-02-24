@@ -1,0 +1,133 @@
+---
+title: Array Operations
+description: Built-in tools for filtering, finding, and safely manipulating array data.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Bridge provides a standard suite of tools for array manipulation under the `std.arr` namespace.
+
+These tools are designed to help you safely extract items, enforce array shapes, and filter collections without needing to write custom JavaScript.
+
+### `std.arr.filter`
+
+Filters an array of objects, returning only the items that perfectly match your specified criteria.
+
+- **Accepts:** `in` (array of objects), plus any number of dynamic key-value pairs to match against.
+- **Returns:** `array`
+
+### `std.arr.find`
+
+Searches an array of objects and returns the _first_ object that perfectly matches your criteria.
+
+- **Accepts:** `in` (array of objects), plus any number of dynamic key-value pairs to match against.
+- **Returns:** `object` (or `undefined` if no match is found)
+
+### `std.arr.first`
+
+Extracts the first element of an array (`arr[0]`). By default, it safely returns `undefined` for empty arrays rather than crashing.
+
+- **Accepts:** `in` (array), `strict` (optional boolean or `"true"` string).
+- **Returns:** `any` (the extracted element)
+- **Strict Mode:** If you set `strict = true`, the tool acts as a strict validation guard. It will **throw an error** if the array is empty, OR if the array contains more than one element.
+
+### `std.arr.toArray`
+
+Safely wraps a single value into an array. If the input is _already_ an array, it is returned completely untouched.
+
+- **Accepts:** `in` (any value)
+- **Returns:** `array`
+
+---
+
+## Usage Examples
+
+### 1. Dynamic Filtering & Finding
+
+Because `filter` and `find` accept dynamic criteria, you can wire arbitrary properties into the tool to act as your search query.
+
+```bridge
+bridge Query.getAdminUser {
+  with std.arr.find as findUser
+  with usersApi as api
+  with output as o
+
+  # 1. Wire the source array
+  findUser.in <- api.users
+
+  # 2. Add as many dynamic matching criteria as you need!
+  findUser.role = "admin"
+  findUser.isActive = true
+
+  # 3. Pull from the found object
+  o.adminId <- findUser.id
+  o.adminName <- findUser.name
+}
+
+```
+
+### 2. Safe Extraction with `first`
+
+When an API returns an array of results but your GraphQL schema expects a single scalar object, use `first` to safely extract the first element.
+
+```bridge
+bridge Query.getLatestPost {
+  with std.arr.first as first
+  with postsApi as api
+  with output as o
+
+  # 1. Wire the array into the tool
+  first.in <- api.recentPosts
+
+  # 2. Safely extract properties from the first object
+  o.title <- first.title
+  o.publishedAt <- first.date
+}
+
+```
+
+<Aside title="Enforcing strict responses">
+If you expect an API endpoint to return *exactly* one user (e.g., searching by email), but the API unhelpfully wraps it in an array, use `strict = true`.
+
+If the API returns 0 users, or 2+ users, the `first` tool will immediately throw an error. This allows you to catch the bad state with an Error Guard (`??`) and handle it gracefully!
+
+</Aside>
+
+```bridge
+bridge Query.getUserByEmail {
+  with std.arr.first as first
+  with usersApi as api
+  with output as o
+
+  first.in <- api.search
+
+  # Enable strict validation!
+  first.strict = true
+
+  # If the API returned exactly one user, this succeeds.
+  # If it returned 0 or 2+, it throws and falls back to "Unknown".
+  o.name <- first.name ?? "Unknown"
+}
+
+```
+
+### 3. Normalizing Payloads with `toArray`
+
+Sometimes legacy APIs return a single object if there is only one result, but an array if there are multiple results. You can use `toArray` to normalize the payload before mapping over it.
+
+```bridge
+bridge Query.getTags {
+  with std.arr.toArray as toArr
+  with legacyApi as api
+  with output as o
+
+  # Whether api.tags is a string or an array of strings,
+  # 'safeTags' is guaranteed to be an array.
+  alias toArr:api.tags as safeTags
+
+  o.tags <- safeTags[] as tag {
+    .name <- tag
+  }
+}
+
+```
