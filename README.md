@@ -1,17 +1,16 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
 [![extension](https://img.shields.io/badge/VS_Code-Full_Support-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 
-
 > **Developer Preview**
 > The Bridge v1.x is a public preview.
-> * Stability: The .bridge language and TypeScript API is largely stable.
-> * Versioning: We follow strict SemVer starting from v2.0.0.
-> 
+>
+> - Stability: The .bridge language and TypeScript API is largely stable.
+> - Versioning: We follow strict SemVer starting from v2.0.0.
+>
 > [See our roadmap](./docs/roadmap/) \
 > [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
-
 
 # The Bridge
 
@@ -23,15 +22,15 @@ Run it as a **GraphQL Egress Gateway** to give your internal teams a clean unifi
 
 **Best fit when your architecture needs:**
 
-* **Controlled Egress:** Funnel external API calls through a single point to enforce uniform rate-limiting, caching, and IP allowlisting.
-* **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES) by changing a `.bridge` text file, without touching your calling services' code.
-* **Centralized Secrets:** Inject external API keys at the gateway/execution level.
-* **Messy REST abstraction:** Morph complex, undocumented REST payloads into clean, strongly-typed internal interfaces.
+- **Controlled Egress:** Funnel external API calls through a single point to enforce uniform rate-limiting, caching, and IP allowlisting.
+- **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES) by changing a `.bridge` text file, without touching your calling services' code.
+- **Centralized Secrets:** Inject external API keys at the gateway/execution level.
+- **Messy REST abstraction:** Morph complex, undocumented REST payloads into clean, strongly-typed internal interfaces.
 
 **Not best fit when you need:**
 
-* Heavy domain modeling or multi-step database sagas.
-* Imperative, line-by-line programming logic (The Bridge is a topology graph, not a script).
+- Heavy domain modeling or multi-step database sagas.
+- Imperative, line-by-line programming logic (The Bridge is a topology graph, not a script).
 
 ---
 
@@ -49,34 +48,33 @@ Want to run it offline or within your own VPN? You can spin up the playground lo
 
 The Bridge is a **Data Topology Language**. You don't write scripts; you wire circuits.
 
-* **Pull, Don't Push:** The engine is strictly lazy. If a client doesn't ask for a specific output field, the wires connected to it are "dead"—no code runs, and no external APIs are called.
-* **Cost-Optimized Fallbacks:** The engine knows the difference between a cheap memory read and an expensive network call, automatically evaluating them in the optimal order.
-* **LLM Friendly:** The language is visually distinct and heavily structural, making it incredibly easy for LLMs to generate correct API mappings from standard JSON schemas or OpenAPI specs.
+- **Pull, Don't Push:** The engine is strictly lazy. If a client doesn't ask for a specific output field, the wires connected to it are "dead"—no code runs, and no external APIs are called.
+- **Cost-Optimized Fallbacks:** The engine knows the difference between a cheap memory read and an expensive network call, automatically evaluating them in the optimal order.
+- **LLM Friendly:** The language is visually distinct and heavily structural, making it incredibly easy for LLMs to generate correct API mappings from standard JSON schemas or OpenAPI specs.
 
 **Don't think in scripts. Think in schematics.**
-
 
 ## Syntax Cheat Sheet
 
 The `.bridge` language is designed to be scannable.
 
-* `.` prefix means a property.
-* `=` means static constant assignment.
-* `<-` means dynamic data flow.
+- `.` prefix means a property.
+- `=` means static constant assignment.
+- `<-` means dynamic data flow.
 
-| Concept | Syntax Example | Description |
-| --- | --- | --- |
-| **Constants** | `.method = "POST"` | Sets a static configuration value. |
-| **Wires** | `.body <- i.userData` | Pulls data from a source at runtime. |
-| **Side Effects** | `force api ?? null` | Eagerly schedules a handle. Critical by default; `?? null` makes it fire-and-forget. |
-| **Pipes** | `o.name <- uc:i.name` | Chains data through a tool right-to-left. |
-| **Null Coalesce** | `o.name <- i.name \|\| "N/A"` | Alternative used if the current source resolves to `null`. |
-| **Error Guard** | `o.price <- api.price ?? 0` | Alternative used if the current source **throws** an exception. |
-| **Ternary** | `o.val <- i.isPro ? a : b` | Evaluates condition; strictly pulls only the chosen branch. |
-| **Node Alias** | `alias uc:i.name as name` | Evaluates an expression once and caches it as a local graph node. |
-| **Arrays** | `o <- items[] as it { }` | Iterates over an array, creating a local shadow scope for each element. |
+| Concept           | Syntax Example                | Description                                                                          |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| **Constants**     | `.method = "POST"`            | Sets a static configuration value.                                                   |
+| **Wires**         | `.body <- i.userData`         | Pulls data from a source at runtime.                                                 |
+| **Side Effects**  | `force api ?? null`           | Eagerly schedules a handle. Critical by default; `?? null` makes it fire-and-forget. |
+| **Pipes**         | `o.name <- uc:i.name`         | Chains data through a tool right-to-left.                                            |
+| **Null Coalesce** | `o.name <- i.name \|\| "N/A"` | Alternative used if the current source resolves to `null`.                           |
+| **Error Guard**   | `o.price <- api.price ?? 0`   | Alternative used if the current source **throws** an exception.                      |
+| **Ternary**       | `o.val <- i.isPro ? a : b`    | Evaluates condition; strictly pulls only the chosen branch.                          |
+| **Node Alias**    | `alias uc:i.name as name`     | Evaluates an expression once and caches it as a local graph node.                    |
+| **Arrays**        | `o <- items[] as it { }`      | Iterates over an array, creating a local shadow scope for each element.              |
 
-👉 **[Read the Full Language Guide](./docs/bridge-language-guide.md)** for deep dives into `define` blocks, overdefinition optimization, and advanced fallbacks.
+**[Read the Full Language Guide](https://bridge.sdk42.com/reference/10-core-concepts/d)**
 
 ## Tools
 
@@ -96,22 +94,17 @@ const myTools = {
 };
 
 // Standalone mode:
-const { data } = await executeBridge({ instructions, operation, input, tools: myTools });
+const { data } = await executeBridge({
+  instructions,
+  operation,
+  input,
+  tools: myTools,
+});
 
 // Gateway mode:
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, { tools: myTools });
-
+const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+  tools: myTools,
+});
 ```
 
-👉 **[Read the Tools & Extensions Guide](./docs/tools.md)** to learn about the `std.httpCall` tool, response caching, and custom tool injection.
-
-## Further Reading
-
-| Document | Description |
-| --- | --- |
-| **[Language Guide](./docs/bridge-language-guide.md)** | Full syntax reference — tool blocks, define blocks, expressions, array mapping, and more. |
-| **[Tools & Extensions](./docs/tools.md)** | Built-in tools, custom tools, `httpCall` configuration, and response caching. |
-| **[Observability](./docs/observability.md)** | OpenTelemetry spans & metrics, structured logging, and `extensions.traces`. |
-| **[Dynamic Routing](./docs/dynamic-routing.md)** | Per-request topology switching for multi-tenant, region-aware, and A/B deployments. |
-| **[LLM Notes](./docs/llm-notes.md)** | Internal development notes and architecture reference. |
-| **[Developer Guide](./docs/developer.md)** | Internals walkthrough for contributors — parser pipeline, execution engine, test setup. |
+**[Read the Tools & Extensions Guide](https://bridge.sdk42.com/advanced/custom-tools/)**
