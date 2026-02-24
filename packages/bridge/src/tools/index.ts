@@ -1,11 +1,8 @@
 import { audit } from "./audit.ts";
-import { concat } from "./concat.ts";
 import { createHttpCall } from "./http-call.ts";
-import { upperCase } from "./upper-case.ts";
-import { lowerCase } from "./lower-case.ts";
-import { findObject } from "./find-object.ts";
-import { pickFirst } from "./pick-first.ts";
-import { toArray } from "./to-array.ts";
+import { concat } from "./concat.ts";
+import * as arrays from "./arrays.ts";
+import * as strings from "./strings.ts";
 import { multiply } from "./multiply.ts";
 import { divide } from "./divide.ts";
 import { add } from "./add.ts";
@@ -20,19 +17,16 @@ import { lte } from "./lte.ts";
 /**
  * Standard built-in tools — available under the `std` namespace.
  *
- * Referenced in `.bridge` files as `std.upperCase`, `std.pickFirst`, etc.
+ * Referenced in `.bridge` files as `std.str.toUpperCase`, `std.arr.first`, etc.
  */
 const httpCallFn = createHttpCall();
 
 export const std = {
+  str: strings,
+  arr: arrays,
   audit,
-  concat,
   httpCall: httpCallFn,
-  upperCase,
-  lowerCase,
-  findObject,
-  pickFirst,
-  toArray,
+  concat,
 } as const;
 
 /**
@@ -83,7 +77,7 @@ export { audit } from "./audit.ts";
  *
  * ```ts
  * builtinToolNames
- * // ["std.httpCall", "std.upperCase", ..., "math.multiply", ...]
+ * // ["std.httpCall", "std.str.toUpperCase", ..., "math.multiply", ...]
  * ```
  */
 export const builtinToolNames: readonly string[] = [
@@ -92,19 +86,3 @@ export const builtinToolNames: readonly string[] = [
 ];
 
 export { createHttpCall } from "./http-call.ts";
-export { concat } from "./concat.ts";
-export { upperCase } from "./upper-case.ts";
-export { lowerCase } from "./lower-case.ts";
-export { findObject } from "./find-object.ts";
-export { pickFirst } from "./pick-first.ts";
-export { toArray } from "./to-array.ts";
-export { multiply } from "./multiply.ts";
-export { divide } from "./divide.ts";
-export { add } from "./add.ts";
-export { subtract } from "./subtract.ts";
-export { eq } from "./eq.ts";
-export { neq } from "./neq.ts";
-export { gt } from "./gt.ts";
-export { gte } from "./gte.ts";
-export { lt } from "./lt.ts";
-export { lte } from "./lte.ts";

@@ -17,7 +17,7 @@
 
 ## What It Does
 
-Declarative dataflow engine for GraphQL. Instead of writing resolvers, you write `.bridge` files that describe *what data is needed and where it comes from*. The engine resolves backwards from demand — only fetches what the client actually asked for.
+Declarative dataflow engine for GraphQL. Instead of writing resolvers, you write `.bridge` files that describe _what data is needed and where it comes from_. The engine resolves backwards from demand — only fetches what the client actually asked for.
 
 ---
 
@@ -42,6 +42,7 @@ src/
 ```
 
 ### What was deleted (do not recreate as library code)
+
 - `gateway.ts` — was a `createGateway()` test helper wrapping graphql-yoga. Lives in `test/_gateway.ts` now. Not part of the public API.
 - `helpers.ts` — contained legacy `fakeProviderCall`. Deleted when backward compat was removed.
 
@@ -56,7 +57,15 @@ import { parseBridge } from "@stackables/bridge";
 import { bridgeTransform } from "@stackables/bridge";
 // bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
 
-import { builtinTools, std, audit, createHttpCall, upperCase, lowerCase, findObject } from "@stackables/bridge";
+import {
+  builtinTools,
+  std,
+  audit,
+  createHttpCall,
+  upperCase,
+  lowerCase,
+  findObject,
+} from "@stackables/bridge";
 // builtinTools — namespaced tool bundle: { std: { audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }
 // std — the std namespace object (for spreading into overrides)
 // audit(input, context?): ToolCallFn — logs inputs via ToolContext logger; level defaults to "info", configurable via input
@@ -64,46 +73,61 @@ import { builtinTools, std, audit, createHttpCall, upperCase, lowerCase, findObj
 // upperCase, lowerCase, findObject — individual tool functions (for direct JS use)
 
 // Types
-import type { BridgeOptions, InstructionSource, Instruction, ToolCallFn, ToolContext, ToolDef, ConstDef, ToolMap } from "@stackables/bridge";
+import type {
+  BridgeOptions,
+  InstructionSource,
+  Instruction,
+  ToolCallFn,
+  ToolContext,
+  ToolDef,
+  ConstDef,
+  ToolMap,
+} from "@stackables/bridge";
 // ToolContext — { logger: { debug?, info?, warn?, error? } } — passed as second arg to every tool function by the engine
 // ToolCallFn — (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>
 ```
 
 ### `InstructionSource`
+
 ```typescript
 type InstructionSource = Instruction[] | ((context: any) => Instruction[]);
 ```
+
 Can be a static array or a **per-request function** for multi-provider routing. The function receives the full GraphQL context. Schema is built once — the function is called per request inside the resolver.
 
 ### `BridgeOptions`
+
 ```typescript
 type BridgeOptions = {
   tools?: ToolMap;
   contextMapper?: (context: any) => Record<string, any>;
   trace?: "off" | "basic" | "full";
-  logger?: Logger;  // { debug?, info?, warn?, error? } — passed to tools via ToolContext
-}
+  logger?: Logger; // { debug?, info?, warn?, error? } — passed to tools via ToolContext
+};
 ```
+
 - `tools` — recursive tool map supporting namespaced nesting. The built-in `std` namespace (audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray) is always included; user-provided tools are shallow-merged on top. All `std` tools are callable with or without the `std.` prefix. To override a `std` tool, replace the `std` key: `tools: { std: { ...std, myTool: fn } }`.
 - `logger` — structured logger (pino, winston, `console`, or any compatible interface with `debug`, `info`, `warn`, `error` methods). Passed to every tool via `ToolContext`. Defaults to silent no-ops. The `std.audit` tool uses `context.logger.info` automatically — no factory needed.
 - `contextMapper` — optional function to reshape/restrict the GraphQL context before it reaches bridge files. By default the full context is exposed.
 
 ### Context access
+
 The engine passes the full GraphQL context to any tool or bridge that declares `with context`. This gives access to auth tokens, config, feature flags — anything on the context.
 
 ```typescript
 // Server setup
 context: () => ({
   hereapi: { apiKey: process.env.HEREAPI_KEY },
-  auth: { userId: '...' },
-})
+  auth: { userId: "..." },
+});
 ```
 
 To restrict what bridge files can see, use `contextMapper`:
+
 ```typescript
 bridgeTransform(schema, instructions, {
   contextMapper: (ctx) => ({ hereapi: ctx.hereapi }),
-})
+});
 ```
 
 ---
@@ -130,19 +154,21 @@ This must be the first non-blank, non-comment line. The current parser accepts o
 
 The parser throws immediately if any of these appear where a user-defined name is expected.
 
-Three block types, multiple operators. **Braces are mandatory** for `bridge` and `tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body tools like `tool first from std.pickFirst` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
+Three block types, multiple operators. **Braces are mandatory** for `bridge` and `tool` blocks that have a body. The opening `{` goes on the keyword line; the closing `}` goes on its own line at column 0. Body lines (with, wires, params) are indented 2 spaces. No-body tools like `tool first from std.arr.first` omit braces. Blocks are self-delimiting — the `---` separator is accepted but no longer required.
 
 ### Block types
-| Block | Purpose |
-|---|---|
+
+| Block           | Purpose                                                                     |
+| --------------- | --------------------------------------------------------------------------- |
 | `tool ... from` | Configures a function or inherits from a parent tool — URL, headers, params |
-| `define` | Declares a reusable subgraph (pipeline) invocable from bridges |
-| `bridge` | Connects a GraphQL field to tools |
-| `const` | Declares named JSON constants reusable across tools and bridges |
+| `define`        | Declares a reusable subgraph (pipeline) invocable from bridges              |
+| `bridge`        | Connects a GraphQL field to tools                                           |
+| `const`         | Declares named JSON constants reusable across tools and bridges             |
 
 `tool <name> from <source>` is the only syntax for tool definitions.
 
 ### `const` blocks
+
 Declare named values as raw JSON. Multiple consts can exist in one file.
 
 ```bridge
@@ -154,22 +180,24 @@ const maxRetries = 3
 Consts are accessed via `with const as c` in tool or bridge blocks, then referenced as `c.<name>` or `c.<name>.<path>`. Multi-line JSON (objects and arrays) is supported — the parser tracks brace/bracket depth. Values are stored as raw JSON strings and parsed at runtime.
 
 ### Operators
-| Operator | Meaning |
-|---|---|
-| `=` | Constant — sets a fixed value |
-| `<-` | Wire — pulls data from a source at runtime |
-| `force <handle>` | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `?? null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
-| `force <handle> ?? null` | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure. |
-| `<- h1:h2:source` | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage |
-| `\|\| <source>` | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained. |
-| `\|\| <json>` | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors. |
-| `?? <json>` | Error-fallback literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values. |
-| `?? <source>` | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression. |
-| `on error = <json>` | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors. |
-| `on error <- <source>` | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime. |
-| `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant. |
+
+| Operator                        | Meaning                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `=`                             | Constant — sets a fixed value                                                                                                                                                                                                                                                                                                                   |
+| `<-`                            | Wire — pulls data from a source at runtime                                                                                                                                                                                                                                                                                                      |
+| `force <handle>`                | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `?? null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
+| `force <handle> ?? null`        | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure.                                                                                                                                                                              |
+| `<- h1:h2:source`               | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage                                                                                                                                                                                                      |
+| `\|\| <source>`                 | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained.                                                                                                                                                          |
+| `\|\| <json>`                   | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors.                                                                                                                                                                                            |
+| `?? <json>`                     | Error-fallback literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values.                                                                                                                                                                                                            |
+| `?? <source>`                   | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression.                                                                                                                                                                                           |
+| `on error = <json>`             | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors.                                                                                                                                   |
+| `on error <- <source>`          | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime.                                                                                                                                                                                                                |
+| `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant.                                                                                                                                                        |
 
 **Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
+
 ```bridge
 # o.label <- A || B || C || "literal" ?? errorSource
 o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
@@ -185,6 +213,7 @@ o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.
 `||` source alternatives desugar to multiple wires with the same target. The engine evaluates all in parallel and returns the first non-null value, so cheaper/faster sources naturally win without a cost model.
 
 ### Multi-wire priority (duplicate target)
+
 Multiple wires pointing to the same target field express **source priority**: the engine evaluates all sources in parallel and returns the first that resolves to a non-null value. Cheaper/local sources (input args) resolve before slower remote tools, so priority is naturally ordered by speed.
 
 ```bridge
@@ -202,6 +231,7 @@ o.textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
 - If all sources throw → `??` source/literal fires.
 
 ### `tool` blocks
+
 Define a reusable API call configuration. Syntax: `tool <name> from <source>`. When `<source>` is a function name (e.g. `httpCall`), a new tool is created. When `<source>` is an existing tool name, the new tool inherits its configuration.
 
 ```bridge
@@ -220,6 +250,7 @@ tool hereapi.geocode from hereapi {
 Param lines use a `.` prefix — the dot means "this tool's own field". `with` and `on error` lines are control flow and do not take a dot prefix.
 
 When inheriting from a parent tool, the engine merges wires from the parent chain by:
+
 1. Walking the inheritance chain from root to leaf
 2. Merging wires (child overrides parent by `target` path; `onError` wires merge by kind — child wins)
 3. Merging deps (deduplicated by handle name)
@@ -230,6 +261,7 @@ When inheriting from a parent tool, the engine merges wires from the parent chai
 **`on error <- <source>`** — same but pulls fallback from context/tool at runtime. Example: `on error <- context.fallbacks.geo`.
 
 ### `define` blocks
+
 Declare a reusable named subgraph (pipeline). Syntax: `define <name> { ... }`. The body uses the same wire syntax as bridge blocks, with `with input as i` and `with output as o` declaring the pipeline's interface.
 
 ```bridge
@@ -264,6 +296,7 @@ bridge Query.location {
 Each invocation is fully isolated — calling the same define twice creates independent tool instances. Inlining happens at parse time; the executor treats the expanded wires identically to hand-written ones.
 
 ### `bridge` blocks
+
 Connect a GraphQL field to its tools.
 
 ```bridge
@@ -284,15 +317,16 @@ bridge Query.geocode {
 
 **`with input as i`** — binds GraphQL field arguments.  
 **`with output as o`** — declares the output handle. **Required in every `bridge` block.** All output field assignments must go through this handle: `o.<field> <- source`. Tool input wires (`<tool>.<param> <- ...`) do not use the output handle.  
-**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.upperCase`), no separate `tool` block is required. A `tool` block is only needed when you want to configure defaults or inherit from a parent tool.  
+**`with <tool> as <handle>`** — binds a tool call result. When the name matches a registered tool function directly (e.g. a built-in like `std.str.toUpperCase`), no separate `tool` block is required. A `tool` block is only needed when you want to configure defaults or inherit from a parent tool.  
 **`with <define> as <handle>`** — invokes a define block. The define's inputs are written as `<handle>.<input>` and outputs read as `<handle>.<output>`.  
 **`o.results <- gc.items[] as item { ... }`** — array mapping. Creates a shadow tree per element. The iterator `item` references the current element — `item.field` accesses element data. The `{ }` block can also include element constants (`.field = "value"`).
 
 Example — pipe-like built-in tools need no `tool` block:
+
 ```bridge
 bridge Query.format {
-  with std.upperCase as up
-  with std.lowerCase as lo
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase as lo
   with input as i
   with output as o
 
@@ -310,20 +344,24 @@ Multiple bridge blocks can be in one `.bridge` file.
 ### ExecutionTree
 
 The core execution primitive. One is created per GraphQL root field call (Query/Mutation). It:
+
 - Holds a `state` map (trunk key → result promise)
 - Resolves wires backwards from demand (`response()` is called by the resolver for every field)
 - Uses `Promise.any()` to resolve the first available source for a field with multiple wire candidates
 - Caches tool dependency calls (`toolDepCache`) — a tool that is a dependency for multiple fields is only called once per request
 
 **Trunk** — identifies a node in the graph:
+
 ```typescript
 { module: string, type: string, field: string, instance?: number }
 ```
+
 `module` is the dotted tool name (e.g. `"hereapi"`, `"hereapi.geocode"`) or `SELF_MODULE = "_"` for the bridge's own input/output.
 
 **Shadow trees** — when an array mapping is encountered (`o.results <- gc.items[] as item { ... }`), a shadow `ExecutionTree` is created per array element. Shadow trees delegate `schedule()` and `resolveToolDep()` to their parent, but have their own `state` for element-scoped data.
 
 **Execution flow:**
+
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree
 2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all force entries in `bridge.forces` and eagerly schedules their target trunks via `schedule()`. **Critical forces** (no `catchError`) return their promises; the engine awaits them alongside data resolution and propagates errors. **Fire-and-forget forces** (`catchError: true`, from `force handle ?? null` syntax) have `.catch(() => {})` to suppress errors
 3. `response()` finds matching wires for the current path
@@ -332,7 +370,9 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 6. Result stored in state, downstream resolvers pick from it
 
 ### Multi-wire null-coalescing (was: `Promise.any()`)
+
 Multiple wires targeting the same field are evaluated in parallel. The engine returns the **first non-null/non-undefined value**. This means:
+
 - Cheap sources (input args) win over slow tool calls naturally — they're already in state.
 - If all sources resolve to null → resolves `undefined` (allowing `||` to fire).
 - If all sources throw → rejects with `AggregateError` (allowing `??` to fire).
@@ -344,18 +384,23 @@ Before this design, `Promise.any()` was used, which raced on fulfillment — mea
 ## Design Decisions Made (and why)
 
 ### No backward compat / no `provider` keyword
+
 The old API had a `provider` keyword and a `legacyProviderCall` option. All of this was removed. The `tool <name> from <source>` keyword is the canonical syntax for tool definitions.
 
 ### `gateway.ts` is not public API
+
 `createGateway()` is a test helper. It wraps graphql-yoga + `bridgeTransform` for convenience in tests. It lives in `test/_gateway.ts`. The library itself has no dependency on graphql-yoga — users bring their own server.
 
 ### Full context, not namespaced
+
 The engine passes the full GraphQL context to `with context` — no wrapping under `context.config` or `context.bridge`. Users control what’s on the context at the server level. To restrict access, pass a `contextMapper` function to `bridgeTransform()`.
 
 ### Function-based `InstructionSource` instead of `Record<string, Instruction[]>`
+
 Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => Instruction[]`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
 
 ### Three-layer fallback architecture
+
 Fault tolerance is split into three independent layers that compose, innermost-first:
 
 1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `tool ... from` chains (child overrides parent).
@@ -364,24 +409,28 @@ Fault tolerance is split into three independent layers that compose, innermost-f
 
 Firing order when all three are present: `on error` → `||` → `??`. Each layer only fires if the one inside it did not produce a usable value.
 
-| Scenario | Layer that fires |
-|---|---|
-| Tool fn throws, `on error` present | `on error` (tool scope) |
-| Tool fn throws, no `on error` | `??` (wire scope) |
-| Tool returns `{ label: null }` | `\|\|` |
+| Scenario                               | Layer that fires                    |
+| -------------------------------------- | ----------------------------------- |
+| Tool fn throws, `on error` present     | `on error` (tool scope)             |
+| Tool fn throws, no `on error`          | `??` (wire scope)                   |
+| Tool returns `{ label: null }`         | `\|\|`                              |
 | `??` is a source expression, all throw | `??` schedules and calls the source |
-| Tool returns `{ label: "Berlin" }` | none — real value used |
+| Tool returns `{ label: "Berlin" }`     | none — real value used              |
 
 ### Const blocks store raw JSON strings
+
 `ConstDef.value` stores the raw JSON string, not a parsed object. It’s parsed at runtime via `JSON.parse()`. This keeps the type simple and makes serializer roundtrip exact. The parser validates JSON at parse time and throws on invalid syntax.
 
 ### Namespaced tools and `std` is always bundled
+
 `builtinTools` is a nested object: `{ std: { audit, httpCall, upperCase, lowerCase, findObject, pickFirst, toArray } }`. The `std` namespace is always merged in — user tools are added alongside via shallow spread. In `.bridge` files, all built-in tools are callable with or without the `std.` prefix (e.g. both `httpCall` and `std.httpCall` work). The `lookupToolFn()` method in `ExecutionTree` splits on dots and traverses the nested map, falling back to `std.*` for unqualified names.
 
 ### ToolContext — unified tool communication channel
+
 Every tool function receives a second argument `context?: ToolContext` containing `{ logger }`. The engine constructs this from `BridgeOptions.logger` and passes it to every `callTool()` invocation. Tools that need logging (like `std.audit`) read `context.logger[level]` — no factory injection needed. All tools share the same `(input, context?) => result` signature.
 
 ### httpCall caching
+
 `createHttpCall(fetchFn?, cacheStore?)` accepts an optional `CacheStore` for response caching. When a tool sets `cache = <seconds>`, httpCall caches responses by `method + URL + body` with TTL eviction. Default store: in-memory `Map`. Users can pass Redis or any key-value store implementing `{ get(key): any, set(key, value, ttl): void }` — both sync and async are supported.
 
 ---

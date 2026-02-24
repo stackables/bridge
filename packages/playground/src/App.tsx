@@ -1,5 +1,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
+  Panel,
+  Group,
+  Separator,
+  useDefaultLayout,
+} from "react-resizable-panels";
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { examples } from "./examples";
@@ -7,7 +12,6 @@ import { runBridge, getDiagnostics, clearHttpCache } from "./engine";
 import type { RunResult } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -18,13 +22,14 @@ import {
 import { cn } from "@/lib/utils";
 import { ShareDialog } from "./components/ShareDialog";
 import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
+import { ChevronLeftIcon } from "lucide-react";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
   return (
-    <PanelResizeHandle
+    <Separator
       className={cn(
-        "shrink-0",
+        "shrink-0 outline-none",
         direction === "horizontal"
           ? "w-2 cursor-[col-resize]"
           : "h-2 cursor-[row-resize]",
@@ -206,6 +211,11 @@ export function App() {
   const [bridge, setBridge] = useState(ex.bridge);
   const [context, setContext] = useState(ex.context);
 
+  // ── persisted panel layouts ──
+  const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
+  const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
+  const rightVLayout = useDefaultLayout({ id: "bridge-playground-right-v" });
+
   // ── multi-query state ──
   const queryCounterRef = useRef(ex.queries.length);
   const [queries, setQueries] = useState<QueryTab[]>(() =>
@@ -360,18 +370,10 @@ export function App() {
       <header className="shrink-0 border-b border-slate-800">
         {/* Row 1: logo + (desktop: example picker + info) + share */}
         <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
-          <a
-            href="https://github.com/stackables/bridge"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2.5 no-underline"
-          >
-            <span className="text-xl font-bold text-sky-400 tracking-tight">
-              Bridge
+          <a href="/" className="flex items-center gap-2.5 no-underline">
+            <span className="text-xl font-bold text-sky-400 tracking-tight flex items-center">
+              <ChevronLeftIcon /> Documentation
             </span>
-            <Badge className="text-[10px] tracking-wider uppercase">
-              Playground
-            </Badge>
           </a>
 
           {/* Example picker — desktop only (row 1) */}
@@ -526,17 +528,19 @@ export function App() {
 
       {/* ── Desktop layout: resizable panels ── */}
       <div className="flex-1 min-h-0 p-3 overflow-hidden hidden md:block">
-        <PanelGroup
-          direction="horizontal"
-          autoSaveId="bridge-playground-h"
+        <Group
+          orientation="horizontal"
           className="h-full"
+          defaultLayout={hLayout.defaultLayout}
+          onLayoutChanged={hLayout.onLayoutChanged}
         >
           {/* ── LEFT column: Schema + Bridge ── */}
           <Panel defaultSize={50} minSize={20}>
-            <PanelGroup
-              direction="vertical"
-              autoSaveId="bridge-playground-left-v"
+            <Group
+              orientation="vertical"
               className="h-full"
+              defaultLayout={leftVLayout.defaultLayout}
+              onLayoutChanged={leftVLayout.onLayoutChanged}
             >
               {/* Schema panel */}
               <Panel defaultSize={35} minSize={15}>
@@ -569,17 +573,18 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-            </PanelGroup>
+            </Group>
           </Panel>
 
           <ResizeHandle direction="horizontal" />
 
           {/* ── RIGHT column: Query/Context + Results ── */}
           <Panel defaultSize={50} minSize={20}>
-            <PanelGroup
-              direction="vertical"
-              autoSaveId="bridge-playground-right-v"
+            <Group
+              orientation="vertical"
               className="h-full"
+              defaultLayout={rightVLayout.defaultLayout}
+              onLayoutChanged={rightVLayout.onLayoutChanged}
             >
               {/* Query / Context tabbed panel */}
               <Panel defaultSize={40} minSize={15}>
@@ -637,9 +642,9 @@ export function App() {
                   </div>
                 </PanelBox>
               </Panel>
-            </PanelGroup>
+            </Group>
           </Panel>
-        </PanelGroup>
+        </Group>
       </div>
     </div>
   );

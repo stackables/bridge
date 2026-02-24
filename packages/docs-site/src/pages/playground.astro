@@ -1,0 +1,18 @@
+---
+// Standalone playground page — no Starlight layout so the playground can own
+// the full viewport with its own Tailwind styles.
+import PlaygroundWrapper from "../components/PlaygroundWrapper";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playground · The Bridge</title>
+  </head>
+  <body>
+    <div id="playground-root" style="height:100vh">
+      <PlaygroundWrapper client:only="react" />
+    </div>
+  </body>
+</html>

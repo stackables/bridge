@@ -1,6 +1,9 @@
-# Bridge Observability — Traces, Metrics, and Logs
+---
+title: Observability
+description: Traces, Metrics, and Logs
+---
 
-Bridge ships with first-class observability built on three pillars:
+Bridge ships with first-class observability built on four pillars:
 
 1. **OpenTelemetry spans** — every tool call produces a `bridge.tool` span via
    the standard `@opentelemetry/api`. Zero-overhead no-ops when no OTel SDK is
@@ -9,7 +12,7 @@ Bridge ships with first-class observability built on three pillars:
    call, also via `@opentelemetry/api`.
 3. **Structured logging** — a pluggable `Logger` interface routes engine-level
    events (completions, errors, warnings) to any compatible logger.
-4. **`extensions.traces`** — structured per-request traces returned in the
+4. **GraphQL extensions.traces** — structured per-request traces returned in the
    GraphQL `extensions` field for debugging and testing (opt-in).
 
 ---
@@ -25,10 +28,10 @@ need to register an OTel SDK in your application.
 
 Each tool call produces one span named **`bridge.tool`** with these attributes:
 
-| Attribute | Value |
-|-----------|-------|
-| `bridge.tool.name` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.upperCase"`) |
-| `bridge.tool.fn` | Registered function that was called (e.g. `"httpCall"`, `"upperCase"`) |
+| Attribute          | Value                                                                            |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `bridge.tool.name` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.str.toUpperCase"`) |
+| `bridge.tool.fn`   | Registered function that was called (e.g. `"httpCall"`, `"upperCase"`)           |
 
 On error the span status is set to `ERROR` and the exception is recorded with
 `span.recordException()`.
@@ -37,11 +40,11 @@ On error the span status is set to `ERROR` and the exception is recorded with
 
 The following instruments are registered under the `@stackables/bridge` meter:
 
-| Metric | Type | Unit | Description |
-|--------|------|------|-------------|
-| `bridge.tool.calls` | Counter | — | Total number of tool invocations (success + error) |
-| `bridge.tool.duration` | Histogram | ms | Tool call wall-clock duration in milliseconds |
-| `bridge.tool.errors` | Counter | — | Total number of tool invocations that threw |
+| Metric                 | Type      | Unit | Description                                        |
+| ---------------------- | --------- | ---- | -------------------------------------------------- |
+| `bridge.tool.calls`    | Counter   | —    | Total number of tool invocations (success + error) |
+| `bridge.tool.duration` | Histogram | ms   | Tool call wall-clock duration in milliseconds      |
+| `bridge.tool.errors`   | Counter   | —    | Total number of tool invocations that threw        |
 
 All instruments carry the same `bridge.tool.name` and `bridge.tool.fn`
 attribute set as spans, so they can be filtered and grouped the same way.
@@ -79,7 +82,7 @@ import type { Logger } from "@stackables/bridge";
 
 const schema = bridgeTransform(baseSchema, instructions, {
   tools,
-  logger: console,           // console works out of the box
+  logger: console, // console works out of the box
   // logger: pinoInstance,   // pino, winston, bunyan — any compatible logger
 });
 ```
@@ -89,8 +92,8 @@ const schema = bridgeTransform(baseSchema, instructions, {
 ```ts
 interface Logger {
   debug: (...args: any[]) => void;
-  info:  (...args: any[]) => void;
-  warn:  (...args: any[]) => void;
+  info: (...args: any[]) => void;
+  warn: (...args: any[]) => void;
   error: (...args: any[]) => void;
 }
 ```
@@ -100,11 +103,11 @@ and zero overhead.
 
 ### What Gets Logged
 
-| Level | Event |
-|-------|-------|
-| `debug` | Successful tool completion: tool name, fn, duration |
-| `error` | Tool invocation failure: tool name, fn, error message |
-| `warn` | Engine-level warnings (e.g. accessing a field on an array without `pickFirst`) |
+| Level   | Event                                                                          |
+| ------- | ------------------------------------------------------------------------------ |
+| `debug` | Successful tool completion: tool name, fn, duration                            |
+| `error` | Tool invocation failure: tool name, fn, error message                          |
+| `warn`  | Engine-level warnings (e.g. accessing a field on an array without `pickFirst`) |
 
 ---
 
@@ -118,7 +121,7 @@ import { bridgeTransform, useBridgeTracing } from "@stackables/bridge";
 
 const schema = bridgeTransform(baseSchema, instructions, {
   tools,
-  trace: "full",   // records tool, fn, input, output, timing
+  trace: "full", // records tool, fn, input, output, timing
   // trace: "basic", // records tool, fn, timing, error (no input/output)
 });
 ```
@@ -152,7 +155,12 @@ When `extensions.traces` is active, the GraphQL response includes:
       {
         "tool": "geocoder",
         "fn": "httpCall",
-        "input": { "q": "Berlin", "baseUrl": "https://api.example.com", "method": "GET", "path": "/geocode" },
+        "input": {
+          "q": "Berlin",
+          "baseUrl": "https://api.example.com",
+          "method": "GET",
+          "path": "/geocode"
+        },
         "output": { "label": "Berlin, DE" },
         "durationMs": 42.5,
         "startedAt": 0.12
@@ -164,23 +172,23 @@ When `extensions.traces` is active, the GraphQL response includes:
 
 ### Trace Levels
 
-| Value | Records |
-|-------|---------|
-| `"full"` | tool, fn, input, output, error, timing |
-| `"basic"` | tool, fn, error, timing (no input/output — lighter payload) |
-| `"off"` (default) | nothing — zero overhead |
+| Value             | Records                                                     |
+| ----------------- | ----------------------------------------------------------- |
+| `"full"`          | tool, fn, input, output, error, timing                      |
+| `"basic"`         | tool, fn, error, timing (no input/output — lighter payload) |
+| `"off"` (default) | nothing — zero overhead                                     |
 
 ### `ToolTrace` Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `tool` | `string` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.upperCase"`) |
-| `fn` | `string` | The registered function that was called (e.g. `"httpCall"`, `"upperCase"`) |
-| `input` | `object` | Input object passed to the tool function, after all wire resolution (`"full"` only) |
-| `output` | `any` | Return value of the tool — present on success (`"full"` only) |
-| `error` | `string` | Error message (present when the tool threw) |
-| `durationMs` | `number` | Wall-clock execution time in milliseconds |
-| `startedAt` | `number` | Timestamp (ms) relative to the first trace in the request |
+| Field        | Type     | Description                                                                         |
+| ------------ | -------- | ----------------------------------------------------------------------------------- |
+| `tool`       | `string` | Tool name as resolved by the engine (e.g. `"geocoder"`, `"std.str.toUpperCase"`)    |
+| `fn`         | `string` | The registered function that was called (e.g. `"httpCall"`, `"upperCase"`)          |
+| `input`      | `object` | Input object passed to the tool function, after all wire resolution (`"full"` only) |
+| `output`     | `any`    | Return value of the tool — present on success (`"full"` only)                       |
+| `error`      | `string` | Error message (present when the tool threw)                                         |
+| `durationMs` | `number` | Wall-clock execution time in milliseconds                                           |
+| `startedAt`  | `number` | Timestamp (ms) relative to the first trace in the request                           |
 
 > A trace always has either `output` or `error`, never both.
 
@@ -191,8 +199,8 @@ When `extensions.traces` is active, the GraphQL response includes:
 The engine instruments **all** tool invocations via all three pillars:
 
 - **Bridge-wired tools** — tools scheduled via `with <tool> as <alias>` in bridge blocks
-- **Tool-def tools** — tools defined in `tool <name> from <fn> { … }` blocks (traced with both the tool name *and* the underlying `fn`)
-- **Direct tool functions** — namespace tools like `std.upperCase`
+- **Tool-def tools** — tools defined in `tool <name> from <fn> { … }` blocks (traced with both the tool name _and_ the underlying `fn`)
+- **Direct tool functions** — namespace tools like `std.str.toUpperCase`
 - **Error paths** — when a tool throws, the span is marked ERROR, the error counter increments, and `logger.error` fires; if a `??` fallback or `on error` handler fires, the fallback tool gets its own instrumentation
 
 ### Execution-Order Semantics (traces)
@@ -229,8 +237,8 @@ new NodeSDK({
 // 2. Configure Bridge with logger + trace
 const schema = bridgeTransform(baseSchema, instructions, {
   tools,
-  logger: pino(),           // structured log output
-  trace: "basic",           // lightweight per-request traces in extensions
+  logger: pino(), // structured log output
+  trace: "basic", // lightweight per-request traces in extensions
 });
 
 // 3. Register Yoga plugin for extensions.traces

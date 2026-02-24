@@ -84,7 +84,7 @@ export type TraceLevel = "basic" | "full" | "off";
 
 /** A single recorded tool invocation. */
 export type ToolTrace = {
-  /** Tool name as resolved (e.g. "hereGeo", "std.upperCase") */
+  /** Tool name as resolved (e.g. "hereGeo", "std.str.toUpperCase") */
   tool: string;
   /** The function that was called (e.g. "httpCall", "upperCase") */
   fn: string;
@@ -241,7 +241,7 @@ export class ExecutionTree {
     return `${target.module}.${target.field}`;
   }
 
-  /** Deep-lookup a tool function by dotted name (e.g. "std.upperCase").
+  /** Deep-lookup a tool function by dotted name (e.g. "std.str.toUpperCase").
    *  Falls back to a flat key lookup for backward compat (e.g. "hereapi.geocode" as literal key). */
   private lookupToolFn(
     name: string,

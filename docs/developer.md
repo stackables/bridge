@@ -6,7 +6,7 @@ This document explains the internal architecture of `@stackables/bridge` for con
 
 ## Overview
 
-The Bridge is a declarative dataflow engine for GraphQL. Instead of resolvers, you write `.bridge` files that describe *what data is needed and where it comes from*. The engine reads those instructions and resolves fields on demand — only fetching what the client actually asked for.
+The Bridge is a declarative dataflow engine for GraphQL. Instead of resolvers, you write `.bridge` files that describe _what data is needed and where it comes from_. The engine reads those instructions and resolves fields on demand — only fetching what the client actually asked for.
 
 The pipeline has two phases:
 
@@ -35,11 +35,11 @@ packages/bridge/src/
 └── tools/
     ├── index.ts          builtinTools bundle + std namespace exports
     ├── http-call.ts      createHttpCall (REST API tool with LRU caching)
-    ├── upper-case.ts     std.upperCase
-    ├── lower-case.ts     std.lowerCase
-    ├── find-object.ts    std.findObject (array search by predicate)
-    ├── pick-first.ts     std.pickFirst (head of array, optional strict)
-    └── to-array.ts       std.toArray (wrap scalar in array)
+    ├── upper-case.ts     std.str.toUpperCase
+    ├── lower-case.ts     std.str.toLowerCase
+    ├── find-object.ts    std.arr.find (array search by predicate)
+    ├── pick-first.ts     std.arr.first (head of array, optional strict)
+    └── to-array.ts       std.arr.toArray (wrap scalar in array)
 ```
 
 ---
@@ -57,7 +57,11 @@ The lexer tokenizes `.bridge` source text using [Chevrotain](https://chevrotain.
 
 ```typescript
 // Adding a new keyword — always set longer_alt to avoid stealing identifiers:
-export const MyKw = createToken({ name: "MyKw", pattern: /my/i, longer_alt: Identifier });
+export const MyKw = createToken({
+  name: "MyKw",
+  pattern: /my/i,
+  longer_alt: Identifier,
+});
 ```
 
 ### Parser (`src/parser/parser.ts`)
@@ -68,15 +72,15 @@ The parser produces a CST — a tree of named child arrays — which is intentio
 
 Key grammar entry points:
 
-| Rule | What it parses |
-|---|---|
-| `program` | Top-level — a sequence of version + blocks |
-| `bridgeBlock` | A full `bridge Type.field { … }` block |
-| `toolBlock` | A `tool name from fn { … }` block |
-| `constBlock` | A `const name = value` declaration |
-| `defineBlock` | A `define name { … }` reusable sub-graph |
-| `bridgeWithDecl` | A `with X as Y` handle declaration |
-| `wireDecl` | A wire line: `o.field <- source` or `o.field = "value"` |
+| Rule             | What it parses                                          |
+| ---------------- | ------------------------------------------------------- |
+| `program`        | Top-level — a sequence of version + blocks              |
+| `bridgeBlock`    | A full `bridge Type.field { … }` block                  |
+| `toolBlock`      | A `tool name from fn { … }` block                       |
+| `constBlock`     | A `const name = value` declaration                      |
+| `defineBlock`    | A `define name { … }` reusable sub-graph                |
+| `bridgeWithDecl` | A `with X as Y` handle declaration                      |
+| `wireDecl`       | A wire line: `o.field <- source` or `o.field = "value"` |
 
 ### AST Types (`src/types.ts`)
 
@@ -89,18 +93,20 @@ type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
 The most important types are:
 
 **`NodeRef`** — identifies a single data point in the execution graph:
+
 ```typescript
 type NodeRef = {
-  module: string;   // "myApi", "sendgrid", "_" (SELF_MODULE = bridge's own type)
-  type: string;     // GraphQL type name or "Tools"
-  field: string;    // field or function name
+  module: string; // "myApi", "sendgrid", "_" (SELF_MODULE = bridge's own type)
+  type: string; // GraphQL type name or "Tools"
+  field: string; // field or function name
   instance?: number; // disambiguates multiple uses of the same tool in one bridge
   element?: boolean; // true when inside an array mapping block
-  path: string[];   // drill-down: ["items", "0", "position", "lat"]
+  path: string[]; // drill-down: ["items", "0", "position", "lat"]
 };
 ```
 
 **`ToolContext`** — communication channel from engine to every tool function:
+
 ```typescript
 type ToolContext = {
   logger: {
@@ -111,21 +117,35 @@ type ToolContext = {
   };
 };
 ```
+
 Constructed by `callTool()` from `BridgeOptions.logger` and passed as the second argument to every tool function. Tools that need logging (like `std.audit`) read `context.logger.info` instead of requiring factory injection.
 
 **`ToolCallFn`** — the function signature for all tools:
+
 ```typescript
-type ToolCallFn = (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>;
+type ToolCallFn = (
+  input: Record<string, any>,
+  context?: ToolContext,
+) => Promise<Record<string, any>>;
 ```
 
 **`Wire`** — a directed data connection:
+
 ```typescript
 type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
-  | { value: string; to: NodeRef };  // constant wire: value
+  | {
+      from: NodeRef;
+      to: NodeRef;
+      pipe?: true;
+      nullFallback?: string;
+      fallback?: string;
+      fallbackRef?: NodeRef;
+    }
+  | { value: string; to: NodeRef }; // constant wire: value
 ```
 
 **`Bridge`** — wires one GraphQL field to its data sources:
+
 ```typescript
 type Bridge = {
   kind: "bridge";
@@ -180,7 +200,7 @@ It evaluates cost-0 sources first. If they resolve, it short-circuits and never 
 
 ### Array mapping
 
-When a field has `[] as iter { }` in the bridge, the engine detects the outer array wire, fetches the array, then creates a *shadow tree* for each element. The shadow tree inherits all non-element wires from its parent and resolves element-specific wires against the array element.
+When a field has `[] as iter { }` in the bridge, the engine detects the outer array wire, fetches the array, then creates a _shadow tree_ for each element. The shadow tree inherits all non-element wires from its parent and resolves element-specific wires against the array element.
 
 ### TraceCollector
 
@@ -219,7 +239,10 @@ Child fields receive the parent `ExecutionTree` as their `source` and call `sour
 ```typescript
 import type { ToolContext } from "../types.ts";
 
-export function myTool(input: Record<string, any>, context?: ToolContext): Promise<Record<string, any>> {
+export function myTool(
+  input: Record<string, any>,
+  context?: ToolContext,
+): Promise<Record<string, any>> {
   const { thing } = input;
   // Tools can access the engine logger via context:
   // context?.logger?.info?.("myTool called", input);
@@ -246,7 +269,8 @@ export const std = {
 
 ```typescript
 test("std.myTool", async () => {
-  const result = await execute(`
+  const result = await execute(
+    `
     version 1.4
     tool t from std.myTool
     bridge Query.result {
@@ -254,7 +278,9 @@ test("std.myTool", async () => {
       with output as o
       o.value <- t.result
     }
-  `, { tools: builtinTools });
+  `,
+    { tools: builtinTools },
+  );
   assert.equal(result.data.result.value, "HELLO");
 });
 ```
@@ -301,6 +327,7 @@ test("hello returns world", async () => {
 ## The VS Code Extension (`packages/bridge-syntax-highlight`)
 
 A separate package providing:
+
 - TextMate grammar for `.bridge` files (syntax highlighting)
 - Language configuration (bracket matching, comment toggling)
 - A language server (hover, diagnostics via `parseBridgeDiagnostics`)

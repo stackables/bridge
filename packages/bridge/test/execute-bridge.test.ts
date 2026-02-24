@@ -13,7 +13,9 @@ function run(
 ) {
   const raw = parseBridge(bridgeText);
   // instructions must survive serioalisation
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<typeof parseBridge>;
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+    typeof parseBridge
+  >;
   return executeBridge({ instructions, operation, input, tools });
 }
 
@@ -69,7 +71,12 @@ bridge Query.livingStandard {
         return { lifeExpectancy: "81.5" };
       },
     };
-    await run(bridgeText, "Query.livingStandard", { location: "Berlin" }, spyTools);
+    await run(
+      bridgeText,
+      "Query.livingStandard",
+      { location: "Berlin" },
+      spyTools,
+    );
     assert.equal(geoParams.q, "Berlin");
     assert.equal(cxParams.x, 52.53);
     assert.equal(cxParams.y, 13.38);
@@ -101,7 +108,11 @@ bridge Query.getUser {
       { id: "123" },
       tools,
     );
-    assert.deepEqual(data, { name: "Alice", age: 30, email: "alice@example.com" });
+    assert.deepEqual(data, {
+      name: "Alice",
+      age: 30,
+      email: "alice@example.com",
+    });
   });
 
   test("tool receives input args", async () => {
@@ -293,10 +304,7 @@ bridge Query.list {
 }`;
     const tools: Record<string, any> = {
       api: async () => ({
-        items: [
-          { nested: { a: 1, b: 2 } },
-          { nested: { a: 3, b: 4 } },
-        ],
+        items: [{ nested: { a: 1, b: 2 } }, { nested: { a: 3, b: 4 } }],
       }),
     };
 
@@ -311,7 +319,7 @@ bridge Query.list {
     const bridgeText = `version 1.4
 bridge Query.items {
   with api
-  with std.upperCase as uc
+  with std.str.toUpperCase as uc
   with output as o
 
   o <- api.items[] as it {
@@ -357,8 +365,17 @@ bridge Query.test {
       },
     };
 
-    const { data } = await run(bridgeText, "Query.test", { name: "alice" }, tools);
-    assert.deepEqual(data, { greeting: "ALICE", label: "ALICE", title: "ALICE" });
+    const { data } = await run(
+      bridgeText,
+      "Query.test",
+      { name: "alice" },
+      tools,
+    );
+    assert.deepEqual(data, {
+      greeting: "ALICE",
+      label: "ALICE",
+      title: "ALICE",
+    });
     // pipe tool called only once despite 3 reads
     assert.equal(ucCallCount, 1);
   });

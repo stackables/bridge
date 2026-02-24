@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source ".";
 
 @theme {
   /* Monospace font stack for code editors */

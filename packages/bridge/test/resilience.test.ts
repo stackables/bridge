@@ -103,7 +103,8 @@ o.result <- a.data
 
   test("invalid JSON throws", () => {
     assert.throws(
-      () => parseBridge(`version 1.4
+      () =>
+        parseBridge(`version 1.4
 const bad = { not valid json }`),
       /[Ii]nvalid JSON/,
     );
@@ -257,7 +258,10 @@ tool myApi from httpCall {
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
   });
 
   test("on error <- source roundtrips", () => {
@@ -268,7 +272,10 @@ tool myApi from httpCall {
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
   });
 });
 
@@ -302,7 +309,9 @@ o.lon <- api.lon
 }`;
 
     const tools: Record<string, any> = {
-      httpCall: async () => { throw new Error("Service unavailable"); },
+      httpCall: async () => {
+        throw new Error("Service unavailable");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -337,7 +346,9 @@ o.lon <- api.lon
 }`;
 
     const tools: Record<string, any> = {
-      httpCall: async () => { throw new Error("Service unavailable"); },
+      httpCall: async () => {
+        throw new Error("Service unavailable");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -413,7 +424,9 @@ o.lon <- api.lon
 }`;
 
     const tools: Record<string, any> = {
-      httpCall: async () => { throw new Error("timeout"); },
+      httpCall: async () => {
+        throw new Error("timeout");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -447,9 +460,7 @@ o.lat <- a.lat ?? 0
 
 }`) as Bridge[];
 
-    const fbWire = bridge.wires.find(
-      (w) => "from" in w && w.fallback != null,
-    );
+    const fbWire = bridge.wires.find((w) => "from" in w && w.fallback != null);
     assert.ok(fbWire, "should have a wire with fallback");
     if ("from" in fbWire!) {
       assert.equal(fbWire.fallback, "0");
@@ -468,9 +479,7 @@ o.result <- a.data ?? {"default":true}
 
 }`) as Bridge[];
 
-    const fbWire = bridge.wires.find(
-      (w) => "from" in w && w.fallback != null,
-    );
+    const fbWire = bridge.wires.find((w) => "from" in w && w.fallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.fallback, `{"default":true}`);
@@ -489,9 +498,7 @@ o.name <- a.name ?? "unknown"
 
 }`) as Bridge[];
 
-    const fbWire = bridge.wires.find(
-      (w) => "from" in w && w.fallback != null,
-    );
+    const fbWire = bridge.wires.find((w) => "from" in w && w.fallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.fallback, `"unknown"`);
@@ -510,9 +517,7 @@ o.name <- a.name ?? null
 
 }`) as Bridge[];
 
-    const fbWire = bridge.wires.find(
-      (w) => "from" in w && w.fallback != null,
-    );
+    const fbWire = bridge.wires.find((w) => "from" in w && w.fallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.fallback, "null");
@@ -532,9 +537,7 @@ o.result <- t:i.text ?? "fallback"
 }`) as Bridge[];
 
     // The output wire (pipe=true, from fork root → target) should have the fallback
-    const fbWire = bridge.wires.find(
-      (w) => "from" in w && w.fallback != null,
-    );
+    const fbWire = bridge.wires.find((w) => "from" in w && w.fallback != null);
     assert.ok(fbWire, "should have pipe output wire with fallback");
     if ("from" in fbWire!) {
       assert.equal(fbWire.fallback, `"fallback"`);
@@ -575,7 +578,10 @@ o.lat <- a.lat ?? 0
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
   });
 
   test("?? on pipe chain roundtrips", () => {
@@ -589,7 +595,10 @@ o.result <- t:i.text ?? "fallback"
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(instructions)), instructions);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
   });
 
   test("serialized output contains ??", () => {
@@ -632,7 +641,9 @@ o.name <- api.name ?? "unknown"
 }`;
 
     const tools: Record<string, any> = {
-      myApi: async () => { throw new Error("down"); },
+      myApi: async () => {
+        throw new Error("down");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -695,7 +706,9 @@ o.name <- geo.name ?? "N/A"
 }`;
 
     const tools: Record<string, any> = {
-      httpCall: async () => { throw new Error("network"); },
+      httpCall: async () => {
+        throw new Error("network");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -751,8 +764,12 @@ o.extra <- bad.data ?? "none"
 }`;
 
     const tools: Record<string, any> = {
-      httpCall: async () => { throw new Error("down"); },
-      badApi: async () => { throw new Error("also down"); },
+      httpCall: async () => {
+        throw new Error("down");
+      },
+      badApi: async () => {
+        throw new Error("also down");
+      },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -821,7 +838,9 @@ o.result <- a.data || {"lat":0,"lon":0}
 
 }`);
     const bridge = instructions[0] as Bridge;
-    const wire = bridge.wires.find((w) => "from" in w && (w as any).from.path[0] === "data") as Extract<Wire, { from: NodeRef }>;
+    const wire = bridge.wires.find(
+      (w) => "from" in w && (w as any).from.path[0] === "data",
+    ) as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.nullFallback, '{"lat":0,"lon":0}');
   });
 
@@ -844,7 +863,7 @@ o.name <- i.name
     const instructions = parseBridge(`version 1.4
 
 bridge Query.format {
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -854,7 +873,8 @@ o.result <- up:i.text || "N/A"
     const bridge = instructions[0] as Bridge;
     // Terminal pipe wire (from fork root to result) carries the nullFallback
     const terminalWire = bridge.wires.find(
-      (w) => "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
+      (w) =>
+        "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
     ) as Extract<Wire, { from: NodeRef }>;
     assert.equal(terminalWire?.nullFallback, '"N/A"');
   });
@@ -894,7 +914,7 @@ o.name <- a.name || "World" ?? "Error"
   test("pipe wire with || roundtrips", () => {
     const input = `version 1.4
 bridge Query.format {
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1054,7 +1074,7 @@ describe("multi-wire null-coalescing: end-to-end", () => {
   test("first wire wins when it has a value", async () => {
     const bridgeText = `version 1.4
 bridge Query.email {
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1067,7 +1087,9 @@ o.textPart <- up:i.htmlBody
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
-      document: parse(`{ email(textBody: "plain text", htmlBody: "<b>bold</b>") { textPart } }`),
+      document: parse(
+        `{ email(textBody: "plain text", htmlBody: "<b>bold</b>") { textPart } }`,
+      ),
     });
     assert.equal(result.data.email.textPart, "plain text");
   });
@@ -1075,7 +1097,7 @@ o.textPart <- up:i.htmlBody
   test("second wire used when first is null", async () => {
     const bridgeText = `version 1.4
 bridge Query.email {
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1089,7 +1111,9 @@ o.textPart <- up:i.htmlBody
 
     // textBody is null → fall through to upperCase(htmlBody)
     const result: any = await executor({
-      document: parse(`{ email(textBody: null, htmlBody: "hello") { textPart } }`),
+      document: parse(
+        `{ email(textBody: null, htmlBody: "hello") { textPart } }`,
+      ),
     });
     assert.equal(result.data.email.textPart, "HELLO");
   });
@@ -1165,7 +1189,7 @@ o.label <- a.label || b.label || "default"
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
     assert.equal(labelWires.length, 2);
-    assert.equal(labelWires[0].nullFallback, undefined);   // first wire: no fallback
+    assert.equal(labelWires[0].nullFallback, undefined); // first wire: no fallback
     assert.equal(labelWires[1].nullFallback, '"default"'); // last wire: has nullFallback
   });
 });
@@ -1197,7 +1221,7 @@ o.label <- api.label ?? i.fallbackLabel
 
 bridge Query.lookup {
   with myApi as api
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1213,7 +1237,10 @@ o.label <- api.label ?? up:i.errorDefault
     // fallbackRef points to the fork root (path=[])
     assert.deepEqual(wire.fallbackRef!.path, []);
     // Fork should be registered in pipeHandles
-    assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0, "should have pipe forks");
+    assert.ok(
+      bridge.pipeHandles && bridge.pipeHandles.length > 0,
+      "should have pipe forks",
+    );
   });
 
   test("full chain: A || B || literal ?? source — wires + fallbackRef", () => {
@@ -1262,7 +1289,7 @@ o.label <- api.label ?? i.fallbackLabel
     const input = `version 1.4
 bridge Query.lookup {
   with myApi as api
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1298,7 +1325,7 @@ o.label <- p.label || b.label || "default"
 bridge Query.lookup {
   with myApi as api
   with backup as b
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1315,8 +1342,12 @@ o.label <- api.label || b.label || "default" ?? up:i.errorDefault
 describe("|| source + ?? source: end-to-end", () => {
   test("|| source: primary null → backup used", async () => {
     const typeDefs = /* GraphQL */ `
-      type Query { lookup(q: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
@@ -1332,20 +1363,26 @@ o.label <- p.label || b.label
 }`;
     const tools: Record<string, any> = {
       primary: async () => ({ label: null }),
-      backup:  async () => ({ label: "from-backup" }),
+      backup: async () => ({ label: "from-backup" }),
     };
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "from-backup");
   });
 
   test("|| source: primary has value → backup never called", async () => {
     const typeDefs = /* GraphQL */ `
-      type Query { lookup(q: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
@@ -1362,22 +1399,35 @@ o.label <- p.label || b.label
     let backupCalled = false;
     const tools: Record<string, any> = {
       primary: async () => ({ label: "from-primary" }),
-      backup:  async () => { backupCalled = true; return { label: "from-backup" }; },
+      backup: async () => {
+        backupCalled = true;
+        return { label: "from-backup" };
+      },
     };
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "from-primary");
     // v2.0: sequential short-circuit — backup is never called when primary succeeds
-    assert.equal(backupCalled, false, "backup should NOT be called when primary returns non-null");
+    assert.equal(
+      backupCalled,
+      false,
+      "backup should NOT be called when primary returns non-null",
+    );
   });
 
   test("|| source || literal: both null → literal fires", async () => {
     const typeDefs = /* GraphQL */ `
-      type Query { lookup(q: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
@@ -1393,20 +1443,26 @@ o.label <- p.label || b.label || "nothing found"
 }`;
     const tools: Record<string, any> = {
       primary: async () => ({ label: null }),
-      backup:  async () => ({ label: null }),
+      backup: async () => ({ label: null }),
     };
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "nothing found");
   });
 
   test("?? source.path: all throw → pull from input field", async () => {
     const typeDefs = /* GraphQL */ `
-      type Query { lookup(q: String!, defaultLabel: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!, defaultLabel: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
@@ -1419,27 +1475,35 @@ o.label <- api.label ?? i.defaultLabel
 
 }`;
     const tools: Record<string, any> = {
-      myApi: async () => { throw new Error("down"); },
+      myApi: async () => {
+        throw new Error("down");
+      },
     };
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
-      document: parse(`{ lookup(q: "x", defaultLabel: "fallback-value") { label } }`),
+      document: parse(
+        `{ lookup(q: "x", defaultLabel: "fallback-value") { label } }`,
+      ),
     });
     assert.equal(result.data.lookup.label, "fallback-value");
   });
 
   test("?? pipe:source: all throw → pipe tool applied to input field", async () => {
     const typeDefs = /* GraphQL */ `
-      type Query { lookup(q: String!, errorDefault: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!, errorDefault: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with myApi as api
-  with std.upperCase as up
+  with std.str.toUpperCase as up
   with input as i
   with output as o
 
@@ -1448,16 +1512,20 @@ o.label <- api.label ?? up:i.errorDefault
 
 }`;
     const tools: Record<string, any> = {
-      myApi: async () => { throw new Error("down"); },
+      myApi: async () => {
+        throw new Error("down");
+      },
     };
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
-      document: parse(`{ lookup(q: "x", errorDefault: "service unavailable") { label } }`),
+      document: parse(
+        `{ lookup(q: "x", errorDefault: "service unavailable") { label } }`,
+      ),
     });
-    // std.upperCase applied to "service unavailable"
+    // std.str.toUpperCase applied to "service unavailable"
     assert.equal(result.data.lookup.label, "SERVICE UNAVAILABLE");
   });
 
@@ -1466,7 +1534,9 @@ o.label <- api.label ?? up:i.errorDefault
       type Query {
         lookup(q: String!, fail: Boolean, defaultLabel: String): Result
       }
-      type Result { label: String }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.4
 bridge Query.lookup {
@@ -1498,13 +1568,17 @@ o.label <- p.label || b.label || "nothing" ?? i.defaultLabel
 
     // Both return null → || literal fires
     const r1: any = await executor({
-      document: parse(`{ lookup(q: "x", fail: false, defaultLabel: "err") { label } }`),
+      document: parse(
+        `{ lookup(q: "x", fail: false, defaultLabel: "err") { label } }`,
+      ),
     });
     assert.equal(r1.data.lookup.label, "nothing");
 
     // Both throw → ?? source fires
     const r2: any = await executor({
-      document: parse(`{ lookup(q: "x", fail: true, defaultLabel: "error-default") { label } }`),
+      document: parse(
+        `{ lookup(q: "x", fail: true, defaultLabel: "error-default") { label } }`,
+      ),
     });
     assert.equal(r2.data.lookup.label, "error-default");
   });

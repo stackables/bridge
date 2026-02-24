@@ -31,9 +31,26 @@ export type NodeRef = {
  * back to pipe notation.
  */
 export type Wire =
-  | { from: NodeRef; to: NodeRef; pipe?: true; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef }
+  | {
+      from: NodeRef;
+      to: NodeRef;
+      pipe?: true;
+      nullFallback?: string;
+      fallback?: string;
+      fallbackRef?: NodeRef;
+    }
   | { value: string; to: NodeRef }
-  | { cond: NodeRef; thenRef?: NodeRef; thenValue?: string; elseRef?: NodeRef; elseValue?: string; to: NodeRef; nullFallback?: string; fallback?: string; fallbackRef?: NodeRef };
+  | {
+      cond: NodeRef;
+      thenRef?: NodeRef;
+      thenValue?: string;
+      elseRef?: NodeRef;
+      elseValue?: string;
+      to: NodeRef;
+      nullFallback?: string;
+      fallback?: string;
+      fallbackRef?: NodeRef;
+    };
 
 /**
  * Bridge definition — wires one GraphQL field to its data sources.
@@ -70,7 +87,12 @@ export type Bridge = {
   pipeHandles?: Array<{
     key: string;
     handle: string;
-    baseTrunk: { module: string; type: string; field: string; instance?: number };
+    baseTrunk: {
+      module: string;
+      type: string;
+      field: string;
+      instance?: number;
+    };
   }>;
 };
 
@@ -181,7 +203,7 @@ export type ToolCallFn = (
  * Example:
  *   { std: { upperCase, lowerCase }, httpCall: createHttpCall(), myCompany: { myTool } }
  *
- * Lookup is dot-separated: "std.upperCase" → tools.std.upperCase
+ * Lookup is dot-separated: "std.str.toUpperCase" → tools.std.str.toUpperCase
  */
 export type ToolMap = {
   [key: string]: ToolCallFn | ((...args: any[]) => any) | ToolMap;

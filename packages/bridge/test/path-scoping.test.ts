@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import {
-  parseBridge,
-  serializeBridge,
-} from "../src/bridge-format.ts";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
 import type { Bridge, Instruction, Wire } from "../src/types.ts";
 import { SELF_MODULE } from "../src/types.ts";
 import { executeBridge } from "../src/execute-bridge.ts";
@@ -40,11 +37,11 @@ bridge Query.test {
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 2);
-    const theme = constWires.find((w) =>
-      w.to.path.join(".") === "settings.theme",
+    const theme = constWires.find(
+      (w) => w.to.path.join(".") === "settings.theme",
     );
-    const lang = constWires.find((w) =>
-      w.to.path.join(".") === "settings.lang",
+    const lang = constWires.find(
+      (w) => w.to.path.join(".") === "settings.lang",
     );
     assert.ok(theme);
     assert.equal(theme.value, "dark");
@@ -69,9 +66,7 @@ bridge Query.test {
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     assert.equal(pullWires.length, 2);
-    const nameWire = pullWires.find(
-      (w) => w.to.path.join(".") === "user.name",
-    );
+    const nameWire = pullWires.find((w) => w.to.path.join(".") === "user.name");
     const emailWire = pullWires.find(
       (w) => w.to.path.join(".") === "user.email",
     );
@@ -137,7 +132,7 @@ bridge Query.test {
     const result = parseBridge(`version 1.4
 
 bridge Query.test {
-  with std.upperCase as uc
+  with std.str.toUpperCase as uc
   with input as i
   with output as o
 
@@ -166,9 +161,7 @@ bridge Query.test {
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
-    const nameWire = pullWires.find(
-      (w) => w.to.path.join(".") === "data.name",
-    );
+    const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
     assert.equal(nameWire.nullFallback, '"anonymous"');
 
@@ -275,9 +268,7 @@ bridge Mutation.createUser {
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
-    const nameWire = pullWires.find(
-      (w) => w.to.path.join(".") === "body.name",
-    );
+    const nameWire = pullWires.find((w) => w.to.path.join(".") === "body.name");
     const emailWire = pullWires.find(
       (w) => w.to.path.join(".") === "body.email",
     );
@@ -494,7 +485,7 @@ bridge Query.test {
     const bridge = `version 1.4
 
 bridge Query.user {
-  with std.upperCase as uc
+  with std.str.toUpperCase as uc
   with input as i
   with output as o
 
@@ -512,15 +503,21 @@ bridge Query.user {
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     // Alias creates a __local wire
-    const localWire = pullWires.find((w) => w.to.module === "__local" && w.to.field === "upper");
+    const localWire = pullWires.find(
+      (w) => w.to.module === "__local" && w.to.field === "upper",
+    );
     assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
     // displayName wire reads from alias
-    const displayWire = pullWires.find((w) => w.to.path.join(".") === "info.displayName");
+    const displayWire = pullWires.find(
+      (w) => w.to.path.join(".") === "info.displayName",
+    );
     assert.ok(displayWire, "wire to o.info.displayName should exist");
     assert.equal(displayWire!.from.module, "__local");
     assert.equal(displayWire!.from.field, "upper");
     // email wire reads from input
-    const emailWire = pullWires.find((w) => w.to.path.join(".") === "info.email");
+    const emailWire = pullWires.find(
+      (w) => w.to.path.join(".") === "info.email",
+    );
     assert.ok(emailWire, "wire to o.info.email should exist");
   });
 });
@@ -621,9 +618,18 @@ bridge Query.test {
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
-    assert.ok(constWires.find((w) => w.to.path.join(".") === "nested.x"), "nested.x constant should exist");
-    assert.ok(pullWires.find((w) => w.to.path.join(".") === "flat"), "flat pull wire should exist");
-    assert.ok(pullWires.find((w) => w.to.path.join(".") === "nested.y"), "nested.y pull wire should exist");
+    assert.ok(
+      constWires.find((w) => w.to.path.join(".") === "nested.x"),
+      "nested.x constant should exist",
+    );
+    assert.ok(
+      pullWires.find((w) => w.to.path.join(".") === "flat"),
+      "flat pull wire should exist",
+    );
+    assert.ok(
+      pullWires.find((w) => w.to.path.join(".") === "nested.y"),
+      "nested.y pull wire should exist",
+    );
   });
 
   test("array mapper scope block executes correctly at runtime", async () => {

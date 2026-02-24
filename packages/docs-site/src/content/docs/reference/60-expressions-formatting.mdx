@@ -1,0 +1,132 @@
+---
+title: Expressions & Formatting
+description: How to format strings, calculate math, and write conditional logic directly in your wires.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+You don't always need to build a custom tool to manipulate data. The Bridge provides built-in syntax for formatting strings, executing math, and branching logic inline.
+
+---
+
+## 1. String Interpolation
+
+String interpolation allows you to seamlessly construct URLs, headers, or text fields using `{...}` placeholders.
+
+Interpolation only works on the right-hand side of a **Pull Wire (`<-`)**. The engine scans the string, resolves each placeholder at runtime, and concatenates the final result.
+
+```bridge
+bridge Query.userOrders {
+  with ordersApi as api
+  with input as i
+  with output as o
+
+  # Build a REST URL dynamically
+  api.path <- "/users/{i.id}/orders"
+
+  # Assemble display text
+  o.greeting <- "Hello, {i.firstName} {i.lastName}!"
+}
+
+```
+
+### Constant Wires vs. Pull Wires
+
+Be careful not to use the Constant Wire (`=`) operator if you want variables to resolve! Constant wires ignore placeholders completely.
+
+```bridge
+o.path = "/users/{i.id}"    # Literal string: "/users/{i.id}"
+o.path <- "/users/{i.id}"   # Templated string: "/users/123"
+
+```
+
+### Coercion & Escaping
+
+Non-string values are automatically coerced into strings. `null` and `undefined` are safely converted into empty strings (`""`) to prevent `"Hello, null"` bugs.
+
+If you need to include a literal curly brace in your string, escape it with a backslash: `\{`.
+
+## 2. Inline Expressions (Math & Logic)
+
+You can perform arithmetic and comparison operations directly inside your wire assignments.
+
+```bridge
+o.cents <- i.dollars * 100
+o.total <- i.price * i.quantity
+o.eligible <- i.age >= 18
+o.isActive <- i.status == "active"
+
+```
+
+### Supported Operators
+
+| Category       | Operators                        | Description                        |
+| -------------- | -------------------------------- | ---------------------------------- |
+| **Arithmetic** | `*`, `/`, `+`, `-`               | Standard math operations.          |
+| **Comparison** | `==`, `!=`, `>`, `>=`, `<`, `<=` | Returns boolean `true` or `false`. |
+
+### Precedence and Chaining
+
+Standard JavaScript math precedence applies (multiplication/division before addition/subtraction, and comparisons last). You can chain as many operators as you need.
+
+```bridge
+# Evaluates as: i.base + (i.tax * 2)
+o.total <- i.base + i.tax * 2
+
+# Evaluates as: (i.price * i.qty) > 100
+o.isExpensive <- i.price * i.qty > 100
+
+```
+
+### Missing Data & Coercion
+
+If an arithmetic wire encounters missing data, it coerces the value using standard JavaScript rules:
+
+- `null` becomes `0` _(e.g., `null _ 100 = 0`)\*
+- `undefined` becomes `NaN` _(e.g., `undefined + 5 = NaN`)_
+- Comparisons against `NaN` always return `false`.
+
+## 3. Conditional Wires (`? :`)
+
+The conditional wire (ternary operator) allows you to select between two different sources based on a boolean condition.
+
+```bridge
+# target <- condition ? true_branch : false_branch
+o.amount <- i.isPro ? i.proPrice : i.basicPrice
+
+```
+
+The condition can be a direct boolean reference (`i.isPro`), or a full inline expression (`i.age >= 18`). The branches can be tool references, input variables, or literal values (`"premium"`, `true`, `20`).
+
+```bridge
+o.tier <- i.score > 100 ? "premium" : "basic"
+
+```
+
+### Lazy Evaluation (Cost Savings!)
+
+Conditional wires are strictly evaluated. The engine evaluates the **condition first**. It then pulls data from **only the chosen branch**.
+
+If the condition is `false`, the engine never touches the `true` branch. If that branch points to an expensive API call, **the API is never called**.
+
+```bridge
+# If i.hasCustomData is false, the customDb API is completely ignored.
+o.data <- i.hasCustomData ? customDb.data : standardDb.data
+
+```
+
+## 4. Combining with Fallbacks
+
+All of the inline formatting tools on this page (Interpolation, Expressions, and Conditionals) can be seamlessly combined with the **Fallback Operators (`||`, `??`)**.
+
+```bridge
+# Interpolation + Null Coalesce
+o.greeting <- "Hello, {i.name}!" || "Hello, Guest!"
+
+# Math + Error Guard (If api.price throws a 500 error, return -1)
+o.cents <- api.price * 100 ?? -1
+
+# Ternary + Null Coalesce + Error Guard
+o.price <- i.isPro ? i.proPrice : i.basicPrice || 0 ?? -1
+
+```

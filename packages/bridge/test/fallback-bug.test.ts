@@ -58,7 +58,7 @@ describe("string interpolation || fallback priority", () => {
       "version 1.4",
       "",
       "bridge Query.test {",
-      "  with std.upperCase as uc",
+      "  with std.str.toUpperCase as uc",
       "  with input as i",
       "  with output as o",
       "",

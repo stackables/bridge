@@ -1,0 +1,104 @@
+---
+title: String Operations
+description: Built-in tools for manipulating, formatting, and measuring string data.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Bridge provides a standard suite of tools for basic string manipulation under the `std.str` namespace.
+
+Because all string tools accept a single `.in` parameter, they are perfectly designed to be used with the Pipe Operator (`:`)
+
+### `std.str.toUpperCase`
+
+Converts the input string to UPPER CASE.
+
+- **Accepts:** `in` (string)
+- **Returns:** `string`
+
+### `std.str.toLowerCase`
+
+Converts the input string to lower case.
+
+- **Accepts:** `in` (string)
+- **Returns:** `string`
+
+### `std.str.trim`
+
+Removes whitespace from both ends of the string.
+
+- **Accepts:** `in` (string)
+- **Returns:** `string`
+
+### `std.str.length`
+
+Calculates the total number of characters in the string.
+
+- **Accepts:** `in` (string)
+- **Returns:** `number`
+
+---
+
+## Usage Examples
+
+### 1. Using the Pipe Operator
+
+The most ergonomic way to use string tools is via inline pipes. The parser automatically routes the piped value into the tool's `.in` parameter.
+
+```bridge
+bridge Query.formatUser {
+  # Bring the tools into scope
+  with std.str.toUpperCase as upCase
+  with std.str.toLowerCase as lowCase
+
+  with input as i
+  with output as o
+
+  # i.lastName -> upCase -> o.lastName
+  o.lastName <- upCase:i.lastName
+  o.email <- lowCase:i.email
+}
+
+```
+
+### 2. Chaining Transformations
+
+You can chain multiple string operations together. Remember that pipes evaluate from right to left!
+
+```bridge
+bridge Query.normalizeEmail {
+  with std.str.trim as trim
+  with std.str.toLowerCase as lowCase
+
+  with input as i
+  with output as o
+
+  # Evaluates: i.rawEmail -> toLowerCase -> trim -> o.email
+  o.email <- trim:lowCase:i.rawEmail
+}
+
+```
+
+### 3. Explicit Wiring
+
+If you prefer not to use pipes, or if you are dynamically building a string using interpolation before transforming it, you can explicitly wire data into the `.in` parameter.
+
+```bridge
+bridge Query.getUsernameLength {
+  with std.str.length as getLen
+  with input as i
+  with output as o
+
+  # Explicitly wire the interpolated string into the tool
+  getLen.in <- "{i.firstName}_{i.lastName}"
+
+  o.characterCount <- getLen
+}
+
+```
+
+<Aside>
+  **Type Coercion:** If you pass a non-string value (like a number or boolean)
+  into `toUpperCase`, `toLowerCase`, or `trim`, the underlying JavaScript engine
+  will automatically coerce it into a string before applying the transformation.
+</Aside>

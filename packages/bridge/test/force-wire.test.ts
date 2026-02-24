@@ -68,7 +68,11 @@ o.result <- m.data
     // No wire should have a force flag
     for (const w of bridge.wires) {
       if ("from" in w) {
-        assert.equal((w as any).force, undefined, "wires should not have force");
+        assert.equal(
+          (w as any).force,
+          undefined,
+          "wires should not have force",
+        );
       }
     }
   });
@@ -149,7 +153,11 @@ o.ok = "true"
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces![0].handle, "se");
-    assert.equal(bridge.forces![0].catchError, undefined, "default is critical");
+    assert.equal(
+      bridge.forces![0].catchError,
+      undefined,
+      "default is critical",
+    );
   });
 
   test("force ?? null sets catchError flag", () => {
@@ -247,8 +255,14 @@ force lg
 
 }`;
     const output = serializeBridge(parseBridge(input));
-    assert.ok(output.includes("force lg"), "serialized output should contain 'force lg'");
-    assert.ok(!output.includes("<-!"), "serialized output should NOT contain <-!");
+    assert.ok(
+      output.includes("force lg"),
+      "serialized output should contain 'force lg'",
+    );
+    assert.ok(
+      !output.includes("<-!"),
+      "serialized output should NOT contain <-!",
+    );
   });
 
   test("force ?? null roundtrips", () => {
@@ -263,7 +277,10 @@ force ping ?? null
 }`;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("force ping ?? null"), "should contain ?? null");
+    assert.ok(
+      serialized.includes("force ping ?? null"),
+      "should contain ?? null",
+    );
     const reparsed = parseBridge(serialized);
     assert.deepStrictEqual(reparsed, instructions);
   });
@@ -357,7 +374,10 @@ o.title <- m.title
     });
 
     assert.equal(result.data.search.title, "Hello World");
-    assert.ok(auditCalled, "audit tool must be called even though output is not queried");
+    assert.ok(
+      auditCalled,
+      "audit tool must be called even though output is not queried",
+    );
     assert.deepStrictEqual(auditInput, { action: "test" });
   });
 
@@ -365,7 +385,9 @@ o.title <- m.title
     let auditInput: any = null;
 
     const typeDefs2 = /* GraphQL */ `
-      type Query { _unused: String }
+      type Query {
+        _unused: String
+      }
       type Mutation {
         createUser(name: String!, role: String!): CreateResult
       }
@@ -402,7 +424,9 @@ o.id <- u.id
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
-      document: parse(`mutation { createUser(name: "Alice", role: "admin") { id } }`),
+      document: parse(
+        `mutation { createUser(name: "Alice", role: "admin") { id } }`,
+      ),
     });
 
     assert.equal(result.data.createUser.id, "usr_123");
@@ -463,7 +487,9 @@ o.title <- m.title
     let sideEffectCalled = false;
 
     const typeDefs4 = /* GraphQL */ `
-      type Query { _unused: String }
+      type Query {
+        _unused: String
+      }
       type Mutation {
         fire(action: String!): FireResult
       }
@@ -501,7 +527,10 @@ o.ok = "true"
     });
 
     assert.equal(result.data.fire.ok, "true");
-    assert.ok(sideEffectCalled, "side-effect tool must run even with no output wires");
+    assert.ok(
+      sideEffectCalled,
+      "side-effect tool must run even with no output wires",
+    );
   });
 
   test("critical forced tool error DOES break the response (GraphQL)", async () => {

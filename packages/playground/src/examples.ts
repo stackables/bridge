@@ -11,7 +11,7 @@ export const examples: Example[] = [
   {
     name: "String Transform",
     description:
-      "Use std.upperCase and std.lowerCase to transform string fields using pipe syntax",
+      "Use std.str.toUpperCase and std.str.toLowerCase to transform string fields using pipe syntax",
     schema: `
 type Query {
   greet(name: String!): Greeting
@@ -26,8 +26,8 @@ type Greeting {
     bridge: `version 1.4
 
 bridge Query.greet {
-  with std.upperCase as uc
-  with std.lowerCase as lc
+  with std.str.toUpperCase as uc
+  with std.str.toLowerCase as lc
   with input as i
   with output as o
 

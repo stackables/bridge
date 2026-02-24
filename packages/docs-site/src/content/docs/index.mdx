@@ -1,0 +1,60 @@
+---
+title: Declarative dataflow for API integrations
+template: splash # Remove or comment out this line to display the site sidebar on this page.
+hero:
+  tagline: The Bridge is a hyper-lightweight execution engine that routes, reshapes, and secures traffic
+  image:
+    file: ../../assets/dsl-window.png
+  actions:
+    - text: Getting Started
+      link: /guides/getting-started/
+      icon: right-arrow
+    - text: Interactive Playground
+      link: /playground
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## How It Works
+
+Stop hardcoding third-party SDKs and API keys into every application. The Bridge is a hyper-lightweight execution engine that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
+
+Run it as a **GraphQL Egress Gateway** to give your internal teams a clean unified API, or use the **Standalone Runner** to execute declarative data pipelines directly in Node, Edge Workers, or the browser.
+
+**Best fit when your architecture needs:**
+
+- **Controlled Egress:** Funnel external API calls through a single point to enforce uniform rate-limiting, caching, and IP allowlisting.
+- **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES) by changing a `.bridge` text file, without touching your calling services' code.
+- **Centralized Secrets:** Inject external API keys at the gateway/execution level.
+- **Messy REST abstraction:** Morph complex, undocumented REST payloads into clean, strongly-typed internal interfaces.
+
+**Not best fit when you need:**
+
+- Heavy domain modeling or multi-step database sagas.
+- Imperative, line-by-line programming logic (The Bridge is a topology graph, not a script).
+
+## Read Next
+
+<CardGrid>
+  <Card title="Language Reference" icon="open-book">
+    Learn more about [the bridge language](/reference/10-core-concepts/).
+  </Card>
+  <Card title="Playground" icon="rocket">
+    Learn by example in our web based [interactive playground](/playground).
+  </Card>
+  <Card title="2 Runtimes" icon="seti:graphql">
+    You can run your `bridge` files
+    [standalone](/guides/getting-started/#standalone-mode) or as a [resolver for
+    your graphql](/guides/getting-started/#graphql-gateway-mode) server
+  </Card>
+  <Card title="VS Code extension" icon="vscode">
+    To get syntax highlighting and IntelliSense install the [VS Code
+    extension](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight).
+  </Card>
+  <Card title="Runnable Examples" icon="node">
+    For some real world [integration
+    examples](https://github.com/stackables/bridge/tree/main/examples) head over
+    to github
+  </Card>
+</CardGrid>
