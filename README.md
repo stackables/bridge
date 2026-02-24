@@ -36,7 +36,7 @@ Run it as a **GraphQL Egress Gateway** to give your internal teams a clean unifi
 
 ## The Playground
 
-Try The Bridge instantly in your browser at **[bridge.sdk42.com](https://bridge.sdk42.com)**.
+Try The Bridge instantly in your browser at **[https://bridge.sdk42.com/playground/](https://bridge.sdk42.com/playground/)**
 
 The playground is fully client-side. **Your API keys, schemas, and data are NEVER sent to our servers.** All parsing, routing, and HTTP execution happens directly inside your browser.
 
