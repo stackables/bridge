@@ -1,0 +1,6 @@
+{
+  "editor.formatOnSave": true,
+  "typescript.preferences.organizeImports": {
+    "removeUnused": true
+  }
+}

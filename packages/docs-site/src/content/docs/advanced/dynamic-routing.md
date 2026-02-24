@@ -1,4 +1,7 @@
-## Dynamic Routing & Context-Aware Topologies
+---
+title: Dynamic Routing
+description: Dynamic Routing & Context-Aware Topologies
+---
 
 By default, `bridgeTransform` takes a parsed `.bridge` file and attaches it to your schema statically. But for enterprise gateways, multi-tenant SaaS, and strict compliance environments, a static graph isn't enough.
 
@@ -21,11 +24,10 @@ const usBridge = parseBridge(fs.readFileSync("us-infrastructure.bridge"));
 const schema = bridgeTransform(baseSchema, (context) => {
   // Read the user's region from the request context
   if (context.user.region === "EU") {
-    return euBridge; 
+    return euBridge;
   }
   return usBridge;
 });
-
 ```
 
 ### Why use Dynamic Routing?
@@ -45,7 +47,6 @@ const schema = bridgeTransform(baseSchema, (context) => {
   // Pro users get real-time GPT-4; Free users get a cached/smaller model
   return context.user.plan === "PRO" ? premiumBridge : budgetBridge;
 });
-
 ```
 
 #### 3. Canary Releases & A/B Testing
@@ -57,7 +58,6 @@ const schema = bridgeTransform(baseSchema, (context) => {
   // Route 5% of traffic to the experimental v2 pipeline
   return Math.random() < 0.05 ? experimentalBridge : stableBridge;
 });
-
 ```
 
 ### Security Note

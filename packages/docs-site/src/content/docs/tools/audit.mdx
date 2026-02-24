@@ -1,0 +1,76 @@
+---
+title: Audit Log
+description: Built-in tool for structured logging and side-effects.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The `audit` tool logs every input it receives using the engine's configured [logger](./observability.md#structured-logging).
+
+Because logging is a side-effect that the client doesn't explicitly request in their GraphQL query, the `audit` tool is almost always used in conjunction with the `force` statement to guarantee execution.
+
+### Input Fields
+
+| Field               | Default  | Description                                                                             |
+| :------------------ | :------- | :-------------------------------------------------------------------------------------- |
+| `level`             | `"info"` | The log level method to call on your logger (`"debug"`, `"info"`, `"warn"`, `"error"`). |
+| _(Any other field)_ | —        | Aggregated into a single structured JSON object and sent to the logger.                 |
+
+<Aside>
+  **Passthrough Behavior:** The `audit` tool returns its exact input object unmodified. This means output wires can read directly from the audit tool if you want to chain data (e.g., `o.id <- audit.orderId`).
+</Aside>
+
+### Example 1: Basic Auditing
+
+Wire any number of inputs to the tool and use `force` to trigger the execution.
+
+```bridge
+bridge Mutation.createOrder {
+  with std.audit as audit
+  with orderApi as api
+  with input as i
+  with output as o
+
+  # 1. Execute the main API call
+  api.product <- i.product
+
+  # 2. Wire up the audit payload
+  audit.action = "createOrder"
+  audit.userId <- i.userId
+  audit.orderId <- api.id
+
+  # 3. Force the logger to run!
+  force audit
+
+  # 4. Map the API response to the client
+  o.id <- api.id
+}
+```
+
+### Example 2: Changing the Log Level
+
+You can override the default log level by statically assigning or dynamically wiring the `level` field.
+
+```bridge
+bridge Mutation.deleteAccount {
+  with std.audit
+  with input as i
+
+  # This will call logger.warn({ action: "deleteAccount", target: ... }, "[bridge:audit]")
+  std.audit.level = "warn"
+
+  std.audit.action = "deleteAccount"
+  std.audit.target <- i.accountId
+
+  force std.audit
+}
+
+```
+
+### Engine Configuration
+
+For the `audit` tool to output anything, you must provide a logger to your execution environment (either to `BridgeOptions` in the Gateway, or directly to the `ExecutionTree` in Standalone mode).
+
+If no logger is provided, the tool safely acts as a fast no-op.
+
+/advanced/observability/#structured-logging

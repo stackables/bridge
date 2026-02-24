@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ShareDialog } from "./components/ShareDialog";
 import { getShareIdFromUrl, loadShare, clearShareIdFromUrl } from "./share";
+import { ChevronLeftIcon } from "lucide-react";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -366,17 +367,12 @@ export function App() {
         {/* Row 1: logo + (desktop: example picker + info) + share */}
         <div className="px-4 py-2 flex items-center gap-3 md:px-5 md:py-2.5 md:gap-4">
           <a
-            href="https://github.com/stackables/bridge"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/"
             className="flex items-center gap-2.5 no-underline"
           >
-            <span className="text-xl font-bold text-sky-400 tracking-tight">
-              Bridge
+            <span className="text-xl font-bold text-sky-400 tracking-tight flex items-center">
+              <ChevronLeftIcon/> Documentation
             </span>
-            <Badge className="text-[10px] tracking-wider uppercase">
-              Playground
-            </Badge>
           </a>
 
           {/* Example picker — desktop only (row 1) */}

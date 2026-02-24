@@ -1,0 +1,154 @@
+---
+title: REST API client
+description: The primary REST API client for The Bridge.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The primary REST API client for The Bridge.
+
+The `httpCall` tool builds and executes an HTTP request from your wired input fields and returns the parsed JSON response. It intelligently routes your dynamic fields based on the HTTP method:
+
+- `GET` requests convert fields into URL query parameters.
+- `POST`/`PUT`/`PATCH` requests automatically construct a JSON body.
+
+### Configuration Fields
+
+| Field     | Default  | Description                                                          |
+| --------- | -------- | -------------------------------------------------------------------- |
+| `baseUrl` | `""`     | The base URL for the target API.                                     |
+| `path`    | `""`     | Appended to `baseUrl` to form the full URL.                          |
+| `method`  | `"GET"`  | The HTTP method (`GET`, `POST`, `PUT`, `DELETE`, etc.).              |
+| `headers` | `{}`     | Key-value pairs for HTTP headers. Nullish values are safely ignored. |
+| `cache`   | `"auto"` | Caching behavior. See [Response Caching](#response-caching) below.   |
+
+### Dynamic Fields (Payload & Query Parameters)
+
+Any field wired to the `httpCall` tool that is **not** listed in the configuration table above is treated as dynamic request data. The tool automatically formats this data based on your chosen HTTP `method`:
+
+- **`GET` requests:** Dynamic fields are appended to the URL as query string parameters.
+- **Non-`GET` requests:** Dynamic fields are assembled into a deeply nested JSON object and sent as the request body.
+
+<Aside>
+  **Smart Defaults:** For non-GET requests, the tool automatically injects
+  `Content-Type: application/json` if you haven't explicitly set it in the
+  `.headers` block. Additionally, any dynamic fields that resolve to `null` or
+  `undefined` are safely stripped from the query string or JSON payload.
+</Aside>
+
+### Example 1: A `GET` Request (Query Parameters)
+
+When using `GET`, any unmatched fields (like `q` or `format` below) are automatically appended to the URL as query string parameters.
+
+```bridge
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = "GET"
+  .path = "/search"
+  .headers.User-Agent = "MyApp/1.0"
+  .cache = 60
+}
+
+bridge Query.geocode {
+  with geo as g
+  with input as i
+  with output as o
+
+  # These become ?q=...&format=json
+  g.q <- i.city
+  g.format = "json"
+
+  o.lat <- g[0].lat
+  o.lon <- g[0].lon
+}
+
+```
+
+### Example 2: A `POST` Request (JSON Body)
+
+When using `POST`, unmatched fields are automatically assembled into a JSON payload. You can build deeply nested JSON bodies using standard dot notation.
+
+```bridge
+tool createCustomer from std.httpCall {
+  .baseUrl = "https://api.stripe.com/v1"
+  .path = "/customers"
+  .method = "POST"
+  with context as c
+  .headers.Authorization <- `Bearer ${c.STRIPE_KEY}`
+}
+
+bridge Mutation.register {
+  with createCustomer as api
+  with input as i
+  with output as o
+
+  # These are automatically stringified into the JSON body
+  api.email <- i.email
+  api.name <- i.fullName
+  api.metadata.source = "bridge_gateway"
+
+  force api
+
+  o.customerId <- api.id
+}
+
+```
+
+## Response Caching
+
+You can add a `.cache` field to any `httpCall` tool to enable TTL-based response caching. The engine automatically creates a unique cache key based on the **HTTP Method, Full URL, and Request Body**.
+
+Identical requests will instantly return the cached result without hitting the network.
+
+### Cache Modes
+
+| Value                | Behavior                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"auto"` _(default)_ | Respects the API's native `Cache-Control` (e.g., `max-age`) or `Expires` headers. Bypasses cache if the API returns `no-store` or `no-cache`. |
+| `0`                  | Disables caching entirely.                                                                                                                    |
+| `<number>`           | Explicit TTL in seconds. Ignores the API's headers and strictly caches the response for this duration.                                        |
+
+```bridge
+tool geo from httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .path = "/search"
+  .method = "GET"
+
+  # Strictly cache responses for 5 minutes, ignoring API headers
+  .cache = 300
+}
+
+```
+
+### Custom Cache Store (Redis / Memcached)
+
+By default, `httpCall` uses a fast, in-memory LRU cache (capped at 1024 entries). If you are deploying across a fleet of stateless workers or serverless edge functions, you should provide a distributed cache backend.
+
+You can easily swap the storage engine by passing a custom `CacheStore` implementation to `createHttpCall` during engine initialization:
+
+```typescript
+import { bridgeTransform, std, createHttpCall } from "@stackables/bridge";
+import type { CacheStore } from "@stackables/bridge";
+import { redis } from "./my-redis-client";
+
+// 1. Wrap your Redis client in the CacheStore interface
+const redisCache: CacheStore = {
+  async get(key) {
+    const v = await redis.get(key);
+    return v ? JSON.parse(v) : undefined;
+  },
+  async set(key, value, ttlSeconds) {
+    await redis.set(key, JSON.stringify(value), "EX", ttlSeconds);
+  },
+};
+
+// 2. Inject it into the tools map
+const schema = bridgeTransform(graphqlSchema, bridgeAst, {
+  tools: {
+    std: {
+      ...std,
+      httpCall: createHttpCall(fetch, redisCache),
+    },
+  },
+});
+```

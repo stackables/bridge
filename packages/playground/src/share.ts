@@ -27,7 +27,7 @@ export async function saveShare(payload: SharePayload): Promise<string> {
 }
 
 export async function loadShare(id: string): Promise<SharePayload> {
-  const resp = await fetch(`/api/share/${encodeURIComponent(id)}`);
+  const resp = await fetch(`/api/share?id=${encodeURIComponent(id)}`);
   if (!resp.ok) {
     const err = (await resp.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? `HTTP ${resp.status}`);
