@@ -74,7 +74,7 @@ The `.bridge` language is designed to be scannable.
 | **Node Alias**    | `alias uc:i.name as name`     | Evaluates an expression once and caches it as a local graph node.                    |
 | **Arrays**        | `o <- items[] as it { }`      | Iterates over an array, creating a local shadow scope for each element.              |
 
-**[Read the Full Language Guide](https://bridge.sdk42.com/reference/10-core-concepts/d)**
+**[Read the Full Language Guide](https://bridge.sdk42.com/reference/10-core-concepts/)**
 
 ## Tools
 
