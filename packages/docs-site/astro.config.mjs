@@ -11,6 +11,7 @@ import cloudflare from "@astrojs/cloudflare";
 
 // https://astro.build/config
 export default defineConfig({
+  site: "https://bridge.sdk42.com/",
   vite: {
     plugins: [
       //@ts-expect-error wrong vite verions
