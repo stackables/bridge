@@ -1,0 +1,4 @@
+{
+  "recommendations": ["astro-build.astro-vscode", "stackables.bridge-syntax-highlight"],
+  "unwantedRecommendations": []
+}
