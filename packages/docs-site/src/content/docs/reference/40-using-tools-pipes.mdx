@@ -1,0 +1,123 @@
+---
+title: Using Tools & Pipes
+description: How to pass data through transform tools and cache the results.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Once you have brought a tool into scope using `with`, you need to pass data into it and read the result. There are two ways to do this in The Bridge: **Explicit Wiring** and **Pipes**.
+
+## 1. Explicit Wiring
+
+The most explicit way to use a tool is to wire a source into its input parameters, and then wire its output to your target.
+
+This is the standard approach for tools that require multiple parameters (like an HTTP client).
+
+```bridge
+bridge Query.convertCurrency {
+  with convertCurrency as convert
+  with input as i
+  with output as o
+
+  # 1. Explicitly set the tool's inputs
+  convert.currency <- i.targetCurrency
+  convert.amount <- i.rawPrice
+
+  # 2. Wire the tool's output to the GraphQL response
+  o.price <- convert.result
+}
+
+```
+
+## 2. The Pipe Operator (`:`)
+
+If you are using a tool that acts as a simple data transformer (like string manipulation or a single-input conversion), explicit wiring feels unnecessarily verbose.
+
+The **Pipe Operator (`:`)** is syntactic sugar that routes data through a transform tool in a single, inline declaration.
+
+```bridge
+# Take i.rawName, pass it through upperCase, and wire the result to o.name
+o.name <- upperCase:i.rawName
+
+```
+
+### Chained Pipes
+
+You can chain multiple pipe operators together to apply a sequence of transformations.
+
+```bridge
+o.name <- trim:upperCase:i.rawName
+
+```
+
+<Aside>
+  **Evaluation Order:** Pipes evaluate from right to left! In the example above,
+  the data flows: `rawName` → `upperCase` → `trim` → `o.name`.
+</Aside>
+
+### Pipes with Extra Parameters
+
+Pipes are not restricted to single-input tools! You can seamlessly combine explicit wiring with the pipe operator.
+
+If your tool requires additional configuration, you can wire those parameters explicitly, and then use the pipe operator to pass the primary payload.
+
+```bridge
+bridge Query.convert {
+  with priceApi as api
+  with convertCurrency as convert
+  with input as i
+  with output as o
+
+  # Explicitly configure the secondary parameter
+  convert.currency <- i.targetCurrency
+
+  # Pipe the primary data payload through the configured tool!
+  o.price <- convert:api.rawPrice
+}
+
+```
+
+In this scenario, the `convert` tool receives _both_ the explicitly wired `currency` parameter and the piped `rawPrice` payload simultaneously.
+
+## 3. How Pipes Execute (Implicit Forking)
+
+It is critical to understand how the execution engine treats the pipe operator under the hood.
+
+When you use **Explicit Wiring**, you are routing data into one shared, physical node. When you use a **Pipe**, the engine implicitly **forks a brand new node** for that specific execution.
+
+```bridge
+bridge Query.formatNames {
+  with std.upperCase as uc
+  with input as i
+  with output as o
+
+  # The engine spawns TWO completely separate upperCase nodes
+  o.first <- uc:i.firstName
+  o.last <- uc:i.lastName
+}
+
+```
+
+Because pipes fork the tool, the engine runs them entirely in parallel. For pure functions like `upperCase`, this is perfectly fine. But if you are piping data into an HTTP API tool, **you are firing multiple independent network requests**.
+
+## 4. Node Aliasing (`alias ... as`)
+
+Because the pipe operator always forks a new node, what happens if you pipe data through an API, but need to read multiple different fields from the resulting object?
+
+To solve this, use the `alias` keyword at the top level of your bridge body. Aliasing allows you to evaluate a pipe chain exactly **once**, cache the result under a local name, and then read from it freely without incurring extra execution costs.
+
+```bridge
+bridge Query.getUser {
+  with userApi
+  with input as i
+  with output as o
+
+  # Evaluate the tool ONCE and cache the resulting object as 'user'
+  alias userApi:i.userId as user
+
+  # Read from the cached node (cost-free memory reads)
+  o.city <- user.city
+  o.state <- user.state
+}
+
+```

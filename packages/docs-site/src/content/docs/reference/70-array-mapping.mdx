@@ -1,0 +1,121 @@
+---
+title: Array Mapping
+description: How to iterate over collections, transform elements, and manage nested scopes.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+When you need to return a list of items in GraphQL, you cannot write standard `for` or `map` loops. Instead, The Bridge provides a declarative syntax for mapping array elements into your expected output shape.
+
+## 1. The `[] as iter` Syntax
+
+To map an array, you use the `[] as <variableName>` operator followed by a scoping block.
+
+```bridge
+bridge Query.getJourneys {
+  with routerApi as router
+  with output as o
+
+  # Iterate over every element in router.journeys
+  o.journeys <- router.journeys[] as j {
+
+    # Map fields for each individual element
+    .label <- j.label
+    .departureTime <- j.departure
+  }
+}
+
+```
+
+### Shadow Scopes
+
+When the engine executes an array mapping block, it creates a **Shadow Scope** (or shadow tree) for every single element in the array.
+
+The variable `j` represents the current element being processed. Because each element executes in its own isolated scope, you can nest array mappings arbitrarily deep without worrying about variable collisions.
+
+### Aliasing Sub-fields for Readability
+
+You can also use aliases inside loops purely for readability, without triggering any tools. If your iterator has deeply nested data, bind it to a short variable:
+
+```bridge
+o.list <- api.items[] as it {
+
+  # Bind a deep sub-object to a cleaner name
+  alias it.metadata.authorInfo as author
+
+  .name <- author.name
+  .role <- author.role
+}
+
+```
+
+## 2. Common Use Cases
+
+### Use Case 1: Filtering an Array Before Mapping
+
+Often, an API returns a massive array, but you only want to process items that match specific criteria. Instead of mapping everything and returning nulls, you can pre-filter the data using the built-in `std.filterObject` tool.
+
+The `filterObject` tool takes an `.in` parameter (the source array) and accepts any number of dynamic key-value pairs as the filter criteria.
+
+```bridge
+bridge Query.getActiveAdmins {
+  with std.filterObject as filter
+  with usersApi as api
+  with output as o
+
+  # 1. Provide the array to filter
+  filter.in <- api.users
+
+  # 2. Define the exact criteria to match
+  filter.role = "admin"
+  filter.isActive = true
+
+  # 3. Map over ONLY the filtered results!
+  o.admins <- filter[] as admin {
+    .id <- admin.id
+    .name <- admin.name
+  }
+}
+
+```
+
+### Use Case 2: Fanout (API Call Per Element)
+
+If you have an array of IDs and you need to fetch detailed information from an external API for _every single item_, you can perform a "Fanout."
+
+By combining array mapping with a Pipe and an `alias`, the engine will dynamically fork the tool and fire a parallel API request for every element in the array.
+
+```bridge
+tool getUserDetail from std.httpCall {
+  .baseUrl = "https://api.example.com/users"
+  .method = "GET"
+  # We leave .path blank so we can inject it dynamically!
+}
+
+bridge Query.getEnrichedUsers {
+  with getUserDetail
+  with input as i
+  with output as o
+
+  o.enrichedUsers <- i.userIds[] as id {
+
+    # 1. Dynamically build the path for this specific element
+    # 2. Pipe the path into the HTTP tool
+    # 3. Cache the result for this element as 'detail'
+    alias getUserDetail.path:"/{id}" as detail
+
+    # Map the resulting HTTP response back to the array
+    .id <- id
+    .email <- detail.email
+    .status <- detail.status
+  }
+}
+
+```
+
+<Aside>
+  **Automatic Parallelism:** Because each element in the array gets its own
+  Shadow Scope, the engine treats every `getUserDetail` alias as an independent
+  node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP
+  requests concurrently!
+</Aside>

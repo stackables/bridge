@@ -1,6 +1,6 @@
-export function findObject(opts: { in: any[]; [key: string]: any }) {
+export function filterObject(opts: { in: any[]; [key: string]: any }) {
   const { in: arr, ...criteria } = opts;
-  return arr.find((obj) => {
+  return arr.filter((obj) => {
     for (const [key, value] of Object.entries(criteria)) {
       if (obj[key] !== value) {
         return false;

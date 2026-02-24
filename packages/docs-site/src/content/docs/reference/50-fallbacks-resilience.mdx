@@ -1,0 +1,105 @@
+---
+title: Fallbacks & Resilience
+description: How to build resilient data pipelines using fallback chains, error guards, and cost-aware overdefinition.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+When wiring external data sources, you must account for missing data and network failures. The Bridge provides three powerful mechanisms to keep your API resilient: Null Coalesce (`||`), Error Guards (`??`), and Cost-Aware Overdefinition.
+
+## 1. Fallback Chains (`||`)
+
+The **Null Coalesce** operator (`||`) acts as a value guard. It fires when a source resolves successfully but returns `null` or `undefined`.
+
+```bridge
+o.name <- api.name || "Anonymous"
+
+```
+
+### Sequential Short-Circuiting
+
+When you chain multiple sources together, the engine evaluates them **left to right, sequentially**.
+
+Crucially, it stops at the very first non-null result. Sources to the right of the winner are **never called**.
+
+```bridge
+# 1. Try primaryApi
+# 2. If null, try backupApi
+# 3. If both are null, use "unknown"
+o.label <- primaryApi.label || backupApi.label || "unknown"
+
+```
+
+The `||` operator **does not catch errors**. If `primaryApi` throws a 500 network error or times out, the entire chain immediately throws and breaks the request. To catch errors, you must use an Error Guard.
+
+## 2. Error Guards (`??`)
+
+The **Error Coalesce** operator (`??`) acts as an error guard. It fires exclusively when the preceding source throws an execution error (e.g., a network failure, a timeout, or a forced tool crash).
+
+```bridge
+# If the API throws an error, gracefully return 0 instead of failing
+o.lat <- api.lat ?? 0
+
+# You can also fall back to another dynamic source
+o.label <- api.label ?? i.fallbackLabel
+
+```
+
+The source to the right of the `??` is evaluated _only_ if the left side throws.
+
+### Combining Chains
+
+You can seamlessly combine both operators into a single, highly resilient wire.
+
+```bridge
+o.label <- api.label || backup.label || "default" ?? i.errorFallback
+
+```
+
+**How the engine reads this:**
+
+1. Try `api.label`. If non-null, return it.
+2. Try `backup.label`. If non-null, return it.
+3. Both null? Return `"default"`.
+4. **Did _any_ of the above throw an error?** Return `i.errorFallback`.
+
+The `??` guard wraps the _entire_ `||` chain that precedes it. If any source throws during the sequential evaluation, the engine immediately jumps to the `??` fallback.
+
+## 3. Cost-Aware Overdefinition
+
+What happens if you wire multiple separate lines to the exact same target field?
+
+```bridge
+o.textPart <- i.textBody
+o.textPart <- upperCase:i.htmlBody
+
+```
+
+This is called **Overdefinition**. Instead of throwing a syntax error or blindly racing all the sources in parallel, the engine forms an implicit coalesce group and sorts them by **estimated execution cost**.
+
+### Cost Tiers
+
+| Cost Tier        | Sources                              | Why                                          |
+| ---------------- | ------------------------------------ | -------------------------------------------- |
+| **Free (0)**     | `input`, `context`, `const`, `alias` | Pure memory reads. Zero I/O overhead.        |
+| **Computed (1)** | Tool calls, Pipes, Defines           | Require scheduling and possible network I/O. |
+
+### Cheapest-First Resolution
+
+When a target is overdefined, the engine evaluates the sources **cheapest first**:
+
+1. It tries all Free (Cost 0) sources.
+2. If none return data, it moves to Computed (Cost 1) sources.
+3. It stops and returns the very first non-null result it finds.
+
+**Example:**
+
+```bridge
+o.city <- i.city            # Cost 0: Free memory read
+o.city <- geo.cityName      # Cost 1: Expensive HTTP call
+
+```
+
+If the user provides `city` in their GraphQL arguments, the engine returns it instantly. The expensive geocoding API is **never called**.
+
+Just like `||`, overdefinition uses short-circuit behavior to save costs—but it does so automatically based on the engine's cost metrics rather than the order you wrote the code!

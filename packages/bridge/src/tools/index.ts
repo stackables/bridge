@@ -4,6 +4,7 @@ import { createHttpCall } from "./http-call.ts";
 import { upperCase } from "./upper-case.ts";
 import { lowerCase } from "./lower-case.ts";
 import { findObject } from "./find-object.ts";
+import { filterObject } from "./filter-object.ts";
 import { pickFirst } from "./pick-first.ts";
 import { toArray } from "./to-array.ts";
 import { multiply } from "./multiply.ts";
@@ -31,6 +32,7 @@ export const std = {
   upperCase,
   lowerCase,
   findObject,
+  filterObject,
   pickFirst,
   toArray,
 } as const;

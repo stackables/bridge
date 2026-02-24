@@ -1,0 +1,117 @@
+---
+title: Wiring & Routing
+description: How to move data from sources to targets, build nested payloads, and trigger side-effects.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Wires are the fundamental building blocks of The Bridge. They define the exact paths data takes as it flows through your graph.
+
+Every wire has a **Target** (left side) and a **Source** (right side).
+
+## 1. The Wire Primitives
+
+There are two types of wires in The Bridge: **Pull Wires** and **Constant Wires**.
+
+### Pull Wires (`<-`)
+
+Pull wires resolve data dynamically at runtime. When GraphQL demands the target field, the engine traces the source, schedules any necessary tool calls, waits for the result, and drills into the response path.
+
+```bridge
+# Dynamically pull the city name from the API's array response
+o.city <- geo.items[0].name
+
+```
+
+### Constant Wires (`=`)
+
+Constant wires assign a fixed, hardcoded value.
+
+```bridge
+o.country = "Germany"
+
+```
+
+## 2. Path Scoping Blocks (Nested Objects)
+
+When you are wiring deeply nested JSON objects (like a complex REST API request body), repeating long path prefixes over and over becomes tedious and difficult to read.
+
+Path Scoping Blocks allow you to factor out the common prefix using curly braces `{ }`.
+
+**Instead of writing this:**
+
+```bridge
+api.body.user.profile.id <- i.id
+api.body.user.profile.name <- i.name
+api.body.user.settings.theme = "dark"
+
+```
+
+**You can write this:**
+
+```bridge
+api.body.user {
+  .profile {
+    .id <- i.id
+    .name <- i.name
+  }
+  .settings {
+    .theme = "dark"
+  }
+}
+
+```
+
+## 3. Renaming Deep Paths
+
+Aliases are also incredibly useful for code readability. If you have a deeply nested path that you need to access repeatedly, you can alias it to a shorter name.
+
+```bridge
+# Rename a deep, cumbersome path
+alias api.response.data.metadata.address as addr
+
+o.zip <- addr.zipCode
+o.street <- addr.streetName
+
+```
+
+## 4. Forcing Execution (`force`)
+
+Because The Bridge uses a lazy, pull-based execution engine, **a tool is never called unless a GraphQL output field actively demands its data.**
+
+But what if you want to trigger a side-effect, like sending an audit log, updating a cache, or firing an analytics event? The GraphQL client doesn't explicitly ask for the log, so the engine would normally ignore the tool entirely.
+
+The `force` statement eagerly schedules a tool for execution, intentionally bypassing the lazy evaluation rules.
+
+```bridge
+bridge Query.search {
+  with searchApi as s
+  with std.audit as log
+  with input as i
+  with output as o
+
+  # 1. Wire the main API
+  s.q <- i.q
+  o.title <- s.title
+
+  # 2. Wire the side-effect
+  log.action = "user_search"
+  log.query <- i.q
+
+  # 3. Tell the engine it MUST run this tool
+  force log
+}
+
+```
+
+### Critical vs. Fire-and-Forget
+
+By default, a bare `force` statement is **critical**. If the forced tool throws a network error, that error propagates up and breaks the entire GraphQL response, just like a standard tool failure.
+
+If you want the side-effect to be **fire-and-forget** (where errors are silently swallowed and don't break the user's request), you can combine `force` with the Error Coalesce operator (`??`):
+
+```bridge
+# Fire-and-forget: If the logger fails, gracefully swallow the error
+force log ?? null
+
+```

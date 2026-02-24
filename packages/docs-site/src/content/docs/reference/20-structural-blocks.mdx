@@ -1,0 +1,165 @@
+---
+title: Structural Blocks
+description: The top-level declarations that make up a .bridge file.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A `.bridge` file is constructed entirely from top-level structural blocks. There are four primary types of blocks you will use to build your dataflow graph: `bridge`, `tool`, `define`, and `const`.
+
+## 1. Bridge Blocks
+
+A `bridge` block is the main entry point for a single GraphQL field. It acts as the routing blueprint, wiring a specific GraphQL operation to its underlying data sources.
+
+```bridge
+bridge Query.getUser {
+  with std.httpCall as api
+  with input as i
+  with output as o
+
+  api.userId <- i.id
+  o.name <- api.fullName
+}
+
+```
+
+### Handle Declarations (`with`)
+
+The Bridge enforces strict scoping. Before you can read from or write to a dependency inside a bridge body, you must bring it into scope using the `with` keyword.
+
+| Declaration           | What it provides                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `with myTool as t`    | A new instance of a tool. Write to it via `t.param`, read its result via `t.result`. |
+| `with input as i`     | The GraphQL query arguments (e.g., `i.argName`).                                     |
+| `with output as o`    | The GraphQL return type. Writing to `o.fieldName` shapes the final API response.     |
+| `with context as ctx` | The server execution context (e.g., auth tokens, request headers).                   |
+| `with const as c`     | Access to named constants declared in the file.                                      |
+| `with myDefine as d`  | A reusable `define` block (macro).                                                   |
+
+### Passthrough Shorthand
+
+If your underlying tool's output shape perfectly matches your GraphQL return type, you can skip the wiring body entirely.
+
+```bridge
+# The HTTP response is returned directly to the client as-is
+bridge Query.getRawData with myTool
+
+```
+
+This is incredibly useful for building zero-boilerplate proxy endpoints.
+
+## 2. Tool Blocks
+
+Tool blocks allow you to pre-configure reusable API calls or transform functions. While a `bridge` block handles the logic for a specific GraphQL endpoint, a `tool` block represents the external service itself.
+
+You declare a new tool using the `tool <Name> from <BaseTool>` syntax:
+
+```bridge
+tool hereGeo from std.httpCall {
+  with context
+
+  # Tool Configuration
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .method = "GET"
+  .path = "/geocode"
+
+  # Pull the API key dynamically per-request
+  .headers.apiKey <- context.hereApiKey
+}
+
+```
+
+### Error Fallbacks
+
+You can provide a safe fallback value in case the tool throws an error (like a network timeout or a 500 response).
+
+```bridge
+tool fragileApi from std.httpCall {
+  .baseUrl = "https://unstable.example.com"
+
+  # Return a safe default instead of failing the GraphQL request
+  on error = { "lat": 0, "lon": 0 }
+}
+
+```
+
+## 3. Tool Inheritance
+
+Tools can extend other tools. This is a powerful way to organize your API clients, allowing you to define a base configuration and spawn specific endpoints from it.
+
+```bridge
+tool baseApi from std.httpCall {
+  with context
+  .baseUrl = "[https://api.example.com](https://api.example.com)"
+  .headers.Authorization <- context.token
+}
+
+tool baseApi.users from baseApi {
+  .path = "/users"
+  .method = "GET"
+}
+
+tool baseApi.createUser from baseApi {
+  .path = "/users"
+  .method = "POST"
+}
+
+```
+
+## 4. Const Blocks
+
+`const` blocks define global, static JSON values that are accessible across all bridges and tools in the file. They are perfect for configuration, magic numbers, or shared fallback objects.
+
+```bridge
+const maxRetries = 3
+const fallbackGeo = { "lat": 0, "lon": 0 }
+
+const config = {
+  "timeout": 5000,
+  "endpoints": ["US", "EU"]
+}
+
+```
+
+To access them in your graph, bring them into scope: `with const as c`, then wire them using dot notation: `o.lat <- c.fallbackGeo.lat`.
+
+## 5. Define Blocks
+
+Defines are reusable subgraphs. Think of them as macros that get inlined into your bridge at parse time. They are ideal for standardizing common data mapping patterns across multiple endpoints.
+
+**1. Create the Define:**
+
+```bridge
+define secureProfile {
+  with userApi as api
+  with input as i
+  with output as o
+
+  api.id <- i.userId
+
+  # Map the raw API fields to our standard schema
+  o.name <- api.login
+  o.email <- api.email
+}
+
+```
+
+**2. Use it in a Bridge:**
+
+```bridge
+bridge Query.me {
+  # Bring the macro into scope
+  with secureProfile as profile
+  with input as i
+  with output as o
+
+  profile.userId <- i.id
+  o.name <- profile.name
+}
+
+```
+
+<Aside>
+  Defines do not add any runtime overhead. The parser unpacks the `define` block
+  and injects its wires directly into the host bridge during compilation.
+</Aside>
