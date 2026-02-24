@@ -537,7 +537,7 @@ o.ok = "true"
     const bridgeText = `version 1.4
 bridge Query.search {
   with mainApi as m
-  with std.audit as audit
+  with audit.log as audit
   with input as i
   with output as o
 

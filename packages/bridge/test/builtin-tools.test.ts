@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { parseBridge } from "../src/bridge-format.ts";
 import { builtinTools } from "../src/tools/index.ts";
 import { audit } from "../src/tools/audit.ts";
-import { std } from "../src/tools";
+import { std } from "../src/tools/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for individual tools ─────────────────────────────────────────
@@ -153,7 +153,7 @@ describe("builtinTools bundle", () => {
     assert.ok(builtinTools.std.arr.find, "findObject present");
     assert.ok(builtinTools.std.arr.first, "pickFirst present");
     assert.ok(builtinTools.std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 8);
+    assert.equal(Object.keys(builtinTools.std).length, 5);
   });
 
   test("math namespace contains math/comparison tools", () => {
@@ -241,7 +241,9 @@ o.upper <- up:i.name
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
         std: {
-          upperCase: (opts: any) => opts.in.split("").reverse().join(""),
+          str: {
+            toUpperCase: (opts: any) => opts.in.split("").reverse().join(""),
+          },
         },
       },
     });
@@ -330,7 +332,7 @@ describe("findObject through bridge", () => {
   const bridgeText = `version 1.4
 bridge Query.findUser {
   with getUsers as db
-  with std.findObject as find
+  with std.arr.find as find
   with input as i
   with output as o
 
@@ -504,7 +506,7 @@ describe("toArray through bridge", () => {
   // Round-trip: wrap single value in array → pick first element back out
   const bridgeText = `version 1.4
 bridge Query.normalize {
-  with std.toArray as ta
+  with std.arr.toArray as ta
   with std.arr.first as pf
   with input as i
   with output as o
@@ -539,7 +541,7 @@ describe("toArray as tool input normalizer", () => {
   // Use toArray to wrap a scalar, then pass to a custom tool that counts items
   const bridgeText = `version 1.4
 bridge Query.wrap {
-  with std.toArray as ta
+  with std.arr.toArray as ta
   with countItems as cnt
   with input as i
   with output as o

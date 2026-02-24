@@ -37,9 +37,9 @@ packages/bridge/src/
     ├── http-call.ts      createHttpCall (REST API tool with LRU caching)
     ├── upper-case.ts     std.str.toUpperCase
     ├── lower-case.ts     std.str.toLowerCase
-    ├── find-object.ts    std.findObject (array search by predicate)
+    ├── find-object.ts    std.arr.find (array search by predicate)
     ├── pick-first.ts     std.arr.first (head of array, optional strict)
-    └── to-array.ts       std.toArray (wrap scalar in array)
+    └── to-array.ts       std.arr.toArray (wrap scalar in array)
 ```
 
 ---

@@ -15,7 +15,7 @@ bridge Query.format {
 
 bridge Query.findEmployee {
   with getEmployees as db
-  with std.findObject as find
+  with std.arr.find as find
   with input as i
   with output as o
 
