@@ -7,7 +7,7 @@
 > - Stability: The .bridge language and TypeScript API is largely stable.
 > - Versioning: v2.0.0 is imminent, with a slightly more flexible package structure.
 >
-> [See our roadmap](./docs/roadmap/) \
+> [See our roadmap](https://github.com/stackables/bridge/milestones) \
 > [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
