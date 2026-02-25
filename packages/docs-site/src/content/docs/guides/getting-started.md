@@ -1,5 +1,6 @@
 ---
 title: Getting Started
+description: How to write your first declarative dataflow
 ---
 
 The Bridge separates your mapping logic (`.bridge` files) from your execution environment. You define the logic once, and run it wherever you need.
