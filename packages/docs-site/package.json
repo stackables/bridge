@@ -28,6 +28,7 @@
     "@types/node": "^25.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@yeskunall/astro-umami": "^0.0.7",
     "wrangler": "^4.68.1"
   }
 }

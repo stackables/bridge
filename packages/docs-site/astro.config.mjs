@@ -6,7 +6,7 @@ import bridgeGrammar from "../bridge-syntax-highlight/syntaxes/bridge.tmLanguage
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
-
+import umami from "@yeskunall/astro-umami";
 import cloudflare from "@astrojs/cloudflare";
 
 // https://astro.build/config
@@ -84,6 +84,7 @@ export default defineConfig({
       ],
     }),
     react(),
+    umami({ id: "1f6b3965-db14-4b6f-bf61-e6b70f1e0994", tag: "bridge" }),
   ],
   adapter: cloudflare({
     platformProxy: {
