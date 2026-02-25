@@ -27,3 +27,9 @@ Standard tool for assertions. Usage examples etc. Currently throw on pipe does n
 ## if/else
 
 While this makes the language too similar to programming languages it really helps with some more complicated mapping paths ... so need to decide, soon
+
+## Per tool trace and log levels
+
+Somehow allow tools to define at which levels to send the traces ... for a "uppercase" tool call it makes sense to send a span and log only on error?
+
+This goes with the batching idea of tool metadata.
