@@ -2,10 +2,10 @@
 [![extension](https://img.shields.io/badge/VS_Code-Full_Support-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 
 > **Developer Preview**
-> The Bridge v1.x is a public preview.
+> The Bridge v1.x is a developer preview.
 >
 > - Stability: The .bridge language and TypeScript API is largely stable.
-> - Versioning: We follow strict SemVer starting from v2.0.0.
+> - Versioning: v2.0.0 is imminent, with a slightly more flexible package structure.
 >
 > [See our roadmap](./docs/roadmap/) \
 > [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
