@@ -1,0 +1,95 @@
+version 1.4
+
+# Tool 1: Geocoder (City Name -> Coordinates)
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
+  .cache = 60
+  # Required by Nominatim policy
+  .headers.User-Agent = "TheBridgeDemo/1.0"
+}
+
+# Tool 2: Weather (Coordinates -> Temperature)
+tool weather from std.httpCall {
+  .baseUrl = "https://api.open-meteo.com/v1"
+  .method = GET
+  .path = /forecast
+  .cache = 60
+}
+
+# Reusable definition to get weather by coordinates
+define weatherByCoordinates {
+  with weather as w
+  with input as i
+  with output as o
+
+  w.latitude  <- i.lat
+  w.longitude <- i.lon
+  w.current_weather = true
+
+  # Proxy back the lat and lon used
+  o.lat         <- i.lat
+  o.lon         <- i.lon
+
+  # On error weather defaults to 0C or 32F
+  o.currentTempC <- w.current_weather.temperature ?? 0.0
+
+  # TODO: o.currentTempF <- (w.current_weather.temperature * 9 / 5) + 32 ?? 32
+  o.currentTempF <- w.current_weather.temperature * 9 / 5 + 32 ?? 32
+
+  # TODO: Here a proper if fould help
+  #    we have current_weather_units wiht F or C mapping
+  #    it would be trivial to map to C anf F if we would have ifs
+
+  # If timezone is null or missing then return UTC
+  # On error default to null
+  o.timezone    <- w.timezone || "UTC" ?? null
+}
+
+# All optional params:
+# if lat/lon provided skip geocode
+# if name is requested and name is not provided Unknown
+# nothing provided -> error?
+bridge Query.getWeather {
+  with geo as gecodeNode
+  with weatherByCoordinates
+  with input as i
+  with output as o
+  with std.arr.first as geocodeFirstResult
+  with std.str.toUpperCase as upper
+  with std.assert as assert
+
+  # Geocode node gets its input from user input directly
+  #    format is hardcoded constant
+  # TODO: Assert throw ... but does not prevent from geocode running
+  gecodeNode.q <- assert:i.cityName # Only used if lat/lon not provided
+  gecodeNode.format = "json"
+
+  # We need input as array to return the first element
+  #    We will take taht input from gecodeNode
+  geocodeFirstResult.in <- gecodeNode
+
+  # Get weather info always by coordinates
+  #    We prefer the coordinates the user provided
+  #    But if there is no user provided coordinates we will pull them from geocodeFirstResult
+  weatherByCoordinates.lat  <- i.lat || geocodeFirstResult.lat
+  weatherByCoordinates.lon <- i.lon || geocodeFirstResult.lon
+
+  # TODO: A || B || C | D ?? E
+  #    || - ignore error
+  #    |  - jump to ?? on error 
+  o.cityUpperCase <- upper:i.cityName || "NARNIA"
+
+  # TODO: If we by any chance fetched geocode then use this value as city name (instead of user input)
+  # o.cityUpperCase <~ upper:geocodeFirstResult.display_name
+
+  # Normal mappings
+  # TODO: Scoped alias
+  o {
+    .lat <- weatherByCoordinates.lat
+    .lon <- weatherByCoordinates.lon
+    .tempC <- weatherByCoordinates.currentTempC
+    .tempF <- weatherByCoordinates.currentTempF
+  }
+}

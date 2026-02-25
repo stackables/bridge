@@ -13,6 +13,7 @@ import { gt } from "./gt.ts";
 import { gte } from "./gte.ts";
 import { lt } from "./lt.ts";
 import { lte } from "./lte.ts";
+import { assert } from "./assert.ts";
 
 /**
  * Standard built-in tools — available under the `std` namespace.
@@ -27,6 +28,7 @@ export const std = {
   audit,
   httpCall: httpCallFn,
   concat,
+  assert,
 } as const;
 
 /**
