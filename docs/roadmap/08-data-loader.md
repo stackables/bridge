@@ -38,6 +38,26 @@ tool getUsers from db.fetch {
 
 **Potential langauge change**: this will conflict with a tool parameter `.batch` and needs some special handling. making it a much bigger change
 
+alternatively we can leave the batch declaration to the tool itself?
+
+```typescript
+// Define the implementation
+const fetchUsersImpl = async (calls) => {
+  const ids = calls.map(c => c.input.id);
+  const users = await db.users.findMany({ where: { id: { in: ids } } });
+  return ids.map(id => users.find(u => u.id === id));
+};
+
+// Attach the "Batch Contract" metadata
+fetchUsersImpl.orchestration = {
+  mode: 'batch',
+  maxBatchSize: 100,
+  flushIntervalMs: 0 // Default to next-tick
+};
+
+export const fetchUsers = fetchUsersImpl;
+```
+
 #### **The User Experience (Clean Implementation)**
 
 The developer no longer needs to know about "Loaders" or "Context." They simply write a function that handles an array of inputs.
