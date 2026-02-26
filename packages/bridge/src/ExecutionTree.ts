@@ -2,6 +2,7 @@ import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { parsePath } from "./utils.ts";
 import type {
   Bridge,
+  ControlFlowInstruction,
   Instruction,
   NodeRef,
   ToolCallFn,
@@ -11,6 +12,27 @@ import type {
   Wire,
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
+
+/** Fatal panic error — bypasses all error boundaries (`?.` and `catch`). */
+export class BridgePanicError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BridgePanicError";
+  }
+}
+
+/** Abort error — raised when an external AbortSignal cancels execution. */
+export class BridgeAbortError extends Error {
+  constructor(message = "Execution aborted by external signal") {
+    super(message);
+    this.name = "BridgeAbortError";
+  }
+}
+
+/** Sentinel for `continue` — skip the current array element */
+const CONTINUE_SYM = Symbol.for("BRIDGE_CONTINUE");
+/** Sentinel for `break` — halt array iteration */
+const BREAK_SYM = Symbol.for("BRIDGE_BREAK");
 
 const otelTracer = trace.getTracer("@stackables/bridge");
 

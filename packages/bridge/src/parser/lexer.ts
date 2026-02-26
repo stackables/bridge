@@ -54,6 +54,10 @@ export const CatchKw   = createToken({ name: "CatchKw",   pattern: /catch/i,   l
 export const AndKw     = createToken({ name: "AndKw",     pattern: /and/,      longer_alt: Identifier });
 export const OrKw      = createToken({ name: "OrKw",      pattern: /or/,       longer_alt: Identifier });
 export const NotKw     = createToken({ name: "NotKw",     pattern: /not/,      longer_alt: Identifier });
+export const ThrowKw   = createToken({ name: "ThrowKw",   pattern: /throw/,    longer_alt: Identifier });
+export const PanicKw   = createToken({ name: "PanicKw",   pattern: /panic/,    longer_alt: Identifier });
+export const ContinueKw = createToken({ name: "ContinueKw", pattern: /continue/, longer_alt: Identifier });
+export const BreakKw   = createToken({ name: "BreakKw",   pattern: /break/,    longer_alt: Identifier });
 
 // ── Operators & punctuation ────────────────────────────────────────────────
 
@@ -155,6 +159,10 @@ export const allTokens = [
   AndKw,
   OrKw,
   NotKw,
+  ThrowKw,
+  PanicKw,
+  ContinueKw,
+  BreakKw,
   TrueLiteral,
   FalseLiteral,
   NullLiteral,
