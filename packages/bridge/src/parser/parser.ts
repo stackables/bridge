@@ -309,7 +309,58 @@ class BridgeParser extends CstParser {
    */
   public bridgeNodeAlias = this.RULE("bridgeNodeAlias", () => {
     this.CONSUME(AliasKw);
-    this.SUBRULE(this.sourceExpr, { LABEL: "nodeAliasSource" });
+    this.OR([
+      {
+        // String literal as source: alias "..." [op operand]* [? then : else] as name
+        ALT: () => {
+          this.CONSUME(StringLiteral, { LABEL: "aliasStringSource" });
+          // Optional expression chain after string literal
+          this.MANY3(() => {
+            this.SUBRULE2(this.exprOperator, { LABEL: "aliasStringExprOp" });
+            this.SUBRULE2(this.exprOperand, { LABEL: "aliasStringExprRight" });
+          });
+          // Optional ternary after string literal expression
+          this.OPTION5(() => {
+            this.CONSUME2(QuestionMark, { LABEL: "aliasStringTernaryOp" });
+            this.SUBRULE3(this.ternaryBranch, { LABEL: "aliasStringThenBranch" });
+            this.CONSUME2(Colon, { LABEL: "aliasStringTernaryColon" });
+            this.SUBRULE4(this.ternaryBranch, { LABEL: "aliasStringElseBranch" });
+          });
+        },
+      },
+      {
+        // [not] (parenExpr | sourceExpr) [op operand]* [? then : else] as name
+        ALT: () => {
+          this.OPTION3(() => {
+            this.CONSUME(NotKw, { LABEL: "aliasNotPrefix" });
+          });
+          this.OR2([
+            {
+              ALT: () => {
+                this.SUBRULE(this.parenExpr, { LABEL: "aliasFirstParen" });
+              },
+            },
+            {
+              ALT: () => {
+                this.SUBRULE(this.sourceExpr, { LABEL: "nodeAliasSource" });
+              },
+            },
+          ]);
+          // Optional expression chain: op operand pairs
+          this.MANY2(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "aliasExprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "aliasExprRight" });
+          });
+          // Optional ternary: ? thenBranch : elseBranch
+          this.OPTION4(() => {
+            this.CONSUME(QuestionMark, { LABEL: "aliasTernaryOp" });
+            this.SUBRULE(this.ternaryBranch, { LABEL: "aliasThenBranch" });
+            this.CONSUME(Colon, { LABEL: "aliasTernaryColon" });
+            this.SUBRULE2(this.ternaryBranch, { LABEL: "aliasElseBranch" });
+          });
+        },
+      },
+    ]);
     // || coalesce chain
     this.MANY(() => {
       this.CONSUME(NullCoalesce);
@@ -4036,14 +4087,119 @@ function buildBridgeBody(
     )?.[0];
     if (nodeAliasNode) {
       const lineNum = line(findFirstToken(nodeAliasNode));
-      const sourceNode = sub(nodeAliasNode, "nodeAliasSource")!;
       const alias = extractNameToken(sub(nodeAliasNode, "nodeAliasName")!);
       assertNotReserved(alias, lineNum, "node alias");
       if (handleRes.has(alias)) {
         throw new Error(`Line ${lineNum}: Duplicate handle name "${alias}"`);
       }
 
-      const { ref: sourceRef, safe: aliasSafe } = buildSourceExprSafe(sourceNode, lineNum);
+      // ── Compute the source ref (mirrors bridgeWire pull-wire logic) ──
+      let sourceRef: NodeRef;
+      let aliasSafe: boolean | undefined;
+
+      const aliasStringToken = (nodeAliasNode.children.aliasStringSource as IToken[] | undefined)?.[0];
+      if (aliasStringToken) {
+        // String literal source: alias "template..." [op right]* as name
+        const raw = aliasStringToken.image.slice(1, -1);
+        const segs = parseTemplateString(raw);
+        const stringExprOps = subs(nodeAliasNode, "aliasStringExprOp");
+        // Produce a NodeRef for the string value (concat fork or template desugar)
+        const strRef: NodeRef = segs
+          ? desugarTemplateString(segs, lineNum)
+          : desugarTemplateString([{ kind: "text", value: raw }], lineNum);
+        if (stringExprOps.length > 0) {
+          const stringExprRights = subs(nodeAliasNode, "aliasStringExprRight");
+          sourceRef = desugarExprChain(strRef, stringExprOps, stringExprRights, lineNum);
+        } else {
+          sourceRef = strRef;
+        }
+        // Ternary after string source (e.g. alias "a" == "b" ? x : y as name)
+        const strTernaryOp = (nodeAliasNode.children.aliasStringTernaryOp as IToken[] | undefined)?.[0];
+        if (strTernaryOp) {
+          const thenNode = sub(nodeAliasNode, "aliasStringThenBranch")!;
+          const elseNode = sub(nodeAliasNode, "aliasStringElseBranch")!;
+          const thenBranch = extractTernaryBranch(thenNode, lineNum);
+          const elseBranch = extractTernaryBranch(elseNode, lineNum);
+          const ternaryToRef: NodeRef = { module: "__local", type: "Shadow", field: alias, path: [] };
+          handleRes.set(alias, { module: "__local", type: "Shadow", field: alias });
+          wires.push({
+            cond: sourceRef,
+            ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+            ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+            to: ternaryToRef,
+          });
+          continue;
+        }
+        aliasSafe = false;
+      } else {
+        // Normal expression source
+        const firstParenNode = sub(nodeAliasNode, "aliasFirstParen");
+        const firstSourceNode = sub(nodeAliasNode, "nodeAliasSource");
+        const headNode = firstSourceNode ? sub(firstSourceNode, "head") : undefined;
+        const isSafe = headNode ? !!extractAddressPath(headNode).rootSafe : false;
+        const exprOps = subs(nodeAliasNode, "aliasExprOp");
+
+        let condRef: NodeRef;
+        if (firstParenNode) {
+          const parenRef = resolveParenExpr(firstParenNode, lineNum, undefined, isSafe);
+          if (exprOps.length > 0) {
+            const exprRights = subs(nodeAliasNode, "aliasExprRight");
+            condRef = desugarExprChain(parenRef, exprOps, exprRights, lineNum, undefined, isSafe);
+          } else {
+            condRef = parenRef;
+          }
+        } else if (exprOps.length > 0) {
+          const exprRights = subs(nodeAliasNode, "aliasExprRight");
+          const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
+          condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum, undefined, isSafe);
+        } else {
+          const result = buildSourceExprSafe(firstSourceNode!, lineNum);
+          condRef = result.ref;
+          aliasSafe = result.safe;
+        }
+
+        // Apply `not` prefix if present
+        if ((nodeAliasNode.children.aliasNotPrefix as IToken[] | undefined)?.[0]) {
+          condRef = desugarNot(condRef, lineNum, isSafe);
+        }
+
+        // Ternary
+        const ternaryOp = (nodeAliasNode.children.aliasTernaryOp as IToken[] | undefined)?.[0];
+        if (ternaryOp) {
+          const thenNode = sub(nodeAliasNode, "aliasThenBranch")!;
+          const elseNode = sub(nodeAliasNode, "aliasElseBranch")!;
+          const thenBranch = extractTernaryBranch(thenNode, lineNum);
+          const elseBranch = extractTernaryBranch(elseNode, lineNum);
+          const ternaryToRef: NodeRef = {
+            module: "__local",
+            type: "Shadow",
+            field: alias,
+            path: [],
+          };
+          handleRes.set(alias, { module: "__local", type: "Shadow", field: alias });
+          wires.push({
+            cond: condRef,
+            ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
+            ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
+            to: ternaryToRef,
+          });
+          // Process coalesce modifiers on the ternary alias wire
+          const aliasNullAltRefs2: NodeRef[] = [];
+          for (const alt of subs(nodeAliasNode, "aliasNullAlt")) {
+            const altResult = extractCoalesceAlt(alt, lineNum);
+            if ("literal" in altResult) { /* ignored on ternary */ }
+            else if ("control" in altResult) { /* ignored on ternary */ }
+            else { aliasNullAltRefs2.push(altResult.sourceRef); }
+          }
+          for (const ref of aliasNullAltRefs2) {
+            wires.push({ from: ref, to: ternaryToRef });
+          }
+          continue; // alias is done — skip the normal wire emission below
+        }
+
+        sourceRef = condRef;
+        if (aliasSafe === undefined) aliasSafe = isSafe || undefined;
+      }
 
       // Process coalesce modifiers on alias
       let aliasFalsyFallback: string | undefined;

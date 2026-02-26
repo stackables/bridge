@@ -481,7 +481,7 @@ bridge Mutation.submitFeedback {
   {
     name: "Alias (Rename & Cache)",
     description:
-      "Use 'alias' to rename deep paths or pre-sanitize data with fallbacks — alias supports the same ?., ||, ??, and catch modifiers as a standard pull wire",
+      "alias is a fully compatible wire — supports ?., ||, ??, catch, and full expression syntax (math, comparison, not, parentheses, ternary)",
     schema: `
 type Query {
   profile(userId: String!): UserProfile
@@ -492,6 +492,7 @@ type UserProfile {
   location: String
   website: String
   upperName: String
+  isPremium: Boolean
 }
     `,
     bridge: `version 1.4
@@ -520,10 +521,14 @@ bridge Query.profile {
   # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
   alias uc:api.name catch "UNKNOWN" as upperName
 
+  # 5. Math/comparison expression — alias fully evaluates the expression
+  alias api.id <= 5 as isPremium
+
   o.displayName <- displayName
   o.location <- city || "Unknown city"
   o.website <- site
   o.upperName <- upperName
+  o.isPremium <- isPremium
 }`,
     queries: [
       {
@@ -534,6 +539,7 @@ bridge Query.profile {
     location
     website
     upperName
+    isPremium
   }
 }`,
       },

@@ -521,6 +521,111 @@ bridge Query.test {
     const { data } = await run(bridgeText, "Query.test", {}, tools);
     assert.equal(data.result, "fallback");
   });
+
+  test("alias with math expression (+ operator)", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.price + 10 as bumped
+
+  o.result <- bumped
+}`;
+    const { data } = await run(bridgeText, "Query.test", { price: 5 });
+    assert.equal(data.result, 15);
+  });
+
+  test("alias with comparison expression (== operator)", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.role == "admin" as isAdmin
+
+  o.isAdmin <- isAdmin
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { role: "admin" });
+    assert.equal(d1.isAdmin, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { role: "user" });
+    assert.equal(d2.isAdmin, false);
+  });
+
+  test("alias with parenthesized expression", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias (i.a + i.b) * 2 as doubled
+
+  o.result <- doubled
+}`;
+    const { data } = await run(bridgeText, "Query.test", { a: 3, b: 4 });
+    assert.equal(data.result, 14);
+  });
+
+  test("alias with string literal source", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with output as o
+
+  alias "hello world" as greeting
+
+  o.result <- greeting
+}`;
+    const { data } = await run(bridgeText, "Query.test", {});
+    assert.equal(data.result, "hello world");
+  });
+
+  test("alias with string literal comparison", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias "a" == i.val as matchesA
+
+  o.result <- matchesA
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { val: "a" });
+    assert.equal(d1.result, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { val: "b" });
+    assert.equal(d2.result, false);
+  });
+
+  test("alias with not prefix", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias not i.blocked as allowed
+
+  o.allowed <- allowed
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { blocked: false });
+    assert.equal(d1.allowed, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { blocked: true });
+    assert.equal(d2.allowed, false);
+  });
+
+  test("alias with ternary expression", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.score >= 90 ? "A" : "B" as grade
+
+  o.grade <- grade
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { score: 95 });
+    assert.equal(d1.grade, "A");
+    const { data: d2 } = await run(bridgeText, "Query.test", { score: 75 });
+    assert.equal(d2.grade, "B");
+  });
 });
 
 // ── Constant wires ──────────────────────────────────────────────────────────
