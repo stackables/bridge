@@ -29,6 +29,7 @@ import {
   NotKw,
   NullCoalesce,
   ErrorCoalesce,
+  SafeNav,
   LCurly,
   RCurly,
   LSquare,
@@ -753,7 +754,7 @@ class BridgeParser extends CstParser {
     this.MANY({
       GATE: () => {
         const la = this.LA(1);
-        if (la.tokenType === Dot) {
+        if (la.tokenType === Dot || la.tokenType === SafeNav) {
           // Don't continue across a line break — prevents greedy path
           // consumption in multi-line contexts like element blocks.
           // LA(0) gives the last consumed token.
@@ -780,6 +781,12 @@ class BridgeParser extends CstParser {
             ALT: () => {
               this.CONSUME(Dot);
               this.SUBRULE(this.pathSegment, { LABEL: "segment" });
+            },
+          },
+          {
+            ALT: () => {
+              this.CONSUME(SafeNav, { LABEL: "safeNav" });
+              this.SUBRULE2(this.pathSegment, { LABEL: "segment" });
             },
           },
           {
@@ -1187,10 +1194,12 @@ function extractDottedPathStr(node: CstNode): string {
 function extractAddressPath(node: CstNode): {
   root: string;
   segments: string[];
+  safe?: boolean;
 } {
   const root = extractNameToken(sub(node, "root")!);
   type Seg = { offset: number; value: string };
   const items: Seg[] = [];
+  const hasSafeNav = (node.children.safeNav as IToken[] | undefined)?.length;
 
   for (const seg of subs(node, "segment")) {
     const firstTok = findFirstToken(seg);
@@ -1208,7 +1217,7 @@ function extractAddressPath(node: CstNode): {
     items.push({ offset: idxTok.startOffset, value: idxTok.image });
   }
   items.sort((a, b) => a.offset - b.offset);
-  return { root, segments: items.map((i) => i.value) };
+  return { root, segments: items.map((i) => i.value), ...(hasSafeNav ? { safe: true } : {}) };
 }
 
 function findFirstToken(node: CstNode): IToken | undefined {
@@ -3596,6 +3605,12 @@ function buildBridgeBody(
     const firstSourceNode = sub(wireNode, "firstSource")!;
     const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
+    // Check for safe navigation (?.) on the head address path
+    const headNode = sub(firstSourceNode, "head");
+    const isSafe = headNode
+      ? !!(headNode.children.safeNav as IToken[] | undefined)?.length
+      : false;
+
     const exprOps = subs(wireNode, "exprOp");
 
     // Compute condition ref (expression chain result or plain source)
@@ -3710,6 +3725,7 @@ function buildBridgeBody(
     for (let ci = 0; ci < sourceParts.length; ci++) {
       const { ref: fromRef, isPipeFork: isPipe } = sourceParts[ci];
       const isLast = ci === sourceParts.length - 1;
+      const isFirst = ci === 0;
       const lastAttrs = isLast
         ? {
             ...(nullFallback ? { nullFallback } : {}),
@@ -3717,12 +3733,14 @@ function buildBridgeBody(
             ...(fallbackRef ? { fallbackRef } : {}),
           }
         : {};
+      const safeAttr = isFirst && isSafe ? { safe: true as const } : {};
       if (isPipe) {
-        wires.push({ from: fromRef, to: toRef, pipe: true, ...lastAttrs });
+        wires.push({ from: fromRef, to: toRef, pipe: true, ...safeAttr, ...lastAttrs });
       } else {
         wires.push({
           from: fromRef,
           to: toRef,
+          ...safeAttr,
           ...lastAttrs,
         });
       }

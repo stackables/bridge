@@ -59,6 +59,7 @@ export const NotKw     = createToken({ name: "NotKw",     pattern: /not/,      l
 export const Arrow         = createToken({ name: "Arrow",         pattern: /<-/ });
 export const NullCoalesce  = createToken({ name: "NullCoalesce",  pattern: /\|\|/ });
 export const ErrorCoalesce = createToken({ name: "ErrorCoalesce", pattern: /\?\?/ });
+export const SafeNav       = createToken({ name: "SafeNav",       pattern: /\?\./ });
 export const QuestionMark  = createToken({ name: "QuestionMark",  pattern: /\?/ });
 export const GreaterEqual  = createToken({ name: "GreaterEqual",  pattern: />=/ });
 export const LessEqual     = createToken({ name: "LessEqual",     pattern: /<=/ });
@@ -110,6 +111,7 @@ export const allTokens = [
   Arrow,
   NullCoalesce,
   ErrorCoalesce,
+  SafeNav,
   QuestionMark,
   GreaterEqual,
   LessEqual,

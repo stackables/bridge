@@ -846,7 +846,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Regular wire
-    const fromStr = sRef(w.from, true);
+    let fromStr = sRef(w.from, true);
+    // ?. safe execution — replace first dot with ?.
+    if (w.safe && fromStr.includes(".")) {
+      fromStr = fromStr.replace(".", "?.");
+    }
     const toStr = sRef(w.to, false);
     const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
     const errf = w.fallbackRef

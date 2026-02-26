@@ -755,6 +755,43 @@ export class ExecutionTree {
     return undefined;
   }
 
+  /**
+   * Safe execution pull: wraps individual safe-flagged pulls in try/catch.
+   * Wires with `safe: true` swallow errors and return undefined.
+   * Non-safe wires propagate errors normally.
+   */
+  async pullSafe(
+    pulls: Extract<Wire, { from: NodeRef }>[],
+  ): Promise<any> {
+    if (pulls.length === 1) {
+      const w = pulls[0];
+      if (w.safe) {
+        try {
+          return await this.pullSingle(w.from);
+        } catch {
+          return undefined;
+        }
+      }
+      return this.pullSingle(w.from);
+    }
+
+    const errors: unknown[] = [];
+    for (const w of pulls) {
+      try {
+        const value = w.safe
+          ? await this.pullSingle(w.from).catch(() => undefined)
+          : await this.pullSingle(w.from);
+        if (value != null) return value;
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    if (errors.length === pulls.length) {
+      throw new AggregateError(errors, "All sources failed");
+    }
+    return undefined;
+  }
+
   push(args: Record<string, any>) {
     this.state[trunkKey(this.trunk)] = args;
   }
@@ -898,7 +935,11 @@ export class ExecutionTree {
       (w) => w.fallback != null || w.fallbackRef != null,
     );
 
-    let result: Promise<any> = this.pull(pulls.map((w) => w.from));
+    // ?. safe execution: wrap individual pulls in try/catch, returning undefined on error
+    const hasSafe = pulls.some((w) => w.safe);
+    let result: Promise<any> = hasSafe
+      ? this.pullSafe(pulls)
+      : this.pull(pulls.map((w) => w.from));
 
     // || null-guard: fires when resolution succeeds but value is null/undefined
     if (nullFallbackWire) {

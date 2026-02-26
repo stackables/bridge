@@ -35,6 +35,7 @@ export type Wire =
       from: NodeRef;
       to: NodeRef;
       pipe?: true;
+      safe?: true;
       nullFallback?: string;
       fallback?: string;
       fallbackRef?: NodeRef;
