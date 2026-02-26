@@ -1,0 +1,116 @@
+---
+title: The "No-Code" BFF
+description: How to build a Backend-for-Frontend using The Bridge
+---
+import { Aside } from '@astrojs/starlight/components';
+
+If you are building a modern frontend, you eventually hit a wall: your UI components need a specific shape of data, but your backend APIs are fragmented across microservices, legacy REST endpoints, and third-party tools.
+
+The standard industry answer is to build a **Backend-for-Frontend (BFF)**—usually a Node.js GraphQL server. But this introduces a massive hidden tax: you end up maintaining a "second backend" filled with imperative glue code, DTOs, type mappers, and `Promise.all` blocks just to proxy data.
+
+The Bridge eliminates this tax. By treating your BFF as a declarative wiring diagram rather than a software project, frontend teams can own the data aggregation layer without owning the infrastructure code.
+
+<Aside type="note">
+The examples below use intentionally simplified APIs and hardcoded values to highlight the core language patterns. In a production BFF, base URLs, authentication tokens, and dynamic headers are typically injected securely via the Engine's context rather than hardcoded in the .bridge file.
+</Aside>
+
+Here is how The Bridge handles the three most common BFF requirements effortlessly.
+
+## Parallel Aggregation (Without the Boilerplate)
+
+In a traditional BFF, fetching a user's profile and their recent orders simultaneously requires manual orchestration (`Promise.all`) to avoid blocking the event loop. In The Bridge, the engine infers the dependency graph and parallelizes automatically.
+
+**The Scenario:** The UI needs a dashboard showing user details and their recent orders.
+
+```bridge
+version 1.4
+
+tool userApi from std.httpCall { .baseUrl = "https://api.internal/users" }
+tool orderApi from std.httpCall { .baseUrl = "https://api.internal/orders" }
+
+bridge Query.dashboard {
+  with userApi
+  with orderApi
+  with input as i
+  with output as o
+
+  # 1. Provide the inputs
+  userApi.id <- i.userId
+  orderApi.userId <- i.userId
+
+  # 2. Map the outputs. 
+  # The engine sees these don't depend on each other and fires both HTTP calls concurrently.
+  o.user <- userApi.profile
+  o.recentOrders <- orderApi.latest_batch
+}
+
+```
+
+The same wiring logic would also know how to schedule calls that depend on other calls (e.g., if `orderApi` needed the user's email from `userApi`). The engine handles all the orchestration for you.
+
+## The UI-Specific Reshape
+
+Backend APIs often have terrible naming conventions (`usr_nm_f`, `status_cd`). Your React or Vue components shouldn't be polluted with this. The Bridge excels at structural reshaping, keeping your UI types pristine.
+
+Using the `[] as` shadow tree syntax, you can easily map complex backend arrays into clean UI props.
+
+```bridge
+bridge Query.orders {
+  # ... tool setup ...
+
+  # The backend returns a messy array of objects.
+  # We iterate over 'orderApi.raw_list' and map it cleanly to 'o.history'
+  o.history <- orderApi.raw_list[] as item {
+    .id <- item.ord_id
+    .status <- item.status_cd
+    # Flatten nested structures easily
+    .shippingAddress <- item.delivery_info.full_address
+  }
+}
+
+```
+
+## Graceful Degradation (with Fallbacks)
+
+UIs need to be resilient. If the "Avatar API" goes down, the whole dashboard shouldn't crash; the UI should just show a placeholder image. Traditional resolvers require messy `try/catch` blocks for this. The Bridge uses declarative fallbacks.
+
+* `||` (Logical OR): Fall back if the value is missing or null.
+* `??` (Wire-level Catch): Fall back if the tool *throws an error* (e.g., a 500 status code).
+
+```bridge
+bridge Query.profile {
+  with userApi
+  with avatarApi
+  with input as i
+  with output as o
+
+  userApi.id <- i.userId
+  avatarApi.email <- userApi.email
+
+  # If the avatar service timeouts or throws a 500, catch it and return a default.
+  o.avatarUrl <- avatarApi.url ?? "https://ui-avatars.com/api/?name=default"
+  
+  # If the user hasn't set a nickname, fall back to their first name.
+  o.displayName <- userApi.nickname || userApi.firstName
+}
+
+```
+
+## The Escape Hatch: Raw Resolvers & Federation
+
+"No-code" tools often trap you in a walled garden. The Bridge is designed to be a transparent execution layer over standard GraphQL, meaning it never locks you in.
+
+If you hit a use case that is simply too complex for a declarative graph—such as managing raw Node.js data streams or orchestrating highly imperative legacy logic—you can seamlessly fall back to traditional TypeScript resolvers. Because the engine simply outputs an executable schema, you can mix and match `.bridge` powered fields with manual `async/await` resolvers in the exact same server.
+
+Furthermore, this standard output means your Bridge BFF is fully compatible with **GraphQL Federation**. You can instantly plug your declarative BFF into an Apollo Supergraph as a subgraph, giving you the exact flexibility and scale you expect from the modern GraphQL ecosystem.
+
+## Summary: Own the Graph, Not the Code
+
+By using The Bridge for your BFF, you achieve a strict separation of concerns:
+
+* **The Backend** provides raw data tools.
+* **The Frontend** writes `.bridge` files to orchestrate and shape that data.
+* **The Platform** retains full GraphQL flexibility and interoperability.
+
+You get the exact GraphQL schema your UI needs without writing a single line of imperative data-mangling code.
+

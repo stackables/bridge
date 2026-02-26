@@ -41,7 +41,7 @@ You write the topology; the engine handles the execution.
 
 Because The Bridge strictly controls how data flows from inputs to tools to outputs, it is the perfect engine for architectures that require strict boundaries and clean mappings.
 
-1. **[The "No-Code" BFF (Backend-for-Frontend)](https://bridge.sdk42.com/guides/getting-started/)**
+1. **[The "No-Code" BFF (Backend-for-Frontend)](https://bridge.sdk42.com/guides/bff/)**
 Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
 1. **[The Egress Gateway](https://bridge.sdk42.com/guides/getting-started/)**
 Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
