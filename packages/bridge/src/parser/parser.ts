@@ -1578,12 +1578,14 @@ function processElementLines(
       let elemPipeSegs: CstNode[] = [];
       let elemSrcRoot: string = "";
       let elemSrcSegs: string[] = [];
+      let elemSafe: boolean = false;
       if (elemSourceNode) {
         elemHeadNode = sub(elemSourceNode, "head")!;
         elemPipeSegs = subs(elemSourceNode, "pipeSegment");
         const extracted = extractAddressPath(elemHeadNode);
         elemSrcRoot = extracted.root;
         elemSrcSegs = extracted.segments;
+        elemSafe = !!extracted.safe;
       }
 
       // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
@@ -1662,10 +1664,10 @@ function processElementLines(
       let elemCondIsPipeFork: boolean;
       if (elemFirstParenNode && resolveParenExprFn) {
         // First source is a parenthesized sub-expression
-        const parenRef = resolveParenExprFn(elemFirstParenNode, elemLineNum, iterName);
+        const parenRef = resolveParenExprFn(elemFirstParenNode, elemLineNum, iterName, elemSafe || undefined);
         if (elemExprOps.length > 0 && desugarExprChain) {
           const elemExprRights = subs(elemLine, "elemExprRight");
-          elemCondRef = desugarExprChain(parenRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+          elemCondRef = desugarExprChain(parenRef, elemExprOps, elemExprRights, elemLineNum, iterName, elemSafe || undefined);
         } else {
           elemCondRef = parenRef;
         }
@@ -1691,6 +1693,7 @@ function processElementLines(
           elemExprRights,
           elemLineNum,
           iterName,
+          elemSafe || undefined,
         );
         elemCondIsPipeFork = true;
       } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
@@ -1712,7 +1715,7 @@ function processElementLines(
 
       // ── Apply `not` prefix if present (element context) ──
       if ((elemC.elemNotPrefix as IToken[] | undefined)?.[0] && desugarNotFn) {
-        elemCondRef = desugarNotFn(elemCondRef, elemLineNum);
+        elemCondRef = desugarNotFn(elemCondRef, elemLineNum, elemSafe || undefined);
         elemCondIsPipeFork = true;
       }
 
@@ -2033,22 +2036,24 @@ function processElementScopeLines(
       let scopePipeSegs: CstNode[] = [];
       let srcRoot: string = "";
       let srcSegs: string[] = [];
+      let scopeSafe: boolean = false;
       if (scopeSourceNode) {
         scopeHeadNode = sub(scopeSourceNode, "head")!;
         scopePipeSegs = subs(scopeSourceNode, "pipeSegment");
         const extracted = extractAddressPath(scopeHeadNode);
         srcRoot = extracted.root;
         srcSegs = extracted.segments;
+        scopeSafe = !!extracted.safe;
       }
 
       const exprOps = subs(scopeLine, "scopeExprOp");
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
       if (scopeFirstParenNode && resolveParenExprFn) {
-        const parenRef = resolveParenExprFn(scopeFirstParenNode, scopeLineNum, iterName);
+        const parenRef = resolveParenExprFn(scopeFirstParenNode, scopeLineNum, iterName, scopeSafe || undefined);
         if (exprOps.length > 0 && desugarExprChain) {
           const exprRights = subs(scopeLine, "scopeExprRight");
-          condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum, iterName);
+          condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum, iterName, scopeSafe || undefined);
         } else {
           condRef = parenRef;
         }
@@ -2067,7 +2072,7 @@ function processElementScopeLines(
         } else {
           leftRef = buildSourceExpr(scopeSourceNode!, scopeLineNum);
         }
-        condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum, iterName);
+        condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum, iterName, scopeSafe || undefined);
         condIsPipeFork = true;
       } else if (srcRoot === iterName && scopePipeSegs.length === 0) {
         condRef = {
@@ -2088,7 +2093,7 @@ function processElementScopeLines(
 
       // ── Apply `not` prefix if present (scope context) ──
       if ((sc.scopeNotPrefix as IToken[] | undefined)?.[0] && desugarNotFn) {
-        condRef = desugarNotFn(condRef, scopeLineNum);
+        condRef = desugarNotFn(condRef, scopeLineNum, scopeSafe || undefined);
         condIsPipeFork = true;
       }
 
@@ -2825,13 +2830,13 @@ function buildBridgeBody(
 
   // ── Helper: build source expression ────────────────────────────────────
 
-  function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
+  function buildSourceExprSafe(sourceNode: CstNode, lineNum: number): { ref: NodeRef; safe?: boolean } {
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
     if (pipeNodes.length === 0) {
-      const { root, segments } = extractAddressPath(headNode);
-      return resolveAddress(root, segments, lineNum);
+      const { root, segments, safe } = extractAddressPath(headNode);
+      return { ref: resolveAddress(root, segments, lineNum), safe };
     }
 
     // Pipe chain: all parts in order [head, ...pipeSegments]
@@ -2850,7 +2855,7 @@ function buildBridgeBody(
       }
     }
 
-    const { root: srcRoot, segments: srcSegments } =
+    const { root: srcRoot, segments: srcSegments, safe } =
       extractAddressPath(actualSourceNode);
     let prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
 
@@ -2895,7 +2900,12 @@ function buildBridgeBody(
       });
       prevOutRef = forkRootRef;
     }
-    return prevOutRef;
+    return { ref: prevOutRef, safe };
+  }
+
+  /** Backward-compat wrapper — returns just the NodeRef. */
+  function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
+    return buildSourceExprSafe(sourceNode, lineNum).ref;
   }
 
   // ── Helper: desugar template string into synthetic std.concat fork ─────
@@ -3094,7 +3104,7 @@ function buildBridgeBody(
     operandNode: CstNode,
     lineNum: number,
     iterName?: string,
-  ): { kind: "ref"; ref: NodeRef } | { kind: "literal"; value: string } {
+  ): { kind: "ref"; ref: NodeRef; safe?: boolean } | { kind: "literal"; value: string } {
     const c = operandNode.children;
     if (c.numberLit)
       return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
@@ -3115,10 +3125,11 @@ function buildBridgeBody(
       if (iterName) {
         const headNode = sub(srcNode, "head")!;
         const pipeSegs = subs(srcNode, "pipeSegment");
-        const { root, segments } = extractAddressPath(headNode);
+        const { root, segments, safe } = extractAddressPath(headNode);
         if (root === iterName && pipeSegs.length === 0) {
           return {
             kind: "ref",
+            safe,
             ref: {
               module: SELF_MODULE,
               type: bridgeType,
@@ -3130,8 +3141,8 @@ function buildBridgeBody(
         }
       }
 
-      const ref = buildSourceExpr(srcNode, lineNum);
-      return { kind: "ref", ref };
+      const { ref, safe } = buildSourceExprSafe(srcNode, lineNum);
+      return { kind: "ref", ref, safe };
     }
     if (c.parenExpr) {
       const parenNode = (c.parenExpr as CstNode[])[0];
@@ -3159,10 +3170,11 @@ function buildBridgeBody(
 
     // Build the inner source ref (handling iterator-relative refs)
     let innerRef: NodeRef;
+    let innerSafe = safe;
     if (iterName) {
       const headNode = sub(innerSourceNode, "head")!;
       const pipeSegs = subs(innerSourceNode, "pipeSegment");
-      const { root, segments } = extractAddressPath(headNode);
+      const { root, segments, safe: srcSafe } = extractAddressPath(headNode);
       if (root === iterName && pipeSegs.length === 0) {
         innerRef = {
           module: SELF_MODULE,
@@ -3171,24 +3183,29 @@ function buildBridgeBody(
           element: true,
           path: segments,
         };
+        if (srcSafe) innerSafe = true;
       } else {
-        innerRef = buildSourceExpr(innerSourceNode, lineNum);
+        const result = buildSourceExprSafe(innerSourceNode, lineNum);
+        innerRef = result.ref;
+        if (result.safe) innerSafe = true;
       }
     } else {
-      innerRef = buildSourceExpr(innerSourceNode, lineNum);
+      const result = buildSourceExprSafe(innerSourceNode, lineNum);
+      innerRef = result.ref;
+      if (result.safe) innerSafe = true;
     }
 
     // Desugar the inner expression chain if there are operators
     let resultRef: NodeRef;
     if (innerOps.length > 0) {
-      resultRef = desugarExprChain(innerRef, innerOps, innerRights, lineNum, iterName, safe);
+      resultRef = desugarExprChain(innerRef, innerOps, innerRights, lineNum, iterName, innerSafe);
     } else {
       resultRef = innerRef;
     }
 
     // Apply not prefix if present
     if (hasNot) {
-      resultRef = desugarNot(resultRef, lineNum, safe);
+      resultRef = desugarNot(resultRef, lineNum, innerSafe);
     }
 
     return resultRef;
@@ -3215,9 +3232,9 @@ function buildBridgeBody(
     // Build flat operand/operator lists for the precedence parser.
     // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
     type Operand =
-      | { kind: "ref"; ref: NodeRef }
+      | { kind: "ref"; ref: NodeRef; safe?: boolean }
       | { kind: "literal"; value: string };
-    const operands: Operand[] = [{ kind: "ref", ref: leftRef }];
+    const operands: Operand[] = [{ kind: "ref", ref: leftRef, safe }];
     const ops: string[] = [];
 
     for (let i = 0; i < exprOps.length; i++) {
@@ -3228,6 +3245,10 @@ function buildBridgeBody(
     // Emit a synthetic fork for a single binary operation and return
     // an operand pointing to the fork's result.
     function emitFork(left: Operand, opStr: string, right: Operand): Operand {
+      // Derive safe flag per operand: either from the operand itself or from outer safe param
+      const leftSafe = (left.kind === "ref" && left.safe) || false;
+      const rightSafe = (right.kind === "ref" && right.safe) || false;
+
       // ── Short-circuit and/or: emit condAnd/condOr wire ──
       if (opStr === "and" || opStr === "or") {
         const forkInstance = 100000 + nextForkSeq++;
@@ -3281,16 +3302,17 @@ function buildBridgeBody(
             ? { rightRef: right.ref }
             : { rightValue: right.value };
 
-        const safeAttr = safe ? { safe: true as const } : {};
+        const safeAttr = leftSafe ? { safe: true as const } : {};
+        const rightSafeAttr = rightSafe ? { rightSafe: true as const } : {};
 
         if (opStr === "and") {
           wires.push({
-            condAnd: { leftRef, ...rightSide, ...safeAttr },
+            condAnd: { leftRef, ...rightSide, ...safeAttr, ...rightSafeAttr },
             to: toRef,
           });
         } else {
           wires.push({
-            condOr: { leftRef, ...rightSide, ...safeAttr },
+            condOr: { leftRef, ...rightSide, ...safeAttr, ...rightSafeAttr },
             to: toRef,
           });
         }
@@ -3327,19 +3349,20 @@ function buildBridgeBody(
         path: [slot],
       });
 
-      // Wire left → fork.a (propagate safe flag for first operand)
+      // Wire left → fork.a (propagate safe flag from operand)
       if (left.kind === "literal") {
         wires.push({ value: left.value, to: makeTarget("a") });
       } else {
-        const safeAttr = safe ? { safe: true as const } : {};
+        const safeAttr = leftSafe ? { safe: true as const } : {};
         wires.push({ from: left.ref, to: makeTarget("a"), pipe: true, ...safeAttr });
       }
 
-      // Wire right → fork.b
+      // Wire right → fork.b (propagate safe flag from operand)
       if (right.kind === "literal") {
         wires.push({ value: right.value, to: makeTarget("b") });
       } else {
-        wires.push({ from: right.ref, to: makeTarget("b"), pipe: true });
+        const safeAttr = rightSafe ? { safe: true as const } : {};
+        wires.push({ from: right.ref, to: makeTarget("b"), pipe: true, ...safeAttr });
       }
 
       return {
@@ -3535,13 +3558,22 @@ function buildBridgeBody(
         const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
         const exprOps = subs(scopeLine, "scopeExprOp");
 
+        // Extract safe flag from head node
+        let scopeBlockSafe: boolean = false;
+        if (firstSourceNode) {
+          const headNode = sub(firstSourceNode, "head");
+          if (headNode) {
+            scopeBlockSafe = !!(headNode.children.safeNav as IToken[] | undefined)?.length;
+          }
+        }
+
         let condRef: NodeRef;
         let condIsPipeFork: boolean;
         if (scopeFirstParenNode) {
-          const parenRef = resolveParenExpr(scopeFirstParenNode, scopeLineNum);
+          const parenRef = resolveParenExpr(scopeFirstParenNode, scopeLineNum, undefined, scopeBlockSafe || undefined);
           if (exprOps.length > 0) {
             const exprRights = subs(scopeLine, "scopeExprRight");
-            condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum);
+            condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum, undefined, scopeBlockSafe || undefined);
           } else {
             condRef = parenRef;
           }
@@ -3549,7 +3581,7 @@ function buildBridgeBody(
         } else if (exprOps.length > 0) {
           const exprRights = subs(scopeLine, "scopeExprRight");
           const leftRef = buildSourceExpr(firstSourceNode!, scopeLineNum);
-          condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum);
+          condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum, undefined, scopeBlockSafe || undefined);
           condIsPipeFork = true;
         } else {
           const pipeSegs = subs(firstSourceNode!, "pipeSegment");
@@ -3562,7 +3594,7 @@ function buildBridgeBody(
 
         // ── Apply `not` prefix if present (scope context) ──
         if ((sc.scopeNotPrefix as IToken[] | undefined)?.[0]) {
-          condRef = desugarNot(condRef, scopeLineNum);
+          condRef = desugarNot(condRef, scopeLineNum, scopeBlockSafe || undefined);
           condIsPipeFork = true;
         }
 

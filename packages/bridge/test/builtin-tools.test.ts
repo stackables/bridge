@@ -148,12 +148,13 @@ describe("builtinTools bundle", () => {
     assert.ok(builtinTools.std.audit, "audit present");
     assert.ok(builtinTools.std.concat, "concat present");
     assert.ok(builtinTools.std.httpCall, "httpCall present");
+    assert.ok(builtinTools.std.assert, "assert present");
     assert.ok(builtinTools.std.str.toUpperCase, "upperCase present");
     assert.ok(builtinTools.std.str.toLowerCase, "lowerCase present");
     assert.ok(builtinTools.std.arr.find, "findObject present");
     assert.ok(builtinTools.std.arr.first, "pickFirst present");
     assert.ok(builtinTools.std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 5);
+    assert.equal(Object.keys(builtinTools.std).length, 6);
   });
 
   test("math namespace contains math/comparison tools", () => {

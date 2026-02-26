@@ -927,14 +927,16 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { condAnd: any }> => "condAnd" in w,
     );
     if (condAndWire) {
-      const { leftRef, rightRef, rightValue, safe: isSafe } = condAndWire.condAnd;
+      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condAndWire.condAnd;
       let result: Promise<any> = (async () => {
         const leftVal = isSafe
           ? await this.pullSingle(leftRef).catch(() => undefined)
           : await this.pullSingle(leftRef);
         if (!leftVal) return false; // short-circuit: left is falsy
         if (rightRef !== undefined) {
-          const rightVal = await this.pullSingle(rightRef);
+          const rightVal = rightSafe
+            ? await this.pullSingle(rightRef).catch(() => undefined)
+            : await this.pullSingle(rightRef);
           return Boolean(rightVal);
         }
         if (rightValue !== undefined) {
@@ -968,14 +970,16 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { condOr: any }> => "condOr" in w,
     );
     if (condOrWire) {
-      const { leftRef, rightRef, rightValue, safe: isSafe } = condOrWire.condOr;
+      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condOrWire.condOr;
       let result: Promise<any> = (async () => {
         const leftVal = isSafe
           ? await this.pullSingle(leftRef).catch(() => undefined)
           : await this.pullSingle(leftRef);
         if (leftVal) return true; // short-circuit: left is truthy
         if (rightRef !== undefined) {
-          const rightVal = await this.pullSingle(rightRef);
+          const rightVal = rightSafe
+            ? await this.pullSingle(rightRef).catch(() => undefined)
+            : await this.pullSingle(rightRef);
           return Boolean(rightVal);
         }
         if (rightValue !== undefined) {

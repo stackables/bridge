@@ -54,7 +54,7 @@ export type Wire =
     }
   | {
       /** Short-circuit logical AND: evaluate left first, only evaluate right if left is truthy */
-      condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true };
+      condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
       to: NodeRef;
       nullFallback?: string;
       fallback?: string;
@@ -62,7 +62,7 @@ export type Wire =
     }
   | {
       /** Short-circuit logical OR: evaluate left first, only evaluate right if left is falsy */
-      condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true };
+      condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
       to: NodeRef;
       nullFallback?: string;
       fallback?: string;
