@@ -490,8 +490,8 @@ type Query {
 type UserProfile {
   displayName: String
   location: String
-  avatar: String
-  score: Int
+  website: String
+  upperName: String
 }
     `,
     bridge: `version 1.4
@@ -511,19 +511,19 @@ bridge Query.profile {
   # 1. Simple rename — give a deeply nested path a short name
   alias api.address.city as city
 
-  # 2. Falsy fallback — use "Anonymous" if nickname is empty or null
+  # 2. Falsy fallback — use "Anonymous" if username is empty or null
   alias api.username || "Anonymous" as displayName
 
   # 3. Nullish fallback — only override if value is strictly null/undefined
   alias api.website ?? "https://example.com" as site
 
-  # 4. Error boundary — if the pipe tool throws, default to 0
+  # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
   alias uc:api.name catch "UNKNOWN" as upperName
 
   o.displayName <- displayName
   o.location <- city || "Unknown city"
-  o.avatar <- site
-  o.score <- upperName
+  o.website <- site
+  o.upperName <- upperName
 }`,
     queries: [
       {
@@ -532,8 +532,8 @@ bridge Query.profile {
   profile(userId: "1") {
     displayName
     location
-    avatar
-    score
+    website
+    upperName
   }
 }`,
       },
