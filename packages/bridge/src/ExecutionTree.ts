@@ -724,13 +724,27 @@ export class ExecutionTree {
     }
 
     let result: any = resolved;
-    for (const segment of ref.path) {
+    
+    // Root-level null check: if root data is null/undefined
+    if (result == null && ref.path.length > 0) {
+      if (ref.rootSafe) return undefined;
+      throw new TypeError(`Cannot read properties of ${result} (reading '${ref.path[0]}')`);
+    }
+    
+    for (let i = 0; i < ref.path.length; i++) {
+      const segment = ref.path[i];
       if (Array.isArray(result) && !/^\d+$/.test(segment)) {
         this.logger?.warn?.(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
         );
       }
-      result = result?.[segment];
+      result = result[segment];
+      // Check for null/undefined AFTER access, before next segment
+      if (result == null && i < ref.path.length - 1) {
+        const nextSafe = ref.pathSafe?.[i + 1] ?? false;
+        if (nextSafe) return undefined;
+        throw new TypeError(`Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`);
+      }
     }
     return result;
   }
@@ -850,8 +864,9 @@ export class ExecutionTree {
   }
 
   /** Resolve a set of matched wires — constants win, then pull from sources.
-   *  `||` (nullFallback): fires when all sources resolve to null/undefined.
-   *  `??` (fallback/fallbackRef): fires when all sources reject (throw/error).
+   *  `||` (falsyFallback): fires when all sources resolve to a falsy value.
+   *  `??` (nullishFallback): fires when value is null/undefined.
+   *  `catch` (catchFallback): fires when sources throw an error.
    *  `? :` (cond/thenRef/elseRef): conditional — pulls only the chosen branch. */
   private resolveWires(wires: Wire[]): Promise<any> {
     // Conditional (ternary) wire: evaluate condition, pull only the chosen branch
@@ -891,33 +906,43 @@ export class ExecutionTree {
         }
       })();
 
-      // || null-guard: try sibling source refs, then literal nullFallback
+      // || falsy-guard: try sibling source refs, then literal falsyFallback
       if (siblingPulls.length > 0) {
         result = result.then(async (value) => {
-          if (value != null) return value;
+          if (value) return value;
           return this.pull(siblingPulls.map((w) => w.from));
         });
       }
-      if (conditional.nullFallback != null) {
+      if (conditional.falsyFallback != null) {
         result = result.then((value) => {
-          if (value != null) return value;
+          if (value) return value;
           try {
-            return JSON.parse(conditional.nullFallback!);
+            return JSON.parse(conditional.falsyFallback!);
           } catch {
-            return conditional.nullFallback;
+            return conditional.falsyFallback;
           }
         });
       }
 
-      // ?? error-guard
-      if (!conditional.fallbackRef && !conditional.fallback) return result;
+      // ?? nullish-guard
+      if (conditional.nullishFallbackRef || conditional.nullishFallback != null) {
+        result = result.then(async (value: any) => {
+          if (value != null) return value;
+          if (conditional.nullishFallbackRef) return this.pullSingle(conditional.nullishFallbackRef);
+          try { return JSON.parse(conditional.nullishFallback!); }
+          catch { return conditional.nullishFallback; }
+        });
+      }
+
+      // catch error-guard
+      if (!conditional.catchFallbackRef && !conditional.catchFallback) return result;
       return result.catch(() => {
-        if (conditional.fallbackRef)
-          return this.pullSingle(conditional.fallbackRef);
+        if (conditional.catchFallbackRef)
+          return this.pullSingle(conditional.catchFallbackRef);
         try {
-          return JSON.parse(conditional.fallback!);
+          return JSON.parse(conditional.catchFallback!);
         } catch {
-          return conditional.fallback;
+          return conditional.catchFallback;
         }
       });
     }
@@ -946,20 +971,29 @@ export class ExecutionTree {
         return Boolean(leftVal);
       })();
 
-      // || null-guard
-      if (condAndWire.nullFallback != null) {
+      // || falsy-guard
+      if (condAndWire.falsyFallback != null) {
         result = result.then((value) => {
-          if (value != null) return value;
-          try { return JSON.parse(condAndWire.nullFallback!); }
-          catch { return condAndWire.nullFallback; }
+          if (value) return value;
+          try { return JSON.parse(condAndWire.falsyFallback!); }
+          catch { return condAndWire.falsyFallback; }
         });
       }
-      // ?? error-guard
-      if (condAndWire.fallbackRef || condAndWire.fallback) {
+      // ?? nullish-guard
+      if (condAndWire.nullishFallbackRef || condAndWire.nullishFallback != null) {
+        result = result.then(async (value: any) => {
+          if (value != null) return value;
+          if (condAndWire.nullishFallbackRef) return this.pullSingle(condAndWire.nullishFallbackRef);
+          try { return JSON.parse(condAndWire.nullishFallback!); }
+          catch { return condAndWire.nullishFallback; }
+        });
+      }
+      // catch error-guard
+      if (condAndWire.catchFallbackRef || condAndWire.catchFallback) {
         result = result.catch(() => {
-          if (condAndWire.fallbackRef) return this.pullSingle(condAndWire.fallbackRef!);
-          try { return JSON.parse(condAndWire.fallback!); }
-          catch { return condAndWire.fallback; }
+          if (condAndWire.catchFallbackRef) return this.pullSingle(condAndWire.catchFallbackRef!);
+          try { return JSON.parse(condAndWire.catchFallback!); }
+          catch { return condAndWire.catchFallback; }
         });
       }
       return result;
@@ -989,20 +1023,29 @@ export class ExecutionTree {
         return Boolean(leftVal);
       })();
 
-      // || null-guard
-      if (condOrWire.nullFallback != null) {
+      // || falsy-guard
+      if (condOrWire.falsyFallback != null) {
         result = result.then((value) => {
-          if (value != null) return value;
-          try { return JSON.parse(condOrWire.nullFallback!); }
-          catch { return condOrWire.nullFallback; }
+          if (value) return value;
+          try { return JSON.parse(condOrWire.falsyFallback!); }
+          catch { return condOrWire.falsyFallback; }
         });
       }
-      // ?? error-guard
-      if (condOrWire.fallbackRef || condOrWire.fallback) {
+      // ?? nullish-guard
+      if (condOrWire.nullishFallbackRef || condOrWire.nullishFallback != null) {
+        result = result.then(async (value: any) => {
+          if (value != null) return value;
+          if (condOrWire.nullishFallbackRef) return this.pullSingle(condOrWire.nullishFallbackRef);
+          try { return JSON.parse(condOrWire.nullishFallback!); }
+          catch { return condOrWire.nullishFallback; }
+        });
+      }
+      // catch error-guard
+      if (condOrWire.catchFallbackRef || condOrWire.catchFallback) {
         result = result.catch(() => {
-          if (condOrWire.fallbackRef) return this.pullSingle(condOrWire.fallbackRef!);
-          try { return JSON.parse(condOrWire.fallback!); }
-          catch { return condOrWire.fallback; }
+          if (condOrWire.catchFallbackRef) return this.pullSingle(condOrWire.catchFallbackRef!);
+          try { return JSON.parse(condOrWire.catchFallback!); }
+          catch { return condOrWire.catchFallback; }
         });
       }
       return result;
@@ -1018,43 +1061,71 @@ export class ExecutionTree {
     );
 
     // First wire with each fallback kind wins
-    const nullFallbackWire = pulls.find((w) => w.nullFallback != null);
-    // Error fallback: JSON literal (`fallback`) or source/pipe reference (`fallbackRef`)
-    const errorFallbackWire = pulls.find(
-      (w) => w.fallback != null || w.fallbackRef != null,
+    const falsyFallbackWire = pulls.find((w) => w.falsyFallback != null);
+    const nullishFallbackWire = pulls.find(
+      (w) => w.nullishFallback != null || w.nullishFallbackRef != null,
+    );
+    const catchFallbackWire = pulls.find(
+      (w) => w.catchFallback != null || w.catchFallbackRef != null,
     );
 
-    // ?. safe execution: wrap individual pulls in try/catch, returning undefined on error
-    const hasSafe = pulls.some((w) => w.safe);
-    let result: Promise<any> = hasSafe
-      ? this.pullSafe(pulls)
-      : this.pull(pulls.map((w) => w.from));
+    let result: Promise<any> = (async () => {
+      // ==========================================
+      // LAYER 1 & 2: Node Execution & Data Routing
+      // ==========================================
+      let resolvedValue: any;
+      let hitTruthy = false;
 
-    // || null-guard: fires when resolution succeeds but value is null/undefined
-    if (nullFallbackWire) {
-      result = result.then((value) => {
-        if (value != null) return value;
-        try {
-          return JSON.parse(nullFallbackWire.nullFallback!);
-        } catch {
-          return nullFallbackWire.nullFallback;
+      // --- LAYER 1: Execute Chain & Safe Modifiers ---
+      for (const w of pulls) {
+        if (w.safe) {
+          try {
+            resolvedValue = await this.pullSingle(w.from);
+          } catch {
+            resolvedValue = undefined; // ?. swallows error
+          }
+        } else {
+          // Strict! If this throws, it skips Layer 2 and hits Layer 3 (catch).
+          resolvedValue = await this.pullSingle(w.from);
         }
-      });
-    }
 
-    // ?? error-guard: fires when resolution throws
-    if (!errorFallbackWire) return result;
+        // --- LAYER 2a: Falsy Gate (||) ---
+        if (resolvedValue) {
+          hitTruthy = true;
+          break; // Short-circuit
+        }
+      }
+
+      // --- LAYER 2a: Falsy Gate Literal ---
+      if (!hitTruthy && falsyFallbackWire) {
+        resolvedValue = coerceConstant(falsyFallbackWire.falsyFallback!);
+      }
+
+      // --- LAYER 2b: Nullish Gate (??) ---
+      if (resolvedValue == null && nullishFallbackWire) {
+        if (nullishFallbackWire.nullishFallbackRef) {
+          resolvedValue = await this.pullSingle(nullishFallbackWire.nullishFallbackRef);
+        } else if (nullishFallbackWire.nullishFallback != null) {
+          resolvedValue = coerceConstant(nullishFallbackWire.nullishFallback);
+        }
+      }
+
+      return resolvedValue;
+    })();
+
+    // ==========================================
+    // LAYER 3: The Wire-Level Error Boundary (catch)
+    // ==========================================
+    if (!catchFallbackWire) return result;
 
     return result.catch(() => {
-      // Source/pipe reference: schedule it lazily and pull the result
-      if (errorFallbackWire.fallbackRef) {
-        return this.pullSingle(errorFallbackWire.fallbackRef);
+      if (catchFallbackWire.catchFallbackRef) {
+        return this.pullSingle(catchFallbackWire.catchFallbackRef);
       }
-      // JSON literal
       try {
-        return JSON.parse(errorFallbackWire.fallback!);
+        return JSON.parse(catchFallbackWire.catchFallback!);
       } catch {
-        return errorFallbackWire.fallback;
+        return catchFallbackWire.catchFallback;
       }
     });
   }

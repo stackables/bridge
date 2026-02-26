@@ -125,21 +125,21 @@ bridge Query.pricing {
     const bridge = instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.nullFallback, "0");
+    assert.equal(condWire.falsyFallback, "0");
   });
 
-  test("?? literal fallback stored on conditional wire", () => {
+  test("catch literal fallback stored on conditional wire", () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.pricing {
   with input as i
   with output as o
 
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice ?? -1
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
 }`);
     const bridge = instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.fallback, "-1");
+    assert.equal(condWire.catchFallback, "-1");
   });
 });
 
@@ -210,17 +210,17 @@ bridge Query.pricing {
     assert.ok(serialized.includes("? i.proPrice : i.basicPrice || 0"), `got: ${serialized}`);
   });
 
-  test("?? literal fallback round-trips", () => {
+  test("catch literal fallback round-trips", () => {
     const text = `version 1.4
 bridge Query.pricing {
   with input as i
   with output as o
 
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice ?? -1
+  o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("? i.proPrice : i.basicPrice ?? -1"), `got: ${serialized}`);
+    assert.ok(serialized.includes("? i.proPrice : i.basicPrice catch -1"), `got: ${serialized}`);
   });
 });
 
@@ -315,13 +315,13 @@ bridge Query.pricing {
     assert.equal((data as any).amount, 0);
   });
 
-  test("?? literal fallback fires when chosen branch throws", async () => {
+  test("catch literal fallback fires when chosen branch throws", async () => {
     const bridge = `version 1.4
 bridge Query.pricing {
   with pro.getPrice as proTool
   with input as i
   with output as o
-  o.amount <- i.isPro ? proTool.price : i.basicPrice ?? -1
+  o.amount <- i.isPro ? proTool.price : i.basicPrice catch -1
 }`;
     const tools = { "pro.getPrice": async () => { throw new Error("api down"); } };
     const { data } = await run(bridge, "Query.pricing", { isPro: true, basicPrice: 9 }, tools);

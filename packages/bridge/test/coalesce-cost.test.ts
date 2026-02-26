@@ -9,7 +9,7 @@ import { createGateway } from "./_gateway.ts";
 // v2.0 Execution Semantics:
 //   • || chains evaluate sequentially (left to right) with short-circuit
 //   • Overdefinition uses cost-based ordering (cheap → expensive)
-//   • Backup tools are NEVER called when a earlier source returns non-null
+//   • Backup tools are NEVER called when a earlier source returns a truthy value
 // ═══════════════════════════════════════════════════════════════════════════
 
 const typeDefs = /* GraphQL */ `
@@ -79,7 +79,7 @@ o.label <- p.label || b.label
     assert.deepStrictEqual(callLog, ["primary", "backup"], "backup called after primary returned null");
   });
 
-  test("3-source chain: first non-null wins, later sources skipped", async () => {
+  test("3-source chain: first truthy wins, later sources skipped", async () => {
     const threeSourceTypes = /* GraphQL */ `
       type Query { lookup(q: String!): Result }
       type Result { label: String }
@@ -140,7 +140,7 @@ o.label <- p.label || b.label || "default"
     assert.deepStrictEqual(callLog, ["primary", "backup"], "both called, then literal fires");
   });
 
-  test("|| does not swallow errors — chain aborts on throw", async () => {
+  test("strict throw exits || chain — backup not called (no catch)", async () => {
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with primary as p
@@ -163,16 +163,12 @@ o.label <- p.label || b.label
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
-    // || does not catch errors. Both sources are tried (errors are collected),
-    // but if all throw → the whole group fails.
-    // Here primary throws but backup succeeds → backup's error-less result is used.
-    // Wait, actually: in the sequential loop, primary throws → error is collected,
-    // then backup is tried → returns {label: "B"} which is non-null → returned.
-    assert.equal(result.data.lookup.label, "B");
-    assert.deepStrictEqual(callLog, ["primary", "backup"]);
+    // strict source throws → error exits || chain → no catch → GraphQL error
+    assert.ok(result.errors?.length, "strict throw → GraphQL error");
+    assert.deepStrictEqual(callLog, ["primary"], "backup never called — strict throw exits chain");
   });
 
-  test("|| + ?? combined: primary throws, backup returns null → ?? fires", async () => {
+  test("|| + catch combined: strict throw → catch fires", async () => {
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with primary as p
@@ -182,7 +178,7 @@ bridge Query.lookup {
 
 p.q <- i.q
 b.q <- i.q
-o.label <- p.label || b.label || "null-default" ?? "error-default"
+o.label <- p.label || b.label || "null-default" catch "error-default"
 
 }`;
     const callLog: string[] = [];
@@ -196,7 +192,7 @@ o.label <- p.label || b.label || "null-default" ?? "error-default"
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
     assert.equal(result.data.lookup.label, "error-default");
-    assert.deepStrictEqual(callLog, ["primary", "backup"], "both tried before error fallback");
+    assert.deepStrictEqual(callLog, ["primary"], "strict throw exits || — catch fires immediately");
   });
 });
 
@@ -377,7 +373,7 @@ o.label <- api.label
     assert.equal(result.data.lookup.label, "hello");
   });
 
-  test("|| with first source throwing and second returning null → returns undefined (then || literal fires)", async () => {
+  test("?. with || fallback: error → undefined, null → falls through to literal", async () => {
     const bridgeText = `version 1.4
 bridge Query.lookup {
   with svcA as a
@@ -387,7 +383,7 @@ bridge Query.lookup {
 
 a.q <- i.q
 b.q <- i.q
-o.label <- a.label || b.label || "last-resort"
+o.label <- a?.label || b.label || "last-resort"
 
 }`;
     const tools = {
@@ -399,8 +395,7 @@ o.label <- a.label || b.label || "last-resort"
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
-    // A throws (error collected), B returns null → both tried, no non-null found.
-    // Not all threw (B succeeded), so || fires → "last-resort"
+    // A throws but ?. swallows → undefined (falsy), B returns null (falsy) → literal fires
     assert.equal(result.data.lookup.label, "last-resort");
   });
 
@@ -562,12 +557,13 @@ bridge Query.lookup {
   with output as o
 
   api.q <- i.q
-  o.label <- api?.label ?? "default"
+  o.label <- api?.label catch "default"
 
 }`;
     const instructions = parseBridge(src);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("?."), "serialized contains ?.");
+    assert.ok(serialized.includes("catch"), "serialized contains catch");
     // Re-parse round-trips
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((i) => i.kind === "bridge")!;

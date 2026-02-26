@@ -18,6 +18,10 @@ export type NodeRef = {
   element?: boolean;
   /** Path into the data: ["items", "0", "position", "lat"] */
   path: string[];
+  /** True when the first `?.` is right after the root (e.g., `api?.data`) */
+  rootSafe?: boolean;
+  /** Per-segment safety flags (same length as `path`); true = `?.` before that segment */
+  pathSafe?: boolean[];
 };
 
 /**
@@ -36,9 +40,11 @@ export type Wire =
       to: NodeRef;
       pipe?: true;
       safe?: true;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      falsyFallback?: string;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
     }
   | { value: string; to: NodeRef }
   | {
@@ -48,25 +54,31 @@ export type Wire =
       elseRef?: NodeRef;
       elseValue?: string;
       to: NodeRef;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      falsyFallback?: string;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
     }
   | {
       /** Short-circuit logical AND: evaluate left first, only evaluate right if left is truthy */
       condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
       to: NodeRef;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      falsyFallback?: string;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
     }
   | {
       /** Short-circuit logical OR: evaluate left first, only evaluate right if left is falsy */
       condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
       to: NodeRef;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      falsyFallback?: string;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
     };
 
 /**

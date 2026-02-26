@@ -121,7 +121,7 @@ bridge Query.test {
   with input
   with output as o
   with context
-  o.x <- input.a ?? "error_val"
+  o.x <- input.a catch "error_val"
 }`,
   );
 
@@ -180,7 +180,7 @@ bridge Query.test {
   with input
   with output as o
   with context
-  o.x <- input.a || input.b ?? context.fallback
+  o.x <- input.a || input.b catch context.fallback
 }`,
   );
 
@@ -423,14 +423,14 @@ tool myApi from std.httpCall {
   );
 
   compat(
-    "error fallback ?? with number",
+    "error fallback catch with number",
     `version 1.4
 bridge Query.test {
   with myTool as t
   with input
   with output as o
   t.q <- input.q
-  o.temp <- t.current_weather.temperature ?? 0.0
+  o.temp <- t.current_weather.temperature catch 0.0
 }`,
   );
 
@@ -444,7 +444,7 @@ bridge Query.test {
   with output as o
   t.q <- input.q
   ot.q <- input.q
-  o.name <- t.name || ot.name ?? "Unknown"
+  o.name <- t.name || ot.name catch "Unknown"
 }`,
   );
 
