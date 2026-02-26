@@ -1,0 +1,148 @@
+---
+title: Getting Started
+description: How to write your first declarative dataflow
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+The Bridge separates your mapping logic (`.bridge` files) from your execution environment. You define the logic once, and run it wherever you need.
+
+## Standalone Execution 
+
+<Steps>
+
+1. Install bridge compiler and runtime
+    ```
+    npm install @stackables/bridge
+    ```
+
+2. Write your first bridge-file  
+    ```bridge title="should_i_go_outside.bridge"
+    version 1.4
+
+    # Tool 1: Geocoder (City Name -> Coordinates)
+    tool geo from std.httpCall {
+      .baseUrl = "https://nominatim.openstreetmap.org"
+      .method = GET
+      .path = /search
+      # Required by Nominatim policy
+      .headers.User-Agent = "TheBridgeDemo/1.0"
+    }
+
+    # Tool 2: Weather (Coordinates -> Temperature)
+    tool weather from std.httpCall {
+      .baseUrl = "https://api.open-meteo.com/v1"
+      .method = GET
+      .path = /forecast
+    }
+
+    # By city name: geocode → pick first → weather
+    bridge Query.should_i_go_outside {
+      with geo as g
+      with weather as w
+      with std.arr.first as first
+      with input as i
+      with output as o
+
+      g.q <- i.cityName
+      g.format = "json"
+
+      alias first:g as f
+
+      w.latitude  <- f.lat
+      w.longitude <- f.lon
+      w.current_weather = true
+
+      o.decision <- w.current_weather.temperature > 25 || false ?? false
+      o.why {
+        .temperature <- w.current_weather.temperature ?? 0.0
+      }
+    }
+
+    ```
+
+3. Execute the bridge
+
+    ```typescript
+    import { readFileSync } from "node:fs";
+    import { parseBridge, executeBridge } from "@stackables/bridge";
+
+    const instructions = parseBridge(
+      readFileSync("should_i_go_outside.bridge", "utf8"),
+    );
+
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.should_i_go_outside",
+      input: { cityName: "San Francisco" },
+    });
+
+    console.log(data);
+    // { decision: true, why: { temperature: 28 } }
+    ```
+
+</Steps>
+
+## Usage with GraphQL
+
+While the standalone runner is great for scripts and background workers, it lacks built-in input validation. The safest and most powerful way to execute your .bridge files is to pair them with a GraphQL Server.
+
+By doing this, GraphQL handles the strict type-checking and API contract, while The Bridge engine handles the execution, parallelization, and data reshaping. You instantly get a production-ready API Gateway.
+
+<Steps>
+
+1. Install your favourite GraphQL server
+    ```
+    npm install graphql-yoga
+    ```
+
+2. Define your GraphQL Schema
+
+    Create a schema that exactly matches the inputs and outputs defined in your .bridge file.
+
+    ```graphql title=schema.graphql
+    type Query {
+      should_i_go_outside(cityName: String!): GoOutsideResponse
+    }
+
+    type GoOutsideResponse {
+      decision: Boolean!
+      why: WeatherInfo
+    }
+
+    type WeatherInfo {
+      temperature: Float
+    }
+
+    ```
+
+3. Wrap your Schema with The Bridge
+
+    You can use any standard GraphQL server (like Apollo or Yoga). bridgeTransform takes your raw schema and automatically attaches the compiled bridge instructions as the resolvers.
+
+    ```typescript title=server.ts
+    import { bridgeTransform, parseBridge } from "@stackables/bridge";
+    import { createSchema, createYoga } from "graphql-yoga";
+    import { readFileSync } from "node:fs";
+    import { createServer } from "node:http"
+
+    const instructions = parseBridge(
+      readFileSync("should_i_go_outside.bridge", "utf8"),
+    );
+
+    const typeDefs = readFileSync("schema.graphql", "utf-8");
+
+    // Apply your bridge as a transformation layer on top of your GraphQL schema. 
+    const schema = bridgeTransform(createSchema({ typeDefs }), instructions);
+
+    // This example uses Yoga
+    const yoga = createYoga({schema});
+    const server = createServer(yoga)
+
+    server.listen(4000, () => {
+      console.info('Server is running on http://localhost:4000/graphql')
+    })
+
+    ```
+
+</Steps>

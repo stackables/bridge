@@ -12,27 +12,42 @@
 >
 > Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
 
+
 # The Bridge
 
-**Declarative dataflow for API integrations.**
+**A declarative dataflow language and execution engine.**
 
-Stop hardcoding third-party SDKs and API keys into every application. The Bridge is a hyper-lightweight execution engine that routes, reshapes, and secures traffic to external providers using static `.bridge` files.
+The Bridge replaces imperative orchestration code with static `.bridge` files. Instead of writing complex `async/await` logic, manual `Promise.all` wrappers, and custom data mappers, you simply define **what** data you need and **where** it comes from.
 
-Run it as a **GraphQL Egress Gateway** to give your internal teams a clean unified API, or use the **Standalone Runner** to execute declarative data pipelines directly in Node, Edge Workers, or the browser.
+The Bridge engine parses your wiring diagram, builds a dependency graph, and executes it - automatically handling parallelization, fallbacks, and data reshaping.
 
-**Best fit when your architecture needs:**
+### How it looks
 
-- **Controlled Egress:** Funnel external API calls through a single point to enforce uniform rate-limiting, caching, and IP allowlisting.
-- **Provider Agnosticism:** Swap external providers (SendGrid ↔ AWS SES) by changing a `.bridge` text file, without touching your calling services' code.
-- **Centralized Secrets:** Inject external API keys at the gateway/execution level.
-- **Messy REST abstraction:** Morph complex, undocumented REST payloads into clean, strongly-typed internal interfaces.
+You write the topology; the engine handles the execution.
 
-**Not best fit when you need:**
+![suntax image](./docs/images/syntax-image.png)
 
-- Heavy domain modeling or multi-step database sagas.
-- Imperative, line-by-line programming logic (The Bridge is a topology graph, not a script).
 
----
+### Why a language instead of code?
+
+* **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
+* **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
+* **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
+* **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
+* **Portable Execution:** The engine is hyper-lightweight and framework-agnostic. Run it in a Node backend, an Edge Worker (Cloudflare/Vercel), or directly in the browser.
+
+
+### Primary Use Cases
+
+Because The Bridge strictly controls how data flows from inputs to tools to outputs, it is the perfect engine for architectures that require strict boundaries and clean mappings.
+
+1. **[The "No-Code" BFF (Backend-for-Frontend)](https://bridge.sdk42.com/guides/getting-started/)**
+Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
+1. **[The Egress Gateway](https://bridge.sdk42.com/guides/getting-started/)**
+Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
+1. **[The Rule Engine / Policy Evaluator](https://bridge.sdk42.com/guides/getting-started/)**
+Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
+
 
 ## The Playground
 

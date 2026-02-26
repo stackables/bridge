@@ -1,0 +1,40 @@
+version 1.4
+
+# Tool 1: Geocoder (City Name -> Coordinates)
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
+  # Required by Nominatim policy
+  .headers.User-Agent = "TheBridgeDemo/1.0"
+}
+
+# Tool 2: Weather (Coordinates -> Temperature)
+tool weather from std.httpCall {
+  .baseUrl = "https://api.open-meteo.com/v1"
+  .method = GET
+  .path = /forecast
+}
+
+# By city name: geocode → pick first → weather
+bridge Query.should_i_go_outside {
+  with geo as g
+  with weather as w
+  with std.arr.first as first
+  with input as i
+  with output as o
+
+  g.q <- i.cityName
+  g.format = "json"
+
+  alias first:g as f
+
+  w.latitude  <- f.lat
+  w.longitude <- f.lon
+  w.current_weather = true
+
+  o.decision <- w.current_weather.temperature > 25 || false ?? false
+  o.why {
+    .temperature <- w.current_weather.temperature ?? 0.0
+  }
+}
