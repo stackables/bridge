@@ -51,8 +51,8 @@ o.name <- trim:upperCase:i.rawName
 ```
 
 <Aside>
-  **Evaluation Order:** Pipes evaluate from right to left! In the example above,
-  the data flows: `rawName` → `upperCase` → `trim` → `o.name`.
+**Evaluation Order:** Pipes evaluate from right to left! In the example above,
+the data flows: `rawName` → `upperCase` → `trim` → `o.name`.
 </Aside>
 
 ### Pipes with Extra Parameters
@@ -77,7 +77,7 @@ bridge Query.convert {
 
 ```
 
-In this scenario, the `convert` tool receives _both_ the explicitly wired `currency` parameter and the piped `rawPrice` payload simultaneously.
+In this scenario, the `convert` tool receives *both* the explicitly wired `currency` parameter and the piped `rawPrice` payload simultaneously.
 
 ## 3. How Pipes Execute (Implicit Forking)
 
@@ -104,7 +104,7 @@ Because pipes fork the tool, the engine runs them entirely in parallel. For pure
 
 Because the pipe operator always forks a new node, what happens if you pipe data through an API, but need to read multiple different fields from the resulting object?
 
-To solve this, use the `alias` keyword at the top level of your bridge body. Aliasing allows you to evaluate a pipe chain exactly **once**, cache the result under a local name, and then read from it freely without incurring extra execution costs.
+To solve this, use the `alias` keyword at the top level of your bridge body. Aliasing allows you to evaluate a pipe chain exactly **once**, optionally apply error boundaries, cache the result under a local name, and then read from it freely without incurring extra execution costs.
 
 ```bridge
 bridge Query.getUser {
@@ -112,8 +112,8 @@ bridge Query.getUser {
   with input as i
   with output as o
 
-  # Evaluate the tool ONCE and cache the resulting object as 'user'
-  alias userApi:i.userId as user
+  # Evaluate the tool ONCE, safely catch network errors, and cache as 'user'
+  alias userApi:i.userId catch {} as user
 
   # Read from the cached node (cost-free memory reads)
   o.city <- user.city
@@ -121,3 +121,4 @@ bridge Query.getUser {
 }
 
 ```
+
