@@ -1237,4 +1237,76 @@ bridge Query.test {
     // Safe swallows error, undefined is falsy, short-circuit returns false
     assert.equal(data.result, false);
   });
+
+  test("safe flag on right operand: i.flag and api?.active does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.flag and api?.active
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: true },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Left is true so right IS evaluated; safe swallows the 500 on right side
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on right operand of comparison: i.a > api?.score does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.a > api?.score || false
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", a: 10 },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error on right operand, comparison with undefined yields false
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on right operand of or: i.flag or api?.fallback does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.flag or api?.fallback
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: false },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Left is false so right IS evaluated; safe swallows the 500 on right side
+    assert.equal(data.result, false);
+  });
 });
