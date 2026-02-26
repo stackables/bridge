@@ -113,16 +113,51 @@ bridge Query.test {
 });
 
 describe("unsafe tool lookup guard", () => {
-  test("lookupToolFn returns undefined for __proto__ in dotted name", async () => {
+  test("lookupToolFn blocks __proto__ in dotted tool name", async () => {
     const bridgeText = `version 1.4
 bridge Query.test {
+  with foo.__proto__.bar as evil
   with output as o
-  o.result = "safe"
+  o.result <- evil.data
 }`;
-    // This just verifies the bridge runs without blowing up when
-    // there's no tool named with an unsafe key — the guard silently
-    // returns undefined rather than traversing the prototype chain.
-    const { data } = await run(bridgeText, "Query.test", {});
-    assert.deepEqual(data, { result: "safe" });
+    const tools = {
+      foo: { bar: async () => ({ data: "ok" }) },
+    };
+    await assert.rejects(
+      () => run(bridgeText, "Query.test", {}, tools),
+      /No tool found/,
+    );
+  });
+
+  test("lookupToolFn blocks constructor in dotted tool name", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with foo.constructor as evil
+  with output as o
+  o.result <- evil.data
+}`;
+    const tools = {
+      foo: { safe: async () => ({ data: "ok" }) },
+    };
+    await assert.rejects(
+      () => run(bridgeText, "Query.test", {}, tools),
+      /No tool found/,
+    );
+  });
+
+  test("lookupToolFn blocks prototype in dotted tool name", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with foo.prototype as evil
+  with output as o
+  o.result <- evil.data
+}`;
+    const tools = {
+      foo: { safe: async () => ({ data: "ok" }) },
+    };
+    await assert.rejects(
+      () => run(bridgeText, "Query.test", {}, tools),
+      /No tool found/,
+    );
   });
 });
