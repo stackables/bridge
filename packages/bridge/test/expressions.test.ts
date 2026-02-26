@@ -560,7 +560,7 @@ bridge Query.calc {
 // ── Expression + fallback integration tests ─────────────────────────────────
 
 describe("expressions: fallback integration", () => {
-  test("expression with ?? error fallback: i.value * 100 ?? -1", async () => {
+  test("expression with catch error fallback: i.value * 100 catch -1", async () => {
     const instructions = parseBridge(`version 1.4
 bridge Query.convert {
   with pricing.lookup as api
@@ -568,7 +568,7 @@ bridge Query.convert {
   with output as o
 
   api.id <- i.dollars
-  o.cents <- api.price * 100 ?? -1
+  o.cents <- api.price * 100 catch -1
 }`);
     const tools = {
       "pricing.lookup": async () => { throw new Error("service unavailable"); },
@@ -582,7 +582,7 @@ bridge Query.convert {
     const result: any = await executor({
       document: parse(`{ convert(dollars: 5) { cents } }`),
     });
-    // api.price throws → expression throws → ?? catches → returns -1
+    // api.price throws → expression throws → catch catches → returns -1
     assert.equal(result.data.convert.cents, -1);
   });
 

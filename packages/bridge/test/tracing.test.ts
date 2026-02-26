@@ -199,7 +199,7 @@ o.label <- g.label
     assert.equal(traces[0].output, undefined);
   });
 
-  test("traces capture both erroring and fallback ?? tool", async () => {
+  test("traces capture both erroring and catch fallback tool", async () => {
     const bridge = `version 1.4
 bridge Query.lookup {
   with primary as p
@@ -209,7 +209,7 @@ bridge Query.lookup {
 
 p.q <- i.q
 f.q <- i.q
-o.label <- p.label ?? f.label
+o.label <- p.label catch f.label
 
 }`;
     const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
@@ -528,8 +528,8 @@ define weatherByCoordinates {
 
   o.lat         <- i.lat
   o.lon         <- i.lon
-  o.currentTemp <- w.current_weather.temperature ?? 0.0
-  o.timezone    <- w.timezone ?? "UTC"
+  o.currentTemp <- w.current_weather.temperature catch 0.0
+  o.timezone    <- w.timezone catch "UTC"
   o.city        <- i.cityName
 }
 
@@ -546,9 +546,9 @@ bridge Query.getWeather {
 
   f.in <- g
 
-  w.lat  <- i.lat || f.lat
-  w.lon <- i.lon || f.lon
-  w.cityName <- upper:i.cityName || f.display_name || "Unknown"
+  w.lat  <- i.lat || f?.lat
+  w.lon <- i.lon || f?.lon
+  w.cityName <- upper:i.cityName || f?.display_name || "Unknown"
 
   o <- w
 }`;

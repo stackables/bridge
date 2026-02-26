@@ -739,7 +739,7 @@ bridge Query.search {
 
   api.q <- i.q
   audit.query <- i.q
-  force audit ?? null
+  force audit catch null
   o.title <- api.title
 
 }`;

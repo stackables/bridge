@@ -160,7 +160,7 @@ o.ok = "true"
     );
   });
 
-  test("force ?? null sets catchError flag", () => {
+  test("force catch null sets catchError flag", () => {
     const [bridge] = parseBridge(`version 1.4
 
 bridge Mutation.fire {
@@ -169,7 +169,7 @@ bridge Mutation.fire {
   with output as o
 
 ping.event <- i.event
-force ping ?? null
+force ping catch null
 o.ok = "true"
 
 }`) as Bridge[];
@@ -191,7 +191,7 @@ bridge Mutation.multi {
 lg.action <- i.event
 mt.name <- i.event
 force lg
-force mt ?? null
+force mt catch null
 
 }`) as Bridge[];
 
@@ -265,21 +265,21 @@ force lg
     );
   });
 
-  test("force ?? null roundtrips", () => {
+  test("force catch null roundtrips", () => {
     const input = `version 1.4
 bridge Mutation.audit {
   with analytics as ping
   with input as i
 
 ping.event <- i.event
-force ping ?? null
+force ping catch null
 
 }`;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     assert.ok(
-      serialized.includes("force ping ?? null"),
-      "should contain ?? null",
+      serialized.includes("force ping catch null"),
+      "should contain catch null",
     );
     const reparsed = parseBridge(serialized);
     assert.deepStrictEqual(reparsed, instructions);
@@ -295,7 +295,7 @@ bridge Mutation.multi {
 lg.action <- i.event
 mt.name <- i.event
 force lg
-force mt ?? null
+force mt catch null
 
 }`;
     const instructions = parseBridge(input);
@@ -569,7 +569,7 @@ o.title <- m.title
     assert.ok(result.errors.length > 0, "should have at least one error");
   });
 
-  test("fire-and-forget (?? null) error does NOT break the response", async () => {
+  test("fire-and-forget (catch null) error does NOT break the response", async () => {
     const bridgeText = `version 1.4
 bridge Query.search {
   with mainApi as m
@@ -579,7 +579,7 @@ bridge Query.search {
 
 m.q <- i.q
 audit.action <- i.q
-force audit ?? null
+force audit catch null
 o.title <- m.title
 
 }`;

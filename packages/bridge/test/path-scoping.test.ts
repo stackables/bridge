@@ -154,7 +154,7 @@ bridge Query.test {
 
   o.data {
     .name <- i.name || "anonymous"
-    .value <- i.value ?? 0
+    .value <- i.value catch 0
   }
 }`);
     const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
@@ -163,13 +163,13 @@ bridge Query.test {
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
-    assert.equal(nameWire.nullFallback, '"anonymous"');
+    assert.equal(nameWire.falsyFallback, '"anonymous"');
 
     const valueWire = pullWires.find(
       (w) => w.to.path.join(".") === "data.value",
     );
     assert.ok(valueWire);
-    assert.equal(valueWire.fallback, "0");
+    assert.equal(valueWire.catchFallback, "0");
   });
 
   test("scope block with expression", () => {

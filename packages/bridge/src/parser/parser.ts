@@ -1668,7 +1668,7 @@ function processElementLines(
         const extracted = extractAddressPath(elemHeadNode);
         elemSrcRoot = extracted.root;
         elemSrcSegs = extracted.segments;
-        elemSafe = !!extracted.safe;
+        elemSafe = !!extracted.rootSafe;
       }
 
       // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
@@ -2184,7 +2184,7 @@ function processElementScopeLines(
         const extracted = extractAddressPath(scopeHeadNode);
         srcRoot = extracted.root;
         srcSegs = extracted.segments;
-        scopeSafe = !!extracted.safe;
+        scopeSafe = !!extracted.rootSafe;
       }
 
       const exprOps = subs(scopeLine, "scopeExprOp");
@@ -4172,7 +4172,7 @@ function buildBridgeBody(
     // Check for safe navigation (?.) on the head address path
     const headNode = firstSourceNode ? sub(firstSourceNode, "head") : undefined;
     const isSafe = headNode
-      ? !!(headNode.children.safeNav as IToken[] | undefined)?.length
+      ? !!extractAddressPath(headNode).rootSafe
       : false;
 
     const exprOps = subs(wireNode, "exprOp");
