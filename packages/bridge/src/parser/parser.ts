@@ -3245,9 +3245,9 @@ function buildBridgeBody(
     // Emit a synthetic fork for a single binary operation and return
     // an operand pointing to the fork's result.
     function emitFork(left: Operand, opStr: string, right: Operand): Operand {
-      // Derive safe flag per operand: either from the operand itself or from outer safe param
-      const leftSafe = (left.kind === "ref" && left.safe) || false;
-      const rightSafe = (right.kind === "ref" && right.safe) || false;
+      // Derive safe flag per operand
+      const leftSafe = left.kind === "ref" && !!left.safe;
+      const rightSafe = right.kind === "ref" && !!right.safe;
 
       // ── Short-circuit and/or: emit condAnd/condOr wire ──
       if (opStr === "and" || opStr === "or") {
@@ -3563,7 +3563,7 @@ function buildBridgeBody(
         if (firstSourceNode) {
           const headNode = sub(firstSourceNode, "head");
           if (headNode) {
-            scopeBlockSafe = !!(headNode.children.safeNav as IToken[] | undefined)?.length;
+            scopeBlockSafe = !!extractAddressPath(headNode).safe;
           }
         }
 
