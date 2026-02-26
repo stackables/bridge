@@ -637,3 +637,216 @@ describe("expressions: non-number handling", () => {
     assert.equal(eq({ a: NaN, b: NaN }), false);
   });
 });
+
+// ── Boolean logic tools ─────────────────────────────────────────────────────
+
+import { and } from "../src/tools/and.ts";
+import { or } from "../src/tools/or.ts";
+import { not } from "../src/tools/not.ts";
+
+describe("boolean logic tools", () => {
+  test("and", () => {
+    assert.equal(and({ a: true, b: true }), true);
+    assert.equal(and({ a: true, b: false }), false);
+    assert.equal(and({ a: false, b: true }), false);
+    assert.equal(and({ a: 1, b: "yes" }), true);
+    assert.equal(and({ a: 0, b: true }), false);
+  });
+  test("or", () => {
+    assert.equal(or({ a: true, b: false }), true);
+    assert.equal(or({ a: false, b: true }), true);
+    assert.equal(or({ a: false, b: false }), false);
+    assert.equal(or({ a: 0, b: "" }), false);
+    assert.equal(or({ a: 0, b: 1 }), true);
+  });
+  test("not", () => {
+    assert.equal(not({ a: true }), false);
+    assert.equal(not({ a: false }), true);
+    assert.equal(not({ a: 0 }), true);
+    assert.equal(not({ a: 1 }), false);
+    assert.equal(not({ a: "" }), true);
+    assert.equal(not({ a: null }), true);
+  });
+});
+
+// ── Boolean logic: parser desugaring ──────────────────────────────────────────
+
+describe("boolean logic: parser desugaring", () => {
+  test("and / or desugar to correct tool names", () => {
+    const boolOps: Record<string, string> = {
+      "and": "and",
+      "or": "or",
+    };
+    for (const [op, fn] of Object.entries(boolOps)) {
+      const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a ${op} i.b
+}`);
+      const bridge = instructions.find((i) => i.kind === "bridge")!;
+      const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+      assert.ok(exprHandle, `${op}: has __expr_ pipe handle`);
+      assert.equal(exprHandle.baseTrunk.field, fn, `${op}: maps to ${fn}`);
+    }
+  });
+
+  test("not prefix desugars to not tool fork", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not i.trusted
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.baseTrunk.field === "not"
+    );
+    assert.ok(exprHandle, "has not pipe handle");
+  });
+
+  test("combined: (a > 18 and b) or c == \"ADMIN\"", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    // Should have multiple expression forks: >, and, ==, or
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 4, `has >= 4 expr handles, got ${exprHandles.length}`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("gt"), "has gt");
+    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("eq"), "has eq");
+    assert.ok(fields.includes("or"), "has or");
+  });
+});
+
+// ── Boolean logic: end-to-end ─────────────────────────────────────────────────
+
+describe("boolean logic: end-to-end", () => {
+  const boolTypeDefs = /* GraphQL */ `
+    type Query { check(age: Int!, verified: Boolean!, role: String!): CheckResult }
+    type CheckResult { approved: Boolean, requireMFA: Boolean }
+  `;
+
+  test("and expression: age > 18 and verified", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.approved <- i.age > 18 and i.verified
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r1: any = await executor({
+      document: parse(`{ check(age: 25, verified: true, role: "USER") { approved } }`),
+    });
+    assert.equal(r1.data.check.approved, true);
+
+    const r2: any = await executor({
+      document: parse(`{ check(age: 15, verified: true, role: "USER") { approved } }`),
+    });
+    assert.equal(r2.data.check.approved, false);
+  });
+
+  test("or expression: approved or role == ADMIN", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    // age=15 verified=false role=ADMIN → false and false = false, role=="ADMIN" = true → true
+    const r1: any = await executor({
+      document: parse(`{ check(age: 15, verified: false, role: "ADMIN") { approved } }`),
+    });
+    assert.equal(r1.data.check.approved, true);
+  });
+
+  test("not prefix: not i.verified", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.requireMFA <- not i.verified
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r1: any = await executor({
+      document: parse(`{ check(age: 25, verified: true, role: "USER") { requireMFA } }`),
+    });
+    assert.equal(r1.data.check.requireMFA, false);
+
+    const r2: any = await executor({
+      document: parse(`{ check(age: 25, verified: false, role: "USER") { requireMFA } }`),
+    });
+    assert.equal(r2.data.check.requireMFA, true);
+  });
+});
+
+// ── Boolean logic: serializer round-trip ──────────────────────────────────────
+
+describe("boolean logic: serializer round-trip", () => {
+  test("and expression round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a and i.b
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes(" and "), "serialized contains 'and'");
+    // Re-parse to ensure no errors
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("or expression round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or i.b
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes(" or "), "serialized contains 'or'");
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("not prefix round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not i.flag
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("not "), "serialized contains 'not'");
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+});

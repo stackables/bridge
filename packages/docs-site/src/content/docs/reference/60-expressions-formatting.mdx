@@ -64,10 +64,26 @@ o.isActive <- i.status == "active"
 | -------------- | -------------------------------- | ---------------------------------- |
 | **Arithmetic** | `*`, `/`, `+`, `-`               | Standard math operations.          |
 | **Comparison** | `==`, `!=`, `>`, `>=`, `<`, `<=` | Returns boolean `true` or `false`. |
+| **Boolean**    | `and`, `or`, `not`               | Logical operators for combining boolean values. |
+
+### Boolean Logic
+
+Use Python/SQL-style keywords for clear, unambiguous boolean expressions. These strictly evaluate to `true` or `false`.
+
+* `and`: Logical AND — returns `true` only if both sides are truthy.
+* `or`: Logical OR — returns `true` if either side is truthy.
+* `not`: Logical NOT — inverts the value (prefix operator).
+
+```bridge
+# Inline policy evaluation
+o.isApproved <- i.age > 18 and i.verified or i.role == "ADMIN"
+o.requireMFA <- not i.isTrusted
+
+```
 
 ### Precedence and Chaining
 
-Standard JavaScript math precedence applies (multiplication/division before addition/subtraction, and comparisons last). You can chain as many operators as you need.
+Standard operator precedence applies: multiplication/division bind tightest, then addition/subtraction, then comparisons, then `and`, and finally `or` binds loosest. You can chain as many operators as you need.
 
 ```bridge
 # Evaluates as: i.base + (i.tax * 2)
@@ -75,6 +91,9 @@ o.total <- i.base + i.tax * 2
 
 # Evaluates as: (i.price * i.qty) > 100
 o.isExpensive <- i.price * i.qty > 100
+
+# Evaluates as: ((i.age > 18) and i.verified) or (i.role == "ADMIN")
+o.allowed <- i.age > 18 and i.verified or i.role == "ADMIN"
 
 ```
 

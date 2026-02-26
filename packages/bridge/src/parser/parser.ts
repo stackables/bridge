@@ -24,6 +24,9 @@ import {
   Arrow,
   ForceKw,
   AliasKw,
+  AndKw,
+  OrKw,
+  NotKw,
   NullCoalesce,
   ErrorCoalesce,
   LCurly,
@@ -400,8 +403,11 @@ class BridgeParser extends CstParser {
               },
             },
             {
-              // Normal source expression
+              // Normal source expression with optional `not` prefix
               ALT: () => {
+                this.OPTION4(() => {
+                  this.CONSUME(NotKw, { LABEL: "notPrefix" });
+                });
                 this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
                 // Optional expression chain: operator + operand, repeatable
                 this.MANY2(() => {
@@ -504,8 +510,11 @@ class BridgeParser extends CstParser {
               },
             },
             {
-              // Normal source expression
+              // Normal source expression with optional `not` prefix
               ALT: () => {
+                this.OPTION4(() => {
+                  this.CONSUME(NotKw, { LABEL: "elemNotPrefix" });
+                });
                 this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
                 // Optional expression chain
                 this.MANY2(() => {
@@ -580,6 +589,9 @@ class BridgeParser extends CstParser {
             },
             {
               ALT: () => {
+                this.OPTION3(() => {
+                  this.CONSUME(NotKw, { LABEL: "scopeNotPrefix" });
+                });
                 this.SUBRULE(this.sourceExpr, { LABEL: "scopeSource" });
                 this.MANY(() => {
                   this.SUBRULE(this.exprOperator, { LABEL: "scopeExprOp" });
@@ -678,7 +690,7 @@ class BridgeParser extends CstParser {
     });
   });
 
-  /** Expression operator: arithmetic or comparison */
+  /** Expression operator: arithmetic, comparison, or boolean */
   public exprOperator = this.RULE("exprOperator", () => {
     this.OR([
       { ALT: () => this.CONSUME(Star, { LABEL: "star" }) },
@@ -691,6 +703,8 @@ class BridgeParser extends CstParser {
       { ALT: () => this.CONSUME(LessEqual, { LABEL: "lessEqual" }) },
       { ALT: () => this.CONSUME(GreaterThan, { LABEL: "greaterThan" }) },
       { ALT: () => this.CONSUME(LessThan, { LABEL: "lessThan" }) },
+      { ALT: () => this.CONSUME(AndKw, { LABEL: "andKw" }) },
+      { ALT: () => this.CONSUME(OrKw, { LABEL: "orKw" }) },
     ]);
   });
 
@@ -800,6 +814,9 @@ class BridgeParser extends CstParser {
       { ALT: () => this.CONSUME(TrueLiteral) },
       { ALT: () => this.CONSUME(FalseLiteral) },
       { ALT: () => this.CONSUME(NullLiteral) },
+      { ALT: () => this.CONSUME(AndKw) },
+      { ALT: () => this.CONSUME(OrKw) },
+      { ALT: () => this.CONSUME(NotKw) },
     ]);
   });
 
@@ -924,6 +941,9 @@ class BridgeParser extends CstParser {
         { ALT: () => this.CONSUME(RSquare) },
         { ALT: () => this.CONSUME(Dot) },
         { ALT: () => this.CONSUME(Equals) },
+        { ALT: () => this.CONSUME(AndKw) },
+        { ALT: () => this.CONSUME(OrKw) },
+        { ALT: () => this.CONSUME(NotKw) },
         // Nested objects
         { ALT: () => this.SUBRULE(this.jsonObject) },
       ]);
@@ -1379,12 +1399,8 @@ function processElementLines(
     lineNum: number,
     iterName?: string,
   ) => NodeRef,
+  desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
 ): void {
-  /**
-   * Wrap extractCoalesceAlt to handle iterator-relative source references
-   * in || and ?? alternatives. When the source root matches the current
-   * iterator name, construct an element ref instead of resolving via handles.
-   */
   function extractCoalesceAltIterAware(
     altNode: CstNode,
     lineNum: number,
@@ -1552,6 +1568,7 @@ function processElementLines(
           extractTernaryBranchFn,
           processLocalBindings,
           desugarTemplateStringFn,
+          desugarNotFn,
         );
         nestedCleanup?.();
         continue;
@@ -1610,6 +1627,12 @@ function processElementLines(
           elemCondRef.instance != null &&
           elemCondRef.path.length === 0 &&
           elemPipeSegs.length > 0;
+      }
+
+      // ── Apply `not` prefix if present (element context) ──
+      if ((elemC.elemNotPrefix as IToken[] | undefined)?.[0] && desugarNotFn) {
+        elemCondRef = desugarNotFn(elemCondRef, elemLineNum);
+        elemCondIsPipeFork = true;
       }
 
       // ── Ternary wire in element context ──
@@ -1751,6 +1774,7 @@ function processElementLines(
         desugarExprChain,
         extractTernaryBranchFn,
         desugarTemplateStringFn,
+        desugarNotFn,
       );
     }
   }
@@ -1794,8 +1818,8 @@ function processElementScopeLines(
     lineNum: number,
     iterName?: string,
   ) => NodeRef,
+  desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
 ): void {
-  /** Wrap extractCoalesceAlt with iterator-relative source awareness. */
   function extractCoalesceAltIterAware(
     altNode: CstNode,
     lineNum: number,
@@ -1846,6 +1870,7 @@ function processElementScopeLines(
         desugarExprChain,
         extractTernaryBranchFn,
         desugarTemplateStringFn,
+        desugarNotFn,
       );
       continue;
     }
@@ -1956,6 +1981,12 @@ function processElementScopeLines(
           condRef.instance != null &&
           condRef.path.length === 0 &&
           scopePipeSegs.length > 0;
+      }
+
+      // ── Apply `not` prefix if present (scope context) ──
+      if ((sc.scopeNotPrefix as IToken[] | undefined)?.[0] && desugarNotFn) {
+        condRef = desugarNotFn(condRef, scopeLineNum);
+        condIsPipeFork = true;
       }
 
       // Ternary wire: .field <- cond ? then : else
@@ -2916,20 +2947,24 @@ function buildBridgeBody(
     ">=": "gte",
     "<": "lt",
     "<=": "lte",
+    "and": "and",
+    "or": "or",
   };
 
   /** Operator precedence: higher number = binds tighter. */
   const OP_PREC: Record<string, number> = {
-    "*": 3,
-    "/": 3,
-    "+": 2,
-    "-": 2,
-    "==": 1,
-    "!=": 1,
-    ">": 1,
-    ">=": 1,
-    "<": 1,
-    "<=": 1,
+    "*": 4,
+    "/": 4,
+    "+": 3,
+    "-": 3,
+    "==": 2,
+    "!=": 2,
+    ">": 2,
+    ">=": 2,
+    "<": 2,
+    "<=": 2,
+    "and": 1,
+    "or": 0,
   };
 
   function extractExprOpStr(opNode: CstNode): string {
@@ -2944,6 +2979,8 @@ function buildBridgeBody(
     if (c.lessEqual) return "<=";
     if (c.greaterThan) return ">";
     if (c.lessThan) return "<";
+    if (c.andKw) return "and";
+    if (c.orKw) return "or";
     throw new Error("Invalid expression operator");
   }
 
@@ -3099,10 +3136,12 @@ function buildBridgeBody(
       }
     }
 
-    // Process in precedence order: * / first, then + -, then comparisons.
-    reduceLevel(3); // * /
-    reduceLevel(2); // + -
-    reduceLevel(1); // == != > >= < <=
+    // Process in precedence order: * / first, then + -, then comparisons, then and, then or.
+    reduceLevel(4); // * /
+    reduceLevel(3); // + -
+    reduceLevel(2); // == != > >= < <=
+    reduceLevel(1); // and
+    reduceLevel(0); // or
 
     // After full reduction, operands[0] holds the final result.
     const final = operands[0];
@@ -3112,6 +3151,48 @@ function buildBridgeBody(
       );
     }
     return final.ref;
+  }
+
+  /**
+   * Desugar a `not` prefix into a synthetic unary fork that calls `math.not`.
+   * Wraps the given ref:  not(sourceRef) → __expr fork with { a: sourceRef }
+   */
+  function desugarNot(sourceRef: NodeRef, _lineNum: number): NodeRef {
+    const forkInstance = 100000 + nextForkSeq++;
+    const forkTrunkModule = SELF_MODULE;
+    const forkTrunkType = "Tools";
+    const forkTrunkField = "not";
+
+    const forkKey = `${forkTrunkModule}:${forkTrunkType}:${forkTrunkField}:${forkInstance}`;
+    pipeHandleEntries.push({
+      key: forkKey,
+      handle: `__expr_${forkInstance}`,
+      baseTrunk: {
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+      },
+    });
+
+    wires.push({
+      from: sourceRef,
+      to: {
+        module: forkTrunkModule,
+        type: forkTrunkType,
+        field: forkTrunkField,
+        instance: forkInstance,
+        path: ["a"],
+      },
+      pipe: true,
+    });
+
+    return {
+      module: forkTrunkModule,
+      type: forkTrunkType,
+      field: forkTrunkField,
+      instance: forkInstance,
+      path: [],
+    };
   }
 
   // ── Helper: recursively process path scoping block lines ───────────────
@@ -3232,6 +3313,12 @@ function buildBridgeBody(
             condRef.instance != null &&
             condRef.path.length === 0 &&
             pipeSegs.length > 0;
+        }
+
+        // ── Apply `not` prefix if present (scope context) ──
+        if ((sc.scopeNotPrefix as IToken[] | undefined)?.[0]) {
+          condRef = desugarNot(condRef, scopeLineNum);
+          condIsPipeFork = true;
         }
 
         // Ternary wire: .field <- cond ? then : else
@@ -3499,6 +3586,7 @@ function buildBridgeBody(
         extractTernaryBranch,
         processLocalBindings,
         desugarTemplateString,
+        desugarNot,
       );
       cleanup();
       continue;
@@ -3526,6 +3614,12 @@ function buildBridgeBody(
         condRef.instance != null &&
         condRef.path.length === 0 &&
         pipeSegs.length > 0;
+    }
+
+    // ── Apply `not` prefix if present ──
+    if (wc.notPrefix) {
+      condRef = desugarNot(condRef, lineNum);
+      condIsPipeFork = true;
     }
 
     // ── Ternary wire: cond ? thenBranch : elseBranch ──

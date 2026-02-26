@@ -167,7 +167,10 @@ describe("builtinTools bundle", () => {
     assert.ok(builtinTools.math.gte, "gte present");
     assert.ok(builtinTools.math.lt, "lt present");
     assert.ok(builtinTools.math.lte, "lte present");
-    assert.equal(Object.keys(builtinTools.math).length, 10);
+    assert.ok(builtinTools.math.and, "and present");
+    assert.ok(builtinTools.math.or, "or present");
+    assert.ok(builtinTools.math.not, "not present");
+    assert.equal(Object.keys(builtinTools.math).length, 13);
   });
 
   test("httpCall is callable with and without std. prefix", () => {

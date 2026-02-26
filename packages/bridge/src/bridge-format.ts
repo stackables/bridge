@@ -343,6 +343,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
     gte: ">=",
     lt: "<",
     lte: "<=",
+    and: "and",
+    or: "or",
+    not: "not",
   };
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
   type ExprForkInfo = {
@@ -556,6 +559,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
 
       if (leftStr == null) return rightStr;
+      if (info.op === "not") return `not ${leftStr}`;
       return `${leftStr} ${info.op} ${rightStr}`;
     }
 
@@ -790,6 +794,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           rightStr = "0";
         }
         if (leftStr == null) return rightStr;
+        if (info.op === "not") return `not ${leftStr}`;
         return `${leftStr} ${info.op} ${rightStr}`;
       }
       return serFork(tk) ?? sRef(ref, true);
@@ -966,6 +971,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
 
         if (leftStr == null) return rightStr;
+        // Unary `not` — only has .a operand
+        if (info.op === "not") return `not ${leftStr}`;
         return `${leftStr} ${info.op} ${rightStr}`;
       }
 

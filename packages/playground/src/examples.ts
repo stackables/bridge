@@ -716,4 +716,49 @@ bridge Query.createPayload {
     ],
     context: `{}`,
   },
+  {
+    name: "Boolean Logic",
+    description:
+      "Use `and`, `or`, and `not` keywords for clear, unambiguous boolean expressions in inline policy evaluation",
+    schema: `
+type Query {
+  evaluate(age: Int!, verified: Boolean!, role: String!): PolicyResult
+}
+
+type PolicyResult {
+  approved: Boolean
+  requireMFA: Boolean
+}
+    `,
+    bridge: `version 1.4
+
+bridge Query.evaluate {
+  with input as i
+  with output as o
+
+  o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
+  o.requireMFA <- not i.verified
+}`,
+    queries: [
+      {
+        name: "Approved User",
+        query: `{
+  evaluate(age: 25, verified: true, role: "USER") {
+    approved
+    requireMFA
+  }
+}`,
+      },
+      {
+        name: "Admin Override",
+        query: `{
+  evaluate(age: 15, verified: false, role: "ADMIN") {
+    approved
+    requireMFA
+  }
+}`,
+      },
+    ],
+    context: `{}`,
+  },
 ];
