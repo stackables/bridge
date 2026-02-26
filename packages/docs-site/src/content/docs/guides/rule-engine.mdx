@@ -78,7 +78,7 @@ bridge Query.canInitiateTransfer {
 
   # 3. THE DECISION: Combine flags using logical coalescing
   # Approve immediately if it's a micro-transaction, OR if KYC is valid
-  o.isApproved <- i.amount <= 5.00 || kyc.status == "VERIFIED" ?? false
+  o.isApproved <- i.amount <= 5.00 OR kyc.status == "VERIFIED" ?? false
 }
 
 ```
