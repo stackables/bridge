@@ -1,0 +1,128 @@
+---
+title: The Rule Engine
+description: How to untangle complex business logic and data enrichment using The Bridge
+---
+import { Aside } from '@astrojs/starlight/components';
+
+Every growing application eventually develops a "spaghetti folder." This is usually where your authorization, fraud detection, or pricing logic lives. 
+
+What starts as a simple `if (user.isActive)` quickly devolves into a massive, unreadable block of code. You have to fetch the user, then conditionally fetch their billing history, check a risk-scoring API, and run it all through twenty nested `if/else` statements just to return a simple `true` or `false`.
+
+
+
+When policy logic is mixed with data-fetching (I/O) logic, the code becomes impossible to audit, hard to test, and terrifying to update.
+
+By using The Bridge as a **Rule Engine**, you can decouple the *data enrichment* from the *policy decision*. You start with a small piece of context (like a User ID), expand it by fetching all necessary data in parallel, and evaluate the business rules—all in a single, readable `.bridge` file.
+
+<Aside type="note">
+The examples below use intentionally simplified APIs. In a production environment, you would likely connect these Bridge files to your internal databases or custom TypeScript tools to execute highly specific domain logic.
+</Aside>
+
+Here is how The Bridge brings clarity to complex policy evaluations.
+
+## The "Fan-Out"
+### Find the most efficient way to enrich data
+
+A good policy engine needs context. If a user tries to initiate a large money transfer, you don't just need their ID; you need their KYC (Know Your Customer) status, their recent transaction volume, and a real-time risk score.
+
+Instead of writing sequential `await` calls that slow down the user experience, The Bridge automatically "fans out" these requests concurrently.
+
+```bridge
+version 1.4
+
+tool kycApi from std.httpCall { .baseUrl = "[https://api.internal/compliance](https://api.internal/compliance)" }
+tool riskApi from std.httpCall { .baseUrl = "[https://api.internal/risk](https://api.internal/risk)" }
+tool ledgerApi from std.httpCall { .baseUrl = "[https://api.internal/ledger](https://api.internal/ledger)" }
+
+bridge Query.canInitiateTransfer {
+  with kycApi as kyc
+  with riskApi as risk
+  with ledgerApi as ledger
+  with input as i
+  with output as o
+
+  # 1. THE FAN-OUT: Enrich the data based on just the User ID
+  kyc.userId <- i.userId
+  
+  risk.userId <- i.userId
+  risk.ipAddress <- context.request.ip # Injected from gateway context
+  
+  ledger.userId <- i.userId
+  ledger.timeframe = "7_DAYS"
+
+  # ... (Evaluation logic follows)
+}
+
+```
+
+## The "Fan-In"
+### Inline Rule Evaluation
+
+Once the engine has gathered the enriched data, it evaluates the rules. Because The Bridge syntax natively supports logical operators (`==`, `>`, `<`, `!=`) and safe fallbacks (`||`, `??`), you can express straightforward business rules entirely inline.
+
+This makes your policies instantly readable to product managers and security teams without digging through TypeScript code.
+
+```bridge
+bridge Query.canInitiateTransfer {
+  # ...
+
+  # 2. THE FAN-IN: Evaluate the rules directly in the graph
+
+  # Determine individual policy flags with safe fallbacks
+  # (If the risk API fails or times out, assume maximum risk: 100)
+  o.flags {
+    .isKycValid <- kyc.status == "VERIFIED" ?? false
+    .isHighRisk <- risk.score ?? 100 > 80
+    .isMicroTx  <- i.amount <= 5.00
+  }
+
+  # 3. THE DECISION: Combine flags using logical coalescing
+  # Approve immediately if it's a micro-transaction, OR if KYC is valid
+  o.isApproved <- i.amount <= 5.00 || kyc.status == "VERIFIED" ?? false
+}
+
+```
+
+## The Escape Hatch
+### Delegating Complex Logic
+
+Native inline operators are great for standard boolean checks, but what happens when your compliance team introduces a massive, 50-variable risk matrix? Or what if you need to calculate a proprietary cryptographic hash before approving the request?
+
+The Bridge is a dataflow orchestrator, not a general-purpose programming language—and it doesn't trap you into trying to build complex algorithms in a declarative syntax.
+
+When the logic gets too heavy, you simply pipe your enriched data into a **Custom TypeScript Tool** or an external 3rd-party decision engine (like Open Policy Agent).
+
+```bridge
+Query.canInitiateTransfer {
+  # ...
+
+  # Import a pure TypeScript function that holds your complex matrix logic
+  with rules.calculateRiskMatrix as matrixEvaluator
+
+  # Pipe the cleanly fetched data directly into your TypeScript tool
+  # using the standard v1.4 block assignment shorthand
+  matrixEvaluator {
+    .kycStatus <- kyc.status ?? "UNKNOWN"
+    .score <- risk.score ?? 100
+    .recentVolume <- ledger.total_sent ?? 0
+    .requestedAmount <- i.amount
+  }
+
+  # Map the result of the TypeScript function to the final output
+  o.isApproved <- matrixEvaluator.passed
+  o.reasonCode <- matrixEvaluator.reason_code || "UNKNOWN_ERROR"
+}
+
+```
+
+Because the `calculateRiskMatrix` TypeScript function doesn't have to worry about HTTP requests, retries, or `Promise.all` orchestration, it remains a **pure, asynchronous function**. It becomes incredibly easy to unit test with simple JSON inputs.
+
+## Summary: Logic as Configuration
+
+By using The Bridge for policy evaluation and rule engines, you achieve a strict separation of concerns:
+
+* **The Bridge** handles the messy I/O: fanning out requests, managing timeouts, and providing safe fallbacks.
+* **Inline Operators** handle fast, readable, high-level policy checks.
+* **TypeScript Tools** handle the deep, proprietary math and domain logic.
+
+You turn your tangled business rules into clean, predictable, and hot-reloadable data pipelines.

@@ -45,7 +45,7 @@ Because The Bridge strictly controls how data flows from inputs to tools to outp
 Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
 1. **[The Egress Gateway](https://bridge.sdk42.com/guides/egress/)**
 Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
-1. **[The Rule Engine / Policy Evaluator](https://bridge.sdk42.com/guides/getting-started/)**
+1. **[The Rule Engine / Policy Evaluator](https://bridge.sdk42.com/guides/rule-engine/)**
 Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
 
 
