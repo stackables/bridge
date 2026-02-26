@@ -1404,7 +1404,7 @@ export class ExecutionTree {
       }
     }
 
-    return Promise.all(
+    const rawResults = await Promise.all(
       items.map(async (shadow) => {
         const obj: Record<string, unknown> = {};
         const tasks: Promise<void>[] = [];
@@ -1450,9 +1450,23 @@ export class ExecutionTree {
         }
 
         await Promise.all(tasks);
+        // Check if any field resolved to a sentinel — propagate it
+        for (const v of Object.values(obj)) {
+          if (v === CONTINUE_SYM) return CONTINUE_SYM;
+          if (v === BREAK_SYM) return BREAK_SYM;
+        }
         return obj;
       }),
     );
+
+    // Filter sentinels from the final result
+    const finalResults: unknown[] = [];
+    for (const item of rawResults) {
+      if (item === BREAK_SYM) break;
+      if (item === CONTINUE_SYM) continue;
+      finalResults.push(item);
+    }
+    return finalResults;
   }
 
   async response(ipath: Path, array: boolean): Promise<any> {
