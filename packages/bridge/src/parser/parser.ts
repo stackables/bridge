@@ -27,6 +27,10 @@ import {
   AndKw,
   OrKw,
   NotKw,
+  ThrowKw,
+  PanicKw,
+  ContinueKw,
+  BreakKw,
   NullCoalesce,
   ErrorCoalesce,
   SafeNav,
@@ -64,6 +68,7 @@ import {
 import type {
   Bridge,
   ConstDef,
+  ControlFlowInstruction,
   DefineDef,
   HandleBinding,
   Instruction,
@@ -87,6 +92,10 @@ const RESERVED_KEYWORDS = new Set([
   "version",
   "define",
   "alias",
+  "throw",
+  "panic",
+  "continue",
+  "break",
 ]);
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
@@ -715,8 +724,20 @@ class BridgeParser extends CstParser {
     // either a literal or a handle name. But the regex parser treats them as
     // literals in || and ?? position (isJsonLiteral check).
     // Identifiers are always source refs. So we use BACKTRACK for safety.
+    //
+    // Control flow keywords: throw "msg", panic "msg", continue, break
     this.OR([
-      { ALT: () => this.CONSUME(StringLiteral, { LABEL: "stringLit" }) },
+      { ALT: () => {
+          this.CONSUME(ThrowKw, { LABEL: "throwKw" });
+          this.CONSUME(StringLiteral, { LABEL: "throwMsg" });
+      }},
+      { ALT: () => {
+          this.CONSUME(PanicKw, { LABEL: "panicKw" });
+          this.CONSUME2(StringLiteral, { LABEL: "panicMsg" });
+      }},
+      { ALT: () => this.CONSUME(ContinueKw, { LABEL: "continueKw" }) },
+      { ALT: () => this.CONSUME(BreakKw, { LABEL: "breakKw" }) },
+      { ALT: () => this.CONSUME3(StringLiteral, { LABEL: "stringLit" }) },
       { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
       { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
       { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
@@ -1503,7 +1524,7 @@ function processElementLines(
     altNode: CstNode,
     lineNum: number,
     iterName?: string,
-  ) => { literal: string } | { sourceRef: NodeRef },
+  ) => { literal: string } | { sourceRef: NodeRef } | { control: ControlFlowInstruction },
   desugarExprChain?: (
     leftRef: NodeRef,
     exprOps: CstNode[],
@@ -1532,7 +1553,7 @@ function processElementLines(
   function extractCoalesceAltIterAware(
     altNode: CstNode,
     lineNum: number,
-  ): { literal: string } | { sourceRef: NodeRef } {
+  ): { literal: string } | { sourceRef: NodeRef } | { control: ControlFlowInstruction } {
     const c = altNode.children;
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
@@ -1592,16 +1613,20 @@ function processElementLines(
 
         // Process coalesce modifiers
         let falsyFallback: string | undefined;
+        let falsyControl: ControlFlowInstruction | undefined;
         const nullAltRefs: NodeRef[] = [];
         for (const alt of subs(elemLine, "elemNullAlt")) {
           const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
           if ("literal" in altResult) {
             falsyFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            falsyControl = altResult.control;
           } else {
             nullAltRefs.push(altResult.sourceRef);
           }
         }
         let nullishFallback: string | undefined;
+        let nullishControl: ControlFlowInstruction | undefined;
         let nullishFallbackRef: NodeRef | undefined;
         let nullishFallbackInternalWires: Wire[] = [];
         const nullishAlt = sub(elemLine, "elemNullishAlt");
@@ -1610,12 +1635,15 @@ function processElementLines(
           const altResult = extractCoalesceAltIterAware(nullishAlt, elemLineNum);
           if ("literal" in altResult) {
             nullishFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            nullishControl = altResult.control;
           } else {
             nullishFallbackRef = altResult.sourceRef;
             nullishFallbackInternalWires = wires.splice(preLen);
           }
         }
         let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(elemLine, "elemCatchAlt");
@@ -1624,6 +1652,8 @@ function processElementLines(
           const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
           if ("literal" in altResult) {
             catchFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            catchControl = altResult.control;
           } else {
             catchFallbackRef = altResult.sourceRef;
             catchFallbackInternalWires = wires.splice(preLen);
@@ -1632,10 +1662,13 @@ function processElementLines(
 
         const lastAttrs = {
           ...(falsyFallback ? { falsyFallback } : {}),
+          ...(falsyControl ? { falsyControl } : {}),
           ...(nullishFallback ? { nullishFallback } : {}),
           ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+          ...(nullishControl ? { nullishControl } : {}),
           ...(catchFallback ? { catchFallback } : {}),
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchControl ? { catchControl } : {}),
         };
 
         if (segs) {
@@ -1820,11 +1853,14 @@ function processElementLines(
 
         // Process || null-coalesce alternatives.
         let elemFalsyFallback: string | undefined;
+        let elemFalsyControl: ControlFlowInstruction | undefined;
         const elemNullAltRefs: NodeRef[] = [];
         for (const alt of subs(elemLine, "elemNullAlt")) {
           const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
           if ("literal" in altResult) {
             elemFalsyFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            elemFalsyControl = altResult.control;
           } else {
             elemNullAltRefs.push(altResult.sourceRef);
           }
@@ -1832,6 +1868,7 @@ function processElementLines(
 
         // Process ?? nullish fallback.
         let elemNullishFallback: string | undefined;
+        let elemNullishControl: ControlFlowInstruction | undefined;
         let elemNullishFallbackRef: NodeRef | undefined;
         let elemNullishFallbackInternalWires: Wire[] = [];
         const elemNullishAlt = sub(elemLine, "elemNullishAlt");
@@ -1843,6 +1880,8 @@ function processElementLines(
           );
           if ("literal" in altResult) {
             elemNullishFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            elemNullishControl = altResult.control;
           } else {
             elemNullishFallbackRef = altResult.sourceRef;
             elemNullishFallbackInternalWires = wires.splice(preLen);
@@ -1851,6 +1890,7 @@ function processElementLines(
 
         // Process catch error fallback.
         let elemCatchFallback: string | undefined;
+        let elemCatchControl: ControlFlowInstruction | undefined;
         let elemCatchFallbackRef: NodeRef | undefined;
         let elemCatchFallbackInternalWires: Wire[] = [];
         const elemCatchAlt = sub(elemLine, "elemCatchAlt");
@@ -1862,6 +1902,8 @@ function processElementLines(
           );
           if ("literal" in altResult) {
             elemCatchFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            elemCatchControl = altResult.control;
           } else {
             elemCatchFallbackRef = altResult.sourceRef;
             elemCatchFallbackInternalWires = wires.splice(preLen);
@@ -1879,16 +1921,19 @@ function processElementLines(
           ...(elemFalsyFallback !== undefined
             ? { falsyFallback: elemFalsyFallback }
             : {}),
+          ...(elemFalsyControl ? { falsyControl: elemFalsyControl } : {}),
           ...(elemNullishFallback !== undefined
             ? { nullishFallback: elemNullishFallback }
             : {}),
           ...(elemNullishFallbackRef !== undefined
             ? { nullishFallbackRef: elemNullishFallbackRef }
             : {}),
+          ...(elemNullishControl ? { nullishControl: elemNullishControl } : {}),
           ...(elemCatchFallback !== undefined ? { catchFallback: elemCatchFallback } : {}),
           ...(elemCatchFallbackRef !== undefined
             ? { catchFallbackRef: elemCatchFallbackRef }
             : {}),
+          ...(elemCatchControl ? { catchControl: elemCatchControl } : {}),
           to: elemToRef,
         });
         for (const ref of elemNullAltRefs) {
@@ -1903,10 +1948,13 @@ function processElementLines(
 
       // || alternatives
       let falsyFallback: string | undefined;
+      let falsyControl: ControlFlowInstruction | undefined;
       for (const alt of subs(elemLine, "elemNullAlt")) {
         const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
         if ("literal" in altResult) {
           falsyFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          falsyControl = altResult.control;
         } else {
           sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
         }
@@ -1914,6 +1962,7 @@ function processElementLines(
 
       // ?? nullish fallback
       let nullishFallback: string | undefined;
+      let nullishControl: ControlFlowInstruction | undefined;
       let nullishFallbackRef: NodeRef | undefined;
       let nullishFallbackInternalWires: Wire[] = [];
       const nullishAlt = sub(elemLine, "elemNullishAlt");
@@ -1922,6 +1971,8 @@ function processElementLines(
         const altResult = extractCoalesceAltIterAware(nullishAlt, elemLineNum);
         if ("literal" in altResult) {
           nullishFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          nullishControl = altResult.control;
         } else {
           nullishFallbackRef = altResult.sourceRef;
           nullishFallbackInternalWires = wires.splice(preLen);
@@ -1930,6 +1981,7 @@ function processElementLines(
 
       // catch error fallback
       let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(elemLine, "elemCatchAlt");
@@ -1938,6 +1990,8 @@ function processElementLines(
         const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
         if ("literal" in altResult) {
           catchFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          catchControl = altResult.control;
         } else {
           catchFallbackRef = altResult.sourceRef;
           catchFallbackInternalWires = wires.splice(preLen);
@@ -1951,10 +2005,13 @@ function processElementLines(
         const lastAttrs = isLast
           ? {
               ...(falsyFallback ? { falsyFallback } : {}),
+              ...(falsyControl ? { falsyControl } : {}),
               ...(nullishFallback ? { nullishFallback } : {}),
               ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+              ...(nullishControl ? { nullishControl } : {}),
               ...(catchFallback ? { catchFallback } : {}),
               ...(catchFallbackRef ? { catchFallbackRef } : {}),
+              ...(catchControl ? { catchControl } : {}),
             }
           : {};
         if (isPipeFork) {
@@ -2013,7 +2070,7 @@ function processElementScopeLines(
     altNode: CstNode,
     lineNum: number,
     iterName?: string,
-  ) => { literal: string } | { sourceRef: NodeRef },
+  ) => { literal: string } | { sourceRef: NodeRef } | { control: ControlFlowInstruction },
   desugarExprChain?: (
     leftRef: NodeRef,
     exprOps: CstNode[],
@@ -2038,7 +2095,7 @@ function processElementScopeLines(
   function extractCoalesceAltIterAware(
     altNode: CstNode,
     lineNum: number,
-  ): { literal: string } | { sourceRef: NodeRef } {
+  ): { literal: string } | { sourceRef: NodeRef } | { control: ControlFlowInstruction } {
     const c = altNode.children;
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
@@ -2125,13 +2182,16 @@ function processElementScopeLines(
         const segs = parseTemplateString(raw);
 
         let falsyFallback: string | undefined;
+        let falsyControl: ControlFlowInstruction | undefined;
         const nullAltRefs: NodeRef[] = [];
         for (const alt of subs(scopeLine, "scopeNullAlt")) {
           const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
           if ("literal" in altResult) falsyFallback = altResult.literal;
+          else if ("control" in altResult) falsyControl = altResult.control;
           else nullAltRefs.push(altResult.sourceRef);
         }
         let nullishFallback: string | undefined;
+        let nullishControl: ControlFlowInstruction | undefined;
         let nullishFallbackRef: NodeRef | undefined;
         let nullishFallbackInternalWires: Wire[] = [];
         const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -2139,9 +2199,11 @@ function processElementScopeLines(
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(nullishAlt, scopeLineNum);
           if ("literal" in altResult) nullishFallback = altResult.literal;
+          else if ("control" in altResult) nullishControl = altResult.control;
           else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
         }
         let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -2149,14 +2211,18 @@ function processElementScopeLines(
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
           if ("literal" in altResult) catchFallback = altResult.literal;
+          else if ("control" in altResult) catchControl = altResult.control;
           else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
         }
         const lastAttrs = {
           ...(falsyFallback ? { falsyFallback } : {}),
+          ...(falsyControl ? { falsyControl } : {}),
           ...(nullishFallback ? { nullishFallback } : {}),
           ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+          ...(nullishControl ? { nullishControl } : {}),
           ...(catchFallback ? { catchFallback } : {}),
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchControl ? { catchControl } : {}),
         };
         if (segs) {
           const concatOutRef = desugarTemplateStringFn(segs, scopeLineNum, iterName);
@@ -2247,13 +2313,16 @@ function processElementScopeLines(
         const elseBranch = extractTernaryBranchFn(elseNode, scopeLineNum, iterName);
 
         let falsyFallback: string | undefined;
+        let falsyControl: ControlFlowInstruction | undefined;
         const nullAltRefs: NodeRef[] = [];
         for (const alt of subs(scopeLine, "scopeNullAlt")) {
           const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
           if ("literal" in altResult) falsyFallback = altResult.literal;
+          else if ("control" in altResult) falsyControl = altResult.control;
           else nullAltRefs.push(altResult.sourceRef);
         }
         let nullishFallback: string | undefined;
+        let nullishControl: ControlFlowInstruction | undefined;
         let nullishFallbackRef: NodeRef | undefined;
         let nullishFallbackInternalWires: Wire[] = [];
         const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -2261,9 +2330,11 @@ function processElementScopeLines(
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(nullishAlt, scopeLineNum);
           if ("literal" in altResult) nullishFallback = altResult.literal;
+          else if ("control" in altResult) nullishControl = altResult.control;
           else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
         }
         let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -2271,6 +2342,7 @@ function processElementScopeLines(
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
           if ("literal" in altResult) catchFallback = altResult.literal;
+          else if ("control" in altResult) catchControl = altResult.control;
           else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
         }
         wires.push({
@@ -2278,10 +2350,13 @@ function processElementScopeLines(
           ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
           ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
           ...(falsyFallback !== undefined ? { falsyFallback } : {}),
+          ...(falsyControl ? { falsyControl } : {}),
           ...(nullishFallback !== undefined ? { nullishFallback } : {}),
           ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
+          ...(nullishControl ? { nullishControl } : {}),
           ...(catchFallback !== undefined ? { catchFallback } : {}),
           ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+          ...(catchControl ? { catchControl } : {}),
           to: elemToRef,
         });
         for (const ref of nullAltRefs) wires.push({ from: ref, to: elemToRef });
@@ -2294,13 +2369,16 @@ function processElementScopeLines(
       sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
       let falsyFallback: string | undefined;
+      let falsyControl: ControlFlowInstruction | undefined;
       for (const alt of subs(scopeLine, "scopeNullAlt")) {
         const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
         if ("literal" in altResult) falsyFallback = altResult.literal;
+        else if ("control" in altResult) falsyControl = altResult.control;
         else sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
       }
 
       let nullishFallback: string | undefined;
+      let nullishControl: ControlFlowInstruction | undefined;
       let nullishFallbackRef: NodeRef | undefined;
       let nullishFallbackInternalWires: Wire[] = [];
       const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -2308,10 +2386,12 @@ function processElementScopeLines(
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(nullishAlt, scopeLineNum);
         if ("literal" in altResult) nullishFallback = altResult.literal;
+        else if ("control" in altResult) nullishControl = altResult.control;
         else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
       }
 
       let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -2319,6 +2399,7 @@ function processElementScopeLines(
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
         if ("literal" in altResult) catchFallback = altResult.literal;
+        else if ("control" in altResult) catchControl = altResult.control;
         else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
       }
 
@@ -2328,10 +2409,13 @@ function processElementScopeLines(
         const lastAttrs = isLast
           ? {
               ...(falsyFallback ? { falsyFallback } : {}),
+              ...(falsyControl ? { falsyControl } : {}),
               ...(nullishFallback ? { nullishFallback } : {}),
               ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+              ...(nullishControl ? { nullishControl } : {}),
               ...(catchFallback ? { catchFallback } : {}),
               ...(catchFallbackRef ? { catchFallbackRef } : {}),
+              ...(catchControl ? { catchControl } : {}),
             }
           : {};
         if (isPipe) {
@@ -3162,8 +3246,19 @@ function buildBridgeBody(
     altNode: CstNode,
     lineNum: number,
     iterName?: string,
-  ): { literal: string } | { sourceRef: NodeRef } {
+  ): { literal: string } | { sourceRef: NodeRef } | { control: ControlFlowInstruction } {
     const c = altNode.children;
+    // Control flow keywords
+    if (c.throwKw) {
+      const msg = (c.throwMsg as IToken[])[0].image;
+      return { control: { kind: "throw", message: JSON.parse(msg) } };
+    }
+    if (c.panicKw) {
+      const msg = (c.panicMsg as IToken[])[0].image;
+      return { control: { kind: "panic", message: JSON.parse(msg) } };
+    }
+    if (c.continueKw) return { control: { kind: "continue" } };
+    if (c.breakKw) return { control: { kind: "break" } };
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       const segs = parseTemplateString(raw.slice(1, -1));
@@ -3703,13 +3798,16 @@ function buildBridgeBody(
           const segs = parseTemplateString(raw);
 
           let falsyFallback: string | undefined;
+          let falsyControl: ControlFlowInstruction | undefined;
           const nullAltRefs: NodeRef[] = [];
           for (const alt of subs(scopeLine, "scopeNullAlt")) {
             const altResult = extractCoalesceAlt(alt, scopeLineNum);
             if ("literal" in altResult) falsyFallback = altResult.literal;
+            else if ("control" in altResult) falsyControl = altResult.control;
             else nullAltRefs.push(altResult.sourceRef);
           }
           let nullishFallback: string | undefined;
+          let nullishControl: ControlFlowInstruction | undefined;
           let nullishFallbackRef: NodeRef | undefined;
           let nullishFallbackInternalWires: Wire[] = [];
           const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -3717,9 +3815,11 @@ function buildBridgeBody(
             const preLen = wires.length;
             const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
             if ("literal" in altResult) nullishFallback = altResult.literal;
+            else if ("control" in altResult) nullishControl = altResult.control;
             else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
           }
           let catchFallback: string | undefined;
+          let catchControl: ControlFlowInstruction | undefined;
           let catchFallbackRef: NodeRef | undefined;
           let catchFallbackInternalWires: Wire[] = [];
           const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -3727,14 +3827,18 @@ function buildBridgeBody(
             const preLen = wires.length;
             const altResult = extractCoalesceAlt(catchAlt, scopeLineNum);
             if ("literal" in altResult) catchFallback = altResult.literal;
+            else if ("control" in altResult) catchControl = altResult.control;
             else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
           }
           const lastAttrs = {
             ...(falsyFallback ? { falsyFallback } : {}),
+            ...(falsyControl ? { falsyControl } : {}),
             ...(nullishFallback ? { nullishFallback } : {}),
             ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+            ...(nullishControl ? { nullishControl } : {}),
             ...(catchFallback ? { catchFallback } : {}),
             ...(catchFallbackRef ? { catchFallbackRef } : {}),
+            ...(catchControl ? { catchControl } : {}),
           };
           if (segs) {
             const concatOutRef = desugarTemplateString(segs, scopeLineNum);
@@ -3802,13 +3906,16 @@ function buildBridgeBody(
           const thenBranch = extractTernaryBranch(thenNode, scopeLineNum);
           const elseBranch = extractTernaryBranch(elseNode, scopeLineNum);
           let falsyFallback: string | undefined;
+          let falsyControl: ControlFlowInstruction | undefined;
           const nullAltRefs: NodeRef[] = [];
           for (const alt of subs(scopeLine, "scopeNullAlt")) {
             const altResult = extractCoalesceAlt(alt, scopeLineNum);
             if ("literal" in altResult) falsyFallback = altResult.literal;
+            else if ("control" in altResult) falsyControl = altResult.control;
             else nullAltRefs.push(altResult.sourceRef);
           }
           let nullishFallback: string | undefined;
+          let nullishControl: ControlFlowInstruction | undefined;
           let nullishFallbackRef: NodeRef | undefined;
           let nullishFallbackInternalWires: Wire[] = [];
           const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -3816,9 +3923,11 @@ function buildBridgeBody(
             const preLen = wires.length;
             const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
             if ("literal" in altResult) nullishFallback = altResult.literal;
+            else if ("control" in altResult) nullishControl = altResult.control;
             else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
           }
           let catchFallback: string | undefined;
+          let catchControl: ControlFlowInstruction | undefined;
           let catchFallbackRef: NodeRef | undefined;
           let catchFallbackInternalWires: Wire[] = [];
           const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -3826,6 +3935,7 @@ function buildBridgeBody(
             const preLen = wires.length;
             const altResult = extractCoalesceAlt(catchAlt, scopeLineNum);
             if ("literal" in altResult) catchFallback = altResult.literal;
+            else if ("control" in altResult) catchControl = altResult.control;
             else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
           }
           wires.push({
@@ -3833,10 +3943,13 @@ function buildBridgeBody(
             ...(thenBranch.kind === "ref" ? { thenRef: thenBranch.ref } : { thenValue: thenBranch.value }),
             ...(elseBranch.kind === "ref" ? { elseRef: elseBranch.ref } : { elseValue: elseBranch.value }),
             ...(falsyFallback !== undefined ? { falsyFallback } : {}),
+            ...(falsyControl ? { falsyControl } : {}),
             ...(nullishFallback !== undefined ? { nullishFallback } : {}),
             ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
+            ...(nullishControl ? { nullishControl } : {}),
             ...(catchFallback !== undefined ? { catchFallback } : {}),
             ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+            ...(catchControl ? { catchControl } : {}),
             to: toRef,
           });
           for (const ref of nullAltRefs) wires.push({ from: ref, to: toRef });
@@ -3848,13 +3961,16 @@ function buildBridgeBody(
         sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
         let falsyFallback: string | undefined;
+        let falsyControl: ControlFlowInstruction | undefined;
         for (const alt of subs(scopeLine, "scopeNullAlt")) {
           const altResult = extractCoalesceAlt(alt, scopeLineNum);
           if ("literal" in altResult) falsyFallback = altResult.literal;
+          else if ("control" in altResult) falsyControl = altResult.control;
           else sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
         }
 
         let nullishFallback: string | undefined;
+        let nullishControl: ControlFlowInstruction | undefined;
         let nullishFallbackRef: NodeRef | undefined;
         let nullishFallbackInternalWires: Wire[] = [];
         const nullishAlt = sub(scopeLine, "scopeNullishAlt");
@@ -3862,10 +3978,12 @@ function buildBridgeBody(
           const preLen = wires.length;
           const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
           if ("literal" in altResult) nullishFallback = altResult.literal;
+          else if ("control" in altResult) nullishControl = altResult.control;
           else { nullishFallbackRef = altResult.sourceRef; nullishFallbackInternalWires = wires.splice(preLen); }
         }
 
         let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
@@ -3873,6 +3991,7 @@ function buildBridgeBody(
           const preLen = wires.length;
           const altResult = extractCoalesceAlt(catchAlt, scopeLineNum);
           if ("literal" in altResult) catchFallback = altResult.literal;
+          else if ("control" in altResult) catchControl = altResult.control;
           else { catchFallbackRef = altResult.sourceRef; catchFallbackInternalWires = wires.splice(preLen); }
         }
 
@@ -3882,10 +4001,13 @@ function buildBridgeBody(
           const lastAttrs = isLast
             ? {
                 ...(falsyFallback ? { falsyFallback } : {}),
+                ...(falsyControl ? { falsyControl } : {}),
                 ...(nullishFallback ? { nullishFallback } : {}),
                 ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+                ...(nullishControl ? { nullishControl } : {}),
                 ...(catchFallback ? { catchFallback } : {}),
                 ...(catchFallbackRef ? { catchFallbackRef } : {}),
+                ...(catchControl ? { catchControl } : {}),
               }
             : {};
           if (isPipe) {
@@ -3925,16 +4047,20 @@ function buildBridgeBody(
 
       // Process coalesce modifiers on alias
       let aliasFalsyFallback: string | undefined;
+      let aliasFalsyControl: ControlFlowInstruction | undefined;
       const aliasNullAltRefs: NodeRef[] = [];
       for (const alt of subs(nodeAliasNode, "aliasNullAlt")) {
         const altResult = extractCoalesceAlt(alt, lineNum);
         if ("literal" in altResult) {
           aliasFalsyFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          aliasFalsyControl = altResult.control;
         } else {
           aliasNullAltRefs.push(altResult.sourceRef);
         }
       }
       let aliasNullishFallback: string | undefined;
+      let aliasNullishControl: ControlFlowInstruction | undefined;
       let aliasNullishFallbackRef: NodeRef | undefined;
       let aliasNullishFallbackInternalWires: Wire[] = [];
       const aliasNullishAlt = sub(nodeAliasNode, "aliasNullishAlt");
@@ -3943,12 +4069,15 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(aliasNullishAlt, lineNum);
         if ("literal" in altResult) {
           aliasNullishFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          aliasNullishControl = altResult.control;
         } else {
           aliasNullishFallbackRef = altResult.sourceRef;
           aliasNullishFallbackInternalWires = wires.splice(preLen);
         }
       }
       let aliasCatchFallback: string | undefined;
+      let aliasCatchControl: ControlFlowInstruction | undefined;
       let aliasCatchFallbackRef: NodeRef | undefined;
       let aliasCatchFallbackInternalWires: Wire[] = [];
       const aliasCatchAlt = sub(nodeAliasNode, "aliasCatchAlt");
@@ -3957,6 +4086,8 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(aliasCatchAlt, lineNum);
         if ("literal" in altResult) {
           aliasCatchFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          aliasCatchControl = altResult.control;
         } else {
           aliasCatchFallbackRef = altResult.sourceRef;
           aliasCatchFallbackInternalWires = wires.splice(preLen);
@@ -3980,10 +4111,13 @@ function buildBridgeBody(
       };
       const aliasAttrs = {
         ...(aliasFalsyFallback ? { falsyFallback: aliasFalsyFallback } : {}),
+        ...(aliasFalsyControl ? { falsyControl: aliasFalsyControl } : {}),
         ...(aliasNullishFallback ? { nullishFallback: aliasNullishFallback } : {}),
         ...(aliasNullishFallbackRef ? { nullishFallbackRef: aliasNullishFallbackRef } : {}),
+        ...(aliasNullishControl ? { nullishControl: aliasNullishControl } : {}),
         ...(aliasCatchFallback ? { catchFallback: aliasCatchFallback } : {}),
         ...(aliasCatchFallbackRef ? { catchFallbackRef: aliasCatchFallbackRef } : {}),
+        ...(aliasCatchControl ? { catchControl: aliasCatchControl } : {}),
       };
       wires.push({ from: sourceRef, to: localToRef, ...aliasAttrs });
       for (const ref of aliasNullAltRefs) {
@@ -4064,16 +4198,20 @@ function buildBridgeBody(
 
       // Process coalesce modifiers
       let falsyFallback: string | undefined;
+      let falsyControl: ControlFlowInstruction | undefined;
       const nullAltRefs: NodeRef[] = [];
       for (const alt of subs(wireNode, "nullAlt")) {
         const altResult = extractCoalesceAlt(alt, lineNum);
         if ("literal" in altResult) {
           falsyFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          falsyControl = altResult.control;
         } else {
           nullAltRefs.push(altResult.sourceRef);
         }
       }
       let nullishFallback: string | undefined;
+      let nullishControl: ControlFlowInstruction | undefined;
       let nullishFallbackRef: NodeRef | undefined;
       let nullishFallbackInternalWires: Wire[] = [];
       const nullishAlt = sub(wireNode, "nullishAlt");
@@ -4082,12 +4220,15 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(nullishAlt, lineNum);
         if ("literal" in altResult) {
           nullishFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          nullishControl = altResult.control;
         } else {
           nullishFallbackRef = altResult.sourceRef;
           nullishFallbackInternalWires = wires.splice(preLen);
         }
       }
       let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(wireNode, "catchAlt");
@@ -4096,6 +4237,8 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(catchAlt, lineNum);
         if ("literal" in altResult) {
           catchFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          catchControl = altResult.control;
         } else {
           catchFallbackRef = altResult.sourceRef;
           catchFallbackInternalWires = wires.splice(preLen);
@@ -4104,10 +4247,13 @@ function buildBridgeBody(
 
       const lastAttrs = {
         ...(falsyFallback ? { falsyFallback } : {}),
+        ...(falsyControl ? { falsyControl } : {}),
         ...(nullishFallback ? { nullishFallback } : {}),
         ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+        ...(nullishControl ? { nullishControl } : {}),
         ...(catchFallback ? { catchFallback } : {}),
         ...(catchFallbackRef ? { catchFallbackRef } : {}),
+        ...(catchControl ? { catchControl } : {}),
       };
 
       if (segs) {
@@ -4222,11 +4368,14 @@ function buildBridgeBody(
       // Process || null-coalesce alternatives.
       // Literals → stored on the ternary wire; source refs → sibling pull wires.
       let falsyFallback: string | undefined;
+      let falsyControl: ControlFlowInstruction | undefined;
       const nullAltRefs: NodeRef[] = [];
       for (const alt of subs(wireNode, "nullAlt")) {
         const altResult = extractCoalesceAlt(alt, lineNum);
         if ("literal" in altResult) {
           falsyFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          falsyControl = altResult.control;
         } else {
           nullAltRefs.push(altResult.sourceRef);
         }
@@ -4234,6 +4383,7 @@ function buildBridgeBody(
 
       // Process ?? nullish fallback.
       let nullishFallback: string | undefined;
+      let nullishControl: ControlFlowInstruction | undefined;
       let nullishFallbackRef: NodeRef | undefined;
       let nullishFallbackInternalWires: Wire[] = [];
       const nullishAlt = sub(wireNode, "nullishAlt");
@@ -4242,6 +4392,8 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(nullishAlt, lineNum);
         if ("literal" in altResult) {
           nullishFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          nullishControl = altResult.control;
         } else {
           nullishFallbackRef = altResult.sourceRef;
           nullishFallbackInternalWires = wires.splice(preLen);
@@ -4250,6 +4402,7 @@ function buildBridgeBody(
 
       // Process catch error fallback.
       let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(wireNode, "catchAlt");
@@ -4258,6 +4411,8 @@ function buildBridgeBody(
         const altResult = extractCoalesceAlt(catchAlt, lineNum);
         if ("literal" in altResult) {
           catchFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          catchControl = altResult.control;
         } else {
           catchFallbackRef = altResult.sourceRef;
           catchFallbackInternalWires = wires.splice(preLen);
@@ -4273,10 +4428,13 @@ function buildBridgeBody(
           ? { elseRef: elseBranch.ref }
           : { elseValue: elseBranch.value }),
         ...(falsyFallback !== undefined ? { falsyFallback } : {}),
+        ...(falsyControl ? { falsyControl } : {}),
         ...(nullishFallback !== undefined ? { nullishFallback } : {}),
         ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
+        ...(nullishControl ? { nullishControl } : {}),
         ...(catchFallback !== undefined ? { catchFallback } : {}),
         ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+        ...(catchControl ? { catchControl } : {}),
         to: toRef,
       });
       // Sibling pull wires for || sourceRef fallbacks
@@ -4291,16 +4449,20 @@ function buildBridgeBody(
     sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
     let falsyFallback: string | undefined;
+    let falsyControl: ControlFlowInstruction | undefined;
     for (const alt of subs(wireNode, "nullAlt")) {
       const altResult = extractCoalesceAlt(alt, lineNum);
       if ("literal" in altResult) {
         falsyFallback = altResult.literal;
+      } else if ("control" in altResult) {
+        falsyControl = altResult.control;
       } else {
         sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
       }
     }
 
     let nullishFallback: string | undefined;
+    let nullishControl: ControlFlowInstruction | undefined;
     let nullishFallbackRef: NodeRef | undefined;
     let nullishFallbackInternalWires: Wire[] = [];
     const nullishAlt = sub(wireNode, "nullishAlt");
@@ -4309,6 +4471,8 @@ function buildBridgeBody(
       const altResult = extractCoalesceAlt(nullishAlt, lineNum);
       if ("literal" in altResult) {
         nullishFallback = altResult.literal;
+      } else if ("control" in altResult) {
+        nullishControl = altResult.control;
       } else {
         nullishFallbackRef = altResult.sourceRef;
         nullishFallbackInternalWires = wires.splice(preLen);
@@ -4316,6 +4480,7 @@ function buildBridgeBody(
     }
 
     let catchFallback: string | undefined;
+    let catchControl: ControlFlowInstruction | undefined;
     let catchFallbackRef: NodeRef | undefined;
     let catchFallbackInternalWires: Wire[] = [];
     const catchAlt = sub(wireNode, "catchAlt");
@@ -4324,6 +4489,8 @@ function buildBridgeBody(
       const altResult = extractCoalesceAlt(catchAlt, lineNum);
       if ("literal" in altResult) {
         catchFallback = altResult.literal;
+      } else if ("control" in altResult) {
+        catchControl = altResult.control;
       } else {
         catchFallbackRef = altResult.sourceRef;
         catchFallbackInternalWires = wires.splice(preLen);
@@ -4337,10 +4504,13 @@ function buildBridgeBody(
       const lastAttrs = isLast
         ? {
             ...(falsyFallback ? { falsyFallback } : {}),
+            ...(falsyControl ? { falsyControl } : {}),
             ...(nullishFallback ? { nullishFallback } : {}),
             ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
+            ...(nullishControl ? { nullishControl } : {}),
             ...(catchFallback ? { catchFallback } : {}),
             ...(catchFallbackRef ? { catchFallbackRef } : {}),
+            ...(catchControl ? { catchControl } : {}),
           }
         : {};
       const safeAttr = isFirst && isSafe ? { safe: true as const } : {};

@@ -1,0 +1,550 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
+import { executeBridge } from "../src/execute-bridge.ts";
+import { BridgeAbortError, BridgePanicError } from "../src/ExecutionTree.ts";
+import type { Bridge, Wire } from "../src/types.ts";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function run(
+  bridgeText: string,
+  operation: string,
+  input: Record<string, unknown> = {},
+  tools: Record<string, any> = {},
+  signal?: AbortSignal,
+) {
+  const raw = parseBridge(bridgeText);
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+    typeof parseBridge
+  >;
+  return executeBridge({ instructions, operation, input, tools, signal });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 1. Parser: control flow keywords
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("parseBridge: control flow keywords", () => {
+  test("throw on || gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name || throw "name is required"
+}`);
+    const b = instructions[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.falsyControl, {
+      kind: "throw",
+      message: "name is required",
+    });
+  });
+
+  test("panic on ?? gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name ?? panic "fatal: name cannot be null"
+}`);
+    const b = instructions[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.nullishControl, {
+      kind: "panic",
+      message: "fatal: name cannot be null",
+    });
+  });
+
+  test("continue on ?? gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.items <- a.list[] as item {
+    .name <- item.name ?? continue
+  }
+}`);
+    const b = instructions[0] as Bridge;
+    const elemWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+    );
+    assert.ok(elemWire);
+    assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
+  });
+
+  test("break on ?? gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.items <- a.list[] as item {
+    .name <- item.name ?? break
+  }
+}`);
+    const b = instructions[0] as Bridge;
+    const elemWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+    );
+    assert.ok(elemWire);
+    assert.deepStrictEqual(elemWire.nullishControl, { kind: "break" });
+  });
+
+  test("throw on catch gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.name <- a.name catch throw "api failed"
+}`);
+    const b = instructions[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.catchControl, {
+      kind: "throw",
+      message: "api failed",
+    });
+  });
+
+  test("panic on catch gate", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.name <- a.name catch panic "unrecoverable"
+}`);
+    const b = instructions[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.catchControl, {
+      kind: "panic",
+      message: "unrecoverable",
+    });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 2. Serializer: roundtrip
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("serializeBridge: control flow roundtrip", () => {
+  test("throw on || gate round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name || throw "name is required"
+}`;
+    const instructions = parseBridge(src);
+    const out = serializeBridge(instructions);
+    assert.ok(out.includes('|| throw "name is required"'));
+    // Parse again and compare AST
+    const roundtripped = parseBridge(out);
+    const b = roundtripped[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.falsyControl, {
+      kind: "throw",
+      message: "name is required",
+    });
+  });
+
+  test("panic on ?? gate round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name ?? panic "fatal"
+}`;
+    const instructions = parseBridge(src);
+    const out = serializeBridge(instructions);
+    assert.ok(out.includes('?? panic "fatal"'));
+    const roundtripped = parseBridge(out);
+    const b = roundtripped[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.nullishControl, {
+      kind: "panic",
+      message: "fatal",
+    });
+  });
+
+  test("continue on ?? gate round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.items <- a.list[] as item {
+    .name <- item.name ?? continue
+  }
+}`;
+    const instructions = parseBridge(src);
+    const out = serializeBridge(instructions);
+    assert.ok(out.includes("?? continue"));
+    const roundtripped = parseBridge(out);
+    const b = roundtripped[0] as Bridge;
+    const elemWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+    );
+    assert.ok(elemWire);
+    assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
+  });
+
+  test("break on catch gate round-trips", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  o.name <- a.name catch break
+}`;
+    const instructions = parseBridge(src);
+    const out = serializeBridge(instructions);
+    assert.ok(out.includes("catch break"));
+    const roundtripped = parseBridge(out);
+    const b = roundtripped[0] as Bridge;
+    const pullWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w && w.to.path.join(".") === "name",
+    );
+    assert.ok(pullWire);
+    assert.deepStrictEqual(pullWire.catchControl, { kind: "break" });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 3. Engine: throw behavior
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("executeBridge: throw control flow", () => {
+  test("throw on || gate raises Error when value is falsy", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name || throw "name is required"
+}`;
+    await assert.rejects(
+      () => run(src, "Query.test", { name: "" }),
+      (err: Error) => {
+        assert.equal(err.message, "name is required");
+        return true;
+      },
+    );
+  });
+
+  test("throw on || gate does NOT fire when value is truthy", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name || throw "name is required"
+}`;
+    const { data } = await run(src, "Query.test", { name: "Alice" });
+    assert.deepStrictEqual(data, { name: "Alice" });
+  });
+
+  test("throw on ?? gate raises Error when value is null", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name ?? throw "name cannot be null"
+}`;
+    await assert.rejects(
+      () => run(src, "Query.test", {}),
+      (err: Error) => {
+        assert.equal(err.message, "name cannot be null");
+        return true;
+      },
+    );
+  });
+
+  test("throw on catch gate raises Error when source throws", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name catch throw "api call failed"
+}`;
+    const tools = {
+      api: async () => {
+        throw new Error("network error");
+      },
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools),
+      (err: Error) => {
+        assert.equal(err.message, "api call failed");
+        return true;
+      },
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 4. Engine: panic behavior (bypasses error boundaries)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("executeBridge: panic control flow", () => {
+  test("panic raises BridgePanicError", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name ?? panic "fatal error"
+}`;
+    await assert.rejects(
+      () => run(src, "Query.test", {}),
+      (err: Error) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.equal(err.message, "fatal error");
+        return true;
+      },
+    );
+  });
+
+  test("panic bypasses catch gate", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name ?? panic "fatal" catch "fallback"
+}`;
+    const tools = {
+      api: async () => ({ name: null }),
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools),
+      (err: Error) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.equal(err.message, "fatal");
+        return true;
+      },
+    );
+  });
+
+  test("panic bypasses safe navigation (?.)", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a?.name ?? panic "must not be null"
+}`;
+    const tools = {
+      api: async () => ({ name: null }),
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools),
+      (err: Error) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.equal(err.message, "must not be null");
+        return true;
+      },
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 5. Engine: continue/break in array iteration
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("executeBridge: continue/break in arrays", () => {
+  test("continue skips null elements in array mapping", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name ?? continue
+  }
+}`;
+    const tools = {
+      api: async () => ({
+        items: [
+          { name: "Alice" },
+          { name: null },
+          { name: "Bob" },
+          { name: null },
+        ],
+      }),
+    };
+    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    assert.equal(data.length, 2);
+    assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
+  });
+
+  test("break halts array processing", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name ?? break
+  }
+}`;
+    const tools = {
+      api: async () => ({
+        items: [
+          { name: "Alice" },
+          { name: "Bob" },
+          { name: null },
+          { name: "Carol" },
+        ],
+      }),
+    };
+    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    assert.equal(data.length, 2);
+    assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 6. AbortSignal integration
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("executeBridge: AbortSignal", () => {
+  test("aborted signal prevents tool execution", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name
+}`;
+    const controller = new AbortController();
+    controller.abort(); // Abort immediately
+    const tools = {
+      api: async () => {
+        throw new Error("should not be called");
+      },
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools, controller.signal),
+      (err: Error) => {
+        assert.ok(err instanceof BridgeAbortError);
+        return true;
+      },
+    );
+  });
+
+  test("abort error bypasses catch gate", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name catch "fallback"
+}`;
+    const controller = new AbortController();
+    controller.abort();
+    const tools = {
+      api: async () => ({ name: "test" }),
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools, controller.signal),
+      (err: Error) => {
+        assert.ok(err instanceof BridgeAbortError);
+        return true;
+      },
+    );
+  });
+
+  test("abort error bypasses safe navigation (?.)", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a?.name
+}`;
+    const controller = new AbortController();
+    controller.abort();
+    const tools = {
+      api: async () => ({ name: "test" }),
+    };
+    await assert.rejects(
+      () => run(src, "Query.test", {}, tools, controller.signal),
+      (err: Error) => {
+        assert.ok(err instanceof BridgeAbortError);
+        return true;
+      },
+    );
+  });
+
+  test("signal is passed to tool context", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name
+}`;
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const tools = {
+      api: async (_input: any, ctx: any) => {
+        receivedSignal = ctx.signal;
+        return { name: "test" };
+      },
+    };
+    await run(src, "Query.test", {}, tools, controller.signal);
+    assert.ok(receivedSignal);
+    assert.equal(receivedSignal, controller.signal);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 7. Error class identity
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("BridgePanicError / BridgeAbortError", () => {
+  test("BridgePanicError extends Error", () => {
+    const err = new BridgePanicError("test");
+    assert.ok(err instanceof Error);
+    assert.ok(err instanceof BridgePanicError);
+    assert.equal(err.name, "BridgePanicError");
+    assert.equal(err.message, "test");
+  });
+
+  test("BridgeAbortError extends Error with default message", () => {
+    const err = new BridgeAbortError();
+    assert.ok(err instanceof Error);
+    assert.ok(err instanceof BridgeAbortError);
+    assert.equal(err.name, "BridgeAbortError");
+    assert.equal(err.message, "Execution aborted by external signal");
+  });
+
+  test("BridgeAbortError accepts custom message", () => {
+    const err = new BridgeAbortError("custom");
+    assert.equal(err.message, "custom");
+  });
+});
