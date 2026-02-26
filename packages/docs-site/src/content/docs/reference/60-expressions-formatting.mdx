@@ -60,13 +60,13 @@ o.isActive <- i.status == "active"
 
 ### Supported Operators
 
-| Category       | Operators                        | Description                        |
-| -------------- | -------------------------------- | ---------------------------------- |
-| **Arithmetic** | `*`, `/`, `+`, `-`               | Standard math operations.          |
+| Category | Operators | Description |
+| --- | --- | --- |
+| **Arithmetic** | `*`, `/`, `+`, `-` | Standard math operations. |
 | **Comparison** | `==`, `!=`, `>`, `>=`, `<`, `<=` | Returns boolean `true` or `false`. |
-| **Boolean**    | `and`, `or`, `not`               | Logical operators for combining boolean values. |
+| **Boolean** | `and`, `or`, `not` | Logical operators for combining boolean values. |
 
-### Boolean Logic
+### Boolean Logic & Short-Circuiting
 
 Use Python/SQL-style keywords for clear, unambiguous boolean expressions. These strictly evaluate to `true` or `false`.
 
@@ -74,6 +74,8 @@ Use Python/SQL-style keywords for clear, unambiguous boolean expressions. These 
 * `or`: Logical OR — returns `true` if either side is truthy.
 * `not`: Logical NOT — inverts the value (prefix operator).
 * `()`: Parentheses for grouping — overrides default operator precedence.
+
+**Lazy Evaluation:** Boolean operators (`and` and `or`) use strict left-to-right short-circuiting. If the left side of an `and` evaluates to `false`, the right side is completely ignored. If the right side is an expensive API call, **it is never executed**.
 
 ```bridge
 # Inline policy evaluation with parentheses for grouping
@@ -107,13 +109,6 @@ o.strict <- i.age > 18 and (i.verified or i.role == "ADMIN")
 
 ```
 
-### Missing Data & Coercion
-
-If an arithmetic wire encounters missing data, it coerces the value using standard JavaScript rules:
-
-- `null` becomes `0` _(e.g., `null _ 100 = 0`)\*
-- `undefined` becomes `NaN` _(e.g., `undefined + 5 = NaN`)_
-- Comparisons against `NaN` always return `false`.
 
 ## 3. Conditional Wires (`? :`)
 
@@ -132,30 +127,14 @@ o.tier <- i.score > 100 ? "premium" : "basic"
 
 ```
 
-### Lazy Evaluation (Cost Savings!)
+### Lazy Evaluation
 
-Conditional wires are strictly evaluated. The engine evaluates the **condition first**. It then pulls data from **only the chosen branch**.
+Just like `and`/`or` logic, conditional wires are strictly evaluated. The engine evaluates the **condition first**. It then pulls data from **only the chosen branch**.
 
 If the condition is `false`, the engine never touches the `true` branch. If that branch points to an expensive API call, **the API is never called**.
 
 ```bridge
 # If i.hasCustomData is false, the customDb API is completely ignored.
 o.data <- i.hasCustomData ? customDb.data : standardDb.data
-
-```
-
-## 4. Combining with Fallbacks
-
-All of the inline formatting tools on this page (Interpolation, Expressions, and Conditionals) can be seamlessly combined with the **Fallback Operators (`||`, `??`)**.
-
-```bridge
-# Interpolation + Null Coalesce
-o.greeting <- "Hello, {i.name}!" || "Hello, Guest!"
-
-# Math + Error Guard (If api.price throws a 500 error, return -1)
-o.cents <- api.price * 100 ?? -1
-
-# Ternary + Null Coalesce + Error Guard
-o.price <- i.isPro ? i.proPrice : i.basicPrice || 0 ?? -1
 
 ```

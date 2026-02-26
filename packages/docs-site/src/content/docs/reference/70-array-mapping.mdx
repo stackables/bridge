@@ -5,7 +5,7 @@ description: How to iterate over collections, transform elements, and manage nes
 
 import { Aside } from "@astrojs/starlight/components";
 
-When you need to return a list of items in GraphQL, you cannot write standard `for` or `map` loops. Instead, The Bridge provides a declarative syntax for mapping array elements into your expected output shape.
+When you need to return a list of items in GraphQL, you cannot write standard `for` or `map` loops. Instead, The Bridge provides a declarative syntax for mapping array elements into your expected output shape, complete with explicit control flow to filter or halt the iteration.
 
 ## 1. The `[] as iter` Syntax
 
@@ -49,13 +49,45 @@ o.list <- api.items[] as it {
 
 ```
 
-## 2. Common Use Cases
+## 2. Array Control Flow
+
+APIs often return messy arrays containing nulls, missing IDs, or corrupt data. Instead of returning `null` to the frontend, you can use the explicit control flow keywords `continue` and `break` on the right side of any fallback gate (`??`, `||`, `catch`) to filter the array directly.
+
+### Skipping Items (`continue`)
+
+The `continue` keyword instructs the engine to **omit this specific item** from the final array, but keep looping and processing the rest of the elements.
+
+```bridge
+o.items <- billingApi.items[] as item {
+  # If the item is missing an ID, skip it entirely.
+  # The frontend will not receive a null object; the item just won't exist.
+  .id <- item.id ?? continue 
+  
+  .name <- item.name
+}
+
+```
+
+### Halting the Array (`break`)
+
+The `break` keyword instructs the engine to **stop processing the array entirely** and return the items processed up to that point.
+
+```bridge
+o.items <- searchApi.results[] as item {
+  .id <- item.id
+  
+  # If we hit an item without a price, halt the entire array map.
+  # Returns only the valid items that came before it.
+  .price <- item.price ?? break 
+}
+
+```
+
+## 3. Common Use Cases
 
 ### Use Case 1: Filtering an Array Before Mapping
 
-Often, an API returns a massive array, but you only want to process items that match specific criteria. Instead of mapping everything and returning nulls, you can pre-filter the data using the built-in `std.filterObject` tool.
-
-The `filterObject` tool takes an `.in` parameter (the source array) and accepts any number of dynamic key-value pairs as the filter criteria.
+While `continue` is great for dropping items based on missing structural fields, sometimes you want to pre-filter a massive array based on explicit logic before mapping it. You can do this using the built-in `std.filterObject` tool.
 
 ```bridge
 bridge Query.getActiveAdmins {
@@ -81,7 +113,7 @@ bridge Query.getActiveAdmins {
 
 ### Use Case 2: Fanout (API Call Per Element)
 
-If you have an array of IDs and you need to fetch detailed information from an external API for _every single item_, you can perform a "Fanout."
+If you have an array of IDs and you need to fetch detailed information from an external API for *every single item*, you can perform a "Fanout."
 
 By combining array mapping with a Pipe and an `alias`, the engine will dynamically fork the tool and fire a parallel API request for every element in the array.
 
@@ -101,12 +133,14 @@ bridge Query.getEnrichedUsers {
 
     # 1. Dynamically build the path for this specific element
     # 2. Pipe the path into the HTTP tool
-    # 3. Cache the result for this element as 'detail'
-    alias getUserDetail.path:"/{id}" as detail
+    # 3. Safely swallow any 500 errors so one bad user doesn't break the list
+    # 4. Cache the result for this element as 'detail'
+    alias getUserDetail?.path:"/{id}" catch null as detail
 
     # Map the resulting HTTP response back to the array
+    # If 'detail' is null (from the catch), we skip this user!
     .id <- id
-    .email <- detail.email
+    .email <- detail.email ?? continue
     .status <- detail.status
   }
 }
@@ -114,8 +148,5 @@ bridge Query.getEnrichedUsers {
 ```
 
 <Aside>
-  **Automatic Parallelism:** Because each element in the array gets its own
-  Shadow Scope, the engine treats every `getUserDetail` alias as an independent
-  node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP
-  requests concurrently!
+**Automatic Parallelism:** Because each element in the array gets its own Shadow Scope, the engine treats every `getUserDetail` alias as an independent node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP requests concurrently!
 </Aside>
