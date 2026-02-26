@@ -50,6 +50,7 @@ export const OnKw      = createToken({ name: "OnKw",      pattern: /on/i,      l
 export const ErrorKw   = createToken({ name: "ErrorKw",   pattern: /error/i,   longer_alt: Identifier });
 export const ForceKw   = createToken({ name: "ForceKw",   pattern: /force/i,   longer_alt: Identifier });
 export const AliasKw   = createToken({ name: "AliasKw",   pattern: /alias/i,   longer_alt: Identifier });
+export const CatchKw   = createToken({ name: "CatchKw",   pattern: /catch/i,   longer_alt: Identifier });
 export const AndKw     = createToken({ name: "AndKw",     pattern: /and/,      longer_alt: Identifier });
 export const OrKw      = createToken({ name: "OrKw",      pattern: /or/,       longer_alt: Identifier });
 export const NotKw     = createToken({ name: "NotKw",     pattern: /not/,      longer_alt: Identifier });
@@ -150,6 +151,7 @@ export const allTokens = [
   ErrorKw,
   ForceKw,
   AliasKw,
+  CatchKw,
   AndKw,
   OrKw,
   NotKw,

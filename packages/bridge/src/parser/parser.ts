@@ -593,7 +593,7 @@ class BridgeParser extends CstParser {
             this.SUBRULE2(this.coalesceAlternative, { LABEL: "elemNullishAlt" });
           });
           // catch error fallback
-          this.OPTION4(() => {
+          this.OPTION5(() => {
             this.CONSUME(CatchKw);
             this.SUBRULE3(this.coalesceAlternative, { LABEL: "elemCatchAlt" });
           });
