@@ -210,9 +210,12 @@ function coerceConstant(raw: string): unknown {
   }
 }
 
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function setNested(obj: any, path: string[], value: any): void {
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
+    if (UNSAFE_KEYS.has(key)) throw new Error(`Unsafe assignment key: ${key}`);
     const nextKey = path[i + 1];
     if (obj[key] == null) {
       obj[key] = /^\d+$/.test(nextKey) ? [] : {};
@@ -220,7 +223,9 @@ function setNested(obj: any, path: string[], value: any): void {
     obj = obj[key];
   }
   if (path.length > 0) {
-    obj[path[path.length - 1]] = value;
+    const finalKey = path[path.length - 1];
+    if (UNSAFE_KEYS.has(finalKey)) throw new Error(`Unsafe assignment key: ${finalKey}`);
+    obj[finalKey] = value;
   }
 }
 
@@ -292,6 +297,7 @@ export class ExecutionTree {
       const parts = name.split(".");
       let current: any = this.toolFns;
       for (const part of parts) {
+        if (UNSAFE_KEYS.has(part)) return undefined;
         if (current == null || typeof current !== "object") {
           current = undefined;
           break;
@@ -779,6 +785,7 @@ export class ExecutionTree {
     
     for (let i = 0; i < ref.path.length; i++) {
       const segment = ref.path[i];
+      if (UNSAFE_KEYS.has(segment)) throw new Error(`Unsafe property traversal: ${segment}`);
       if (Array.isArray(result) && !/^\d+$/.test(segment)) {
         this.logger?.warn?.(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
