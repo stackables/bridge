@@ -347,6 +347,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
     or: "or",
     not: "not",
   };
+  const OP_PREC_SER: Record<string, number> = {
+    "*": 4, "/": 4, "+": 3, "-": 3,
+    "==": 2, "!=": 2, ">": 2, ">=": 2, "<": 2, "<=": 2,
+    "and": 1, "or": 0, "not": -1,
+  };
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
   type ExprForkInfo = {
     op: string;
@@ -525,7 +530,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!exprForks.has(tk) || !outWire.to.element) continue;
 
     // Recursively serialize expression fork tree
-    function serializeElemExprTree(forkTk: string): string | null {
+    function serializeElemExprTree(forkTk: string, parentPrec?: number): string | null {
       const info = exprForks.get(forkTk);
       if (!info) return null;
 
@@ -533,7 +538,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       if (info.aWire) {
         const fromTk = refTrunkKey(info.aWire.from);
         if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-          leftStr = serializeElemExprTree(fromTk);
+          leftStr = serializeElemExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
         } else {
           leftStr = info.aWire.from.element
             ? "ITER." + serPath(info.aWire.from.path)
@@ -548,7 +553,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const bFrom = (info.bWire as FW).from;
         const bTk = refTrunkKey(bFrom);
         if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-          rightStr = serializeElemExprTree(bTk) ?? sRef(bFrom, true);
+          rightStr = serializeElemExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
         } else {
           rightStr = bFrom.element
             ? "ITER." + serPath(bFrom.path)
@@ -560,7 +565,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
       if (leftStr == null) return rightStr;
       if (info.op === "not") return `not ${leftStr}`;
-      return `${leftStr} ${info.op} ${rightStr}`;
+      let result = `${leftStr} ${info.op} ${rightStr}`;
+      const myPrec = OP_PREC_SER[info.op] ?? 0;
+      if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+      return result;
     }
 
     const exprStr = serializeElemExprTree(tk);
@@ -939,7 +947,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       // Element-targeting expressions are handled in serializeArrayElements
       if (outWire.to.element) continue;
       // Recursively serialize an expression fork into infix notation.
-      function serializeExprTree(forkTk: string): string | null {
+      function serializeExprTree(forkTk: string, parentPrec?: number): string | null {
         const info = exprForks.get(forkTk);
         if (!info) return null;
 
@@ -948,7 +956,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         if (info.aWire) {
           const fromTk = refTrunkKey(info.aWire.from);
           if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-            leftStr = serializeExprTree(fromTk);
+            leftStr = serializeExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
           } else {
             leftStr = info.aWire.from.element
               ? "ITER." + serPath(info.aWire.from.path)
@@ -964,7 +972,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
           if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-            rightStr = serializeExprTree(bTk) ?? sRef(bFrom, true);
+            rightStr = serializeExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
           } else {
             rightStr = bFrom.element
               ? "ITER." + serPath(bFrom.path)
@@ -977,7 +985,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
         if (leftStr == null) return rightStr;
         // Unary `not` — only has .a operand
         if (info.op === "not") return `not ${leftStr}`;
-        return `${leftStr} ${info.op} ${rightStr}`;
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
       }
 
       const exprStr = serializeExprTree(tk);

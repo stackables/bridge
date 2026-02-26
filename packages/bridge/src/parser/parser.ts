@@ -30,6 +30,8 @@ import {
   NullCoalesce,
   ErrorCoalesce,
   SafeNav,
+  LParen,
+  RParen,
   LCurly,
   RCurly,
   LSquare,
@@ -409,7 +411,19 @@ class BridgeParser extends CstParser {
                 this.OPTION4(() => {
                   this.CONSUME(NotKw, { LABEL: "notPrefix" });
                 });
-                this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+                this.OR6([
+                  {
+                    // Parenthesized sub-expression as first source
+                    ALT: () => {
+                      this.SUBRULE(this.parenExpr, { LABEL: "firstParenExpr" });
+                    },
+                  },
+                  {
+                    ALT: () => {
+                      this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+                    },
+                  },
+                ]);
                 // Optional expression chain: operator + operand, repeatable
                 this.MANY2(() => {
                   this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
@@ -516,7 +530,18 @@ class BridgeParser extends CstParser {
                 this.OPTION4(() => {
                   this.CONSUME(NotKw, { LABEL: "elemNotPrefix" });
                 });
-                this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+                this.OR4([
+                  {
+                    ALT: () => {
+                      this.SUBRULE2(this.parenExpr, { LABEL: "elemFirstParenExpr" });
+                    },
+                  },
+                  {
+                    ALT: () => {
+                      this.SUBRULE(this.sourceExpr, { LABEL: "elemSource" });
+                    },
+                  },
+                ]);
                 // Optional expression chain
                 this.MANY2(() => {
                   this.SUBRULE(this.exprOperator, { LABEL: "elemExprOp" });
@@ -593,7 +618,18 @@ class BridgeParser extends CstParser {
                 this.OPTION3(() => {
                   this.CONSUME(NotKw, { LABEL: "scopeNotPrefix" });
                 });
-                this.SUBRULE(this.sourceExpr, { LABEL: "scopeSource" });
+                this.OR5([
+                  {
+                    ALT: () => {
+                      this.SUBRULE3(this.parenExpr, { LABEL: "scopeFirstParenExpr" });
+                    },
+                  },
+                  {
+                    ALT: () => {
+                      this.SUBRULE(this.sourceExpr, { LABEL: "scopeSource" });
+                    },
+                  },
+                ]);
                 this.MANY(() => {
                   this.SUBRULE(this.exprOperator, { LABEL: "scopeExprOp" });
                   this.SUBRULE(this.exprOperand, { LABEL: "scopeExprRight" });
@@ -709,7 +745,7 @@ class BridgeParser extends CstParser {
     ]);
   });
 
-  /** Expression operand: a source reference or a literal value */
+  /** Expression operand: a source reference, a literal value, or a parenthesized sub-expression */
   public exprOperand = this.RULE("exprOperand", () => {
     this.OR([
       { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
@@ -717,8 +753,23 @@ class BridgeParser extends CstParser {
       { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
       { ALT: () => this.CONSUME(FalseLiteral, { LABEL: "falseLit" }) },
       { ALT: () => this.CONSUME(NullLiteral, { LABEL: "nullLit" }) },
+      { ALT: () => this.SUBRULE(this.parenExpr, { LABEL: "parenExpr" }) },
       { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceRef" }) },
     ]);
+  });
+
+  /** Parenthesized sub-expression: ( [not] source [op operand]* ) */
+  public parenExpr = this.RULE("parenExpr", () => {
+    this.CONSUME(LParen);
+    this.OPTION(() => {
+      this.CONSUME(NotKw, { LABEL: "parenNotPrefix" });
+    });
+    this.SUBRULE(this.sourceExpr, { LABEL: "parenSource" });
+    this.MANY(() => {
+      this.SUBRULE(this.exprOperator, { LABEL: "parenExprOp" });
+      this.SUBRULE(this.exprOperand, { LABEL: "parenExprRight" });
+    });
+    this.CONSUME(RParen);
   });
 
   /**
@@ -1409,6 +1460,7 @@ function processElementLines(
     iterName?: string,
   ) => NodeRef,
   desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
+  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string) => NodeRef,
 ): void {
   function extractCoalesceAltIterAware(
     altNode: CstNode,
@@ -1517,13 +1569,21 @@ function processElementLines(
         continue;
       }
 
-      const elemSourceNode = sub(elemLine, "elemSource")!;
+      const elemSourceNode = sub(elemLine, "elemSource");
+      const elemFirstParenNode = sub(elemLine, "elemFirstParenExpr");
 
-      // Check if iterator-relative source
-      const elemHeadNode = sub(elemSourceNode, "head")!;
-      const elemPipeSegs = subs(elemSourceNode, "pipeSegment");
-      const { root: elemSrcRoot, segments: elemSrcSegs } =
-        extractAddressPath(elemHeadNode);
+      // Check if iterator-relative source (only for non-paren sources)
+      let elemHeadNode: CstNode | undefined;
+      let elemPipeSegs: CstNode[] = [];
+      let elemSrcRoot: string = "";
+      let elemSrcSegs: string[] = [];
+      if (elemSourceNode) {
+        elemHeadNode = sub(elemSourceNode, "head")!;
+        elemPipeSegs = subs(elemSourceNode, "pipeSegment");
+        const extracted = extractAddressPath(elemHeadNode);
+        elemSrcRoot = extracted.root;
+        elemSrcSegs = extracted.segments;
+      }
 
       // ── Nested array mapping: .legs <- j.legs[] as l { ... } ──
       const nestedArrayNode = (
@@ -1541,7 +1601,7 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          innerFromRef = buildSourceExpr(elemSourceNode, elemLineNum);
+          innerFromRef = buildSourceExpr(elemSourceNode!, elemLineNum);
         }
         const innerToRef: NodeRef = {
           module: SELF_MODULE,
@@ -1578,6 +1638,7 @@ function processElementLines(
           processLocalBindings,
           desugarTemplateStringFn,
           desugarNotFn,
+          resolveParenExprFn,
         );
         nestedCleanup?.();
         continue;
@@ -1598,7 +1659,17 @@ function processElementLines(
       // Compute condition ref (expression chain result or plain source)
       let elemCondRef: NodeRef;
       let elemCondIsPipeFork: boolean;
-      if (elemExprOps.length > 0 && desugarExprChain) {
+      if (elemFirstParenNode && resolveParenExprFn) {
+        // First source is a parenthesized sub-expression
+        const parenRef = resolveParenExprFn(elemFirstParenNode, elemLineNum, iterName);
+        if (elemExprOps.length > 0 && desugarExprChain) {
+          const elemExprRights = subs(elemLine, "elemExprRight");
+          elemCondRef = desugarExprChain(parenRef, elemExprOps, elemExprRights, elemLineNum, iterName);
+        } else {
+          elemCondRef = parenRef;
+        }
+        elemCondIsPipeFork = true;
+      } else if (elemExprOps.length > 0 && desugarExprChain) {
         // Expression in element line — desugar then merge with fallback path
         const elemExprRights = subs(elemLine, "elemExprRight");
         let leftRef: NodeRef;
@@ -1611,7 +1682,7 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          leftRef = buildSourceExpr(elemSourceNode, elemLineNum);
+          leftRef = buildSourceExpr(elemSourceNode!, elemLineNum);
         }
         elemCondRef = desugarExprChain(
           leftRef,
@@ -1631,7 +1702,7 @@ function processElementLines(
         };
         elemCondIsPipeFork = false;
       } else {
-        elemCondRef = buildSourceExpr(elemSourceNode, elemLineNum);
+        elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum);
         elemCondIsPipeFork =
           elemCondRef.instance != null &&
           elemCondRef.path.length === 0 &&
@@ -1784,6 +1855,7 @@ function processElementLines(
         extractTernaryBranchFn,
         desugarTemplateStringFn,
         desugarNotFn,
+        resolveParenExprFn,
       );
     }
   }
@@ -1828,6 +1900,7 @@ function processElementScopeLines(
     iterName?: string,
   ) => NodeRef,
   desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
+  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string) => NodeRef,
 ): void {
   function extractCoalesceAltIterAware(
     altNode: CstNode,
@@ -1880,6 +1953,7 @@ function processElementScopeLines(
         extractTernaryBranchFn,
         desugarTemplateStringFn,
         desugarNotFn,
+        resolveParenExprFn,
       );
       continue;
     }
@@ -1951,15 +2025,33 @@ function processElementScopeLines(
       }
 
       // Normal source expression
-      const scopeSourceNode = sub(scopeLine, "scopeSource")!;
-      const scopeHeadNode = sub(scopeSourceNode, "head")!;
-      const scopePipeSegs = subs(scopeSourceNode, "pipeSegment");
-      const { root: srcRoot, segments: srcSegs } = extractAddressPath(scopeHeadNode);
+      const scopeSourceNode = sub(scopeLine, "scopeSource");
+      const scopeFirstParenNode = sub(scopeLine, "scopeFirstParenExpr");
+      let scopeHeadNode: CstNode | undefined;
+      let scopePipeSegs: CstNode[] = [];
+      let srcRoot: string = "";
+      let srcSegs: string[] = [];
+      if (scopeSourceNode) {
+        scopeHeadNode = sub(scopeSourceNode, "head")!;
+        scopePipeSegs = subs(scopeSourceNode, "pipeSegment");
+        const extracted = extractAddressPath(scopeHeadNode);
+        srcRoot = extracted.root;
+        srcSegs = extracted.segments;
+      }
 
       const exprOps = subs(scopeLine, "scopeExprOp");
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
-      if (exprOps.length > 0 && desugarExprChain) {
+      if (scopeFirstParenNode && resolveParenExprFn) {
+        const parenRef = resolveParenExprFn(scopeFirstParenNode, scopeLineNum, iterName);
+        if (exprOps.length > 0 && desugarExprChain) {
+          const exprRights = subs(scopeLine, "scopeExprRight");
+          condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum, iterName);
+        } else {
+          condRef = parenRef;
+        }
+        condIsPipeFork = true;
+      } else if (exprOps.length > 0 && desugarExprChain) {
         const exprRights = subs(scopeLine, "scopeExprRight");
         let leftRef: NodeRef;
         if (srcRoot === iterName && scopePipeSegs.length === 0) {
@@ -1971,7 +2063,7 @@ function processElementScopeLines(
             path: srcSegs,
           };
         } else {
-          leftRef = buildSourceExpr(scopeSourceNode, scopeLineNum);
+          leftRef = buildSourceExpr(scopeSourceNode!, scopeLineNum);
         }
         condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum, iterName);
         condIsPipeFork = true;
@@ -1985,7 +2077,7 @@ function processElementScopeLines(
         };
         condIsPipeFork = false;
       } else {
-        condRef = buildSourceExpr(scopeSourceNode, scopeLineNum);
+        condRef = buildSourceExpr(scopeSourceNode!, scopeLineNum);
         condIsPipeFork =
           condRef.instance != null &&
           condRef.path.length === 0 &&
@@ -3040,7 +3132,64 @@ function buildBridgeBody(
       const ref = buildSourceExpr(srcNode, lineNum);
       return { kind: "ref", ref };
     }
+    if (c.parenExpr) {
+      const parenNode = (c.parenExpr as CstNode[])[0];
+      const ref = resolveParenExpr(parenNode, lineNum, iterName);
+      return { kind: "ref", ref };
+    }
     throw new Error(`Line ${lineNum}: Invalid expression operand`);
+  }
+
+  /**
+   * Resolve a parenthesized sub-expression `( [not] source [op operand]* )`
+   * into a single NodeRef by recursively desugaring the inner chain.
+   */
+  function resolveParenExpr(
+    parenNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ): NodeRef {
+    const pc = parenNode.children;
+    const innerSourceNode = sub(parenNode, "parenSource")!;
+    const innerOps = subs(parenNode, "parenExprOp");
+    const innerRights = subs(parenNode, "parenExprRight");
+    const hasNot = !!(pc.parenNotPrefix as IToken[] | undefined)?.length;
+
+    // Build the inner source ref (handling iterator-relative refs)
+    let innerRef: NodeRef;
+    if (iterName) {
+      const headNode = sub(innerSourceNode, "head")!;
+      const pipeSegs = subs(innerSourceNode, "pipeSegment");
+      const { root, segments } = extractAddressPath(headNode);
+      if (root === iterName && pipeSegs.length === 0) {
+        innerRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: segments,
+        };
+      } else {
+        innerRef = buildSourceExpr(innerSourceNode, lineNum);
+      }
+    } else {
+      innerRef = buildSourceExpr(innerSourceNode, lineNum);
+    }
+
+    // Desugar the inner expression chain if there are operators
+    let resultRef: NodeRef;
+    if (innerOps.length > 0) {
+      resultRef = desugarExprChain(innerRef, innerOps, innerRights, lineNum, iterName);
+    } else {
+      resultRef = innerRef;
+    }
+
+    // Apply not prefix if present
+    if (hasNot) {
+      resultRef = desugarNot(resultRef, lineNum);
+    }
+
+    return resultRef;
   }
 
   /**
@@ -3304,20 +3453,30 @@ function buildBridgeBody(
         }
 
         // Normal source expression
-        const firstSourceNode = sub(scopeLine, "scopeSource")!;
+        const firstSourceNode = sub(scopeLine, "scopeSource");
+        const scopeFirstParenNode = sub(scopeLine, "scopeFirstParenExpr");
         const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
         const exprOps = subs(scopeLine, "scopeExprOp");
 
         let condRef: NodeRef;
         let condIsPipeFork: boolean;
-        if (exprOps.length > 0) {
+        if (scopeFirstParenNode) {
+          const parenRef = resolveParenExpr(scopeFirstParenNode, scopeLineNum);
+          if (exprOps.length > 0) {
+            const exprRights = subs(scopeLine, "scopeExprRight");
+            condRef = desugarExprChain(parenRef, exprOps, exprRights, scopeLineNum);
+          } else {
+            condRef = parenRef;
+          }
+          condIsPipeFork = true;
+        } else if (exprOps.length > 0) {
           const exprRights = subs(scopeLine, "scopeExprRight");
-          const leftRef = buildSourceExpr(firstSourceNode, scopeLineNum);
+          const leftRef = buildSourceExpr(firstSourceNode!, scopeLineNum);
           condRef = desugarExprChain(leftRef, exprOps, exprRights, scopeLineNum);
           condIsPipeFork = true;
         } else {
-          const pipeSegs = subs(firstSourceNode, "pipeSegment");
-          condRef = buildSourceExpr(firstSourceNode, scopeLineNum);
+          const pipeSegs = subs(firstSourceNode!, "pipeSegment");
+          condRef = buildSourceExpr(firstSourceNode!, scopeLineNum);
           condIsPipeFork =
             condRef.instance != null &&
             condRef.path.length === 0 &&
@@ -3569,8 +3728,11 @@ function buildBridgeBody(
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
-      const firstSourceNode = sub(wireNode, "firstSource")!;
-      const srcRef = buildSourceExpr(firstSourceNode, lineNum);
+      const firstSourceNode = sub(wireNode, "firstSource");
+      const firstParenNode = sub(wireNode, "firstParenExpr");
+      const srcRef = firstParenNode
+        ? resolveParenExpr(firstParenNode, lineNum)
+        : buildSourceExpr(firstSourceNode!, lineNum);
       wires.push({ from: srcRef, to: toRef });
 
       const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
@@ -3596,17 +3758,18 @@ function buildBridgeBody(
         processLocalBindings,
         desugarTemplateString,
         desugarNot,
+        resolveParenExpr,
       );
       cleanup();
       continue;
     }
 
-    // ── Build primary source (expression or plain ref) ──
-    const firstSourceNode = sub(wireNode, "firstSource")!;
+    const firstSourceNode = sub(wireNode, "firstSource");
+    const firstParenNode = sub(wireNode, "firstParenExpr");
     const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
     // Check for safe navigation (?.) on the head address path
-    const headNode = sub(firstSourceNode, "head");
+    const headNode = firstSourceNode ? sub(firstSourceNode, "head") : undefined;
     const isSafe = headNode
       ? !!(headNode.children.safeNav as IToken[] | undefined)?.length
       : false;
@@ -3616,15 +3779,25 @@ function buildBridgeBody(
     // Compute condition ref (expression chain result or plain source)
     let condRef: NodeRef;
     let condIsPipeFork: boolean;
-    if (exprOps.length > 0) {
+    if (firstParenNode) {
+      // First source is a parenthesized sub-expression
+      const parenRef = resolveParenExpr(firstParenNode, lineNum);
+      if (exprOps.length > 0) {
+        const exprRights = subs(wireNode, "exprRight");
+        condRef = desugarExprChain(parenRef, exprOps, exprRights, lineNum);
+      } else {
+        condRef = parenRef;
+      }
+      condIsPipeFork = true;
+    } else if (exprOps.length > 0) {
       // It's a math/comparison expression — desugar it.
       const exprRights = subs(wireNode, "exprRight");
-      const leftRef = buildSourceExpr(firstSourceNode, lineNum);
+      const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
       condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
       condIsPipeFork = true;
     } else {
-      const pipeSegs = subs(firstSourceNode, "pipeSegment");
-      condRef = buildSourceExpr(firstSourceNode, lineNum);
+      const pipeSegs = subs(firstSourceNode!, "pipeSegment");
+      condRef = buildSourceExpr(firstSourceNode!, lineNum);
       condIsPipeFork =
         condRef.instance != null &&
         condRef.path.length === 0 &&

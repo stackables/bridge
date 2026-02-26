@@ -73,27 +73,37 @@ Use Python/SQL-style keywords for clear, unambiguous boolean expressions. These 
 * `and`: Logical AND — returns `true` only if both sides are truthy.
 * `or`: Logical OR — returns `true` if either side is truthy.
 * `not`: Logical NOT — inverts the value (prefix operator).
+* `()`: Parentheses for grouping — overrides default operator precedence.
 
 ```bridge
-# Inline policy evaluation
-o.isApproved <- i.age > 18 and i.verified or i.role == "ADMIN"
-o.requireMFA <- not i.isTrusted
+# Inline policy evaluation with parentheses for grouping
+o.isApproved <- (i.age > 18 and i.verified) or i.role == "ADMIN"
+o.requireMFA <- not (i.isTrusted)
+
+# Override precedence: add before multiply
+o.total <- (i.price + i.discount) * i.qty
 
 ```
 
 ### Precedence and Chaining
 
-Standard operator precedence applies: multiplication/division bind tightest, then addition/subtraction, then comparisons, then `and`, and finally `or` binds loosest. You can chain as many operators as you need.
+Standard operator precedence applies: multiplication/division bind tightest, then addition/subtraction, then comparisons, then `and`, and finally `or` binds loosest. Use parentheses `()` to override the default precedence when needed.
 
 ```bridge
 # Evaluates as: i.base + (i.tax * 2)
 o.total <- i.base + i.tax * 2
 
+# Use parentheses to force addition first: (i.base + i.tax) * 2
+o.total <- (i.base + i.tax) * 2
+
 # Evaluates as: (i.price * i.qty) > 100
 o.isExpensive <- i.price * i.qty > 100
 
-# Evaluates as: ((i.age > 18) and i.verified) or (i.role == "ADMIN")
+# Without parens: (age > 18 and verified) or (role == "ADMIN")
 o.allowed <- i.age > 18 and i.verified or i.role == "ADMIN"
+
+# With parens: age > 18 and (verified or role == "ADMIN")
+o.strict <- i.age > 18 and (i.verified or i.role == "ADMIN")
 
 ```
 

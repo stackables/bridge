@@ -736,8 +736,8 @@ bridge Query.evaluate {
   with input as i
   with output as o
 
-  o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
-  o.requireMFA <- not i.verified
+  o.approved <- (i.age > 18 and i.verified) or i.role == "ADMIN"
+  o.requireMFA <- not (i.verified)
 }`,
     queries: [
       {

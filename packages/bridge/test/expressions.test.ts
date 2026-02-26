@@ -850,3 +850,204 @@ bridge Query.test {
     assert.ok(reparsed.length > 0, "reparsed successfully");
   });
 });
+
+// ── Parenthesized expressions ─────────────────────────────────────────────────
+
+describe("parenthesized expressions: parser desugaring", () => {
+  test("(A and B) or C — groups correctly", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.a and i.b) or i.c
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("or"), "has or");
+  });
+
+  test("A or (B and C) — groups correctly", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("or"), "has or");
+  });
+
+  test("not (A and B) — not wraps grouped expr", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not (i.a and i.b)
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("not"), "has not");
+  });
+
+  test("(i.price + i.discount) * i.qty — math with parens", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.price + i.discount) * i.qty
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("add"), "has add (from parens)");
+    assert.ok(fields.includes("multiply"), "has multiply");
+  });
+});
+
+describe("parenthesized expressions: end-to-end", () => {
+  const boolTypeDefs = /* GraphQL */ `
+    type Query { check(a: Boolean!, b: Boolean!, c: Boolean!): CheckResult }
+    type CheckResult { result: Boolean }
+  `;
+
+  test("A or (B and C): true or (false and false) = true", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  test("A or (B and C): false or (true and true) = true", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: false, b: true, c: true) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  test("(A or B) and C: (true or false) and false = false", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- (i.a or i.b) and i.c
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, false);
+  });
+
+  test("not (A and B): not (true and false) = true", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- not (i.a and i.b)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  const mathTypeDefs2 = /* GraphQL */ `
+    type Query { calc(price: Int!, discount: Int!, qty: Int!): CalcResult }
+    type CalcResult { total: Int }
+  `;
+
+  test("(price + discount) * qty: (10 + 5) * 3 = 45", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- (i.price + i.discount) * i.qty
+}`);
+    const gateway = createGateway(mathTypeDefs2, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ calc(price: 10, discount: 5, qty: 3) { total } }`),
+    });
+    assert.equal(r.data.calc.total, 45);
+  });
+});
+
+// ── Parenthesized expressions: serializer round-trip ──────────────────────────
+
+describe("parenthesized expressions: serializer round-trip", () => {
+  test("(A + B) * C round-trips with parentheses", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.a + i.b) * i.c
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("("), "serialized contains '(' for grouping");
+    assert.ok(serialized.includes(")"), "serialized contains ')' for grouping");
+    // Re-parse to ensure correctness
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
+    const src = `version 1.4
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    // and already binds tighter than or, so parens are omitted in serialized form
+    assert.ok(serialized.includes(" or "), "serialized contains 'or'");
+    assert.ok(serialized.includes(" and "), "serialized contains 'and'");
+    // Re-parse to ensure correctness
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+});

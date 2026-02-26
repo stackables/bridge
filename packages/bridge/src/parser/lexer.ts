@@ -69,6 +69,8 @@ export const GreaterThan   = createToken({ name: "GreaterThan",   pattern: />/ }
 export const LessThan      = createToken({ name: "LessThan",      pattern: /</ });
 export const Star          = createToken({ name: "Star",          pattern: /\*/ });
 export const Plus          = createToken({ name: "Plus",          pattern: /\+/ });
+export const LParen        = createToken({ name: "LParen",        pattern: /\(/ });
+export const RParen        = createToken({ name: "RParen",        pattern: /\)/ });
 export const LCurly        = createToken({ name: "LCurly",        pattern: /\{/ });
 export const RCurly        = createToken({ name: "RCurly",        pattern: /\}/ });
 export const LSquare       = createToken({ name: "LSquare",       pattern: /\[/ });
@@ -121,6 +123,8 @@ export const allTokens = [
   LessThan,
   Star,
   Plus,
+  LParen,
+  RParen,
   LCurly,
   RCurly,
   LSquare,
