@@ -1,0 +1,121 @@
+---
+title: The Egress Gateway
+description: How to centralize and control all your third-party API calls with The Bridge
+---
+import { Aside } from '@astrojs/starlight/components';
+
+
+In a modern microservice architecture, outbound traffic (egress) usually becomes a decentralized mess. Your Billing service talks to Stripe, your Auth service talks to Twilio, and five different microservices are individually importing the SendGrid SDK to send emails.
+
+
+
+This sprawl creates serious operational blind spots:
+
+* **Scattered Secrets:** API keys are distributed across dozens of repositories and environment variables.
+* **Vendor Lock-in:** Changing an email provider requires refactoring, testing, and deploying five separate microservices.
+* **Inconsistent Policies:** Every team implements retries, timeouts, and rate-limiting differently.
+
+By deploying The Bridge as an **Egress Gateway**, you force all third-party outbound traffic through a single, declarative chokepoint. Internal services no longer talk to the outside world; they talk to your internal Bridge API.
+
+<Aside type="note">
+The examples below use intentionally simplified payloads. In a production Egress Gateway, you would also leverage the Engine's context to inject dynamic trace IDs and enforce organizational rate-limiting policies.
+</Aside>
+
+Here is how The Bridge brings order to outbound traffic.
+
+## Provider Agnosticism (Vendor Swap)
+
+When internal services rely on a central Bridge gateway, they agree on a standard internal contract (e.g., a `Mutation.sendEmail` GraphQL field). The Bridge file acts as the translation layer between your internal contract and the external vendor's specific API quirks.
+
+If marketing decides to switch from SendGrid to Mailgun, **no internal microservices need to change their code.** You simply update the `.bridge` mapping.
+
+**The SendGrid Implementation:**
+
+```bridge
+version 1.4
+
+tool emailProvider from std.httpCall {
+  .baseUrl = "https://api.sendgrid.com/v3"
+  # Inject secrets securely from the engine context, not the codebase
+  .headers.Authorization = context.secrets.SENDGRID_API_KEY
+}
+
+bridge Mutation.sendEmail {
+  with emailProvider as api
+  with input as i
+  with output as o
+  
+  # Map your clean internal input to SendGrid's nested payload
+  api.body.personalizations[0].to[0].email <- i.to
+  api.body.subject <- i.subject
+  api.body.content[0].type = "text/plain"
+  api.body.content[0].value <- i.body
+
+  force api
+  o.success = "ok"
+}
+
+```
+
+**The Mailgun Swap (Updated in seconds):**
+
+```bridge
+# ... tool setup for Mailgun using context.secrets.MAILGUN_API_KEY ...
+
+bridge Mutation.sendEmail {
+  with mailgunProvider as api
+  with input as i
+  with output as o
+
+  # Mailgun uses form-data instead of nested JSON
+  api.formData.to <- i.to
+  api.formData.subject <- i.subject
+  api.formData.text <- i.body
+
+  force api
+  o.success = "ok"
+}
+
+```
+
+Your internal services keep firing the exact same request. The Bridge handles the structural translation entirely in configuration.
+
+## Centralized Secret Injection
+
+Third-party API keys are some of the most sensitive credentials in your stack. When using an Egress Gateway, internal services do not need to know the Stripe API key or the Twilio token.
+
+Because The Bridge executes at the gateway level, credentials are injected dynamically via the Engine's `context` right before the external call is made. If an API key needs to be rotated, you update it in one central location (the Gateway's environment), instantly securing all downstream services.
+
+## A Familiar, Unified Internal API
+
+Instead of forcing your microservices to manage the idiosyncrasies of 20 different external REST APIs, SOAP XML payloads, or bloated vendor SDKs, they simply query a single, strongly-typed GraphQL schema.
+
+Because your Bridge Egress Gateway is just a GraphQL server under the hood, you instantly unlock the power of the broader GraphQL ecosystem. At the server level, you can easily wrap your Bridge endpoints with:
+
+* Internal corporate authentication (like mutual TLS or JWTs).
+* Standardized rate-limiting.
+* Query caching (e.g., via Redis).
+* Automatic retry logic for flaky third-party endpoints.
+
+Your microservices get a reliable, predictable API they can easily integrate against, completely shielding them from the strangeness of the external providers.
+
+## Dynamic Routing & A/B Testing
+
+What happens when you want to migrate providers slowly, or use different vendors for different regions?
+
+The Bridge isn't limited to a 1:1 mapping. You can mount multiple `.bridge` files in parallel for the exact same GraphQL resolver and direct traffic based on the incoming request context (such as headers, feature flags, or tenant IDs).
+
+For example, you can seamlessly:
+
+* Route 10% of traffic to Mailgun and 90% to SendGrid to A/B test deliverability.
+* Direct enterprise customers to a dedicated, high-tier SMS provider while free-tier users route to a cheaper alternative.
+* Instantly failover to a backup provider if your primary vendor experiences an outage.
+
+*To learn how to implement traffic shaping and context-based evaluation, check out our guide on **[Dynamic Routing](/advanced/dynamic-routing/)**.*
+
+## Summary: Control the Perimeter
+
+By using The Bridge as an Egress Gateway, you decouple your business logic from external vendor SDKs.
+
+* **Internal teams** get clean, strongly-typed internal APIs with uniform reliability.
+* **Platform/DevOps teams** get a single surface to monitor outbound traffic, dynamically route requests, rotate credentials, and manage third-party vendor transitions without coordinating massive codebase refactors.
