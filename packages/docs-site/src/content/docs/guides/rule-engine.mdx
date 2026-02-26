@@ -58,7 +58,7 @@ bridge Query.canInitiateTransfer {
 ## The "Fan-In"
 ### Inline Rule Evaluation
 
-Once the engine has gathered the enriched data, it evaluates the rules. Because The Bridge syntax natively supports logical operators (`==`, `>`, `<`, `!=`) and safe fallbacks (`||`, `??`), you can express straightforward business rules entirely inline.
+Once the engine has gathered the enriched data, it evaluates the rules. Because The Bridge syntax natively supports logical operators (`==`, `>`, `<`, `!=`) and safe fallbacks (`||`, `??`, `catch`), you can express straightforward business rules entirely inline.
 
 This makes your policies instantly readable to product managers and security teams without digging through TypeScript code.
 
@@ -71,14 +71,14 @@ bridge Query.canInitiateTransfer {
   # Determine individual policy flags with safe fallbacks
   # (If the risk API fails or times out, assume maximum risk: 100)
   o.flags {
-    .isKycValid <- kyc.status == "VERIFIED" ?? false
-    .isHighRisk <- risk.score ?? 100 > 80
+    .isKycValid <- kyc.status == "VERIFIED" catch false
+    .isHighRisk <- risk.score catch 100 > 80
     .isMicroTx  <- i.amount <= 5.00
   }
 
   # 3. THE DECISION: Combine flags using logical coalescing
   # Approve immediately if it's a micro-transaction, OR if KYC is valid
-  o.isApproved <- i.amount <= 5.00 OR kyc.status == "VERIFIED" ?? false
+  o.isApproved <- i.amount <= 5.00 OR kyc.status == "VERIFIED" catch false
 }
 
 ```

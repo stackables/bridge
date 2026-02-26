@@ -448,6 +448,79 @@ bridge Query.products {
     // 1 call for top-level upperCat + 2 calls for per-element upper = 3 total
     assert.equal(ucCallCount, 3);
   });
+
+  test("alias with || falsy fallback", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with output as o
+  with input as i
+
+  alias i.nickname || "Guest" as displayName
+
+  o.name <- displayName
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { nickname: "Alice" });
+    assert.equal(d1.name, "Alice");
+    const { data: d2 } = await run(bridgeText, "Query.test", {});
+    assert.equal(d2.name, "Guest");
+  });
+
+  test("alias with ?? nullish fallback", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with output as o
+  with input as i
+
+  alias i.score ?? 0 as score
+
+  o.score <- score
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { score: 42 });
+    assert.equal(d1.score, 42);
+    const { data: d2 } = await run(bridgeText, "Query.test", {});
+    assert.equal(d2.score, 0);
+  });
+
+  test("alias with catch error boundary", async () => {
+    let callCount = 0;
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with riskyApi as api
+  with output as o
+
+  alias api.value catch 99 as safeVal
+
+  o.result <- safeVal
+}`;
+    const tools: Record<string, any> = {
+      riskyApi: () => {
+        callCount++;
+        throw new Error("Service unavailable");
+      },
+    };
+    const { data } = await run(bridgeText, "Query.test", {}, tools);
+    assert.equal(data.result, 99);
+    assert.equal(callCount, 1);
+  });
+
+  test("alias with ?. safe execution", async () => {
+    const bridgeText = `version 1.4
+bridge Query.test {
+  with riskyApi as api
+  with output as o
+
+  alias api?.value as safeVal
+
+  o.result <- safeVal || "fallback"
+}`;
+    const tools: Record<string, any> = {
+      riskyApi: () => {
+        throw new Error("Service unavailable");
+      },
+    };
+    const { data } = await run(bridgeText, "Query.test", {}, tools);
+    assert.equal(data.result, "fallback");
+  });
 });
 
 // ── Constant wires ──────────────────────────────────────────────────────────

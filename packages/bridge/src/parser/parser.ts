@@ -3760,7 +3760,7 @@ function buildBridgeBody(
           if (handleRes.has(alias)) {
             throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
           }
-          const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+          const { ref: sourceRef, safe: aliasSafe } = buildSourceExprSafe(sourceNode, aliasLineNum);
           const localRes: HandleResolution = {
             module: "__local",
             type: "Shadow",
@@ -3773,7 +3773,7 @@ function buildBridgeBody(
             field: alias,
             path: [],
           };
-          wires.push({ from: sourceRef, to: localToRef });
+          wires.push({ from: sourceRef, to: localToRef, ...(aliasSafe ? { safe: true as const } : {}) });
         }
         processScopeLines(nestedScopeLines, targetRoot, fullSegs);
         continue;
@@ -4043,7 +4043,7 @@ function buildBridgeBody(
         throw new Error(`Line ${lineNum}: Duplicate handle name "${alias}"`);
       }
 
-      const sourceRef = buildSourceExpr(sourceNode, lineNum);
+      const { ref: sourceRef, safe: aliasSafe } = buildSourceExprSafe(sourceNode, lineNum);
 
       // Process coalesce modifiers on alias
       let aliasFalsyFallback: string | undefined;
@@ -4110,6 +4110,7 @@ function buildBridgeBody(
         path: [],
       };
       const aliasAttrs = {
+        ...(aliasSafe ? { safe: true as const } : {}),
         ...(aliasFalsyFallback ? { falsyFallback: aliasFalsyFallback } : {}),
         ...(aliasFalsyControl ? { falsyControl: aliasFalsyControl } : {}),
         ...(aliasNullishFallback ? { nullishFallback: aliasNullishFallback } : {}),
@@ -4168,7 +4169,7 @@ function buildBridgeBody(
         if (handleRes.has(alias)) {
           throw new Error(`Line ${aliasLineNum}: Duplicate handle name "${alias}"`);
         }
-        const sourceRef = buildSourceExpr(sourceNode, aliasLineNum);
+        const { ref: sourceRef, safe: aliasSafe } = buildSourceExprSafe(sourceNode, aliasLineNum);
         const localRes: HandleResolution = {
           module: "__local",
           type: "Shadow",
@@ -4181,7 +4182,7 @@ function buildBridgeBody(
           field: alias,
           path: [],
         };
-        wires.push({ from: sourceRef, to: localToRef });
+        wires.push({ from: sourceRef, to: localToRef, ...(aliasSafe ? { safe: true as const } : {}) });
       }
       const scopeLines = subs(wireNode, "pathScopeLine");
       processScopeLines(scopeLines, targetRoot, targetSegs);
