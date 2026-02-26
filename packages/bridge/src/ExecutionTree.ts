@@ -567,20 +567,11 @@ export class ExecutionTree {
         return input;
       }
 
-      // Local binding: block-scoped `with <source> as <alias>` inside array maps.
-      // The wire resolves the source and stores the result — no tool call needed.
-      // For path=[] wires the resolved value may be a primitive (e.g. string from
+      // Local binding or logic node: the wire resolves the source and stores
+      // the result — no tool call needed.  For path=[] wires the resolved
+      // value may be a primitive (boolean from condAnd/condOr, string from
       // a pipe tool like upperCase), so return the resolved value directly.
-      if (target.module === "__local") {
-        for (const [path, value] of resolved) {
-          if (path.length === 0) return value;
-        }
-        return input;
-      }
-
-      // Logic nodes: short-circuit and/or intermediate results.
-      // The condAnd/condOr wire targets path=[] and resolveWires returns the boolean.
-      if (target.field === "__and" || target.field === "__or") {
+      if (target.module === "__local" || target.field === "__and" || target.field === "__or") {
         for (const [path, value] of resolved) {
           if (path.length === 0) return value;
         }
