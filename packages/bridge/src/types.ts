@@ -35,6 +35,7 @@ export type Wire =
       from: NodeRef;
       to: NodeRef;
       pipe?: true;
+      safe?: true;
       nullFallback?: string;
       fallback?: string;
       fallbackRef?: NodeRef;
@@ -46,6 +47,22 @@ export type Wire =
       thenValue?: string;
       elseRef?: NodeRef;
       elseValue?: string;
+      to: NodeRef;
+      nullFallback?: string;
+      fallback?: string;
+      fallbackRef?: NodeRef;
+    }
+  | {
+      /** Short-circuit logical AND: evaluate left first, only evaluate right if left is truthy */
+      condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
+      to: NodeRef;
+      nullFallback?: string;
+      fallback?: string;
+      fallbackRef?: NodeRef;
+    }
+  | {
+      /** Short-circuit logical OR: evaluate left first, only evaluate right if left is falsy */
+      condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
       to: NodeRef;
       nullFallback?: string;
       fallback?: string;

@@ -103,3 +103,40 @@ o.city <- geo.cityName      # Cost 1: Expensive HTTP call
 If the user provides `city` in their GraphQL arguments, the engine returns it instantly. The expensive geocoding API is **never called**.
 
 Just like `||`, overdefinition uses short-circuit behavior to save costs—but it does so automatically based on the engine's cost metrics rather than the order you wrote the code!
+
+## 4. Safe Execution (`?.`)
+
+The **Safe Execution** modifier (`?.`) acts as an error boundary for individual tool calls. Appending `?.` before a path segment tells the engine: *"If this tool throws an error, swallow it and return `undefined` instead of crashing."*
+
+This perfectly mirrors TypeScript's Optional Chaining syntax.
+
+```bridge
+# STRICT: If billingApi crashes, the field crashes.
+o.receipt <- billingApi.charge
+
+# SAFE: If avatarApi crashes, swallow the error and return undefined.
+# Then ?? provides a default value.
+o.avatar <- avatarApi?.url || "https://default.png"
+
+```
+
+### Combining with Fallbacks
+
+`?.` pairs naturally with `||` to build resilient wires:
+
+```bridge
+# Safe execution + null coalesce: swallow errors, then fall back
+o.avatar <- avatarApi?.url || "https://default.png"
+
+```
+
+**How the engine reads this:**
+
+1. Call `avatarApi`. If it throws, return `undefined`.
+2. Access `.url` on the result.
+3. If the value is `null` or `undefined`, return `"https://default.png"`.
+
+| Syntax | Skips `null`? | Swallows 500 Errors? |
+| --- | --- | --- |
+| `api.val \|\|` | ✅ Yes | ❌ No (Crashes) |
+| `api?.val \|\|` | ✅ Yes | ✅ Yes (Returns `undefined`) |

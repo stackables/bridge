@@ -343,12 +343,22 @@ function serializeBridgeBlock(bridge: Bridge): string {
     gte: ">=",
     lt: "<",
     lte: "<=",
+    __and: "and",
+    __or: "or",
+    not: "not",
+  };
+  const OP_PREC_SER: Record<string, number> = {
+    "*": 4, "/": 4, "+": 3, "-": 3,
+    "==": 2, "!=": 2, ">": 2, ">=": 2, "<": 2, "<=": 2,
+    "and": 1, "or": 0, "not": -1,
   };
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
   type ExprForkInfo = {
     op: string;
     bWire: Wire | undefined;
     aWire: FW | undefined;
+    /** For condAnd/condOr wires: the logic wire itself */
+    logicWire?: Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }>;
   };
   const exprForks = new Map<string, ExprForkInfo>();
   const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
@@ -357,6 +367,22 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!ph.handle.startsWith("__expr_")) continue;
     const op = FN_TO_OP[ph.baseTrunk.field];
     if (!op) continue;
+
+    // For condAnd/condOr wires (field === "__and" or "__or")
+    if (ph.baseTrunk.field === "__and" || ph.baseTrunk.field === "__or") {
+      const logicWire = bridge.wires.find(
+        (w) => {
+          const prop = ph.baseTrunk.field === "__and" ? "condAnd" : "condOr";
+          return prop in w && refTrunkKey(w.to) === ph.key;
+        },
+      ) as Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }> | undefined;
+
+      if (logicWire) {
+        exprForks.set(ph.key, { op, bWire: undefined, aWire: undefined, logicWire });
+        exprPipeWireSet.add(logicWire);
+      }
+      continue;
+    }
 
     // Find the .a and .b wires for this fork
     let aWire: FW | undefined;
@@ -522,15 +548,50 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!exprForks.has(tk) || !outWire.to.element) continue;
 
     // Recursively serialize expression fork tree
-    function serializeElemExprTree(forkTk: string): string | null {
+    function serializeElemExprTree(forkTk: string, parentPrec?: number): string | null {
       const info = exprForks.get(forkTk);
       if (!info) return null;
+
+      // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+      if (info.logicWire) {
+        const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+        let leftStr: string;
+        const leftTk = refTrunkKey(logic.leftRef);
+        if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+          leftStr = serializeElemExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+        } else {
+          leftStr = logic.leftRef.element
+            ? "ITER." + serPath(logic.leftRef.path)
+            : sRef(logic.leftRef, true);
+        }
+
+        let rightStr: string;
+        if (logic.rightRef) {
+          const rightTk = refTrunkKey(logic.rightRef);
+          if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+            rightStr = serializeElemExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+          } else {
+            rightStr = logic.rightRef.element
+              ? "ITER." + serPath(logic.rightRef.path)
+              : sRef(logic.rightRef, true);
+          }
+        } else if (logic.rightValue != null) {
+          rightStr = logic.rightValue;
+        } else {
+          rightStr = "0";
+        }
+
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
+      }
 
       let leftStr: string | null = null;
       if (info.aWire) {
         const fromTk = refTrunkKey(info.aWire.from);
         if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-          leftStr = serializeElemExprTree(fromTk);
+          leftStr = serializeElemExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
         } else {
           leftStr = info.aWire.from.element
             ? "ITER." + serPath(info.aWire.from.path)
@@ -545,7 +606,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const bFrom = (info.bWire as FW).from;
         const bTk = refTrunkKey(bFrom);
         if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-          rightStr = serializeElemExprTree(bTk) ?? sRef(bFrom, true);
+          rightStr = serializeElemExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
         } else {
           rightStr = bFrom.element
             ? "ITER." + serPath(bFrom.path)
@@ -556,7 +617,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
 
       if (leftStr == null) return rightStr;
-      return `${leftStr} ${info.op} ${rightStr}`;
+      if (info.op === "not") return `not ${leftStr}`;
+      let result = `${leftStr} ${info.op} ${rightStr}`;
+      const myPrec = OP_PREC_SER[info.op] ?? 0;
+      if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+      return result;
     }
 
     const exprStr = serializeElemExprTree(tk);
@@ -790,6 +855,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           rightStr = "0";
         }
         if (leftStr == null) return rightStr;
+        if (info.op === "not") return `not ${leftStr}`;
         return `${leftStr} ${info.op} ${rightStr}`;
       }
       return serFork(tk) ?? sRef(ref, true);
@@ -827,6 +893,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
       continue;
     }
 
+    // Skip condAnd/condOr wires (handled in expression tree serialization)
+    if ("condAnd" in w || "condOr" in w) continue;
+
     // Array mapping — emit brace-delimited element block
     const arrayKey = w.to.path.join(".");
     if (arrayKey in arrayIterators && !serializedArrays.has(arrayKey)) {
@@ -841,7 +910,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Regular wire
-    const fromStr = sRef(w.from, true);
+    let fromStr = sRef(w.from, true);
+    // ?. safe execution — replace first dot with ?.
+    if (w.safe && fromStr.includes(".")) {
+      fromStr = fromStr.replace(".", "?.");
+    }
     const toStr = sRef(w.to, false);
     const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
     const errf = w.fallbackRef
@@ -930,16 +1003,51 @@ function serializeBridgeBlock(bridge: Bridge): string {
       // Element-targeting expressions are handled in serializeArrayElements
       if (outWire.to.element) continue;
       // Recursively serialize an expression fork into infix notation.
-      function serializeExprTree(forkTk: string): string | null {
+      function serializeExprTree(forkTk: string, parentPrec?: number): string | null {
         const info = exprForks.get(forkTk);
         if (!info) return null;
+
+        // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+        if (info.logicWire) {
+          const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+          let leftStr: string;
+          const leftTk = refTrunkKey(logic.leftRef);
+          if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+            leftStr = serializeExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+          } else {
+            leftStr = logic.leftRef.element
+              ? "ITER." + serPath(logic.leftRef.path)
+              : sRef(logic.leftRef, true);
+          }
+
+          let rightStr: string;
+          if (logic.rightRef) {
+            const rightTk = refTrunkKey(logic.rightRef);
+            if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+              rightStr = serializeExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+            } else {
+              rightStr = logic.rightRef.element
+                ? "ITER." + serPath(logic.rightRef.path)
+                : sRef(logic.rightRef, true);
+            }
+          } else if (logic.rightValue != null) {
+            rightStr = logic.rightValue;
+          } else {
+            rightStr = "0";
+          }
+
+          let result = `${leftStr} ${info.op} ${rightStr}`;
+          const myPrec = OP_PREC_SER[info.op] ?? 0;
+          if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+          return result;
+        }
 
         // Serialize left operand (from .a wire)
         let leftStr: string | null = null;
         if (info.aWire) {
           const fromTk = refTrunkKey(info.aWire.from);
           if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-            leftStr = serializeExprTree(fromTk);
+            leftStr = serializeExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
           } else {
             leftStr = info.aWire.from.element
               ? "ITER." + serPath(info.aWire.from.path)
@@ -955,7 +1063,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
           if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-            rightStr = serializeExprTree(bTk) ?? sRef(bFrom, true);
+            rightStr = serializeExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
           } else {
             rightStr = bFrom.element
               ? "ITER." + serPath(bFrom.path)
@@ -966,7 +1074,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
 
         if (leftStr == null) return rightStr;
-        return `${leftStr} ${info.op} ${rightStr}`;
+        // Unary `not` — only has .a operand
+        if (info.op === "not") return `not ${leftStr}`;
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
       }
 
       const exprStr = serializeExprTree(tk);

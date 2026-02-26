@@ -450,7 +450,10 @@ export class ExecutionTree {
       const forkWires =
         this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
       const hasElementSource = forkWires.some(
-        (w) => "from" in w && !!w.from.element,
+        (w) =>
+          ("from" in w && !!w.from.element) ||
+          ("condAnd" in w && (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
+          ("condOr" in w && (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
       );
       // For __local trunks, also check transitively: if the source is a
       // pipe fork whose own wires reference element data, keep it local.
@@ -564,11 +567,11 @@ export class ExecutionTree {
         return input;
       }
 
-      // Local binding: block-scoped `with <source> as <alias>` inside array maps.
-      // The wire resolves the source and stores the result — no tool call needed.
-      // For path=[] wires the resolved value may be a primitive (e.g. string from
+      // Local binding or logic node: the wire resolves the source and stores
+      // the result — no tool call needed.  For path=[] wires the resolved
+      // value may be a primitive (boolean from condAnd/condOr, string from
       // a pipe tool like upperCase), so return the resolved value directly.
-      if (target.module === "__local") {
+      if (target.module === "__local" || target.field === "__and" || target.field === "__or") {
         for (const [path, value] of resolved) {
           if (path.length === 0) return value;
         }
@@ -755,6 +758,43 @@ export class ExecutionTree {
     return undefined;
   }
 
+  /**
+   * Safe execution pull: wraps individual safe-flagged pulls in try/catch.
+   * Wires with `safe: true` swallow errors and return undefined.
+   * Non-safe wires propagate errors normally.
+   */
+  async pullSafe(
+    pulls: Extract<Wire, { from: NodeRef }>[],
+  ): Promise<any> {
+    if (pulls.length === 1) {
+      const w = pulls[0];
+      if (w.safe) {
+        try {
+          return await this.pullSingle(w.from);
+        } catch {
+          return undefined;
+        }
+      }
+      return this.pullSingle(w.from);
+    }
+
+    const errors: unknown[] = [];
+    for (const w of pulls) {
+      try {
+        const value = w.safe
+          ? await this.pullSingle(w.from).catch(() => undefined)
+          : await this.pullSingle(w.from);
+        if (value != null) return value;
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    if (errors.length === pulls.length) {
+      throw new AggregateError(errors, "All sources failed");
+    }
+    return undefined;
+  }
+
   push(args: Record<string, any>) {
     this.state[trunkKey(this.trunk)] = args;
   }
@@ -882,6 +922,92 @@ export class ExecutionTree {
       });
     }
 
+    // Short-circuit logical AND: evaluate left, skip right if left is falsy
+    const condAndWire = wires.find(
+      (w): w is Extract<Wire, { condAnd: any }> => "condAnd" in w,
+    );
+    if (condAndWire) {
+      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condAndWire.condAnd;
+      let result: Promise<any> = (async () => {
+        const leftVal = isSafe
+          ? await this.pullSingle(leftRef).catch(() => undefined)
+          : await this.pullSingle(leftRef);
+        if (!leftVal) return false; // short-circuit: left is falsy
+        if (rightRef !== undefined) {
+          const rightVal = rightSafe
+            ? await this.pullSingle(rightRef).catch(() => undefined)
+            : await this.pullSingle(rightRef);
+          return Boolean(rightVal);
+        }
+        if (rightValue !== undefined) {
+          try { return Boolean(JSON.parse(rightValue)); }
+          catch { return Boolean(rightValue); }
+        }
+        return Boolean(leftVal);
+      })();
+
+      // || null-guard
+      if (condAndWire.nullFallback != null) {
+        result = result.then((value) => {
+          if (value != null) return value;
+          try { return JSON.parse(condAndWire.nullFallback!); }
+          catch { return condAndWire.nullFallback; }
+        });
+      }
+      // ?? error-guard
+      if (condAndWire.fallbackRef || condAndWire.fallback) {
+        result = result.catch(() => {
+          if (condAndWire.fallbackRef) return this.pullSingle(condAndWire.fallbackRef!);
+          try { return JSON.parse(condAndWire.fallback!); }
+          catch { return condAndWire.fallback; }
+        });
+      }
+      return result;
+    }
+
+    // Short-circuit logical OR: evaluate left, skip right if left is truthy
+    const condOrWire = wires.find(
+      (w): w is Extract<Wire, { condOr: any }> => "condOr" in w,
+    );
+    if (condOrWire) {
+      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condOrWire.condOr;
+      let result: Promise<any> = (async () => {
+        const leftVal = isSafe
+          ? await this.pullSingle(leftRef).catch(() => undefined)
+          : await this.pullSingle(leftRef);
+        if (leftVal) return true; // short-circuit: left is truthy
+        if (rightRef !== undefined) {
+          const rightVal = rightSafe
+            ? await this.pullSingle(rightRef).catch(() => undefined)
+            : await this.pullSingle(rightRef);
+          return Boolean(rightVal);
+        }
+        if (rightValue !== undefined) {
+          try { return Boolean(JSON.parse(rightValue)); }
+          catch { return Boolean(rightValue); }
+        }
+        return Boolean(leftVal);
+      })();
+
+      // || null-guard
+      if (condOrWire.nullFallback != null) {
+        result = result.then((value) => {
+          if (value != null) return value;
+          try { return JSON.parse(condOrWire.nullFallback!); }
+          catch { return condOrWire.nullFallback; }
+        });
+      }
+      // ?? error-guard
+      if (condOrWire.fallbackRef || condOrWire.fallback) {
+        result = result.catch(() => {
+          if (condOrWire.fallbackRef) return this.pullSingle(condOrWire.fallbackRef!);
+          try { return JSON.parse(condOrWire.fallback!); }
+          catch { return condOrWire.fallback; }
+        });
+      }
+      return result;
+    }
+
     const constant = wires.find(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
@@ -898,7 +1024,11 @@ export class ExecutionTree {
       (w) => w.fallback != null || w.fallbackRef != null,
     );
 
-    let result: Promise<any> = this.pull(pulls.map((w) => w.from));
+    // ?. safe execution: wrap individual pulls in try/catch, returning undefined on error
+    const hasSafe = pulls.some((w) => w.safe);
+    let result: Promise<any> = hasSafe
+      ? this.pullSafe(pulls)
+      : this.pull(pulls.map((w) => w.from));
 
     // || null-guard: fires when resolution succeeds but value is null/undefined
     if (nullFallbackWire) {

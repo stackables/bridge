@@ -14,6 +14,7 @@ import { gte } from "./gte.ts";
 import { lt } from "./lt.ts";
 import { lte } from "./lte.ts";
 import { assert } from "./assert.ts";
+import { not } from "./not.ts";
 
 /**
  * Standard built-in tools — available under the `std` namespace.
@@ -48,6 +49,7 @@ export const math = {
   gte,
   lt,
   lte,
+  not,
 } as const;
 
 /**

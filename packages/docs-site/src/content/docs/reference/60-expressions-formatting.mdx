@@ -64,17 +64,46 @@ o.isActive <- i.status == "active"
 | -------------- | -------------------------------- | ---------------------------------- |
 | **Arithmetic** | `*`, `/`, `+`, `-`               | Standard math operations.          |
 | **Comparison** | `==`, `!=`, `>`, `>=`, `<`, `<=` | Returns boolean `true` or `false`. |
+| **Boolean**    | `and`, `or`, `not`               | Logical operators for combining boolean values. |
+
+### Boolean Logic
+
+Use Python/SQL-style keywords for clear, unambiguous boolean expressions. These strictly evaluate to `true` or `false`.
+
+* `and`: Logical AND — returns `true` only if both sides are truthy.
+* `or`: Logical OR — returns `true` if either side is truthy.
+* `not`: Logical NOT — inverts the value (prefix operator).
+* `()`: Parentheses for grouping — overrides default operator precedence.
+
+```bridge
+# Inline policy evaluation with parentheses for grouping
+o.isApproved <- (i.age > 18 and i.verified) or i.role == "ADMIN"
+o.requireMFA <- not (i.isTrusted)
+
+# Override precedence: add before multiply
+o.total <- (i.price + i.discount) * i.qty
+
+```
 
 ### Precedence and Chaining
 
-Standard JavaScript math precedence applies (multiplication/division before addition/subtraction, and comparisons last). You can chain as many operators as you need.
+Standard operator precedence applies: multiplication/division bind tightest, then addition/subtraction, then comparisons, then `and`, and finally `or` binds loosest. Use parentheses `()` to override the default precedence when needed.
 
 ```bridge
 # Evaluates as: i.base + (i.tax * 2)
 o.total <- i.base + i.tax * 2
 
+# Use parentheses to force addition first: (i.base + i.tax) * 2
+o.total <- (i.base + i.tax) * 2
+
 # Evaluates as: (i.price * i.qty) > 100
 o.isExpensive <- i.price * i.qty > 100
+
+# Without parens: (age > 18 and verified) or (role == "ADMIN")
+o.allowed <- i.age > 18 and i.verified or i.role == "ADMIN"
+
+# With parens: age > 18 and (verified or role == "ADMIN")
+o.strict <- i.age > 18 and (i.verified or i.role == "ADMIN")
 
 ```
 

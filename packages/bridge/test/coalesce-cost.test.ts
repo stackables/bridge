@@ -452,3 +452,128 @@ o.score <- b.score
     assert.ok(gap < 30, `tools should start concurrently (gap: ${gap}ms)`);
   });
 });
+
+// ── ?. Safe execution modifier ────────────────────────────────────────────
+
+import { executeBridge } from "../src/execute-bridge.ts";
+import { serializeBridge } from "../src/bridge-format.ts";
+
+function run(
+  bridgeText: string,
+  operation: string,
+  input: Record<string, unknown>,
+  tools: Record<string, any> = {},
+) {
+  const raw = parseBridge(bridgeText);
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+    typeof parseBridge
+  >;
+  return executeBridge({ instructions, operation, input, tools });
+}
+
+describe("?. safe execution modifier", () => {
+  test("parser detects ?. and sets safe flag on wire", () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.lookup {
+  with api.fetch as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const safePull = bridge.wires.find(
+      (w) => "from" in w && "safe" in w && w.safe,
+    );
+    assert.ok(safePull, "has a wire with safe: true");
+  });
+
+  test("?. swallows tool error and returns undefined", async () => {
+    const { data } = await run(
+      `version 1.4
+bridge Query.lookup {
+  with failing.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "failing.api": async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    );
+    assert.equal(data.label, undefined);
+  });
+
+  test("?. with || fallback: error returns undefined then || kicks in", async () => {
+    const { data } = await run(
+      `version 1.4
+bridge Query.lookup {
+  with failing.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label || "fallback"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "failing.api": async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    );
+    assert.equal(data.label, "fallback");
+  });
+
+  test("?. passes through value when tool succeeds", async () => {
+    const { data } = await run(
+      `version 1.4
+bridge Query.lookup {
+  with good.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "good.api": async () => ({ label: "Hello" }),
+      },
+    );
+    assert.equal(data.label, "Hello");
+  });
+
+  test("safe execution round-trips through serializer", () => {
+    const src = `version 1.4
+
+bridge Query.lookup {
+  with api.fetch as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label ?? "default"
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("?."), "serialized contains ?.");
+    // Re-parse round-trips
+    const reparsed = parseBridge(serialized);
+    const bridge = reparsed.find((i) => i.kind === "bridge")!;
+    const safePull = bridge.wires.find(
+      (w) => "from" in w && "safe" in w && w.safe,
+    );
+    assert.ok(safePull, "round-tripped wire has safe: true");
+  });
+});
