@@ -1,6 +1,7 @@
 import type {
   Bridge,
   ConstDef,
+  ControlFlowInstruction,
   DefineDef,
   Instruction,
   NodeRef,
@@ -19,6 +20,14 @@ export function parseBridge(text: string): Instruction[] {
 }
 
 const BRIDGE_VERSION = "1.4";
+
+/** Serialize a ControlFlowInstruction to its textual form. */
+function serializeControl(ctrl: ControlFlowInstruction): string {
+  if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
+  if (ctrl.kind === "panic") return `panic ${JSON.stringify(ctrl.message)}`;
+  if (ctrl.kind === "continue") return "continue";
+  return "break";
+}
 
 // ── Serializer ───────────────────────────────────────────────────────────────
 
@@ -775,19 +784,25 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const elemTo = "." + serPath(fieldPath);
 
       const nfb =
-        "falsyFallback" in ew && ew.falsyFallback ? ` || ${ew.falsyFallback}` : "";
+        "falsyControl" in ew && ew.falsyControl
+          ? ` || ${serializeControl(ew.falsyControl)}`
+          : "falsyFallback" in ew && ew.falsyFallback ? ` || ${ew.falsyFallback}` : "";
       const nuf =
-        "nullishFallbackRef" in ew && ew.nullishFallbackRef
-          ? ` ?? ${sPipeOrRef(ew.nullishFallbackRef)}`
-          : "nullishFallback" in ew && ew.nullishFallback
-            ? ` ?? ${ew.nullishFallback}`
-            : "";
+        "nullishControl" in ew && ew.nullishControl
+          ? ` ?? ${serializeControl(ew.nullishControl)}`
+          : "nullishFallbackRef" in ew && ew.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(ew.nullishFallbackRef)}`
+            : "nullishFallback" in ew && ew.nullishFallback
+              ? ` ?? ${ew.nullishFallback}`
+              : "";
       const errf =
-        "catchFallbackRef" in ew && ew.catchFallbackRef
-          ? ` catch ${sPipeOrRef(ew.catchFallbackRef)}`
-          : "catchFallback" in ew && ew.catchFallback
-            ? ` catch ${ew.catchFallback}`
-            : "";
+        "catchControl" in ew && ew.catchControl
+          ? ` catch ${serializeControl(ew.catchControl)}`
+          : "catchFallbackRef" in ew && ew.catchFallbackRef
+            ? ` catch ${sPipeOrRef(ew.catchFallbackRef)}`
+            : "catchFallback" in ew && ew.catchFallback
+              ? ` catch ${ew.catchFallback}`
+              : "";
       lines.push(`${indent}${elemTo} <- ${fromPart}${nfb}${nuf}${errf}`);
     }
 
@@ -880,17 +895,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const elseStr = w.elseRef
         ? sRef(w.elseRef, true)
         : (w.elseValue ?? "null");
-      const nfb = w.falsyFallback ? ` || ${w.falsyFallback}` : "";
-      const nuf = w.nullishFallbackRef
-        ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
-        : w.nullishFallback
-          ? ` ?? ${w.nullishFallback}`
-          : "";
-      const errf = w.catchFallbackRef
-        ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
-        : w.catchFallback
-          ? ` catch ${w.catchFallback}`
-          : "";
+      const nfb = "falsyControl" in w && w.falsyControl
+        ? ` || ${serializeControl(w.falsyControl)}`
+        : w.falsyFallback ? ` || ${w.falsyFallback}` : "";
+      const nuf = "nullishControl" in w && w.nullishControl
+        ? ` ?? ${serializeControl(w.nullishControl)}`
+        : w.nullishFallbackRef
+          ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+          : w.nullishFallback
+            ? ` ?? ${w.nullishFallback}`
+            : "";
+      const errf = "catchControl" in w && w.catchControl
+        ? ` catch ${serializeControl(w.catchControl)}`
+        : w.catchFallbackRef
+          ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
+          : w.catchFallback
+            ? ` catch ${w.catchFallback}`
+            : "";
       lines.push(
         `${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${nuf}${errf}`,
       );
@@ -945,17 +966,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
     const toStr = sRef(w.to, false);
-    const nfb = w.falsyFallback ? ` || ${w.falsyFallback}` : "";
-    const nuf = w.nullishFallbackRef
-      ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
-      : w.nullishFallback
-        ? ` ?? ${w.nullishFallback}`
-        : "";
-    const errf = w.catchFallbackRef
-      ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
-      : w.catchFallback
-        ? ` catch ${w.catchFallback}`
-        : "";
+    const nfb = "falsyControl" in w && w.falsyControl
+      ? ` || ${serializeControl(w.falsyControl)}`
+      : w.falsyFallback ? ` || ${w.falsyFallback}` : "";
+    const nuf = "nullishControl" in w && w.nullishControl
+      ? ` ?? ${serializeControl(w.nullishControl)}`
+      : w.nullishFallbackRef
+        ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+        : w.nullishFallback
+          ? ` ?? ${w.nullishFallback}`
+          : "";
+    const errf = "catchControl" in w && w.catchControl
+      ? ` catch ${serializeControl(w.catchControl)}`
+      : w.catchFallbackRef
+        ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
+        : w.catchFallback
+          ? ` catch ${w.catchFallback}`
+          : "";
     lines.push(`${toStr} <- ${fromStr}${nfb}${nuf}${errf}`);
   }
 
@@ -1119,17 +1146,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const exprStr = serializeExprTree(tk);
       if (exprStr) {
         const destStr = sRef(outWire.to, false);
-        const nfb = outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
-        const nuf = outWire.nullishFallbackRef
-          ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
-          : outWire.nullishFallback
-            ? ` ?? ${outWire.nullishFallback}`
-            : "";
-        const errf = outWire.catchFallbackRef
-          ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
-          : outWire.catchFallback
-            ? ` catch ${outWire.catchFallback}`
-            : "";
+        const nfb = "falsyControl" in outWire && outWire.falsyControl
+          ? ` || ${serializeControl(outWire.falsyControl)}`
+          : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+        const nuf = "nullishControl" in outWire && outWire.nullishControl
+          ? ` ?? ${serializeControl(outWire.nullishControl)}`
+          : outWire.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallback
+              ? ` ?? ${outWire.nullishFallback}`
+              : "";
+        const errf = "catchControl" in outWire && outWire.catchControl
+          ? ` catch ${serializeControl(outWire.catchControl)}`
+          : outWire.catchFallbackRef
+            ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+            : outWire.catchFallback
+              ? ` catch ${outWire.catchFallback}`
+              : "";
         lines.push(`${destStr} <- ${exprStr}${nfb}${nuf}${errf}`);
       }
       continue;
@@ -1141,17 +1174,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const templateStr = reconstructTemplateString(tk);
       if (templateStr) {
         const destStr = sRef(outWire.to, false);
-        const nfb = outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
-        const nuf = outWire.nullishFallbackRef
-          ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
-          : outWire.nullishFallback
-            ? ` ?? ${outWire.nullishFallback}`
-            : "";
-        const errf = outWire.catchFallbackRef
-          ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
-          : outWire.catchFallback
-            ? ` catch ${outWire.catchFallback}`
-            : "";
+        const nfb = "falsyControl" in outWire && outWire.falsyControl
+          ? ` || ${serializeControl(outWire.falsyControl)}`
+          : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+        const nuf = "nullishControl" in outWire && outWire.nullishControl
+          ? ` ?? ${serializeControl(outWire.nullishControl)}`
+          : outWire.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallback
+              ? ` ?? ${outWire.nullishFallback}`
+              : "";
+        const errf = "catchControl" in outWire && outWire.catchControl
+          ? ` catch ${serializeControl(outWire.catchControl)}`
+          : outWire.catchFallbackRef
+            ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+            : outWire.catchFallback
+              ? ` catch ${outWire.catchFallback}`
+              : "";
         lines.push(`${destStr} <- ${templateStr}${nfb}${nuf}${errf}`);
       }
       continue;
@@ -1182,17 +1221,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = sRef(actualSourceRef, true);
       const destStr = sRef(outWire.to, false);
-      const nfb = outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
-      const nuf = outWire.nullishFallbackRef
-        ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
-        : outWire.nullishFallback
-          ? ` ?? ${outWire.nullishFallback}`
-          : "";
-      const errf = outWire.catchFallbackRef
-        ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
-        : outWire.catchFallback
-          ? ` catch ${outWire.catchFallback}`
-          : "";
+      const nfb = "falsyControl" in outWire && outWire.falsyControl
+        ? ` || ${serializeControl(outWire.falsyControl)}`
+        : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+      const nuf = "nullishControl" in outWire && outWire.nullishControl
+        ? ` ?? ${serializeControl(outWire.nullishControl)}`
+        : outWire.nullishFallbackRef
+          ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+          : outWire.nullishFallback
+            ? ` ?? ${outWire.nullishFallback}`
+            : "";
+      const errf = "catchControl" in outWire && outWire.catchControl
+        ? ` catch ${serializeControl(outWire.catchControl)}`
+        : outWire.catchFallbackRef
+          ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+          : outWire.catchFallback
+            ? ` catch ${outWire.catchFallback}`
+            : "";
       lines.push(
         `${destStr} <- ${handleChain.join(":")}:${sourceStr}${nfb}${nuf}${errf}`,
       );
