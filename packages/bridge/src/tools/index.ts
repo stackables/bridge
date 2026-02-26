@@ -14,8 +14,6 @@ import { gte } from "./gte.ts";
 import { lt } from "./lt.ts";
 import { lte } from "./lte.ts";
 import { assert } from "./assert.ts";
-import { and } from "./and.ts";
-import { or } from "./or.ts";
 import { not } from "./not.ts";
 
 /**
@@ -51,8 +49,6 @@ export const math = {
   gte,
   lt,
   lte,
-  and,
-  or,
   not,
 } as const;
 

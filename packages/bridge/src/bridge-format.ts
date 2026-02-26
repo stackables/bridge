@@ -343,8 +343,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     gte: ">=",
     lt: "<",
     lte: "<=",
-    and: "and",
-    or: "or",
+    __and: "and",
+    __or: "or",
     not: "not",
   };
   const OP_PREC_SER: Record<string, number> = {
@@ -357,6 +357,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     op: string;
     bWire: Wire | undefined;
     aWire: FW | undefined;
+    /** For condAnd/condOr wires: the logic wire itself */
+    logicWire?: Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }>;
   };
   const exprForks = new Map<string, ExprForkInfo>();
   const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
@@ -365,6 +367,22 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!ph.handle.startsWith("__expr_")) continue;
     const op = FN_TO_OP[ph.baseTrunk.field];
     if (!op) continue;
+
+    // For condAnd/condOr wires (field === "__and" or "__or")
+    if (ph.baseTrunk.field === "__and" || ph.baseTrunk.field === "__or") {
+      const logicWire = bridge.wires.find(
+        (w) => {
+          const prop = ph.baseTrunk.field === "__and" ? "condAnd" : "condOr";
+          return prop in w && refTrunkKey(w.to) === ph.key;
+        },
+      ) as Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }> | undefined;
+
+      if (logicWire) {
+        exprForks.set(ph.key, { op, bWire: undefined, aWire: undefined, logicWire });
+        exprPipeWireSet.add(logicWire);
+      }
+      continue;
+    }
 
     // Find the .a and .b wires for this fork
     let aWire: FW | undefined;
@@ -533,6 +551,41 @@ function serializeBridgeBlock(bridge: Bridge): string {
     function serializeElemExprTree(forkTk: string, parentPrec?: number): string | null {
       const info = exprForks.get(forkTk);
       if (!info) return null;
+
+      // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+      if (info.logicWire) {
+        const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+        let leftStr: string;
+        const leftTk = refTrunkKey(logic.leftRef);
+        if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+          leftStr = serializeElemExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+        } else {
+          leftStr = logic.leftRef.element
+            ? "ITER." + serPath(logic.leftRef.path)
+            : sRef(logic.leftRef, true);
+        }
+
+        let rightStr: string;
+        if (logic.rightRef) {
+          const rightTk = refTrunkKey(logic.rightRef);
+          if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+            rightStr = serializeElemExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+          } else {
+            rightStr = logic.rightRef.element
+              ? "ITER." + serPath(logic.rightRef.path)
+              : sRef(logic.rightRef, true);
+          }
+        } else if (logic.rightValue != null) {
+          rightStr = logic.rightValue;
+        } else {
+          rightStr = "0";
+        }
+
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
+      }
 
       let leftStr: string | null = null;
       if (info.aWire) {
@@ -840,6 +893,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
       continue;
     }
 
+    // Skip condAnd/condOr wires (handled in expression tree serialization)
+    if ("condAnd" in w || "condOr" in w) continue;
+
     // Array mapping — emit brace-delimited element block
     const arrayKey = w.to.path.join(".");
     if (arrayKey in arrayIterators && !serializedArrays.has(arrayKey)) {
@@ -950,6 +1006,41 @@ function serializeBridgeBlock(bridge: Bridge): string {
       function serializeExprTree(forkTk: string, parentPrec?: number): string | null {
         const info = exprForks.get(forkTk);
         if (!info) return null;
+
+        // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+        if (info.logicWire) {
+          const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+          let leftStr: string;
+          const leftTk = refTrunkKey(logic.leftRef);
+          if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+            leftStr = serializeExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+          } else {
+            leftStr = logic.leftRef.element
+              ? "ITER." + serPath(logic.leftRef.path)
+              : sRef(logic.leftRef, true);
+          }
+
+          let rightStr: string;
+          if (logic.rightRef) {
+            const rightTk = refTrunkKey(logic.rightRef);
+            if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+              rightStr = serializeExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+            } else {
+              rightStr = logic.rightRef.element
+                ? "ITER." + serPath(logic.rightRef.path)
+                : sRef(logic.rightRef, true);
+            }
+          } else if (logic.rightValue != null) {
+            rightStr = logic.rightValue;
+          } else {
+            rightStr = "0";
+          }
+
+          let result = `${leftStr} ${info.op} ${rightStr}`;
+          const myPrec = OP_PREC_SER[info.op] ?? 0;
+          if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+          return result;
+        }
 
         // Serialize left operand (from .a wire)
         let leftStr: string | null = null;

@@ -1444,6 +1444,7 @@ function processElementLines(
     exprRights: CstNode[],
     lineNum: number,
     iterName?: string,
+    safe?: boolean,
   ) => NodeRef,
   extractTernaryBranchFn?: (
     branchNode: CstNode,
@@ -1459,8 +1460,8 @@ function processElementLines(
     lineNum: number,
     iterName?: string,
   ) => NodeRef,
-  desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
-  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string) => NodeRef,
+  desugarNotFn?: (sourceRef: NodeRef, lineNum: number, safe?: boolean) => NodeRef,
+  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string, safe?: boolean) => NodeRef,
 ): void {
   function extractCoalesceAltIterAware(
     altNode: CstNode,
@@ -1888,6 +1889,7 @@ function processElementScopeLines(
     exprRights: CstNode[],
     lineNum: number,
     iterName?: string,
+    safe?: boolean,
   ) => NodeRef,
   extractTernaryBranchFn?: (
     branchNode: CstNode,
@@ -1899,8 +1901,8 @@ function processElementScopeLines(
     lineNum: number,
     iterName?: string,
   ) => NodeRef,
-  desugarNotFn?: (sourceRef: NodeRef, lineNum: number) => NodeRef,
-  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string) => NodeRef,
+  desugarNotFn?: (sourceRef: NodeRef, lineNum: number, safe?: boolean) => NodeRef,
+  resolveParenExprFn?: (parenNode: CstNode, lineNum: number, iterName?: string, safe?: boolean) => NodeRef,
 ): void {
   function extractCoalesceAltIterAware(
     altNode: CstNode,
@@ -3048,8 +3050,7 @@ function buildBridgeBody(
     ">=": "gte",
     "<": "lt",
     "<=": "lte",
-    "and": "and",
-    "or": "or",
+    // and/or are handled as native condAnd/condOr wires, not tool forks
   };
 
   /** Operator precedence: higher number = binds tighter. */
@@ -3148,6 +3149,7 @@ function buildBridgeBody(
     parenNode: CstNode,
     lineNum: number,
     iterName?: string,
+    safe?: boolean,
   ): NodeRef {
     const pc = parenNode.children;
     const innerSourceNode = sub(parenNode, "parenSource")!;
@@ -3179,14 +3181,14 @@ function buildBridgeBody(
     // Desugar the inner expression chain if there are operators
     let resultRef: NodeRef;
     if (innerOps.length > 0) {
-      resultRef = desugarExprChain(innerRef, innerOps, innerRights, lineNum, iterName);
+      resultRef = desugarExprChain(innerRef, innerOps, innerRights, lineNum, iterName, safe);
     } else {
       resultRef = innerRef;
     }
 
     // Apply not prefix if present
     if (hasNot) {
-      resultRef = desugarNot(resultRef, lineNum);
+      resultRef = desugarNot(resultRef, lineNum, safe);
     }
 
     return resultRef;
@@ -3208,6 +3210,7 @@ function buildBridgeBody(
     exprRights: CstNode[],
     lineNum: number,
     iterName?: string,
+    safe?: boolean,
   ): NodeRef {
     // Build flat operand/operator lists for the precedence parser.
     // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
@@ -3225,6 +3228,77 @@ function buildBridgeBody(
     // Emit a synthetic fork for a single binary operation and return
     // an operand pointing to the fork's result.
     function emitFork(left: Operand, opStr: string, right: Operand): Operand {
+      // ── Short-circuit and/or: emit condAnd/condOr wire ──
+      if (opStr === "and" || opStr === "or") {
+        const forkInstance = 100000 + nextForkSeq++;
+        const forkField = opStr === "and" ? "__and" : "__or";
+        const forkTrunkModule = SELF_MODULE;
+        const forkTrunkType = "Tools";
+        const forkKey = `${forkTrunkModule}:${forkTrunkType}:${forkField}:${forkInstance}`;
+        pipeHandleEntries.push({
+          key: forkKey,
+          handle: `__expr_${forkInstance}`,
+          baseTrunk: {
+            module: forkTrunkModule,
+            type: forkTrunkType,
+            field: forkField,
+          },
+        });
+
+        const toRef: NodeRef = {
+          module: forkTrunkModule,
+          type: forkTrunkType,
+          field: forkField,
+          instance: forkInstance,
+          path: [],
+        };
+
+        // Build the leftRef for the condAnd/condOr
+        const leftRef =
+          left.kind === "ref"
+            ? left.ref
+            : (() => {
+                // Literal left: emit a constant wire and reference it
+                const litInstance = 100000 + nextForkSeq++;
+                const litField = "__lit";
+                const litKey = `${forkTrunkModule}:${forkTrunkType}:${litField}:${litInstance}`;
+                pipeHandleEntries.push({
+                  key: litKey,
+                  handle: `__expr_${litInstance}`,
+                  baseTrunk: { module: forkTrunkModule, type: forkTrunkType, field: litField },
+                });
+                const litRef: NodeRef = {
+                  module: forkTrunkModule, type: forkTrunkType,
+                  field: litField, instance: litInstance, path: [],
+                };
+                wires.push({ value: left.value, to: litRef });
+                return litRef;
+              })();
+
+        // Build right side
+        const rightSide =
+          right.kind === "ref"
+            ? { rightRef: right.ref }
+            : { rightValue: right.value };
+
+        const safeAttr = safe ? { safe: true as const } : {};
+
+        if (opStr === "and") {
+          wires.push({
+            condAnd: { leftRef, ...rightSide, ...safeAttr },
+            to: toRef,
+          });
+        } else {
+          wires.push({
+            condOr: { leftRef, ...rightSide, ...safeAttr },
+            to: toRef,
+          });
+        }
+
+        return { kind: "ref", ref: toRef };
+      }
+
+      // ── Standard math/comparison: emit synthetic tool fork ──
       const fnName = OP_TO_FN[opStr];
       if (!fnName)
         throw new Error(`Line ${lineNum}: Unknown operator "${opStr}"`);
@@ -3253,11 +3327,12 @@ function buildBridgeBody(
         path: [slot],
       });
 
-      // Wire left → fork.a
+      // Wire left → fork.a (propagate safe flag for first operand)
       if (left.kind === "literal") {
         wires.push({ value: left.value, to: makeTarget("a") });
       } else {
-        wires.push({ from: left.ref, to: makeTarget("a"), pipe: true });
+        const safeAttr = safe ? { safe: true as const } : {};
+        wires.push({ from: left.ref, to: makeTarget("a"), pipe: true, ...safeAttr });
       }
 
       // Wire right → fork.b
@@ -3315,7 +3390,7 @@ function buildBridgeBody(
    * Desugar a `not` prefix into a synthetic unary fork that calls `math.not`.
    * Wraps the given ref:  not(sourceRef) → __expr fork with { a: sourceRef }
    */
-  function desugarNot(sourceRef: NodeRef, _lineNum: number): NodeRef {
+  function desugarNot(sourceRef: NodeRef, _lineNum: number, safe?: boolean): NodeRef {
     const forkInstance = 100000 + nextForkSeq++;
     const forkTrunkModule = SELF_MODULE;
     const forkTrunkType = "Tools";
@@ -3332,6 +3407,7 @@ function buildBridgeBody(
       },
     });
 
+    const safeAttr = safe ? { safe: true as const } : {};
     wires.push({
       from: sourceRef,
       to: {
@@ -3342,6 +3418,7 @@ function buildBridgeBody(
         path: ["a"],
       },
       pipe: true,
+      ...safeAttr,
     });
 
     return {
@@ -3781,10 +3858,10 @@ function buildBridgeBody(
     let condIsPipeFork: boolean;
     if (firstParenNode) {
       // First source is a parenthesized sub-expression
-      const parenRef = resolveParenExpr(firstParenNode, lineNum);
+      const parenRef = resolveParenExpr(firstParenNode, lineNum, undefined, isSafe);
       if (exprOps.length > 0) {
         const exprRights = subs(wireNode, "exprRight");
-        condRef = desugarExprChain(parenRef, exprOps, exprRights, lineNum);
+        condRef = desugarExprChain(parenRef, exprOps, exprRights, lineNum, undefined, isSafe);
       } else {
         condRef = parenRef;
       }
@@ -3793,7 +3870,7 @@ function buildBridgeBody(
       // It's a math/comparison expression — desugar it.
       const exprRights = subs(wireNode, "exprRight");
       const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
-      condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum);
+      condRef = desugarExprChain(leftRef, exprOps, exprRights, lineNum, undefined, isSafe);
       condIsPipeFork = true;
     } else {
       const pipeSegs = subs(firstSourceNode!, "pipeSegment");
@@ -3806,7 +3883,7 @@ function buildBridgeBody(
 
     // ── Apply `not` prefix if present ──
     if (wc.notPrefix) {
-      condRef = desugarNot(condRef, lineNum);
+      condRef = desugarNot(condRef, lineNum, isSafe);
       condIsPipeFork = true;
     }
 

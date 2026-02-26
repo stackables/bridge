@@ -672,10 +672,10 @@ describe("boolean logic tools", () => {
 // ── Boolean logic: parser desugaring ──────────────────────────────────────────
 
 describe("boolean logic: parser desugaring", () => {
-  test("and / or desugar to correct tool names", () => {
+  test("and / or desugar to condAnd/condOr wires", () => {
     const boolOps: Record<string, string> = {
-      "and": "and",
-      "or": "or",
+      "and": "__and",
+      "or": "__or",
     };
     for (const [op, fn] of Object.entries(boolOps)) {
       const instructions = parseBridge(`version 1.4
@@ -721,9 +721,9 @@ bridge Query.test {
     assert.ok(exprHandles.length >= 4, `has >= 4 expr handles, got ${exprHandles.length}`);
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("gt"), "has gt");
-    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("__and"), "has __and");
     assert.ok(fields.includes("eq"), "has eq");
-    assert.ok(fields.includes("or"), "has or");
+    assert.ok(fields.includes("__or"), "has __or");
   });
 });
 
@@ -866,8 +866,8 @@ bridge Query.test {
     const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("and"), "has and");
-    assert.ok(fields.includes("or"), "has or");
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("__or"), "has __or");
   });
 
   test("A or (B and C) — groups correctly", () => {
@@ -882,8 +882,8 @@ bridge Query.test {
     const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("and"), "has and");
-    assert.ok(fields.includes("or"), "has or");
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("__or"), "has __or");
   });
 
   test("not (A and B) — not wraps grouped expr", () => {
@@ -897,7 +897,7 @@ bridge Query.test {
     const bridge = instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("and"), "has and");
+    assert.ok(fields.includes("__and"), "has __and");
     assert.ok(fields.includes("not"), "has not");
   });
 
@@ -1049,5 +1049,192 @@ bridge Query.test {
     // Re-parse to ensure correctness
     const reparsed = parseBridge(serialized);
     assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+});
+
+// ── Short-circuit tests ───────────────────────────────────────────────────────
+
+import { executeBridge } from "../src/execute-bridge.ts";
+
+describe("and/or short-circuit behavior", () => {
+  test("and short-circuits: right side not evaluated when left is false", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag and c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: false, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, false);
+    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is false");
+  });
+
+  test("and evaluates right side when left is true", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag and c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: true, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, true);
+    assert.equal(rightEvaluated, true, "right side should be evaluated when left is true");
+  });
+
+  test("or short-circuits: right side not evaluated when left is true", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag or c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: true, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, true);
+    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is true");
+  });
+
+  test("or evaluates right side when left is false", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag or c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: false, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: false };
+        },
+      },
+    });
+    assert.equal(data.result, false);
+    assert.equal(rightEvaluated, true, "right side should be evaluated when left is false");
+  });
+});
+
+// ── Safe flag propagation in expressions ──────────────────────────────────────
+
+describe("safe flag propagation in expressions", () => {
+  test("safe flag propagated through expression: api?.value > 5 does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- api?.score > 5 || false
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test" },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe execution swallows the error, expression evaluates with undefined,
+    // comparison with undefined yields false, fallback || false returns false
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on not prefix: not api?.verified does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- not api?.verified || true
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test" },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error, not(undefined) = true, || true fallback also works
+    assert.equal(data.result, true);
+  });
+
+  test("safe flag in condAnd: api?.active and i.flag does not crash", async () => {
+    const instructions = parseBridge(`version 1.4
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- api?.active and i.flag
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: true },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error, undefined is falsy, short-circuit returns false
+    assert.equal(data.result, false);
   });
 });

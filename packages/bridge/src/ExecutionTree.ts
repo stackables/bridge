@@ -450,7 +450,10 @@ export class ExecutionTree {
       const forkWires =
         this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
       const hasElementSource = forkWires.some(
-        (w) => "from" in w && !!w.from.element,
+        (w) =>
+          ("from" in w && !!w.from.element) ||
+          ("condAnd" in w && (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
+          ("condOr" in w && (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
       );
       // For __local trunks, also check transitively: if the source is a
       // pipe fork whose own wires reference element data, keep it local.
@@ -569,6 +572,15 @@ export class ExecutionTree {
       // For path=[] wires the resolved value may be a primitive (e.g. string from
       // a pipe tool like upperCase), so return the resolved value directly.
       if (target.module === "__local") {
+        for (const [path, value] of resolved) {
+          if (path.length === 0) return value;
+        }
+        return input;
+      }
+
+      // Logic nodes: short-circuit and/or intermediate results.
+      // The condAnd/condOr wire targets path=[] and resolveWires returns the boolean.
+      if (target.field === "__and" || target.field === "__or") {
         for (const [path, value] of resolved) {
           if (path.length === 0) return value;
         }
@@ -917,6 +929,88 @@ export class ExecutionTree {
           return conditional.fallback;
         }
       });
+    }
+
+    // Short-circuit logical AND: evaluate left, skip right if left is falsy
+    const condAndWire = wires.find(
+      (w): w is Extract<Wire, { condAnd: any }> => "condAnd" in w,
+    );
+    if (condAndWire) {
+      const { leftRef, rightRef, rightValue, safe: isSafe } = condAndWire.condAnd;
+      let result: Promise<any> = (async () => {
+        const leftVal = isSafe
+          ? await this.pullSingle(leftRef).catch(() => undefined)
+          : await this.pullSingle(leftRef);
+        if (!leftVal) return false; // short-circuit: left is falsy
+        if (rightRef !== undefined) {
+          const rightVal = await this.pullSingle(rightRef);
+          return Boolean(rightVal);
+        }
+        if (rightValue !== undefined) {
+          try { return Boolean(JSON.parse(rightValue)); }
+          catch { return Boolean(rightValue); }
+        }
+        return Boolean(leftVal);
+      })();
+
+      // || null-guard
+      if (condAndWire.nullFallback != null) {
+        result = result.then((value) => {
+          if (value != null) return value;
+          try { return JSON.parse(condAndWire.nullFallback!); }
+          catch { return condAndWire.nullFallback; }
+        });
+      }
+      // ?? error-guard
+      if (condAndWire.fallbackRef || condAndWire.fallback) {
+        result = result.catch(() => {
+          if (condAndWire.fallbackRef) return this.pullSingle(condAndWire.fallbackRef!);
+          try { return JSON.parse(condAndWire.fallback!); }
+          catch { return condAndWire.fallback; }
+        });
+      }
+      return result;
+    }
+
+    // Short-circuit logical OR: evaluate left, skip right if left is truthy
+    const condOrWire = wires.find(
+      (w): w is Extract<Wire, { condOr: any }> => "condOr" in w,
+    );
+    if (condOrWire) {
+      const { leftRef, rightRef, rightValue, safe: isSafe } = condOrWire.condOr;
+      let result: Promise<any> = (async () => {
+        const leftVal = isSafe
+          ? await this.pullSingle(leftRef).catch(() => undefined)
+          : await this.pullSingle(leftRef);
+        if (leftVal) return true; // short-circuit: left is truthy
+        if (rightRef !== undefined) {
+          const rightVal = await this.pullSingle(rightRef);
+          return Boolean(rightVal);
+        }
+        if (rightValue !== undefined) {
+          try { return Boolean(JSON.parse(rightValue)); }
+          catch { return Boolean(rightValue); }
+        }
+        return Boolean(leftVal);
+      })();
+
+      // || null-guard
+      if (condOrWire.nullFallback != null) {
+        result = result.then((value) => {
+          if (value != null) return value;
+          try { return JSON.parse(condOrWire.nullFallback!); }
+          catch { return condOrWire.nullFallback; }
+        });
+      }
+      // ?? error-guard
+      if (condOrWire.fallbackRef || condOrWire.fallback) {
+        result = result.catch(() => {
+          if (condOrWire.fallbackRef) return this.pullSingle(condOrWire.fallbackRef!);
+          try { return JSON.parse(condOrWire.fallback!); }
+          catch { return condOrWire.fallback; }
+        });
+      }
+      return result;
     }
 
     const constant = wires.find(
