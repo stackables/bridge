@@ -314,6 +314,10 @@ function token(stream: StringStream, state: State): string | null {
     state.lineStart = false;
     return "keyword";
   }
+  if (stream.match(/^catch\b/)) {
+    state.lineStart = false;
+    return "keyword";
+  }
   if (stream.match(/^as\b/)) {
     state.lineStart = false;
     return "keyword";

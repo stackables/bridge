@@ -21,7 +21,7 @@ function compat(label: string, text: string) {
 describe("parser — syntax coverage", () => {
   compat(
     "simple bridge with input/output",
-    `version 1.4
+    `version 1.5
 bridge Query.getWeather {
   with input
   with output as o
@@ -31,7 +31,7 @@ bridge Query.getWeather {
 
   compat(
     "tool with constant and pull wires",
-    `version 1.4
+    `version 1.5
 tool hereapi from std.httpCall {
   .baseUrl = "https://geocode.search.hereapi.com/v1"
   .method = GET
@@ -45,43 +45,43 @@ tool hereapi.geocode from hereapi {
 
   compat(
     "const with JSON object",
-    `version 1.4
+    `version 1.5
 const fallbackGeo = { "lat": 0, "lon": 0 }`,
   );
 
   compat(
     "const with string value",
-    `version 1.4
+    `version 1.5
 const myStr = "hello"`,
   );
 
   compat(
     "const with number value",
-    `version 1.4
+    `version 1.5
 const myNum = 42`,
   );
 
   compat(
     "const with boolean value",
-    `version 1.4
+    `version 1.5
 const myBool = true`,
   );
 
   compat(
     "const with null value",
-    `version 1.4
+    `version 1.5
 const myNull = null`,
   );
 
   compat(
     "const with array value",
-    `version 1.4
+    `version 1.5
 const myArr = ["a", "b", "c"]`,
   );
 
   compat(
     "force statement",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with myTool as t
   with input
@@ -94,7 +94,7 @@ bridge Query.test {
 
   compat(
     "pipe chain",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with std.str.toUpperCase as uc
   with input
@@ -105,7 +105,7 @@ bridge Query.test {
 
   compat(
     "null coalesce with literal",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with input
   with output as o
@@ -116,18 +116,18 @@ bridge Query.test {
 
   compat(
     "error fallback with literal",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with input
   with output as o
   with context
-  o.x <- input.a ?? "error_val"
+  o.x <- input.a catch "error_val"
 }`,
   );
 
   compat(
     "array mapping",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with std.str.toUpperCase as uc
   with input
@@ -141,7 +141,7 @@ bridge Query.test {
 
   compat(
     "define block and usage",
-    `version 1.4
+    `version 1.5
 define myDef {
   with input as i
   with output as o
@@ -159,14 +159,14 @@ bridge Query.test {
 
   compat(
     "passthrough shorthand",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall
 bridge Query.test with myTool`,
   );
 
   compat(
     "tool with context alias",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   with context as ctx
   .apiKey <- ctx.apiKey
@@ -175,18 +175,18 @@ tool myTool from std.httpCall {
 
   compat(
     "null + error coalesce combined",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with input
   with output as o
   with context
-  o.x <- input.a || input.b ?? context.fallback
+  o.x <- input.a || input.b catch context.fallback
 }`,
   );
 
   compat(
     "tool extends another tool",
-    `version 1.4
+    `version 1.5
 tool base from std.httpCall {
   .baseUrl = "https://api.example.com"
 }
@@ -200,7 +200,7 @@ tool base.detail from base {
 
   compat(
     "multiple bridges",
-    `version 1.4
+    `version 1.5
 tool api from std.httpCall {
   .baseUrl = "https://api.example.com"
 }
@@ -222,7 +222,7 @@ bridge Query.second {
 
   compat(
     "nested dotted paths on tool wire",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   .headers.Authorization <- context.token
   with context
@@ -231,7 +231,7 @@ tool myTool from std.httpCall {
 
   compat(
     "array index in source",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with input
   with output as o
@@ -241,7 +241,7 @@ bridge Query.test {
 
   compat(
     "on error constant",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   on error = { "error": true }
 }`,
@@ -249,7 +249,7 @@ tool myTool from std.httpCall {
 
   compat(
     "on error source",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   with context
   on error <- context.fallback
@@ -258,7 +258,7 @@ tool myTool from std.httpCall {
 
   compat(
     "constant wire in bridge",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with output as o
   o.fixed = "hello world"
@@ -267,7 +267,7 @@ bridge Query.test {
 
   compat(
     "with const in bridge",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with const as c
   with output as o
@@ -277,7 +277,7 @@ bridge Query.test {
 
   compat(
     "bridge wire to handle root (no path)",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with std.httpCall as api
   with input
@@ -289,7 +289,7 @@ bridge Query.test {
 
   compat(
     "define with constant wire",
-    `version 1.4
+    `version 1.5
 define myDef {
   with input as i
   with output as o
@@ -299,7 +299,7 @@ define myDef {
 
   compat(
     "element wire with coalesce",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with input
   with output as o
@@ -311,7 +311,7 @@ bridge Query.test {
 
   compat(
     "tool with const dep",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   with const as c
   .apiKey <- c.key
@@ -320,7 +320,7 @@ tool myTool from std.httpCall {
 
   compat(
     "multiple pipe tools",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with std.str.toUpperCase as uc
   with std.str.toLowerCase as lc
@@ -332,7 +332,7 @@ bridge Query.test {
 
   compat(
     "passthrough with dotted name",
-    `version 1.4
+    `version 1.5
 tool std.httpCall from std.httpCall
 bridge Query.test with std.httpCall`,
   );
@@ -358,7 +358,7 @@ describe("parser — real .bridge files", () => {
 describe("parser — edge cases", () => {
   compat(
     "hyphenated path in tool header",
-    `version 1.4
+    `version 1.5
 tool sg from std.httpCall {
   .headers.x-message-id <- context.msgId
   with context
@@ -367,7 +367,7 @@ tool sg from std.httpCall {
 
   compat(
     "array index in source path",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with myTool as t
   with input
@@ -380,7 +380,7 @@ bridge Query.test {
 
   compat(
     "mutation type",
-    `version 1.4
+    `version 1.5
 bridge Mutation.sendEmail {
   with myMailer as m
   with input
@@ -393,7 +393,7 @@ bridge Mutation.sendEmail {
 
   compat(
     "case-insensitive keywords",
-    `version 1.4
+    `version 1.5
 Bridge Query.test {
   With Input
   With Output As o
@@ -403,7 +403,7 @@ Bridge Query.test {
 
   compat(
     "tool with on error JSON",
-    `version 1.4
+    `version 1.5
 tool myTool from std.httpCall {
   on error = { "lat": 0, "lon": 0 }
 }`,
@@ -411,7 +411,7 @@ tool myTool from std.httpCall {
 
   compat(
     "tool POST with headers",
-    `version 1.4
+    `version 1.5
 tool myApi from std.httpCall {
   .baseUrl = "https://api.example.com"
   .method = POST
@@ -423,20 +423,20 @@ tool myApi from std.httpCall {
   );
 
   compat(
-    "error fallback ?? with number",
-    `version 1.4
+    "error fallback catch with number",
+    `version 1.5
 bridge Query.test {
   with myTool as t
   with input
   with output as o
   t.q <- input.q
-  o.temp <- t.current_weather.temperature ?? 0.0
+  o.temp <- t.current_weather.temperature catch 0.0
 }`,
   );
 
   compat(
     "null coalesce + error fallback combined",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with myTool as t
   with otherTool as ot
@@ -444,13 +444,13 @@ bridge Query.test {
   with output as o
   t.q <- input.q
   ot.q <- input.q
-  o.name <- t.name || ot.name ?? "Unknown"
+  o.name <- t.name || ot.name catch "Unknown"
 }`,
   );
 
   compat(
     "multiple tools in chain",
-    `version 1.4
+    `version 1.5
 tool base from std.httpCall {
   .baseUrl = "https://api.example.com"
 }
@@ -468,7 +468,7 @@ bridge Query.test {
 
   compat(
     "tool with const dep and nested context",
-    `version 1.4
+    `version 1.5
 tool authTool from std.httpCall {
   with const as c
   with context as ctx
@@ -479,7 +479,7 @@ tool authTool from std.httpCall {
 
   compat(
     "alias with pipe in array map",
-    `version 1.4
+    `version 1.5
 bridge Query.list {
   with api
   with enrich
@@ -495,7 +495,7 @@ bridge Query.list {
 
   compat(
     "alias with iterator plain ref in array map",
-    `version 1.4
+    `version 1.5
 bridge Query.list {
   with api
   with output as o
@@ -510,7 +510,7 @@ bridge Query.list {
 
   compat(
     "top-level alias with pipe",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with std.str.toUpperCase as uc
   with input as i
@@ -524,7 +524,7 @@ bridge Query.test {
 
   compat(
     "top-level alias simple rename",
-    `version 1.4
+    `version 1.5
 bridge Query.test {
   with myTool as api
   with input as i

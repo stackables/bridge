@@ -15,7 +15,7 @@ function run(
 
 describe("universal interpolation: fallback (||)", () => {
   test("template string in || fallback alternative", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -30,7 +30,7 @@ bridge Query.test {
   });
 
   test("template string fallback triggers when primary is null", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -46,7 +46,7 @@ bridge Query.test {
   });
 
   test("template string in || fallback inside array mapping", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -70,7 +70,7 @@ bridge Query.test {
 
 describe("universal interpolation: ternary (? :)", () => {
   test("template string in ternary then-branch", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -85,7 +85,7 @@ bridge Query.test {
   });
 
   test("template string in ternary else-branch", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o

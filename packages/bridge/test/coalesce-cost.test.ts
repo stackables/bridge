@@ -9,7 +9,7 @@ import { createGateway } from "./_gateway.ts";
 // v2.0 Execution Semantics:
 //   • || chains evaluate sequentially (left to right) with short-circuit
 //   • Overdefinition uses cost-based ordering (cheap → expensive)
-//   • Backup tools are NEVER called when a earlier source returns non-null
+//   • Backup tools are NEVER called when a earlier source returns a truthy value
 // ═══════════════════════════════════════════════════════════════════════════
 
 const typeDefs = /* GraphQL */ `
@@ -26,7 +26,7 @@ const typeDefs = /* GraphQL */ `
 
 describe("|| sequential short-circuit", () => {
   test("primary succeeds → backup is never called", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -53,7 +53,7 @@ o.label <- p.label || b.label
   });
 
   test("primary returns null → backup is called", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -79,12 +79,12 @@ o.label <- p.label || b.label
     assert.deepStrictEqual(callLog, ["primary", "backup"], "backup called after primary returned null");
   });
 
-  test("3-source chain: first non-null wins, later sources skipped", async () => {
+  test("3-source chain: first truthy wins, later sources skipped", async () => {
     const threeSourceTypes = /* GraphQL */ `
       type Query { lookup(q: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -114,7 +114,7 @@ o.label <- a.label || b.label || c.label
   });
 
   test("|| with literal fallback: both null → literal, no extra calls", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -140,8 +140,8 @@ o.label <- p.label || b.label || "default"
     assert.deepStrictEqual(callLog, ["primary", "backup"], "both called, then literal fires");
   });
 
-  test("|| does not swallow errors — chain aborts on throw", async () => {
-    const bridgeText = `version 1.4
+  test("strict throw exits || chain — backup not called (no catch)", async () => {
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -163,17 +163,13 @@ o.label <- p.label || b.label
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
-    // || does not catch errors. Both sources are tried (errors are collected),
-    // but if all throw → the whole group fails.
-    // Here primary throws but backup succeeds → backup's error-less result is used.
-    // Wait, actually: in the sequential loop, primary throws → error is collected,
-    // then backup is tried → returns {label: "B"} which is non-null → returned.
-    assert.equal(result.data.lookup.label, "B");
-    assert.deepStrictEqual(callLog, ["primary", "backup"]);
+    // strict source throws → error exits || chain → no catch → GraphQL error
+    assert.ok(result.errors?.length, "strict throw → GraphQL error");
+    assert.deepStrictEqual(callLog, ["primary"], "backup never called — strict throw exits chain");
   });
 
-  test("|| + ?? combined: primary throws, backup returns null → ?? fires", async () => {
-    const bridgeText = `version 1.4
+  test("|| + catch combined: strict throw → catch fires", async () => {
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -182,7 +178,7 @@ bridge Query.lookup {
 
 p.q <- i.q
 b.q <- i.q
-o.label <- p.label || b.label || "null-default" ?? "error-default"
+o.label <- p.label || b.label || "null-default" catch "error-default"
 
 }`;
     const callLog: string[] = [];
@@ -196,7 +192,7 @@ o.label <- p.label || b.label || "null-default" ?? "error-default"
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
     assert.equal(result.data.lookup.label, "error-default");
-    assert.deepStrictEqual(callLog, ["primary", "backup"], "both tried before error fallback");
+    assert.deepStrictEqual(callLog, ["primary"], "strict throw exits || — catch fires immediately");
   });
 });
 
@@ -204,7 +200,7 @@ o.label <- p.label || b.label || "null-default" ?? "error-default"
 
 describe("overdefinition: authored order respected", () => {
   test("first wire wins when both are non-null (left-to-right)", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -232,7 +228,7 @@ o.label <- i.hint
   });
 
   test("input is null → falls through to tool call", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -262,7 +258,7 @@ o.label <- i.hint
   test("overdefinition respects authored order — first wire wins", async () => {
     // The expensive tool wire is written FIRST, so it is evaluated first.
     // Left-to-right semantics mean the tool result wins.
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -289,7 +285,7 @@ o.label <- i.hint
   });
 
   test("authored order: tool before context — tool wins", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with context as ctx
@@ -321,7 +317,7 @@ o.label <- ctx.defaultLabel
   });
 
   test("two tool sources with same cost — file order preserved", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -356,7 +352,7 @@ o.label <- b.label
 
 describe("coalesce edge cases", () => {
   test("single source: no sorting or short-circuit needed", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -377,8 +373,8 @@ o.label <- api.label
     assert.equal(result.data.lookup.label, "hello");
   });
 
-  test("|| with first source throwing and second returning null → returns undefined (then || literal fires)", async () => {
-    const bridgeText = `version 1.4
+  test("?. with || fallback: error → undefined, null → falls through to literal", async () => {
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -387,7 +383,7 @@ bridge Query.lookup {
 
 a.q <- i.q
 b.q <- i.q
-o.label <- a.label || b.label || "last-resort"
+o.label <- a?.label || b.label || "last-resort"
 
 }`;
     const tools = {
@@ -399,15 +395,14 @@ o.label <- a.label || b.label || "last-resort"
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
-    // A throws (error collected), B returns null → both tried, no non-null found.
-    // Not all threw (B succeeded), so || fires → "last-resort"
+    // A throws but ?. swallows → undefined (falsy), B returns null (falsy) → literal fires
     assert.equal(result.data.lookup.label, "last-resort");
   });
 
   test("independent targets still resolve concurrently", async () => {
     // label comes from svcA, score comes from svcB — these are different
     // targets and should run in parallel, not sequentially.
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -450,5 +445,131 @@ o.score <- b.score
     // The gap between A starting and B starting should be < 30ms (concurrent)
     const gap = Math.abs(startEvents[0].time - startEvents[1].time);
     assert.ok(gap < 30, `tools should start concurrently (gap: ${gap}ms)`);
+  });
+});
+
+// ── ?. Safe execution modifier ────────────────────────────────────────────
+
+import { executeBridge } from "../src/execute-bridge.ts";
+import { serializeBridge } from "../src/bridge-format.ts";
+
+function run(
+  bridgeText: string,
+  operation: string,
+  input: Record<string, unknown>,
+  tools: Record<string, any> = {},
+) {
+  const raw = parseBridge(bridgeText);
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+    typeof parseBridge
+  >;
+  return executeBridge({ instructions, operation, input, tools });
+}
+
+describe("?. safe execution modifier", () => {
+  test("parser detects ?. and sets safe flag on wire", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.lookup {
+  with api.fetch as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const safePull = bridge.wires.find(
+      (w) => "from" in w && "safe" in w && w.safe,
+    );
+    assert.ok(safePull, "has a wire with safe: true");
+  });
+
+  test("?. swallows tool error and returns undefined", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with failing.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "failing.api": async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    );
+    assert.equal(data.label, undefined);
+  });
+
+  test("?. with || fallback: error returns undefined then || kicks in", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with failing.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label || "fallback"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "failing.api": async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    );
+    assert.equal(data.label, "fallback");
+  });
+
+  test("?. passes through value when tool succeeds", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with good.api as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "good.api": async () => ({ label: "Hello" }),
+      },
+    );
+    assert.equal(data.label, "Hello");
+  });
+
+  test("safe execution round-trips through serializer", () => {
+    const src = `version 1.5
+
+bridge Query.lookup {
+  with api.fetch as api
+  with input as i
+  with output as o
+
+  api.q <- i.q
+  o.label <- api?.label catch "default"
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("?."), "serialized contains ?.");
+    assert.ok(serialized.includes("catch"), "serialized contains catch");
+    // Re-parse round-trips
+    const reparsed = parseBridge(serialized);
+    const bridge = reparsed.find((i) => i.kind === "bridge")!;
+    const safePull = bridge.wires.find(
+      (w) => "from" in w && "safe" in w && w.safe,
+    );
+    assert.ok(safePull, "round-tripped wire has safe: true");
   });
 });

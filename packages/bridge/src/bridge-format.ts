@@ -1,6 +1,7 @@
 import type {
   Bridge,
   ConstDef,
+  ControlFlowInstruction,
   DefineDef,
   Instruction,
   NodeRef,
@@ -18,7 +19,15 @@ export function parseBridge(text: string): Instruction[] {
   return parseBridgeChevrotain(text);
 }
 
-const BRIDGE_VERSION = "1.4";
+const BRIDGE_VERSION = "1.5";
+
+/** Serialize a ControlFlowInstruction to its textual form. */
+function serializeControl(ctrl: ControlFlowInstruction): string {
+  if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
+  if (ctrl.kind === "panic") return `panic ${JSON.stringify(ctrl.message)}`;
+  if (ctrl.kind === "continue") return "continue";
+  return "break";
+}
 
 // ── Serializer ───────────────────────────────────────────────────────────────
 
@@ -142,8 +151,8 @@ function serializeToolBlock(tool: ToolDef): string {
  * the `toInMap` backward (same logic as the main pipe serializer).
  * Otherwise delegates to `serializeRef`.
  *
- * This is used to emit `?? handle.path` or `?? pipe:source` for wire
- * `fallbackRef` values.
+ * This is used to emit `catch handle.path` or `catch pipe:source` for wire
+ * `catchFallbackRef` values, or `?? ref` for `nullishFallbackRef`.
  */
 function serializePipeOrRef(
   ref: NodeRef,
@@ -343,12 +352,22 @@ function serializeBridgeBlock(bridge: Bridge): string {
     gte: ">=",
     lt: "<",
     lte: "<=",
+    __and: "and",
+    __or: "or",
+    not: "not",
+  };
+  const OP_PREC_SER: Record<string, number> = {
+    "*": 4, "/": 4, "+": 3, "-": 3,
+    "==": 2, "!=": 2, ">": 2, ">=": 2, "<": 2, "<=": 2,
+    "and": 1, "or": 0, "not": -1,
   };
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
   type ExprForkInfo = {
     op: string;
     bWire: Wire | undefined;
     aWire: FW | undefined;
+    /** For condAnd/condOr wires: the logic wire itself */
+    logicWire?: Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }>;
   };
   const exprForks = new Map<string, ExprForkInfo>();
   const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
@@ -357,6 +376,22 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!ph.handle.startsWith("__expr_")) continue;
     const op = FN_TO_OP[ph.baseTrunk.field];
     if (!op) continue;
+
+    // For condAnd/condOr wires (field === "__and" or "__or")
+    if (ph.baseTrunk.field === "__and" || ph.baseTrunk.field === "__or") {
+      const logicWire = bridge.wires.find(
+        (w) => {
+          const prop = ph.baseTrunk.field === "__and" ? "condAnd" : "condOr";
+          return prop in w && refTrunkKey(w.to) === ph.key;
+        },
+      ) as Extract<Wire, { condAnd: any }> | Extract<Wire, { condOr: any }> | undefined;
+
+      if (logicWire) {
+        exprForks.set(ph.key, { op, bWire: undefined, aWire: undefined, logicWire });
+        exprPipeWireSet.add(logicWire);
+      }
+      continue;
+    }
 
     // Find the .a and .b wires for this fork
     let aWire: FW | undefined;
@@ -522,15 +557,50 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (!exprForks.has(tk) || !outWire.to.element) continue;
 
     // Recursively serialize expression fork tree
-    function serializeElemExprTree(forkTk: string): string | null {
+    function serializeElemExprTree(forkTk: string, parentPrec?: number): string | null {
       const info = exprForks.get(forkTk);
       if (!info) return null;
+
+      // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+      if (info.logicWire) {
+        const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+        let leftStr: string;
+        const leftTk = refTrunkKey(logic.leftRef);
+        if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+          leftStr = serializeElemExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+        } else {
+          leftStr = logic.leftRef.element
+            ? "ITER." + serPath(logic.leftRef.path)
+            : sRef(logic.leftRef, true);
+        }
+
+        let rightStr: string;
+        if (logic.rightRef) {
+          const rightTk = refTrunkKey(logic.rightRef);
+          if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+            rightStr = serializeElemExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+          } else {
+            rightStr = logic.rightRef.element
+              ? "ITER." + serPath(logic.rightRef.path)
+              : sRef(logic.rightRef, true);
+          }
+        } else if (logic.rightValue != null) {
+          rightStr = logic.rightValue;
+        } else {
+          rightStr = "0";
+        }
+
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
+      }
 
       let leftStr: string | null = null;
       if (info.aWire) {
         const fromTk = refTrunkKey(info.aWire.from);
         if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-          leftStr = serializeElemExprTree(fromTk);
+          leftStr = serializeElemExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
         } else {
           leftStr = info.aWire.from.element
             ? "ITER." + serPath(info.aWire.from.path)
@@ -545,7 +615,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const bFrom = (info.bWire as FW).from;
         const bTk = refTrunkKey(bFrom);
         if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-          rightStr = serializeElemExprTree(bTk) ?? sRef(bFrom, true);
+          rightStr = serializeElemExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
         } else {
           rightStr = bFrom.element
             ? "ITER." + serPath(bFrom.path)
@@ -556,7 +626,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
 
       if (leftStr == null) return rightStr;
-      return `${leftStr} ${info.op} ${rightStr}`;
+      if (info.op === "not") return `not ${leftStr}`;
+      let result = `${leftStr} ${info.op} ${rightStr}`;
+      const myPrec = OP_PREC_SER[info.op] ?? 0;
+      if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+      return result;
     }
 
     const exprStr = serializeElemExprTree(tk);
@@ -710,14 +784,26 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const elemTo = "." + serPath(fieldPath);
 
       const nfb =
-        "nullFallback" in ew && ew.nullFallback ? ` || ${ew.nullFallback}` : "";
+        "falsyControl" in ew && ew.falsyControl
+          ? ` || ${serializeControl(ew.falsyControl)}`
+          : "falsyFallback" in ew && ew.falsyFallback ? ` || ${ew.falsyFallback}` : "";
+      const nuf =
+        "nullishControl" in ew && ew.nullishControl
+          ? ` ?? ${serializeControl(ew.nullishControl)}`
+          : "nullishFallbackRef" in ew && ew.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(ew.nullishFallbackRef)}`
+            : "nullishFallback" in ew && ew.nullishFallback
+              ? ` ?? ${ew.nullishFallback}`
+              : "";
       const errf =
-        "fallbackRef" in ew && ew.fallbackRef
-          ? ` ?? ${sPipeOrRef(ew.fallbackRef)}`
-          : "fallback" in ew && ew.fallback
-            ? ` ?? ${ew.fallback}`
-            : "";
-      lines.push(`${indent}${elemTo} <- ${fromPart}${nfb}${errf}`);
+        "catchControl" in ew && ew.catchControl
+          ? ` catch ${serializeControl(ew.catchControl)}`
+          : "catchFallbackRef" in ew && ew.catchFallbackRef
+            ? ` catch ${sPipeOrRef(ew.catchFallbackRef)}`
+            : "catchFallback" in ew && ew.catchFallback
+              ? ` catch ${ew.catchFallback}`
+              : "";
+      lines.push(`${indent}${elemTo} <- ${fromPart}${nfb}${nuf}${errf}`);
     }
 
     // Emit expression element wires at this level
@@ -790,6 +876,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           rightStr = "0";
         }
         if (leftStr == null) return rightStr;
+        if (info.op === "not") return `not ${leftStr}`;
         return `${leftStr} ${info.op} ${rightStr}`;
       }
       return serFork(tk) ?? sRef(ref, true);
@@ -808,14 +895,25 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const elseStr = w.elseRef
         ? sRef(w.elseRef, true)
         : (w.elseValue ?? "null");
-      const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
-      const errf = w.fallbackRef
-        ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
-        : w.fallback
-          ? ` ?? ${w.fallback}`
-          : "";
+      const nfb = "falsyControl" in w && w.falsyControl
+        ? ` || ${serializeControl(w.falsyControl)}`
+        : w.falsyFallback ? ` || ${w.falsyFallback}` : "";
+      const nuf = "nullishControl" in w && w.nullishControl
+        ? ` ?? ${serializeControl(w.nullishControl)}`
+        : w.nullishFallbackRef
+          ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+          : w.nullishFallback
+            ? ` ?? ${w.nullishFallback}`
+            : "";
+      const errf = "catchControl" in w && w.catchControl
+        ? ` catch ${serializeControl(w.catchControl)}`
+        : w.catchFallbackRef
+          ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
+          : w.catchFallback
+            ? ` catch ${w.catchFallback}`
+            : "";
       lines.push(
-        `${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${errf}`,
+        `${toStr} <- ${condStr} ? ${thenStr} : ${elseStr}${nfb}${nuf}${errf}`,
       );
       continue;
     }
@@ -826,6 +924,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
       lines.push(`${toStr} = ${formatBareValue(w.value)}`);
       continue;
     }
+
+    // Skip condAnd/condOr wires (handled in expression tree serialization)
+    if ("condAnd" in w || "condOr" in w) continue;
 
     // Array mapping — emit brace-delimited element block
     const arrayKey = w.to.path.join(".");
@@ -841,15 +942,48 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Regular wire
-    const fromStr = sRef(w.from, true);
+    let fromStr = sRef(w.from, true);
+    // Per-segment safe navigation: insert ?. at correct positions
+    if (w.safe) {
+      const ref = w.from;
+      if (ref.rootSafe || ref.pathSafe?.some(s => s)) {
+        // Re-serialize the path with per-segment safety
+        const handle = fromStr.split(".")[0].split("[")[0];
+        const parts: string[] = [handle];
+        for (let i = 0; i < ref.path.length; i++) {
+          const seg = ref.path[i];
+          const isSafe = i === 0 ? !!ref.rootSafe : !!ref.pathSafe?.[i];
+          if (/^\d+$/.test(seg)) {
+            parts.push(`[${seg}]`);
+          } else {
+            parts.push(`${isSafe ? "?." : "."}${seg}`);
+          }
+        }
+        fromStr = parts.join("");
+      } else if (fromStr.includes(".")) {
+        // Legacy behavior: safe flag without per-segment info, put ?. after root
+        fromStr = fromStr.replace(".", "?.");
+      }
+    }
     const toStr = sRef(w.to, false);
-    const nfb = w.nullFallback ? ` || ${w.nullFallback}` : "";
-    const errf = w.fallbackRef
-      ? ` ?? ${sPipeOrRef(w.fallbackRef)}`
-      : w.fallback
-        ? ` ?? ${w.fallback}`
-        : "";
-    lines.push(`${toStr} <- ${fromStr}${nfb}${errf}`);
+    const nfb = "falsyControl" in w && w.falsyControl
+      ? ` || ${serializeControl(w.falsyControl)}`
+      : w.falsyFallback ? ` || ${w.falsyFallback}` : "";
+    const nuf = "nullishControl" in w && w.nullishControl
+      ? ` ?? ${serializeControl(w.nullishControl)}`
+      : w.nullishFallbackRef
+        ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+        : w.nullishFallback
+          ? ` ?? ${w.nullishFallback}`
+          : "";
+    const errf = "catchControl" in w && w.catchControl
+      ? ` catch ${serializeControl(w.catchControl)}`
+      : w.catchFallbackRef
+        ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
+        : w.catchFallback
+          ? ` catch ${w.catchFallback}`
+          : "";
+    lines.push(`${toStr} <- ${fromStr}${nfb}${nuf}${errf}`);
   }
 
   // ── Top-level alias declarations ─────────────────────────────────────
@@ -930,16 +1064,51 @@ function serializeBridgeBlock(bridge: Bridge): string {
       // Element-targeting expressions are handled in serializeArrayElements
       if (outWire.to.element) continue;
       // Recursively serialize an expression fork into infix notation.
-      function serializeExprTree(forkTk: string): string | null {
+      function serializeExprTree(forkTk: string, parentPrec?: number): string | null {
         const info = exprForks.get(forkTk);
         if (!info) return null;
+
+        // condAnd/condOr logic wire — reconstruct from leftRef/rightRef
+        if (info.logicWire) {
+          const logic = "condAnd" in info.logicWire ? info.logicWire.condAnd : info.logicWire.condOr;
+          let leftStr: string;
+          const leftTk = refTrunkKey(logic.leftRef);
+          if (logic.leftRef.path.length === 0 && exprForks.has(leftTk)) {
+            leftStr = serializeExprTree(leftTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.leftRef, true);
+          } else {
+            leftStr = logic.leftRef.element
+              ? "ITER." + serPath(logic.leftRef.path)
+              : sRef(logic.leftRef, true);
+          }
+
+          let rightStr: string;
+          if (logic.rightRef) {
+            const rightTk = refTrunkKey(logic.rightRef);
+            if (logic.rightRef.path.length === 0 && exprForks.has(rightTk)) {
+              rightStr = serializeExprTree(rightTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(logic.rightRef, true);
+            } else {
+              rightStr = logic.rightRef.element
+                ? "ITER." + serPath(logic.rightRef.path)
+                : sRef(logic.rightRef, true);
+            }
+          } else if (logic.rightValue != null) {
+            rightStr = logic.rightValue;
+          } else {
+            rightStr = "0";
+          }
+
+          let result = `${leftStr} ${info.op} ${rightStr}`;
+          const myPrec = OP_PREC_SER[info.op] ?? 0;
+          if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+          return result;
+        }
 
         // Serialize left operand (from .a wire)
         let leftStr: string | null = null;
         if (info.aWire) {
           const fromTk = refTrunkKey(info.aWire.from);
           if (info.aWire.from.path.length === 0 && exprForks.has(fromTk)) {
-            leftStr = serializeExprTree(fromTk);
+            leftStr = serializeExprTree(fromTk, OP_PREC_SER[info.op] ?? 0);
           } else {
             leftStr = info.aWire.from.element
               ? "ITER." + serPath(info.aWire.from.path)
@@ -955,7 +1124,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
           if (bFrom.path.length === 0 && exprForks.has(bTk)) {
-            rightStr = serializeExprTree(bTk) ?? sRef(bFrom, true);
+            rightStr = serializeExprTree(bTk, OP_PREC_SER[info.op] ?? 0) ?? sRef(bFrom, true);
           } else {
             rightStr = bFrom.element
               ? "ITER." + serPath(bFrom.path)
@@ -966,19 +1135,35 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
 
         if (leftStr == null) return rightStr;
-        return `${leftStr} ${info.op} ${rightStr}`;
+        // Unary `not` — only has .a operand
+        if (info.op === "not") return `not ${leftStr}`;
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
       }
 
       const exprStr = serializeExprTree(tk);
       if (exprStr) {
         const destStr = sRef(outWire.to, false);
-        const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
-        const errf = outWire.fallbackRef
-          ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
-          : outWire.fallback
-            ? ` ?? ${outWire.fallback}`
-            : "";
-        lines.push(`${destStr} <- ${exprStr}${nfb}${errf}`);
+        const nfb = "falsyControl" in outWire && outWire.falsyControl
+          ? ` || ${serializeControl(outWire.falsyControl)}`
+          : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+        const nuf = "nullishControl" in outWire && outWire.nullishControl
+          ? ` ?? ${serializeControl(outWire.nullishControl)}`
+          : outWire.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallback
+              ? ` ?? ${outWire.nullishFallback}`
+              : "";
+        const errf = "catchControl" in outWire && outWire.catchControl
+          ? ` catch ${serializeControl(outWire.catchControl)}`
+          : outWire.catchFallbackRef
+            ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+            : outWire.catchFallback
+              ? ` catch ${outWire.catchFallback}`
+              : "";
+        lines.push(`${destStr} <- ${exprStr}${nfb}${nuf}${errf}`);
       }
       continue;
     }
@@ -989,13 +1174,24 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const templateStr = reconstructTemplateString(tk);
       if (templateStr) {
         const destStr = sRef(outWire.to, false);
-        const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
-        const errf = outWire.fallbackRef
-          ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
-          : outWire.fallback
-            ? ` ?? ${outWire.fallback}`
-            : "";
-        lines.push(`${destStr} <- ${templateStr}${nfb}${errf}`);
+        const nfb = "falsyControl" in outWire && outWire.falsyControl
+          ? ` || ${serializeControl(outWire.falsyControl)}`
+          : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+        const nuf = "nullishControl" in outWire && outWire.nullishControl
+          ? ` ?? ${serializeControl(outWire.nullishControl)}`
+          : outWire.nullishFallbackRef
+            ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallback
+              ? ` ?? ${outWire.nullishFallback}`
+              : "";
+        const errf = "catchControl" in outWire && outWire.catchControl
+          ? ` catch ${serializeControl(outWire.catchControl)}`
+          : outWire.catchFallbackRef
+            ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+            : outWire.catchFallback
+              ? ` catch ${outWire.catchFallback}`
+              : "";
+        lines.push(`${destStr} <- ${templateStr}${nfb}${nuf}${errf}`);
       }
       continue;
     }
@@ -1025,14 +1221,25 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = sRef(actualSourceRef, true);
       const destStr = sRef(outWire.to, false);
-      const nfb = outWire.nullFallback ? ` || ${outWire.nullFallback}` : "";
-      const errf = outWire.fallbackRef
-        ? ` ?? ${sPipeOrRef(outWire.fallbackRef)}`
-        : outWire.fallback
-          ? ` ?? ${outWire.fallback}`
-          : "";
+      const nfb = "falsyControl" in outWire && outWire.falsyControl
+        ? ` || ${serializeControl(outWire.falsyControl)}`
+        : outWire.falsyFallback ? ` || ${outWire.falsyFallback}` : "";
+      const nuf = "nullishControl" in outWire && outWire.nullishControl
+        ? ` ?? ${serializeControl(outWire.nullishControl)}`
+        : outWire.nullishFallbackRef
+          ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+          : outWire.nullishFallback
+            ? ` ?? ${outWire.nullishFallback}`
+            : "";
+      const errf = "catchControl" in outWire && outWire.catchControl
+        ? ` catch ${serializeControl(outWire.catchControl)}`
+        : outWire.catchFallbackRef
+          ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+          : outWire.catchFallback
+            ? ` catch ${outWire.catchFallback}`
+            : "";
       lines.push(
-        `${destStr} <- ${handleChain.join(":")}:${sourceStr}${nfb}${errf}`,
+        `${destStr} <- ${handleChain.join(":")}:${sourceStr}${nfb}${nuf}${errf}`,
       );
     }
   }
@@ -1041,7 +1248,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   if (bridge.forces) {
     for (const f of bridge.forces) {
       lines.push(
-        f.catchError ? `force ${f.handle} ?? null` : `force ${f.handle}`,
+        f.catchError ? `force ${f.handle} catch null` : `force ${f.handle}`,
       );
     }
   }

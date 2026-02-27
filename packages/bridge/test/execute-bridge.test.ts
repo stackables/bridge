@@ -22,7 +22,7 @@ function run(
 // ── Object output (per-field wires) ─────────────────────────────────────────
 
 describe("executeBridge: object output", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.livingStandard {
   with hereapi.geocode as gc
   with companyX.getLivingStandard as cx
@@ -86,7 +86,7 @@ bridge Query.livingStandard {
 // ── Whole-object passthrough (root wire: o <- ...) ──────────────────────────
 
 describe("executeBridge: root wire passthrough", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.getUser {
   with userApi as api
   with input as i
@@ -131,7 +131,7 @@ bridge Query.getUser {
 // ── Array output (o <- items[] as x { ... }) ────────────────────────────────
 
 describe("executeBridge: array output", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
@@ -184,7 +184,7 @@ bridge Query.geocode {
 // ── Nested arrays (o <- items[] as x { .sub <- x.things[] as y { ... } }) ──
 
 describe("executeBridge: nested arrays", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.searchTrains {
   with transportApi as api
   with input as i
@@ -256,7 +256,7 @@ bridge Query.searchTrains {
 describe("executeBridge: alias declarations", () => {
   test("alias pipe:iter as name — evaluates pipe once per element", async () => {
     let enrichCallCount = 0;
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.list {
   with api
   with enrich
@@ -291,7 +291,7 @@ bridge Query.list {
   });
 
   test("alias iter.subfield as name — iterator-relative plain ref", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.list {
   with api
   with output as o
@@ -316,7 +316,7 @@ bridge Query.list {
   });
 
   test("alias tool:iter as name — tool handle ref in array", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.items {
   with api
   with std.str.toUpperCase as uc
@@ -346,7 +346,7 @@ bridge Query.items {
 
   test("top-level alias pipe:source as name — caches result", async () => {
     let ucCallCount = 0;
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with myUC
   with input as i
@@ -381,7 +381,7 @@ bridge Query.test {
   });
 
   test("top-level alias handle.path as name — simple rename", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with myTool as api
   with input as i
@@ -405,7 +405,7 @@ bridge Query.test {
 
   test("top-level alias reused inside array — not re-evaluated per element", async () => {
     let ucCallCount = 0;
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.products {
   with api
   with myUC
@@ -448,12 +448,190 @@ bridge Query.products {
     // 1 call for top-level upperCat + 2 calls for per-element upper = 3 total
     assert.equal(ucCallCount, 3);
   });
+
+  test("alias with || falsy fallback", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with output as o
+  with input as i
+
+  alias i.nickname || "Guest" as displayName
+
+  o.name <- displayName
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { nickname: "Alice" });
+    assert.equal(d1.name, "Alice");
+    const { data: d2 } = await run(bridgeText, "Query.test", {});
+    assert.equal(d2.name, "Guest");
+  });
+
+  test("alias with ?? nullish fallback", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with output as o
+  with input as i
+
+  alias i.score ?? 0 as score
+
+  o.score <- score
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { score: 42 });
+    assert.equal(d1.score, 42);
+    const { data: d2 } = await run(bridgeText, "Query.test", {});
+    assert.equal(d2.score, 0);
+  });
+
+  test("alias with catch error boundary", async () => {
+    let callCount = 0;
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with riskyApi as api
+  with output as o
+
+  alias api.value catch 99 as safeVal
+
+  o.result <- safeVal
+}`;
+    const tools: Record<string, any> = {
+      riskyApi: () => {
+        callCount++;
+        throw new Error("Service unavailable");
+      },
+    };
+    const { data } = await run(bridgeText, "Query.test", {}, tools);
+    assert.equal(data.result, 99);
+    assert.equal(callCount, 1);
+  });
+
+  test("alias with ?. safe execution", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with riskyApi as api
+  with output as o
+
+  alias api?.value as safeVal
+
+  o.result <- safeVal || "fallback"
+}`;
+    const tools: Record<string, any> = {
+      riskyApi: () => {
+        throw new Error("Service unavailable");
+      },
+    };
+    const { data } = await run(bridgeText, "Query.test", {}, tools);
+    assert.equal(data.result, "fallback");
+  });
+
+  test("alias with math expression (+ operator)", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.price + 10 as bumped
+
+  o.result <- bumped
+}`;
+    const { data } = await run(bridgeText, "Query.test", { price: 5 });
+    assert.equal(data.result, 15);
+  });
+
+  test("alias with comparison expression (== operator)", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.role == "admin" as isAdmin
+
+  o.isAdmin <- isAdmin
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { role: "admin" });
+    assert.equal(d1.isAdmin, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { role: "user" });
+    assert.equal(d2.isAdmin, false);
+  });
+
+  test("alias with parenthesized expression", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias (i.a + i.b) * 2 as doubled
+
+  o.result <- doubled
+}`;
+    const { data } = await run(bridgeText, "Query.test", { a: 3, b: 4 });
+    assert.equal(data.result, 14);
+  });
+
+  test("alias with string literal source", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with output as o
+
+  alias "hello world" as greeting
+
+  o.result <- greeting
+}`;
+    const { data } = await run(bridgeText, "Query.test", {});
+    assert.equal(data.result, "hello world");
+  });
+
+  test("alias with string literal comparison", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias "a" == i.val as matchesA
+
+  o.result <- matchesA
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { val: "a" });
+    assert.equal(d1.result, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { val: "b" });
+    assert.equal(d2.result, false);
+  });
+
+  test("alias with not prefix", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias not i.blocked as allowed
+
+  o.allowed <- allowed
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { blocked: false });
+    assert.equal(d1.allowed, true);
+    const { data: d2 } = await run(bridgeText, "Query.test", { blocked: true });
+    assert.equal(d2.allowed, false);
+  });
+
+  test("alias with ternary expression", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  alias i.score >= 90 ? "A" : "B" as grade
+
+  o.grade <- grade
+}`;
+    const { data: d1 } = await run(bridgeText, "Query.test", { score: 95 });
+    assert.equal(d1.grade, "A");
+    const { data: d2 } = await run(bridgeText, "Query.test", { score: 75 });
+    assert.equal(d2.grade, "B");
+  });
 });
 
 // ── Constant wires ──────────────────────────────────────────────────────────
 
 describe("executeBridge: constant wires", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.info {
   with input as i
   with output as o
@@ -471,7 +649,7 @@ bridge Query.info {
 // ── Tracing ─────────────────────────────────────────────────────────────────
 
 describe("executeBridge: tracing", () => {
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.echo {
   with myTool as t
   with input as i
@@ -512,13 +690,13 @@ bridge Query.echo {
 describe("executeBridge: errors", () => {
   test("invalid operation format throws", async () => {
     await assert.rejects(
-      () => run("version 1.4", "badformat", {}),
+      () => run("version 1.5", "badformat", {}),
       /expected "Type\.field"/,
     );
   });
 
   test("missing bridge definition throws", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.foo {
   with output as o
   o.x = "ok"

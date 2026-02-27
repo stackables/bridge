@@ -10,6 +10,7 @@ export type {
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
+export { BridgeAbortError, BridgePanicError } from "./ExecutionTree.ts";
 export { BridgeLanguageService } from "./language-service.ts";
 export type {
   BridgeCompletion,
@@ -28,12 +29,13 @@ export {
   builtinToolNames,
   builtinTools,
   createHttpCall,
-  math,
+  internal,
   std,
 } from "./tools/index.ts";
 export type {
   CacheStore,
   ConstDef,
+  ControlFlowInstruction,
   HandleBinding,
   Instruction,
   ToolCallFn,

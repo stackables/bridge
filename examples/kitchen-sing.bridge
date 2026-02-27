@@ -1,4 +1,4 @@
-version 1.4
+version 1.5
 
 # Tool 1: Geocoder (City Name -> Coordinates)
 tool geo from std.httpCall {

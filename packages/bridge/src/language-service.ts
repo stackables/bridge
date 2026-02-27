@@ -15,7 +15,7 @@
 import { parseBridgeDiagnostics } from "./parser/index.ts";
 import type { BridgeDiagnostic } from "./parser/index.ts";
 import type { Instruction, HandleBinding, ToolDep } from "./types.ts";
-import { builtinToolNames } from "./tools/index.ts";
+import { builtinToolNames, std } from "./tools/index.ts";
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -41,15 +41,29 @@ export type BridgeHover = {
 
 const builtinToolNameSet = new Set(builtinToolNames);
 
-const toolsByNamespace: Record<string, string[]> = {};
-for (const fqn of builtinToolNames) {
-  const dot = fqn.indexOf(".");
-  const ns = fqn.slice(0, dot);
-  const name = fqn.slice(dot + 1);
-  (toolsByNamespace[ns] ??= []).push(name);
+/** Recursively enumerate all leaf function paths in `obj` as "prefix.key" strings. */
+function flattenToolPaths(obj: object, prefix: string): string[] {
+  const result: string[] = [];
+  for (const [key, val] of Object.entries(obj)) {
+    const path = `${prefix}.${key}`;
+    if (typeof val === "function") {
+      result.push(path);
+    } else if (typeof val === "object" && val !== null) {
+      result.push(...flattenToolPaths(val, path));
+    }
+  }
+  return result;
 }
 
-const BUILTIN_REF_RE = /\b((?:std|math)\.[A-Za-z_]\w*)\b/g;
+/**
+ * User-facing tool names — only `std.*` leaf paths, fully qualified.
+ * `internal.*` tools are engine-internal and not exposed to users.
+ * e.g. ["std.str.toUpperCase", "std.str.toLowerCase", ..., "std.audit", ...]
+ */
+const userFacingToolNames: readonly string[] = flattenToolPaths(std, "std");
+
+// Only validate std.* references in user code (not internal.* which is engine-only)
+const BUILTIN_REF_RE = /\b(std\.[A-Za-z_]\w*)\b/g;
 
 // ── Language Service ───────────────────────────────────────────────────────
 
@@ -94,7 +108,7 @@ export class BridgeLanguageService {
 
     const diags = [...this.parserDiagnostics];
 
-    // Scan for unknown std.*/math.* tool references
+    // Scan for unknown std.* tool references (internal.* is engine-only; skip)
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
       if (line.trimStart().startsWith("#")) continue;
@@ -127,16 +141,28 @@ export class BridgeLanguageService {
     const lineText = this.lines[pos.line] ?? "";
     const textBefore = lineText.slice(0, pos.character);
 
-    // After "std." or "math." → suggest tool names within that namespace
-    const nsDotMatch = textBefore.match(/\b(std|math)\.\w*$/);
-    if (nsDotMatch) {
-      const ns = nsDotMatch[1];
-      const names = toolsByNamespace[ns] ?? [];
-      return names.map((name) => ({
-        label: name,
-        kind: "function" as const,
-        detail: `${ns}.${name}`,
-      }));
+    // After "std." or a deeper std path (e.g. "std.str.") → suggest next segment
+    const nsPrefixMatch = textBefore.match(/\b(std(?:\.\w+)*)\.\w*$/);
+    if (nsPrefixMatch) {
+      const prefix = nsPrefixMatch[1] + "."; // e.g. "std." or "std.str."
+      const seen = new Set<string>();
+      const completions: BridgeCompletion[] = [];
+      for (const fqn of userFacingToolNames) {
+        if (fqn.startsWith(prefix)) {
+          const rest = fqn.slice(prefix.length);
+          const nextSegment = rest.split(".")[0];
+          if (!seen.has(nextSegment)) {
+            seen.add(nextSegment);
+            const isLeaf = !rest.includes(".");
+            completions.push({
+              label: nextSegment,
+              kind: isLeaf ? ("function" as const) : ("variable" as const),
+              detail: prefix + nextSegment,
+            });
+          }
+        }
+      }
+      return completions;
     }
 
     // After "with " at start of line or after "from " / "extends " → suggest FQN tools
@@ -144,7 +170,7 @@ export class BridgeLanguageService {
       /(?:^\s*with\s+|(?:from|extends)\s+)\S*$/,
     );
     if (contextMatch) {
-      return builtinToolNames.map((fqn) => ({
+      return userFacingToolNames.map((fqn) => ({
         label: fqn,
         kind: "function" as const,
       }));

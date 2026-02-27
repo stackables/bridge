@@ -23,7 +23,7 @@ In a traditional BFF, fetching a user's profile and their recent orders simultan
 **The Scenario:** The UI needs a dashboard showing user details and their recent orders.
 
 ```bridge
-version 1.4
+version 1.5
 
 tool userApi from std.httpCall { .baseUrl = "https://api.internal/users" }
 tool orderApi from std.httpCall { .baseUrl = "https://api.internal/orders" }
@@ -75,7 +75,7 @@ bridge Query.orders {
 UIs need to be resilient. If the "Avatar API" goes down, the whole dashboard shouldn't crash; the UI should just show a placeholder image. Traditional resolvers require messy `try/catch` blocks for this. The Bridge uses declarative fallbacks.
 
 * `||` (Logical OR): Fall back if the value is missing or null.
-* `??` (Wire-level Catch): Fall back if the tool *throws an error* (e.g., a 500 status code).
+* `catch` (Wire-level Catch): Fall back if the tool *throws an error* (e.g., a 500 status code).
 
 ```bridge
 bridge Query.profile {
@@ -88,7 +88,7 @@ bridge Query.profile {
   avatarApi.email <- userApi.email
 
   # If the avatar service timeouts or throws a 500, catch it and return a default.
-  o.avatarUrl <- avatarApi.url ?? "https://ui-avatars.com/api/?name=default"
+  o.avatarUrl <- avatarApi.url catch "https://ui-avatars.com/api/?name=default"
   
   # If the user hasn't set a nickname, fall back to their first name.
   o.displayName <- userApi.nickname || userApi.firstName

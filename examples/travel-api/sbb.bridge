@@ -1,4 +1,4 @@
-version 1.4
+version 1.5
 
 tool sbbApi from std.httpCall {
   .baseUrl = "https://transport.opendata.ch/v1"

@@ -17,7 +17,7 @@ function run(
 describe("string interpolation || fallback priority", () => {
   test("template string with || fallback (flat wire)", async () => {
     const bridge = [
-      "version 1.4",
+      "version 1.5",
       "",
       "bridge Query.test {",
       "  with input as i",
@@ -35,7 +35,7 @@ describe("string interpolation || fallback priority", () => {
 
   test("template string with || fallback inside path scope block", async () => {
     const bridge = [
-      "version 1.4",
+      "version 1.5",
       "",
       "bridge Query.test {",
       "  with input as i",
@@ -55,7 +55,7 @@ describe("string interpolation || fallback priority", () => {
 
   test("template string with multiple || fallbacks in scope + alias", async () => {
     const bridge = [
-      "version 1.4",
+      "version 1.5",
       "",
       "bridge Query.test {",
       "  with std.str.toUpperCase as uc",

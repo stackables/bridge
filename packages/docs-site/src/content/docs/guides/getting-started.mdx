@@ -20,7 +20,7 @@ The Bridge separates your mapping logic (`.bridge` files) from your execution en
 
 2. Write your first bridge-file  
     ```bridge title="should_i_go_outside.bridge"
-    version 1.4
+    version 1.5
 
     # Tool 1: Geocoder (City Name -> Coordinates)
     tool geo from std.httpCall {
@@ -55,7 +55,7 @@ The Bridge separates your mapping logic (`.bridge` files) from your execution en
       w.longitude <- f.lon
       w.current_weather = true
 
-      o.decision <- w.current_weather.temperature > 25 || false ?? false
+      o.decision <- w.current_weather.temperature > 25 || false catch false
       o.why {
         .temperature <- w.current_weather.temperature ?? 0.0
       }

@@ -50,12 +50,21 @@ export const OnKw      = createToken({ name: "OnKw",      pattern: /on/i,      l
 export const ErrorKw   = createToken({ name: "ErrorKw",   pattern: /error/i,   longer_alt: Identifier });
 export const ForceKw   = createToken({ name: "ForceKw",   pattern: /force/i,   longer_alt: Identifier });
 export const AliasKw   = createToken({ name: "AliasKw",   pattern: /alias/i,   longer_alt: Identifier });
+export const CatchKw   = createToken({ name: "CatchKw",   pattern: /catch/i,   longer_alt: Identifier });
+export const AndKw     = createToken({ name: "AndKw",     pattern: /and/,      longer_alt: Identifier });
+export const OrKw      = createToken({ name: "OrKw",      pattern: /or/,       longer_alt: Identifier });
+export const NotKw     = createToken({ name: "NotKw",     pattern: /not/,      longer_alt: Identifier });
+export const ThrowKw   = createToken({ name: "ThrowKw",   pattern: /throw/,    longer_alt: Identifier });
+export const PanicKw   = createToken({ name: "PanicKw",   pattern: /panic/,    longer_alt: Identifier });
+export const ContinueKw = createToken({ name: "ContinueKw", pattern: /continue/, longer_alt: Identifier });
+export const BreakKw   = createToken({ name: "BreakKw",   pattern: /break/,    longer_alt: Identifier });
 
 // ── Operators & punctuation ────────────────────────────────────────────────
 
 export const Arrow         = createToken({ name: "Arrow",         pattern: /<-/ });
 export const NullCoalesce  = createToken({ name: "NullCoalesce",  pattern: /\|\|/ });
 export const ErrorCoalesce = createToken({ name: "ErrorCoalesce", pattern: /\?\?/ });
+export const SafeNav       = createToken({ name: "SafeNav",       pattern: /\?\./ });
 export const QuestionMark  = createToken({ name: "QuestionMark",  pattern: /\?/ });
 export const GreaterEqual  = createToken({ name: "GreaterEqual",  pattern: />=/ });
 export const LessEqual     = createToken({ name: "LessEqual",     pattern: /<=/ });
@@ -65,6 +74,8 @@ export const GreaterThan   = createToken({ name: "GreaterThan",   pattern: />/ }
 export const LessThan      = createToken({ name: "LessThan",      pattern: /</ });
 export const Star          = createToken({ name: "Star",          pattern: /\*/ });
 export const Plus          = createToken({ name: "Plus",          pattern: /\+/ });
+export const LParen        = createToken({ name: "LParen",        pattern: /\(/ });
+export const RParen        = createToken({ name: "RParen",        pattern: /\)/ });
 export const LCurly        = createToken({ name: "LCurly",        pattern: /\{/ });
 export const RCurly        = createToken({ name: "RCurly",        pattern: /\}/ });
 export const LSquare       = createToken({ name: "LSquare",       pattern: /\[/ });
@@ -107,6 +118,7 @@ export const allTokens = [
   Arrow,
   NullCoalesce,
   ErrorCoalesce,
+  SafeNav,
   QuestionMark,
   GreaterEqual,
   LessEqual,
@@ -116,6 +128,8 @@ export const allTokens = [
   LessThan,
   Star,
   Plus,
+  LParen,
+  RParen,
   LCurly,
   RCurly,
   LSquare,
@@ -141,6 +155,14 @@ export const allTokens = [
   ErrorKw,
   ForceKw,
   AliasKw,
+  CatchKw,
+  AndKw,
+  OrKw,
+  NotKw,
+  ThrowKw,
+  PanicKw,
+  ContinueKw,
+  BreakKw,
   TrueLiteral,
   FalseLiteral,
   NullLiteral,

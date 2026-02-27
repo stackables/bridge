@@ -27,6 +27,7 @@ with hereGeo as geo2
 # Wire them independently
 geo1.q <- i.cityOne
 geo2.q <- i.cityTwo
+
 ```
 
 ### 2. Lazy, Pull-Based Execution
@@ -39,27 +40,27 @@ If a client's query does not ask for a specific field, the wire connected to it 
 
 Because The Bridge knows the exact shape of your data dependencies, it handles all parallelization automatically:
 
-- **Independent targets run concurrently:** Because `geo1` and `geo2` above are independent nodes, the engine fires both HTTP requests in parallel!
-- **Tool inputs run concurrently:** If a tool requires three different dynamic parameters, all three are resolved in parallel before the tool is invoked.
-- **Fallbacks run sequentially:** If you chain sources together using fallbacks (`a || b`), the engine evaluates them one by one, short-circuiting as soon as it finds data to save execution costs.
+* **Independent targets run concurrently:** Because `geo1` and `geo2` above are independent nodes, the engine fires both HTTP requests in parallel!
+* **Tool inputs run concurrently:** If a tool requires three different dynamic parameters, all three are resolved in parallel before the tool is invoked.
+* **Fallbacks & Logic short-circuit:** If you chain sources together (`a || b`), or evaluate boolean logic (`a and b`), the engine evaluates them strictly left-to-right, short-circuiting network requests the moment a definitive answer is found to save execution costs.
 
 ### 4. Per-Request Caching (No N+1)
 
-When multiple wires read from the _same_ node, the engine only executes that node **once** per GraphQL operation. The result is cached in memory for the lifecycle of the request, eliminating N+1 bugs entirely.
+When multiple wires read from the *same* node, the engine only executes that node **once** per GraphQL operation. The result is cached in memory for the lifecycle of the request, eliminating N+1 bugs entirely.
 
 ## File Structure
 
 A `.bridge` file is a collection of static definitions. Because the execution is demand-driven, **the order of blocks in the file does not matter.** Every file must begin with a `version` declaration, followed by any number of `const`, `tool`, `define`, and `bridge` blocks. Blocks are separated by blank lines, and comments start with `#`.
 
 ```bridge
-version 1.4
+version 1.5
 
 # 1. CONST: Shared static data
 const defaultCurrency = "EUR"
 
 # 2. TOOL: Configured API clients or functions
 tool hereGeo from std.httpCall {
-  .baseUrl = "[https://geocode.search.hereapi.com/v1](https://geocode.search.hereapi.com/v1)"
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
   .method = "GET"
   .path = "/geocode"
 }

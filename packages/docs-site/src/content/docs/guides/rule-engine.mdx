@@ -28,7 +28,7 @@ A good policy engine needs context. If a user tries to initiate a large money tr
 Instead of writing sequential `await` calls that slow down the user experience, The Bridge automatically "fans out" these requests concurrently.
 
 ```bridge
-version 1.4
+version 1.5
 
 tool kycApi from std.httpCall { .baseUrl = "[https://api.internal/compliance](https://api.internal/compliance)" }
 tool riskApi from std.httpCall { .baseUrl = "[https://api.internal/risk](https://api.internal/risk)" }
@@ -58,7 +58,7 @@ bridge Query.canInitiateTransfer {
 ## The "Fan-In"
 ### Inline Rule Evaluation
 
-Once the engine has gathered the enriched data, it evaluates the rules. Because The Bridge syntax natively supports logical operators (`==`, `>`, `<`, `!=`) and safe fallbacks (`||`, `??`), you can express straightforward business rules entirely inline.
+Once the engine has gathered the enriched data, it evaluates the rules. Because The Bridge syntax natively supports logical operators (`==`, `>`, `<`, `!=`) and safe fallbacks (`||`, `??`, `catch`), you can express straightforward business rules entirely inline.
 
 This makes your policies instantly readable to product managers and security teams without digging through TypeScript code.
 
@@ -71,14 +71,14 @@ bridge Query.canInitiateTransfer {
   # Determine individual policy flags with safe fallbacks
   # (If the risk API fails or times out, assume maximum risk: 100)
   o.flags {
-    .isKycValid <- kyc.status == "VERIFIED" ?? false
-    .isHighRisk <- risk.score ?? 100 > 80
+    .isKycValid <- kyc.status == "VERIFIED" catch false
+    .isHighRisk <- risk.score catch 100 > 80
     .isMicroTx  <- i.amount <= 5.00
   }
 
   # 3. THE DECISION: Combine flags using logical coalescing
   # Approve immediately if it's a micro-transaction, OR if KYC is valid
-  o.isApproved <- i.amount <= 5.00 OR kyc.status == "VERIFIED" ?? false
+  o.isApproved <- i.amount <= 5.00 OR kyc.status == "VERIFIED" catch false
 }
 
 ```
@@ -100,7 +100,7 @@ Query.canInitiateTransfer {
   with rules.calculateRiskMatrix as matrixEvaluator
 
   # Pipe the cleanly fetched data directly into your TypeScript tool
-  # using the standard v1.4 block assignment shorthand
+  # using the standard v1.5 block assignment shorthand
   matrixEvaluator {
     .kycStatus <- kyc.status ?? "UNKNOWN"
     .score <- risk.score ?? 100

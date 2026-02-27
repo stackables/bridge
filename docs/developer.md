@@ -159,7 +159,7 @@ type Bridge = {
     type: string;
     field: string;
     instance?: number;
-    catchError?: true;   // true = fire-and-forget (force handle ?? null)
+    catchError?: true;   // true = fire-and-forget (force handle catch null)
   }>;
   arrayIterators?: Record<string, string>;  // for array mapping blocks
   pipeHandles?: Array<{ key: string; handle: string; baseTrunk: … }>;
@@ -191,7 +191,7 @@ The engine is **pull-based**: resolution starts from a demanded GraphQL field an
 
 ### Cost-sorted resolution
 
-When a bridge field has multiple sources (overdefinition, `||` null coalesce, `??` error coalesce), the engine sorts candidates by inferred cost:
+When a bridge field has multiple sources (overdefinition, `||` falsy coalesce, `??` nullish gate, `catch` error boundary), the engine sorts candidates by inferred cost:
 
 - **Cost 0**: `input` arguments, `context`, `const` — already in memory
 - **Cost 1**: tool calls — require a network or compute call
@@ -214,7 +214,7 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 1. Calls `buildHandleMap` to map canonical trunk keys back to human-readable handle names
 2. Serializes each `Bridge` block with its `with` declarations and wire body
-3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements (`force handle` for critical, `force handle ?? null` for fire-and-forget)
+3. Converts `Wire` entries back to `<-`, `=` syntax and emits `force` statements (`force handle` for critical, `force handle catch null` for fire-and-forget)
 4. Handles pipe notation, array mapping blocks, fallback chains
 
 ---
@@ -271,7 +271,7 @@ export const std = {
 test("std.myTool", async () => {
   const result = await execute(
     `
-    version 1.4
+    version 1.5
     tool t from std.myTool
     bridge Query.result {
       with t
@@ -303,7 +303,7 @@ import { createGateway } from "./_gateway.js";
 const { execute } = createGateway({
   typeDefs: `type Query { hello: String }`,
   bridgeText: `
-    version 1.4
+    version 1.5
     bridge Query.hello {
       with const as c
       with output as o

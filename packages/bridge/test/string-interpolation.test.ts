@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
 import { executeBridge } from "../src/execute-bridge.ts";
-import { concat } from "../src/tools/concat.ts";
+import { concat } from "../src/tools/internal.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ function run(
 
 // ── concat tool unit tests ──────────────────────────────────────────────────
 
-describe("std.concat tool", () => {
+describe("internal.concat tool", () => {
   test("joins string parts", () => {
     assert.deepEqual(concat({ parts: ["Hello", ", ", "World!"] }), { value: "Hello, World!" });
   });
@@ -45,7 +45,7 @@ describe("std.concat tool", () => {
 
 describe("string interpolation: basic", () => {
   test("simple placeholder", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -57,7 +57,7 @@ bridge Query.test {
   });
 
   test("URL construction with placeholder", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -69,7 +69,7 @@ bridge Query.test {
   });
 
   test("multiple placeholders", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -81,7 +81,7 @@ bridge Query.test {
   });
 
   test("plain string without placeholders", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -93,7 +93,7 @@ bridge Query.test {
   });
 
   test("numeric value coercion in placeholder", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -105,7 +105,7 @@ bridge Query.test {
   });
 
   test("null coercion in placeholder", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -119,7 +119,7 @@ bridge Query.test {
 
 describe("string interpolation: tool interaction", () => {
   test("interpolation with tool output", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with userApi as api
   with input as i
@@ -138,7 +138,7 @@ bridge Query.test {
 
 describe("string interpolation: array mapping", () => {
   test("template in element lines", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -163,7 +163,7 @@ bridge Query.test {
 
 describe("string interpolation: fallback chains", () => {
   test("template with || fallback", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -179,7 +179,7 @@ bridge Query.test {
 
 describe("string interpolation: formatter round-trip", () => {
   test("basic template string round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -196,7 +196,7 @@ bridge Query.test {
   });
 
   test("URL template round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -209,7 +209,7 @@ bridge Query.test {
   });
 
   test("multiple fields with templates round-trip", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o

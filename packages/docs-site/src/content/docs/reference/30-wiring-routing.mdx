@@ -62,16 +62,45 @@ api.body.user {
 
 ```
 
-## 3. Renaming Deep Paths
+## 3. The Universal `alias`
 
-Aliases are also incredibly useful for code readability. If you have a deeply nested path that you need to access repeatedly, you can alias it to a shorter name.
+The `alias` keyword allows you to declare a temporary, reusable node in your graph.
+
+While it is incredibly useful for simply renaming a deeply nested path to make your code more readable, an `alias` is actually a **fully functional evaluation node**. The source expression inside an `alias` supports the exact same operators as a standard pull wire:
+
+- **Safe Execution** (`?.`) — swallows errors from the source
+- **Logic** (`and`/`or`, `not`) — boolean composition
+- **Math & Comparison** (`+`, `-`, `*`, `/`, `==`, `!=`, `>`, `<`, `>=`, `<=`) — inline arithmetic and comparisons
+- **Parentheses** (`(...)`) — override operator precedence
+- **Ternary** (`? :`) — conditional value selection
+- **Fallbacks** (`||`, `??`, `catch`) — falsy, nullish, and error boundaries
+
+This makes `alias` the perfect tool for pre-sanitizing messy data or breaking complex fallback chains into readable, composable pieces:
 
 ```bridge
-# Rename a deep, cumbersome path
+# 1. Rename a deep, cumbersome path
 alias api.response.data.metadata.address as addr
 
+# 2. Pre-sanitize a fragile data lookup with a fallback
+alias api.user?.nickname || "Guest" as displayName
+
+# 3. Safely chain a primitive tool
+alias riskyMathTool catch 0 as safeMathResult
+
+# 4. Inline math/comparison expression
+alias api.price * 1.2 as priceWithTax
+alias api.score >= 80 as isPassing
+
+# 5. Parenthesized expression
+alias (api.a + api.b) * api.rate as total
+
+# Route the sanitized local variables downstream!
 o.zip <- addr.zipCode
-o.street <- addr.streetName
+o.name <- displayName
+o.score <- safeMathResult
+o.price <- priceWithTax
+o.pass <- isPassing
+o.total <- total
 
 ```
 
@@ -108,10 +137,10 @@ bridge Query.search {
 
 By default, a bare `force` statement is **critical**. If the forced tool throws a network error, that error propagates up and breaks the entire GraphQL response, just like a standard tool failure.
 
-If you want the side-effect to be **fire-and-forget** (where errors are silently swallowed and don't break the user's request), you can combine `force` with the Error Coalesce operator (`??`):
+If you want the side-effect to be **fire-and-forget** (where errors are safely caught and don't break the user's request), you can apply the Wire-Level Error Boundary (`catch null`):
 
 ```bridge
-# Fire-and-forget: If the logger fails, gracefully swallow the error
-force log ?? null
+# Fire-and-forget: If the logger fails, gracefully swallow the network error
+force log catch null
 
 ```

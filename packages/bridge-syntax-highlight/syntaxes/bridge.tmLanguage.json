@@ -20,7 +20,7 @@
   "repository": {
 
     "version-line": {
-      "comment": "version 1.4",
+      "comment": "version 1.5",
       "match": "^\\s*(version)\\s+(\\d+\\.\\d+)",
       "captures": {
         "1": { "name": "keyword.other.version.bridge" },
@@ -156,18 +156,18 @@
     },
 
     "force-lines": {
-      "comment": "Force statement: force <handle> [?? null]",
-      "match": "^\\s*(force)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s*(\\?\\?)\\s*(null))?",
+      "comment": "Force statement: force <handle> [catch null]",
+      "match": "^\\s*(force)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(catch)\\s+(null))?",
       "captures": {
         "1": { "name": "keyword.control.bridge" },
         "2": { "name": "variable.other.handle.bridge" },
-        "3": { "name": "keyword.operator.error-fallback.bridge" },
+        "3": { "name": "keyword.control.bridge" },
         "4": { "name": "constant.language.null.bridge" }
       }
     },
 
     "wire-lines": {
-      "comment": "Wire line: target <- source [|| …] [?? …]  — target may be dot-prefixed (.field) inside array-map blocks",
+      "comment": "Wire line: target <- source [|| …] [?? …] [catch …]  — target may be dot-prefixed (.field) inside array-map blocks",
       "begin": "^(\\s*)(\\.?[A-Za-z_][A-Za-z0-9_.]*)\\s*(<-)",
       "end": "$",
       "beginCaptures": {
@@ -201,9 +201,14 @@
           "name": "keyword.operator.null-coalesce.bridge"
         },
         {
-          "comment": "?? error-fallback",
+          "comment": "?? nullish gate",
           "match": "\\?\\?",
-          "name": "keyword.operator.error-fallback.bridge"
+          "name": "keyword.operator.nullish.bridge"
+        },
+        {
+          "comment": "catch error boundary",
+          "match": "\\bcatch\\b",
+          "name": "keyword.control.bridge"
         },
         { "include": "#reserved-handles" },
         { "include": "#strings" },

@@ -3,16 +3,7 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { multiply } from "../src/tools/multiply.ts";
-import { divide } from "../src/tools/divide.ts";
-import { add } from "../src/tools/add.ts";
-import { subtract } from "../src/tools/subtract.ts";
-import { eq } from "../src/tools/eq.ts";
-import { neq } from "../src/tools/neq.ts";
-import { gt } from "../src/tools/gt.ts";
-import { gte } from "../src/tools/gte.ts";
-import { lt } from "../src/tools/lt.ts";
-import { lte } from "../src/tools/lte.ts";
+import { multiply, divide, add, subtract, eq, neq, gt, gte, lt, lte } from "../src/tools/internal.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for math/comparison tools ────────────────────────────────────
@@ -69,7 +60,7 @@ describe("comparison tools return boolean", () => {
 
 describe("expressions: parser desugaring", () => {
   test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -92,7 +83,7 @@ bridge Query.convert {
       "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
     };
     for (const [op, fn] of Object.entries(ops)) {
-      const instructions = parseBridge(`version 1.4
+      const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -107,7 +98,7 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 5 / 10", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -122,7 +113,7 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 2 > 6", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -137,7 +128,7 @@ bridge Query.test {
   });
 
   test("two source refs: i.price * i.qty", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -154,7 +145,7 @@ bridge Query.calc {
   });
 
   test("expression in array mapping element", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.list {
   with pricing.list as api
   with input as i
@@ -176,7 +167,7 @@ bridge Query.list {
 
 describe("expressions: round-trip serialization", () => {
   test("multiply expression serializes and re-parses", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -196,7 +187,7 @@ bridge Query.convert {
   });
 
   test("comparison expression round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -209,7 +200,7 @@ bridge Query.check {
   });
 
   test("chained expression round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -222,7 +213,7 @@ bridge Query.test {
   });
 
   test("two source refs round-trip", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -265,7 +256,7 @@ const mathTypeDefs = /* GraphQL */ `
 
 describe("expressions: execution", () => {
   test("multiply: dollars to cents", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -281,7 +272,7 @@ bridge Query.convert {
   });
 
   test("divide: halve a value", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -297,7 +288,7 @@ bridge Query.convert {
   });
 
   test("multiply two source refs: price * quantity", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -313,7 +304,7 @@ bridge Query.calc {
   });
 
   test("comparison >= returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -335,7 +326,7 @@ bridge Query.check {
   });
 
   test("comparison > returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -357,7 +348,7 @@ bridge Query.check {
   });
 
   test("comparison == with string returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -379,7 +370,7 @@ bridge Query.check {
   });
 
   test("expression with tool source", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
@@ -403,7 +394,7 @@ bridge Query.convert {
   });
 
   test("chained expression: i.dollars * 5 / 10", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -420,7 +411,7 @@ bridge Query.convert {
   });
 
   test("expression in array mapping", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.products {
   with pricing.list as api
   with output as o
@@ -454,7 +445,7 @@ bridge Query.products {
 
 describe("expressions: operator precedence", () => {
   test("i.base + i.tax * 2 — multiplication before addition", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -470,7 +461,7 @@ bridge Query.calc {
   });
 
   test("precedence: a + b * c executes correctly", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -491,7 +482,7 @@ bridge Query.calc {
   });
 
   test("precedence: a * b + c * d", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -512,7 +503,7 @@ bridge Query.calc {
   });
 
   test("precedence: comparison after arithmetic — i.base + i.tax * 2 > 100", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -540,7 +531,7 @@ bridge Query.check {
   });
 
   test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -560,15 +551,15 @@ bridge Query.calc {
 // ── Expression + fallback integration tests ─────────────────────────────────
 
 describe("expressions: fallback integration", () => {
-  test("expression with ?? error fallback: i.value * 100 ?? -1", async () => {
-    const instructions = parseBridge(`version 1.4
+  test("expression with catch error fallback: i.value * 100 catch -1", async () => {
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
   with output as o
 
   api.id <- i.dollars
-  o.cents <- api.price * 100 ?? -1
+  o.cents <- api.price * 100 catch -1
 }`);
     const tools = {
       "pricing.lookup": async () => { throw new Error("service unavailable"); },
@@ -582,13 +573,13 @@ bridge Query.convert {
     const result: any = await executor({
       document: parse(`{ convert(dollars: 5) { cents } }`),
     });
-    // api.price throws → expression throws → ?? catches → returns -1
+    // api.price throws → expression throws → catch catches → returns -1
     assert.equal(result.data.convert.cents, -1);
   });
 
   test("expression with || null coalesce: (i.value ?? 1) * 2", async () => {
     // This tests coalescing on the source BEFORE the expression
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -635,5 +626,676 @@ describe("expressions: non-number handling", () => {
   test("comparison with NaN returns false", () => {
     assert.equal(gt({ a: NaN, b: 5 }), false);
     assert.equal(eq({ a: NaN, b: NaN }), false);
+  });
+});
+
+// ── Boolean logic tools ─────────────────────────────────────────────────────
+
+import { and, or, not } from "../src/tools/internal.ts";
+
+describe("boolean logic tools", () => {
+  test("and", () => {
+    assert.equal(and({ a: true, b: true }), true);
+    assert.equal(and({ a: true, b: false }), false);
+    assert.equal(and({ a: false, b: true }), false);
+    assert.equal(and({ a: 1, b: "yes" }), true);
+    assert.equal(and({ a: 0, b: true }), false);
+  });
+  test("or", () => {
+    assert.equal(or({ a: true, b: false }), true);
+    assert.equal(or({ a: false, b: true }), true);
+    assert.equal(or({ a: false, b: false }), false);
+    assert.equal(or({ a: 0, b: "" }), false);
+    assert.equal(or({ a: 0, b: 1 }), true);
+  });
+  test("not", () => {
+    assert.equal(not({ a: true }), false);
+    assert.equal(not({ a: false }), true);
+    assert.equal(not({ a: 0 }), true);
+    assert.equal(not({ a: 1 }), false);
+    assert.equal(not({ a: "" }), true);
+    assert.equal(not({ a: null }), true);
+  });
+});
+
+// ── Boolean logic: parser desugaring ──────────────────────────────────────────
+
+describe("boolean logic: parser desugaring", () => {
+  test("and / or desugar to condAnd/condOr wires", () => {
+    const boolOps: Record<string, string> = {
+      "and": "__and",
+      "or": "__or",
+    };
+    for (const [op, fn] of Object.entries(boolOps)) {
+      const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a ${op} i.b
+}`);
+      const bridge = instructions.find((i) => i.kind === "bridge")!;
+      const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+      assert.ok(exprHandle, `${op}: has __expr_ pipe handle`);
+      assert.equal(exprHandle.baseTrunk.field, fn, `${op}: maps to ${fn}`);
+    }
+  });
+
+  test("not prefix desugars to not tool fork", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not i.trusted
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.baseTrunk.field === "not"
+    );
+    assert.ok(exprHandle, "has not pipe handle");
+  });
+
+  test("combined: (a > 18 and b) or c == \"ADMIN\"", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    // Should have multiple expression forks: >, and, ==, or
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 4, `has >= 4 expr handles, got ${exprHandles.length}`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("gt"), "has gt");
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("eq"), "has eq");
+    assert.ok(fields.includes("__or"), "has __or");
+  });
+});
+
+// ── Boolean logic: end-to-end ─────────────────────────────────────────────────
+
+describe("boolean logic: end-to-end", () => {
+  const boolTypeDefs = /* GraphQL */ `
+    type Query { check(age: Int!, verified: Boolean!, role: String!): CheckResult }
+    type CheckResult { approved: Boolean, requireMFA: Boolean }
+  `;
+
+  test("and expression: age > 18 and verified", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.approved <- i.age > 18 and i.verified
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r1: any = await executor({
+      document: parse(`{ check(age: 25, verified: true, role: "USER") { approved } }`),
+    });
+    assert.equal(r1.data.check.approved, true);
+
+    const r2: any = await executor({
+      document: parse(`{ check(age: 15, verified: true, role: "USER") { approved } }`),
+    });
+    assert.equal(r2.data.check.approved, false);
+  });
+
+  test("or expression: approved or role == ADMIN", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    // age=15 verified=false role=ADMIN → false and false = false, role=="ADMIN" = true → true
+    const r1: any = await executor({
+      document: parse(`{ check(age: 15, verified: false, role: "ADMIN") { approved } }`),
+    });
+    assert.equal(r1.data.check.approved, true);
+  });
+
+  test("not prefix: not i.verified", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.requireMFA <- not i.verified
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r1: any = await executor({
+      document: parse(`{ check(age: 25, verified: true, role: "USER") { requireMFA } }`),
+    });
+    assert.equal(r1.data.check.requireMFA, false);
+
+    const r2: any = await executor({
+      document: parse(`{ check(age: 25, verified: false, role: "USER") { requireMFA } }`),
+    });
+    assert.equal(r2.data.check.requireMFA, true);
+  });
+});
+
+// ── Boolean logic: serializer round-trip ──────────────────────────────────────
+
+describe("boolean logic: serializer round-trip", () => {
+  test("and expression round-trips", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a and i.b
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes(" and "), "serialized contains 'and'");
+    // Re-parse to ensure no errors
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("or expression round-trips", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or i.b
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes(" or "), "serialized contains 'or'");
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("not prefix round-trips", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not i.flag
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("not "), "serialized contains 'not'");
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+});
+
+// ── Parenthesized expressions ─────────────────────────────────────────────────
+
+describe("parenthesized expressions: parser desugaring", () => {
+  test("(A and B) or C — groups correctly", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.a and i.b) or i.c
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("__or"), "has __or");
+  });
+
+  test("A or (B and C) — groups correctly", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("__or"), "has __or");
+  });
+
+  test("not (A and B) — not wraps grouped expr", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- not (i.a and i.b)
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("__and"), "has __and");
+    assert.ok(fields.includes("not"), "has not");
+  });
+
+  test("(i.price + i.discount) * i.qty — math with parens", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.price + i.discount) * i.qty
+}`);
+    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
+    assert.ok(fields.includes("add"), "has add (from parens)");
+    assert.ok(fields.includes("multiply"), "has multiply");
+  });
+});
+
+describe("parenthesized expressions: end-to-end", () => {
+  const boolTypeDefs = /* GraphQL */ `
+    type Query { check(a: Boolean!, b: Boolean!, c: Boolean!): CheckResult }
+    type CheckResult { result: Boolean }
+  `;
+
+  test("A or (B and C): true or (false and false) = true", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  test("A or (B and C): false or (true and true) = true", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: false, b: true, c: true) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  test("(A or B) and C: (true or false) and false = false", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- (i.a or i.b) and i.c
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, false);
+  });
+
+  test("not (A and B): not (true and false) = true", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+  o.result <- not (i.a and i.b)
+}`);
+    const gateway = createGateway(boolTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ check(a: true, b: false, c: false) { result } }`),
+    });
+    assert.equal(r.data.check.result, true);
+  });
+
+  const mathTypeDefs2 = /* GraphQL */ `
+    type Query { calc(price: Int!, discount: Int!, qty: Int!): CalcResult }
+    type CalcResult { total: Int }
+  `;
+
+  test("(price + discount) * qty: (10 + 5) * 3 = 45", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.calc {
+  with input as i
+  with output as o
+
+  o.total <- (i.price + i.discount) * i.qty
+}`);
+    const gateway = createGateway(mathTypeDefs2, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const r: any = await executor({
+      document: parse(`{ calc(price: 10, discount: 5, qty: 3) { total } }`),
+    });
+    assert.equal(r.data.calc.total, 45);
+  });
+});
+
+// ── Parenthesized expressions: serializer round-trip ──────────────────────────
+
+describe("parenthesized expressions: serializer round-trip", () => {
+  test("(A + B) * C round-trips with parentheses", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- (i.a + i.b) * i.c
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("("), "serialized contains '(' for grouping");
+    assert.ok(serialized.includes(")"), "serialized contains ')' for grouping");
+    // Re-parse to ensure correctness
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+
+  test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.a or (i.b and i.c)
+
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    // and already binds tighter than or, so parens are omitted in serialized form
+    assert.ok(serialized.includes(" or "), "serialized contains 'or'");
+    assert.ok(serialized.includes(" and "), "serialized contains 'and'");
+    // Re-parse to ensure correctness
+    const reparsed = parseBridge(serialized);
+    assert.ok(reparsed.length > 0, "reparsed successfully");
+  });
+});
+
+// ── Short-circuit tests ───────────────────────────────────────────────────────
+
+import { executeBridge } from "../src/execute-bridge.ts";
+
+describe("and/or short-circuit behavior", () => {
+  test("and short-circuits: right side not evaluated when left is false", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag and c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: false, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, false);
+    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is false");
+  });
+
+  test("and evaluates right side when left is true", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag and c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: true, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, true);
+    assert.equal(rightEvaluated, true, "right side should be evaluated when left is true");
+  });
+
+  test("or short-circuits: right side not evaluated when left is true", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag or c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: true, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: true };
+        },
+      },
+    });
+    assert.equal(data.result, true);
+    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is true");
+  });
+
+  test("or evaluates right side when left is false", async () => {
+    let rightEvaluated = false;
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with checker as c
+  with output as o
+
+  c.in <- i.value
+  o.result <- i.flag or c.ok
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { flag: false, value: "test" },
+      tools: {
+        checker: async () => {
+          rightEvaluated = true;
+          return { ok: false };
+        },
+      },
+    });
+    assert.equal(data.result, false);
+    assert.equal(rightEvaluated, true, "right side should be evaluated when left is false");
+  });
+});
+
+// ── Safe flag propagation in expressions ──────────────────────────────────────
+
+describe("safe flag propagation in expressions", () => {
+  test("safe flag propagated through expression: api?.value > 5 does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- api?.score > 5 || false
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test" },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe execution swallows the error, expression evaluates with undefined,
+    // comparison with undefined yields false, fallback || false returns false
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on not prefix: not api?.verified does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- not api?.verified || true
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test" },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error, not(undefined) = true, || true fallback also works
+    assert.equal(data.result, true);
+  });
+
+  test("safe flag in condAnd: api?.active and i.flag does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- api?.active and i.flag
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: true },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error, undefined is falsy, short-circuit returns false
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on right operand: i.flag and api?.active does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.flag and api?.active
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: true },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Left is true so right IS evaluated; safe swallows the 500 on right side
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on right operand of comparison: i.a > api?.score does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.a > api?.score || false
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", a: 10 },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Safe swallows error on right operand, comparison with undefined yields false
+    assert.equal(data.result, false);
+  });
+
+  test("safe flag on right operand of or: i.flag or api?.fallback does not crash", async () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with failingApi as api
+  with output as o
+
+  api.in <- i.value
+  o.result <- i.flag or api?.fallback
+}`);
+    const { data } = await executeBridge({
+      instructions,
+      operation: "Query.test",
+      input: { value: "test", flag: false },
+      tools: {
+        failingApi: async () => {
+          throw new Error("HTTP 500");
+        },
+      },
+    });
+    // Left is false so right IS evaluated; safe swallows the 500 on right side
+    assert.equal(data.result, false);
   });
 });

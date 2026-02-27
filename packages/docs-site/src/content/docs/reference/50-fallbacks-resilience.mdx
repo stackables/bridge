@@ -5,73 +5,117 @@ description: How to build resilient data pipelines using fallback chains, error 
 
 import { Aside } from "@astrojs/starlight/components";
 
-When wiring external data sources, you must account for missing data and network failures. The Bridge provides three powerful mechanisms to keep your API resilient: Null Coalesce (`||`), Error Guards (`??`), and Cost-Aware Overdefinition.
+When wiring external data sources, you must account for missing data and network failures. The Bridge engine handles this natively without requiring imperative `try/catch` or `if/else` blocks.
 
-## 1. Fallback Chains (`||`)
+Instead, it relies on a **3-Layer Architecture** that gives you surgical control over exactly how and when your APIs fail.
 
-The **Null Coalesce** operator (`||`) acts as a value guard. It fires when a source resolves successfully but returns `null` or `undefined`.
+## 1. Layer 1: Safe Execution (`?.`)
+
+By default, if a tool throws a network exception (e.g., HTTP 500, timeout), the error bubbles up and crashes the GraphQL field.
+
+To gracefully handle I/O failures, you use the **Safe Execution Modifier (`?.`)**, perfectly mirroring TypeScript's Optional Chaining. Appending `?.` tells the engine: _"If this tool throws an error, or the data is missing, swallow the error and return `undefined`."_
 
 ```bridge
-o.name <- api.name || "Anonymous"
+# STRICT: If the billing API crashes, the field crashes.
+o.receipt <- billingApi.charge
+
+# SAFE: If the avatar API crashes, swallow the 500 error and yield `undefined`.
+o.avatar <- avatarApi?.url
 
 ```
 
-### Sequential Short-Circuiting
+### Strict Path Traversal (The `?.` Nuance)
 
-When you chain multiple sources together, the engine evaluates them **left to right, sequentially**.
+To ensure API contracts are respected, path traversal in The Bridge behaves exactly like standard TypeScript. **Where you place the `?.` matters immensely.**
 
-Crucially, it stops at the very first non-null result. Sources to the right of the winner are **never called**.
+Consider these two lines:
+
+1. `o.out <- user?.info.name`
+2. `o.out <- user.info?.name`
+
+If the `user` API is called but the backend returns a completely empty object `{}`, here is how the engine responds:
+
+- **Scenario 1:** `.info` evaluates safely to `undefined`. We then attempt to access `.name` strictly. **The engine throws a `TypeError` and crashes the field!**
+- **Scenario 2:** `.info` is accessed strictly, resulting in `undefined`. The `?.` on `name` intercepts the subsequent structural crash and safely yields `undefined`.
+
+If the `user` API **throws a 500 Network Error**:
+
+- **Scenario 1:** The `?.` is on the root tool. It intercepts the network crash and yields `undefined`.
+- **Scenario 2:** The root tool is evaluated strictly. The network error **crashes the field!**
+
+## 2. Layer 2: Data-Level Routing (`||` and `??`)
+
+Once Layer 1 resolves the data (or yields `undefined`), the engine evaluates Data Routing gates to determine what value to pass down the wire.
+
+When you chain multiple sources together, the engine evaluates them **left to right, sequentially**. It stops and short-circuits at the very first acceptable result. Sources to the right of the winner are **never called**.
+
+### The Falsy Gate (`||`)
+
+The `||` operator triggers if the left side is **falsy** (`0`, `""`, `false`, `null`, `undefined`).
 
 ```bridge
-# 1. Try primaryApi
-# 2. If null, try backupApi
-# 3. If both are null, use "unknown"
-o.label <- primaryApi.label || backupApi.label || "unknown"
+# If the user has no nickname, or it is an empty string "", fall back to "Guest".
+o.displayName <- userApi?.nickname || "Guest"
 
 ```
 
-The `||` operator **does not catch errors**. If `primaryApi` throws a 500 network error or times out, the entire chain immediately throws and breaks the request. To catch errors, you must use an Error Guard.
+### The Nullish Gate (`??`)
 
-## 2. Error Guards (`??`)
-
-The **Error Coalesce** operator (`??`) acts as an error guard. It fires exclusively when the preceding source throws an execution error (e.g., a network failure, a timeout, or a forced tool crash).
+The `??` operator triggers _only_ if the left side is exactly `null` or `undefined`. It respects `0`, `""`, and `false` as valid data.
 
 ```bridge
-# If the API throws an error, gracefully return 0 instead of failing
-o.lat <- api.lat ?? 0
-
-# You can also fall back to another dynamic source
-o.label <- api.label ?? i.fallbackLabel
+# If the user's balance is exactly $0, we WANT to show 0.
+# We only fall back if the data is actually missing.
+o.walletBalance <- billingApi?.balance ?? -1
 
 ```
 
-The source to the right of the `??` is evaluated _only_ if the left side throws.
+## 3. Layer 3: Wire-Level Catch (`catch`)
 
-### Combining Chains
+The `||` and `??` operators **do not catch network errors**. If a strict tool throws an HTTP 500, it blows past the data routing gates entirely.
 
-You can seamlessly combine both operators into a single, highly resilient wire.
+If you want to provide an absolute, final safety net for the entire wire in case any strict evaluation fails, use the `catch` keyword.
 
 ```bridge
-o.label <- api.label || backup.label || "default" ?? i.errorFallback
+# 1. Evaluate B strictly.
+# 2. If it is nullish, evaluate C strictly.
+# 3. If B or C throw a 500 network error, catch it and return "Error".
+o.value <- B.field ?? C.field catch "Error"
 
 ```
 
-**How the engine reads this:**
+The `catch` fallback is evaluated _only_ if an unhandled exception occurred during the execution of that specific wire.
 
-1. Try `api.label`. If non-null, return it.
-2. Try `backup.label`. If non-null, return it.
-3. Both null? Return `"default"`.
-4. **Did _any_ of the above throw an error?** Return `i.errorFallback`.
+## 4. Raising Explicit Errors
 
-The `??` guard wraps the _entire_ `||` chain that precedes it. If any source throws during the sequential evaluation, the engine immediately jumps to the `??` fallback.
+Sometimes a fallback isn't enough, and you actively _want_ to break the execution flow based on business logic. The Bridge provides explicit control flow keywords to seamlessly bridge the gap between declarative mappings and GraphQL's robust error-handling spec.
 
-## 3. Cost-Aware Overdefinition
+### Field Error (`throw`)
 
-What happens if you wire multiple separate lines to the exact same target field?
+Fails the specific output field, but allows the rest of the graph to continue evaluating. This maps perfectly to a standard GraphQL partial error in the `errors` array.
 
 ```bridge
-o.textPart <- i.textBody
-o.textPart <- upperCase:i.htmlBody
+# If the API is missing data or crashes, throw a domain-specific error
+o.receipt <- billingApi?.charge ?? throw "Billing system unavailable"
+
+```
+
+### Fatal Error (`panic`)
+
+Stops all engine processing immediately and fails the entire request. This acts exactly like an external client disconnect (`AbortSignal`) and results in a top-level error (e.g., HTTP 403/500).
+
+```bridge
+o.secureData <- authApi.token ?? panic "CRITICAL: Unauthorized access"
+
+```
+
+## 5. Cost-Aware Overdefinition
+
+What happens if you define multiple completely separate lines to target the exact same field?
+
+```bridge
+o.city <- i.city
+o.city <- geoApi.cityName
 
 ```
 
@@ -89,17 +133,7 @@ This is called **Overdefinition**. Instead of throwing a syntax error or blindly
 When a target is overdefined, the engine evaluates the sources **cheapest first**:
 
 1. It tries all Free (Cost 0) sources.
-2. If none return data, it moves to Computed (Cost 1) sources.
-3. It stops and returns the very first non-null result it finds.
+2. If they all return `null` or `undefined`, it moves to Computed (Cost 1) sources.
+3. It stops and returns the very first **non-nullish** result it finds.
 
-**Example:**
-
-```bridge
-o.city <- i.city            # Cost 0: Free memory read
-o.city <- geo.cityName      # Cost 1: Expensive HTTP call
-
-```
-
-If the user provides `city` in their GraphQL arguments, the engine returns it instantly. The expensive geocoding API is **never called**.
-
-Just like `||`, overdefinition uses short-circuit behavior to save costs—but it does so automatically based on the engine's cost metrics rather than the order you wrote the code!
+_(Note: The engine respects falsy values like `0`, `""`, and `false`. If a cheap source returns `0`, the engine accepts it and short-circuits, saving the cost of evaluating the more expensive sources.)_

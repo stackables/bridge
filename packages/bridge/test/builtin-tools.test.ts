@@ -140,14 +140,14 @@ describe("toArray tool", () => {
 // ── builtinTools bundle ─────────────────────────────────────────────────────
 
 describe("builtinTools bundle", () => {
-  test("has two top-level keys: std and math", () => {
-    assert.deepEqual(Object.keys(builtinTools).sort(), ["math", "std"]);
+  test("has two top-level keys: std and internal", () => {
+    assert.deepEqual(Object.keys(builtinTools).sort(), ["internal", "std"]);
   });
 
   test("std namespace contains transform tools", () => {
     assert.ok(builtinTools.std.audit, "audit present");
-    assert.ok(builtinTools.std.concat, "concat present");
     assert.ok(builtinTools.std.httpCall, "httpCall present");
+    assert.ok(builtinTools.std.assert, "assert present");
     assert.ok(builtinTools.std.str.toUpperCase, "upperCase present");
     assert.ok(builtinTools.std.str.toLowerCase, "lowerCase present");
     assert.ok(builtinTools.std.arr.find, "findObject present");
@@ -156,18 +156,22 @@ describe("builtinTools bundle", () => {
     assert.equal(Object.keys(builtinTools.std).length, 5);
   });
 
-  test("math namespace contains math/comparison tools", () => {
-    assert.ok(builtinTools.math.multiply, "multiply present");
-    assert.ok(builtinTools.math.divide, "divide present");
-    assert.ok(builtinTools.math.add, "add present");
-    assert.ok(builtinTools.math.subtract, "subtract present");
-    assert.ok(builtinTools.math.eq, "eq present");
-    assert.ok(builtinTools.math.neq, "neq present");
-    assert.ok(builtinTools.math.gt, "gt present");
-    assert.ok(builtinTools.math.gte, "gte present");
-    assert.ok(builtinTools.math.lt, "lt present");
-    assert.ok(builtinTools.math.lte, "lte present");
-    assert.equal(Object.keys(builtinTools.math).length, 10);
+  test("internal namespace contains math/comparison/logic tools", () => {
+    assert.ok(builtinTools.internal.multiply, "multiply present");
+    assert.ok(builtinTools.internal.divide, "divide present");
+    assert.ok(builtinTools.internal.add, "add present");
+    assert.ok(builtinTools.internal.subtract, "subtract present");
+    assert.ok(builtinTools.internal.eq, "eq present");
+    assert.ok(builtinTools.internal.neq, "neq present");
+    assert.ok(builtinTools.internal.gt, "gt present");
+    assert.ok(builtinTools.internal.gte, "gte present");
+    assert.ok(builtinTools.internal.lt, "lt present");
+    assert.ok(builtinTools.internal.lte, "lte present");
+    assert.ok(builtinTools.internal.not, "not present");
+    assert.ok(builtinTools.internal.and, "and present");
+    assert.ok(builtinTools.internal.or, "or present");
+    assert.ok(builtinTools.internal.concat, "concat present");
+    assert.equal(Object.keys(builtinTools.internal).length, 14);
   });
 
   test("httpCall is callable with and without std. prefix", () => {
@@ -188,7 +192,7 @@ describe("default tools (no tools option)", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.greet {
   with std.str.toUpperCase as up
   with std.str.toLowerCase as lo
@@ -225,7 +229,7 @@ describe("user can override std namespace", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.greet {
   with std.str.toUpperCase as up
   with input as i
@@ -284,7 +288,7 @@ describe("user can add custom tools alongside std", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.process {
   with std.str.toUpperCase as up
   with reverse as rev
@@ -329,7 +333,7 @@ describe("findObject through bridge", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.findUser {
   with getUsers as db
   with std.arr.find as find
@@ -383,7 +387,7 @@ describe("pipe with built-in tools", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.shout {
   with std.str.toUpperCase as up
   with input as i
@@ -418,7 +422,7 @@ describe("pickFirst through bridge", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.first {
   with std.arr.first as pf
   with input as i
@@ -451,7 +455,7 @@ describe("pickFirst strict through bridge", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 tool pf from std.arr.first {
   .strict = true
 
@@ -504,7 +508,7 @@ describe("toArray through bridge", () => {
   `;
 
   // Round-trip: wrap single value in array → pick first element back out
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.normalize {
   with std.arr.toArray as ta
   with std.arr.first as pf
@@ -539,7 +543,7 @@ describe("toArray as tool input normalizer", () => {
   `;
 
   // Use toArray to wrap a scalar, then pass to a custom tool that counts items
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.wrap {
   with std.arr.toArray as ta
   with countItems as cnt
@@ -581,7 +585,7 @@ describe("inline with — no tool block", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.format {
   with std.str.toUpperCase as up
   with std.str.toLowerCase as lo
@@ -684,7 +688,7 @@ describe("audit tool with force (e2e)", () => {
     const logged: any[] = [];
     const logger = { info: (...args: any[]) => logged.push(args) };
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with searchApi as api
   with std.audit as audit
@@ -728,7 +732,7 @@ bridge Query.search {
       throw new Error("audit down");
     };
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with searchApi as api
   with std.audit as audit
@@ -737,7 +741,7 @@ bridge Query.search {
 
   api.q <- i.q
   audit.query <- i.q
-  force audit ?? null
+  force audit catch null
   o.title <- api.title
 
 }`;
@@ -745,7 +749,7 @@ bridge Query.search {
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
       std: { ...builtinTools.std, audit: failAudit },
-      math: builtinTools.math,
+      internal: builtinTools.internal,
     };
 
     const instructions = parseBridge(bridgeText);
@@ -765,7 +769,7 @@ bridge Query.search {
       throw new Error("audit down");
     };
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with searchApi as api
   with std.audit as audit
@@ -782,7 +786,7 @@ bridge Query.search {
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
       std: { ...builtinTools.std, audit: failAudit },
-      math: builtinTools.math,
+      internal: builtinTools.internal,
     };
 
     const instructions = parseBridge(bridgeText);

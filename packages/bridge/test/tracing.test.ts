@@ -54,7 +54,7 @@ async function execute(
 
 describe("tracing: basics", () => {
   test("traces are returned when trace is enabled", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -81,7 +81,7 @@ o.label <- g.label
   });
 
   test("no traces when tracing is disabled (default)", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -113,7 +113,7 @@ o.label <- g.label
 
 describe("tracing: call order", () => {
   test("traces record sequential order for || chains", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -140,7 +140,7 @@ o.label <- p.label || b.label
   });
 
   test("traces show short-circuit: backup not called when primary succeeds", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -166,7 +166,7 @@ o.label <- p.label || b.label
 
 describe("tracing: errors", () => {
   test("traces capture error message on tool failure", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -199,8 +199,8 @@ o.label <- g.label
     assert.equal(traces[0].output, undefined);
   });
 
-  test("traces capture both erroring and fallback ?? tool", async () => {
-    const bridge = `version 1.4
+  test("traces capture both erroring and catch fallback tool", async () => {
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with fallback as f
@@ -209,7 +209,7 @@ bridge Query.lookup {
 
 p.q <- i.q
 f.q <- i.q
-o.label <- p.label ?? f.label
+o.label <- p.label catch f.label
 
 }`;
     const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
@@ -231,7 +231,7 @@ o.label <- p.label ?? f.label
 
 describe("tracing: multi-tool", () => {
   test("multiple independent tools are all traced", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with alpha as a
   with beta as b
@@ -261,7 +261,7 @@ o.score <- b.score
   });
 
   test("trace inputs reflect bridge wire resolution", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 const limits = { "limit": 5 }
 
@@ -292,7 +292,7 @@ o.label <- g.label
 
 describe("tracing: tool-dep (tool blocks)", () => {
   test("tool block calls are traced with fn name", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 tool geocoder from httpCall {
   .baseUrl = "https://api.example.com"
   .method = "GET"
@@ -334,7 +334,7 @@ o.label <- g.label
 
 describe("tracing: timing", () => {
   test("durationMs reflects actual tool execution time", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with slow as s
   with input as i
@@ -359,7 +359,7 @@ o.label <- s.label
   });
 
   test("startedAt values are monotonically ordered", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with first as f
   with second as s
@@ -390,7 +390,7 @@ o.label <- f.label || s.label
 // ── Trace levels ──────────────────────────────────────────────────────────
 
 describe("tracing: levels", () => {
-  const bridge = `version 1.4
+  const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -501,7 +501,7 @@ describe("tracing: weather-style diagnostic", () => {
   `;
 
   // Mirrors Weather.bridge: define + bridge + tool blocks
-  const weatherBridge = `version 1.4
+  const weatherBridge = `version 1.5
 
 tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
@@ -528,8 +528,8 @@ define weatherByCoordinates {
 
   o.lat         <- i.lat
   o.lon         <- i.lon
-  o.currentTemp <- w.current_weather.temperature ?? 0.0
-  o.timezone    <- w.timezone ?? "UTC"
+  o.currentTemp <- w.current_weather.temperature catch 0.0
+  o.timezone    <- w.timezone catch "UTC"
   o.city        <- i.cityName
 }
 
@@ -546,9 +546,9 @@ bridge Query.getWeather {
 
   f.in <- g
 
-  w.lat  <- i.lat || f.lat
-  w.lon <- i.lon || f.lon
-  w.cityName <- upper:i.cityName || f.display_name || "Unknown"
+  w.lat  <- i.lat || f?.lat
+  w.lon <- i.lon || f?.lon
+  w.cityName <- upper:i.cityName || f?.display_name || "Unknown"
 
   o <- w
 }`;

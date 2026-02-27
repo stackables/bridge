@@ -18,6 +18,10 @@ export type NodeRef = {
   element?: boolean;
   /** Path into the data: ["items", "0", "position", "lat"] */
   path: string[];
+  /** True when the first `?.` is right after the root (e.g., `api?.data`) */
+  rootSafe?: boolean;
+  /** Per-segment safety flags (same length as `path`); true = `?.` before that segment */
+  pathSafe?: boolean[];
 };
 
 /**
@@ -35,9 +39,15 @@ export type Wire =
       from: NodeRef;
       to: NodeRef;
       pipe?: true;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      safe?: true;
+      falsyFallback?: string;
+      falsyControl?: ControlFlowInstruction;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      nullishControl?: ControlFlowInstruction;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
+      catchControl?: ControlFlowInstruction;
     }
   | { value: string; to: NodeRef }
   | {
@@ -47,9 +57,40 @@ export type Wire =
       elseRef?: NodeRef;
       elseValue?: string;
       to: NodeRef;
-      nullFallback?: string;
-      fallback?: string;
-      fallbackRef?: NodeRef;
+      falsyFallback?: string;
+      falsyControl?: ControlFlowInstruction;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      nullishControl?: ControlFlowInstruction;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
+      catchControl?: ControlFlowInstruction;
+    }
+  | {
+      /** Short-circuit logical AND: evaluate left first, only evaluate right if left is truthy */
+      condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
+      to: NodeRef;
+      falsyFallback?: string;
+      falsyControl?: ControlFlowInstruction;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      nullishControl?: ControlFlowInstruction;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
+      catchControl?: ControlFlowInstruction;
+    }
+  | {
+      /** Short-circuit logical OR: evaluate left first, only evaluate right if left is falsy */
+      condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
+      to: NodeRef;
+      falsyFallback?: string;
+      falsyControl?: ControlFlowInstruction;
+      nullishFallback?: string;
+      nullishFallbackRef?: NodeRef;
+      nullishControl?: ControlFlowInstruction;
+      catchFallback?: string;
+      catchFallbackRef?: NodeRef;
+      catchControl?: ControlFlowInstruction;
     };
 
 /**
@@ -180,7 +221,26 @@ export type ToolContext = {
     warn?: (...args: any[]) => void;
     error?: (...args: any[]) => void;
   };
+  /** External abort signal — allows the caller to cancel execution mid-flight.
+   *  When aborted, the engine short-circuits before starting new tool calls
+   *  and propagates the signal to tool implementations via this context field. */
+  signal?: AbortSignal;
 };
+
+/**
+ * Explicit control flow instruction — used on the right side of fallback
+ * gates (`||`, `??`, `catch`) to influence execution.
+ *
+ *   - `throw`    — raises a standard Error with the given message
+ *   - `panic`    — raises a BridgePanicError that bypasses all error boundaries
+ *   - `continue` — skips the current array element (sentinel value)
+ *   - `break`    — halts array iteration (sentinel value)
+ */
+export type ControlFlowInstruction =
+  | { kind: "throw"; message: string }
+  | { kind: "panic"; message: string }
+  | { kind: "continue" }
+  | { kind: "break" };
 
 /**
  * Tool call function — the signature for registered tool functions.

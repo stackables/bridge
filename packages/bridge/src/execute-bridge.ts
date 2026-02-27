@@ -28,6 +28,8 @@ export type ExecuteBridgeOptions = {
   trace?: TraceLevel;
   /** Structured logger for engine events. */
   logger?: Logger;
+  /** External abort signal — cancels execution when triggered. */
+  signal?: AbortSignal;
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
@@ -80,6 +82,7 @@ export async function executeBridge<T = unknown>(
   );
 
   if (options.logger) tree.logger = options.logger;
+  if (options.signal) tree.signal = options.signal;
 
   const traceLevel = options.trace ?? "off";
   if (traceLevel !== "off") {
