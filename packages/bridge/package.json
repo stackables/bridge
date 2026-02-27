@@ -9,22 +9,6 @@
     ".": {
       "import": "./build/index.js",
       "types": "./build/index.d.ts"
-    },
-    "./core": {
-      "import": "./build/core.js",
-      "types": "./build/core.d.ts"
-    },
-    "./compiler": {
-      "import": "./build/compiler.js",
-      "types": "./build/compiler.d.ts"
-    },
-    "./graphql": {
-      "import": "./build/graphql.js",
-      "types": "./build/graphql.d.ts"
-    },
-    "./stdlib": {
-      "import": "./build/stdlib.js",
-      "types": "./build/stdlib.d.ts"
     }
   },
   "bin": {
@@ -58,6 +42,10 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@stackables/bridge-core": "workspace:*",
+    "@stackables/bridge-compiler": "workspace:*",
+    "@stackables/bridge-graphql": "workspace:*",
+    "@stackables/bridge-stdlib": "workspace:*",
     "@graphql-tools/utils": "^11",
     "@opentelemetry/api": "^1.9.0",
     "chevrotain": "^11.1.1",

@@ -91,6 +91,18 @@ importers:
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.0
+      '@stackables/bridge-compiler':
+        specifier: workspace:*
+        version: link:../bridge-compiler
+      '@stackables/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      '@stackables/bridge-graphql':
+        specifier: workspace:*
+        version: link:../bridge-graphql
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
       chevrotain:
         specifier: ^11.1.1
         version: 11.1.1
@@ -113,6 +125,88 @@ importers:
       graphql-yoga:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.13.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/bridge-compiler:
+    dependencies:
+      '@stackables/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
+      chevrotain:
+        specifier: ^11.1.1
+        version: 11.1.1
+    devDependencies:
+      '@tsconfig/node22':
+        specifier: ^22.0.5
+        version: 22.0.5
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/bridge-core:
+    dependencies:
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.0
+    devDependencies:
+      '@tsconfig/node22':
+        specifier: ^22.0.5
+        version: 22.0.5
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/bridge-graphql:
+    dependencies:
+      '@graphql-tools/utils':
+        specifier: ^11
+        version: 11.0.0(graphql@16.13.0)
+      '@stackables/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
+      graphql:
+        specifier: ^16
+        version: 16.13.0
+    devDependencies:
+      '@tsconfig/node22':
+        specifier: ^22.0.5
+        version: 22.0.5
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/bridge-stdlib:
+    dependencies:
+      '@stackables/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      lru-cache:
+        specifier: ^11
+        version: 11.2.6
+    devDependencies:
+      '@tsconfig/node22':
+        specifier: ^22.0.5
+        version: 22.0.5
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

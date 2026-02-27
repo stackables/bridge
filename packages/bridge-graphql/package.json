@@ -1,0 +1,43 @@
+{
+  "name": "@stackables/bridge-graphql",
+  "version": "0.0.0",
+  "description": "Bridge GraphQL adapter — wire bridges into a GraphQL schema",
+  "main": "./build/index.js",
+  "type": "module",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./build/index.js",
+      "types": "./build/index.d.ts"
+    }
+  },
+  "files": [
+    "build",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stackables/bridge.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stackables/bridge-core": "workspace:*",
+    "@stackables/bridge-stdlib": "workspace:*"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.5",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "graphql": "^16",
+    "@graphql-tools/utils": "^11"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
