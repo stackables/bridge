@@ -1,0 +1,41 @@
+{
+  "name": "@stackables/bridge-core",
+  "version": "0.0.0",
+  "description": "Bridge runtime engine — execute pre-compiled bridge instructions",
+  "main": "./build/index.js",
+  "type": "module",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./build/index.js",
+      "types": "./build/index.d.ts"
+    }
+  },
+  "files": [
+    "build",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "test": "node --experimental-transform-types --test test/*.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stackables/bridge.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@stackables/bridge-stdlib": "workspace:*",
+    "@stackables/bridge-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.5",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

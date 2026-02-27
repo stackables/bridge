@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
-import { BridgeLanguageService } from "./index.ts";
+import { BridgeLanguageService } from "./language-service.ts";
 
 const args = process.argv.slice(2);
 

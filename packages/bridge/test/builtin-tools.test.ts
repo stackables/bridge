@@ -2,10 +2,9 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.ts";
-import { builtinTools } from "../src/tools/index.ts";
-import { audit } from "../src/tools/audit.ts";
-import { std } from "../src/tools/index.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { audit } from "../src/index.ts";
+import { std } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for individual tools ─────────────────────────────────────────
@@ -137,45 +136,23 @@ describe("toArray tool", () => {
   });
 });
 
-// ── builtinTools bundle ─────────────────────────────────────────────────────
+// ── std bundle ──────────────────────────────────────────────────────────────
 
-describe("builtinTools bundle", () => {
-  test("has two top-level keys: std and internal", () => {
-    assert.deepEqual(Object.keys(builtinTools).sort(), ["internal", "std"]);
-  });
-
+describe("std bundle", () => {
   test("std namespace contains transform tools", () => {
-    assert.ok(builtinTools.std.audit, "audit present");
-    assert.ok(builtinTools.std.httpCall, "httpCall present");
-    assert.ok(builtinTools.std.assert, "assert present");
-    assert.ok(builtinTools.std.str.toUpperCase, "upperCase present");
-    assert.ok(builtinTools.std.str.toLowerCase, "lowerCase present");
-    assert.ok(builtinTools.std.arr.find, "findObject present");
-    assert.ok(builtinTools.std.arr.first, "pickFirst present");
-    assert.ok(builtinTools.std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 5);
+    assert.ok(std.audit, "audit present");
+    assert.ok(std.httpCall, "httpCall present");
+    assert.ok(std.assert, "assert present");
+    assert.ok(std.str.toUpperCase, "upperCase present");
+    assert.ok(std.str.toLowerCase, "lowerCase present");
+    assert.ok(std.arr.find, "findObject present");
+    assert.ok(std.arr.first, "pickFirst present");
+    assert.ok(std.arr.toArray, "toArray present");
+    assert.equal(Object.keys(std).length, 5);
   });
 
-  test("internal namespace contains math/comparison/logic tools", () => {
-    assert.ok(builtinTools.internal.multiply, "multiply present");
-    assert.ok(builtinTools.internal.divide, "divide present");
-    assert.ok(builtinTools.internal.add, "add present");
-    assert.ok(builtinTools.internal.subtract, "subtract present");
-    assert.ok(builtinTools.internal.eq, "eq present");
-    assert.ok(builtinTools.internal.neq, "neq present");
-    assert.ok(builtinTools.internal.gt, "gt present");
-    assert.ok(builtinTools.internal.gte, "gte present");
-    assert.ok(builtinTools.internal.lt, "lt present");
-    assert.ok(builtinTools.internal.lte, "lte present");
-    assert.ok(builtinTools.internal.not, "not present");
-    assert.ok(builtinTools.internal.and, "and present");
-    assert.ok(builtinTools.internal.or, "or present");
-    assert.ok(builtinTools.internal.concat, "concat present");
-    assert.equal(Object.keys(builtinTools.internal).length, 14);
-  });
-
-  test("httpCall is callable with and without std. prefix", () => {
-    assert.equal(typeof builtinTools.std.httpCall, "function");
+  test("httpCall is callable with std. prefix", () => {
+    assert.equal(typeof std.httpCall, "function");
   });
 });
 
@@ -748,8 +725,7 @@ bridge Query.search {
 
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
-      std: { ...builtinTools.std, audit: failAudit },
-      internal: builtinTools.internal,
+      std: { ...std, audit: failAudit },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -785,8 +761,7 @@ bridge Query.search {
 
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
-      std: { ...builtinTools.std, audit: failAudit },
-      internal: builtinTools.internal,
+      std: { ...std, audit: failAudit },
     };
 
     const instructions = parseBridge(bridgeText);

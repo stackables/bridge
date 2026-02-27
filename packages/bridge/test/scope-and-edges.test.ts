@@ -3,10 +3,10 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
-  parseBridge,
+  parseBridgeFormat as parseBridge,
   parsePath,
   serializeBridge,
-} from "../src/bridge-format.ts";
+} from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
