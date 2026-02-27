@@ -1,0 +1,9 @@
+{
+  "ignores": [
+    "@astrojs/check",
+    "@types/node",
+    "astro:content",
+    "tailwindcss",
+    "typescript"
+  ]
+}

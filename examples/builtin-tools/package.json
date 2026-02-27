@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --experimental-transform-types server.ts",
-    "e2e": "node --experimental-transform-types --test e2e.test.ts"
+    "start": "node --experimental-transform-types --conditions source server.ts",
+    "e2e": "node --experimental-transform-types --conditions source --test e2e.test.ts"
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*",

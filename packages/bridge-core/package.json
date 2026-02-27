@@ -7,6 +7,7 @@
   "types": "./build/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "import": "./build/index.js",
       "types": "./build/index.d.ts"
     }
@@ -18,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "test": "node --experimental-transform-types --test test/*.test.ts"
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -31,7 +32,6 @@
     "@stackables/bridge-types": "workspace:*"
   },
   "devDependencies": {
-    "@tsconfig/node22": "^22.0.5",
     "@types/node": "^25.3.0",
     "typescript": "^5.9.3"
   },

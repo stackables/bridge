@@ -88,12 +88,6 @@ importers:
 
   packages/bridge:
     dependencies:
-      '@graphql-tools/utils':
-        specifier: ^11
-        version: 11.0.0(graphql@16.13.0)
-      '@opentelemetry/api':
-        specifier: ^1.9.0
-        version: 1.9.0
       '@stackables/bridge-compiler':
         specifier: workspace:*
         version: link:../bridge-compiler
@@ -106,25 +100,16 @@ importers:
       '@stackables/bridge-stdlib':
         specifier: workspace:*
         version: link:../bridge-stdlib
-      chevrotain:
-        specifier: ^11.1.1
-        version: 11.1.1
-      graphql:
-        specifier: ^16
-        version: 16.13.0
-      lru-cache:
-        specifier: ^11
-        version: 11.2.6
     devDependencies:
       '@graphql-tools/executor-http':
         specifier: ^3.1.0
         version: 3.1.0(@types/node@25.3.0)(graphql@16.13.0)
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
+      graphql:
+        specifier: ^16
+        version: 16.13.0
       graphql-yoga:
         specifier: ^5.18.0
         version: 5.18.0(graphql@16.13.0)
@@ -144,9 +129,6 @@ importers:
         specifier: ^11.1.1
         version: 11.1.1
     devDependencies:
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
@@ -166,9 +148,6 @@ importers:
         specifier: workspace:*
         version: link:../bridge-types
     devDependencies:
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
@@ -191,12 +170,6 @@ importers:
         specifier: ^16
         version: 16.13.0
     devDependencies:
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
-      '@types/node':
-        specifier: ^25.3.0
-        version: 25.3.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -210,9 +183,6 @@ importers:
         specifier: ^11
         version: 11.2.6
     devDependencies:
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
@@ -249,21 +219,12 @@ importers:
 
   packages/bridge-types:
     devDependencies:
-      '@tsconfig/node22':
-        specifier: ^22.0.5
-        version: 22.0.5
-      '@types/node':
-        specifier: ^25.3.0
-        version: 25.3.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   packages/docs-site:
     dependencies:
-      '@astrojs/check':
-        specifier: ^0.9.6
-        version: 0.9.6(prettier@3.8.1)(typescript@5.9.3)
       '@astrojs/cloudflare':
         specifier: ^12.6.12
         version: 12.6.12(@types/node@25.3.0)(astro@5.17.3(@types/node@25.3.0)(jiti@2.6.1)(lightningcss@1.31.1)(rollup@4.59.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2))(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
@@ -297,10 +258,10 @@ importers:
       tailwindcss:
         specifier: 4.2.1
         version: 4.2.1
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
     devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.6
+        version: 0.9.6(prettier@3.8.1)(typescript@5.9.3)
       '@types/node':
         specifier: ^25.3.0
         version: 25.3.0
@@ -313,6 +274,9 @@ importers:
       '@yeskunall/astro-umami':
         specifier: ^0.0.7
         version: 0.0.7(astro@5.17.3(@types/node@25.3.0)(jiti@2.6.1)(lightningcss@1.31.1)(rollup@4.59.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2))
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       wrangler:
         specifier: ^4.68.1
         version: 4.68.1(@cloudflare/workers-types@4.20260303.0)

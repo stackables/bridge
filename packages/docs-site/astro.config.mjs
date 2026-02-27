@@ -2,7 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightCatppuccin from "@catppuccin/starlight";
-import bridgeGrammar from "../bridge-syntax-highlight/syntaxes/bridge.tmLanguage.json" assert { type: "json" };
+import bridgeGrammar from "../bridge-syntax-highlight/syntaxes/bridge.tmLanguage.json" with { type: "json" };
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";

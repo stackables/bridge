@@ -7,6 +7,7 @@
   "types": "./build/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "import": "./build/index.js",
       "types": "./build/index.d.ts"
     }
@@ -21,8 +22,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "test": "node --experimental-transform-types --test test/*.test.ts",
-    "release": "npx --no-install semantic-release -e semantic-release-monorepo"
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -36,8 +36,8 @@
   "homepage": "https://github.com/stackables/bridge#readme",
   "devDependencies": {
     "@graphql-tools/executor-http": "^3.1.0",
-    "@tsconfig/node22": "^22.0.5",
     "@types/node": "^25.3.0",
+    "graphql": "^16",
     "graphql-yoga": "^5.18.0",
     "typescript": "^5.9.3"
   },
@@ -45,12 +45,7 @@
     "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-compiler": "workspace:*",
     "@stackables/bridge-graphql": "workspace:*",
-    "@stackables/bridge-stdlib": "workspace:*",
-    "@graphql-tools/utils": "^11",
-    "@opentelemetry/api": "^1.9.0",
-    "chevrotain": "^11.1.1",
-    "graphql": "^16",
-    "lru-cache": "^11"
+    "@stackables/bridge-stdlib": "workspace:*"
   },
   "publishConfig": {
     "access": "public"

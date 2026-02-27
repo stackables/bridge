@@ -1,7 +1,13 @@
+/**
+ * Unit tests for the httpCall tool — createHttpCall, parseCacheTTL, and cache behaviour.
+ *
+ * These test the stdlib HTTP tool directly — no gateway or bridge engine.
+ */
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createHttpCall, parseCacheTTL } from "../src/index.ts";
-import type { CacheStore } from "../src/index.ts";
+import { createHttpCall } from "../src/tools/http-call.ts";
+import { parseCacheTTL } from "../src/tools/http-call.ts";
+import type { CacheStore } from "@stackables/bridge-types";
 
 /** Creates a mock Response with optional headers. */
 function mockResponse(data: any, headers?: Record<string, string>): Response {
@@ -181,7 +187,10 @@ describe("parseCacheTTL", () => {
   });
 
   test("s-maxage takes priority over max-age", () => {
-    const r = mockResponse({}, { "cache-control": "public, max-age=60, s-maxage=600" });
+    const r = mockResponse(
+      {},
+      { "cache-control": "public, max-age=60, s-maxage=600" },
+    );
     assert.equal(parseCacheTTL(r), 600);
   });
 
@@ -218,19 +227,40 @@ describe("httpCall cache", () => {
     const { fetch, getCalls } = countingFetch({ ok: true });
     const httpCall = createHttpCall(fetch);
 
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "1", cache: 0 });
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "1", cache: 0 });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "1",
+      cache: 0,
+    });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "1",
+      cache: 0,
+    });
 
     assert.equal(getCalls(), 2, "fetch should be called twice");
   });
 
   test("auto mode respects max-age header", async () => {
-    const { fetch, getCalls } = countingFetch({ data: "fresh" }, { "cache-control": "max-age=60" });
+    const { fetch, getCalls } = countingFetch(
+      { data: "fresh" },
+      { "cache-control": "max-age=60" },
+    );
     const httpCall = createHttpCall(fetch);
 
     // Default cache mode is auto
-    const r1 = await httpCall({ baseUrl: "https://example.com", path: "/a", q: "x" });
-    const r2 = await httpCall({ baseUrl: "https://example.com", path: "/a", q: "x" });
+    const r1 = await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "x",
+    });
+    const r2 = await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "x",
+    });
 
     assert.equal(getCalls(), 1, "second call should be cached");
     assert.deepStrictEqual(r1, { data: "fresh" });
@@ -248,7 +278,10 @@ describe("httpCall cache", () => {
   });
 
   test("auto mode does not cache when no-store", async () => {
-    const { fetch, getCalls } = countingFetch({ data: "secret" }, { "cache-control": "no-store" });
+    const { fetch, getCalls } = countingFetch(
+      { data: "secret" },
+      { "cache-control": "no-store" },
+    );
     const httpCall = createHttpCall(fetch);
 
     await httpCall({ baseUrl: "https://example.com", path: "/a", q: "x" });
@@ -259,11 +292,24 @@ describe("httpCall cache", () => {
 
   test("explicit TTL overrides response headers", async () => {
     // Server says no-store but user says cache 60
-    const { fetch, getCalls } = countingFetch({ data: "forced" }, { "cache-control": "no-store" });
+    const { fetch, getCalls } = countingFetch(
+      { data: "forced" },
+      { "cache-control": "no-store" },
+    );
     const httpCall = createHttpCall(fetch);
 
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "x", cache: 60 });
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "x", cache: 60 });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "x",
+      cache: 60,
+    });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "x",
+      cache: 60,
+    });
 
     assert.equal(getCalls(), 1, "explicit TTL should override no-store");
   });
@@ -272,8 +318,18 @@ describe("httpCall cache", () => {
     const { fetch, getCalls } = countingFetch({ result: 1 });
     const httpCall = createHttpCall(fetch);
 
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "Berlin", cache: 60 });
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "Paris", cache: 60 });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "Berlin",
+      cache: 60,
+    });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "Paris",
+      cache: 60,
+    });
 
     assert.equal(getCalls(), 2, "different params should produce two fetches");
   });
@@ -285,7 +341,10 @@ describe("httpCall cache", () => {
       get(key) {
         const e = store.get(key);
         if (!e) return undefined;
-        if (now > e.expiry) { store.delete(key); return undefined; }
+        if (now > e.expiry) {
+          store.delete(key);
+          return undefined;
+        }
         return e.value;
       },
       set(key, value, ttl) {
@@ -311,8 +370,13 @@ describe("httpCall cache", () => {
   test("custom CacheStore is used instead of default", async () => {
     const ops: string[] = [];
     const custom: CacheStore = {
-      async get(key) { ops.push(`get:${key}`); return undefined; },
-      async set(key, _value, ttl) { ops.push(`set:${key}:${ttl}`); },
+      async get(key) {
+        ops.push(`get:${key}`);
+        return undefined;
+      },
+      async set(key, _value, ttl) {
+        ops.push(`set:${key}:${ttl}`);
+      },
     };
 
     const { fetch } = countingFetch({ ok: true });
@@ -320,8 +384,14 @@ describe("httpCall cache", () => {
 
     await httpCall({ baseUrl: "https://example.com", path: "/z", cache: 120 });
 
-    assert.ok(ops.some((o) => o.startsWith("get:")), "should call get on custom store");
-    assert.ok(ops.some((o) => o.startsWith("set:") && o.endsWith(":120")), "should call set with TTL");
+    assert.ok(
+      ops.some((o) => o.startsWith("get:")),
+      "should call get on custom store",
+    );
+    assert.ok(
+      ops.some((o) => o.startsWith("set:") && o.endsWith(":120")),
+      "should call set with TTL",
+    );
   });
 
   test("cache param is not sent as query param in GET requests", async () => {
@@ -332,9 +402,17 @@ describe("httpCall cache", () => {
     };
 
     const httpCall = createHttpCall(fetch as any);
-    await httpCall({ baseUrl: "https://example.com", path: "/a", q: "test", cache: 30 });
+    await httpCall({
+      baseUrl: "https://example.com",
+      path: "/a",
+      q: "test",
+      cache: 30,
+    });
 
-    assert.ok(!capturedUrl.includes("cache="), "cache should not appear in URL");
+    assert.ok(
+      !capturedUrl.includes("cache="),
+      "cache should not appear in URL",
+    );
     assert.ok(capturedUrl.includes("q=test"), "q should be in URL");
   });
 
@@ -346,7 +424,13 @@ describe("httpCall cache", () => {
     };
 
     const httpCall = createHttpCall(fetch as any);
-    await httpCall({ baseUrl: "https://example.com", method: "POST", path: "/a", data: "hello", cache: 30 });
+    await httpCall({
+      baseUrl: "https://example.com",
+      method: "POST",
+      path: "/a",
+      data: "hello",
+      cache: 30,
+    });
 
     const parsed = JSON.parse(capturedBody);
     assert.equal(parsed.data, "hello");
@@ -368,8 +452,12 @@ describe("LRU eviction", () => {
     const { LRUCache } = await import("lru-cache");
     const lruStore = new LRUCache<string, any>({ max: 2 });
     const cache: CacheStore = {
-      get(key) { return lruStore.get(key); },
-      set(key, value, ttl) { if (ttl > 0) lruStore.set(key, value, { ttl: ttl * 1000 }); },
+      get(key) {
+        return lruStore.get(key);
+      },
+      set(key, value, ttl) {
+        if (ttl > 0) lruStore.set(key, value, { ttl: ttl * 1000 });
+      },
     };
 
     const httpCall = createHttpCall(fetch as any, cache);

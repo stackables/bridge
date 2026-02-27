@@ -37,6 +37,4 @@ export const builtinToolNames: readonly string[] = Object.keys(std).map(
   (k) => `std.${k}`,
 );
 
-export { audit } from "./tools/audit.ts";
 export { createHttpCall } from "./tools/http-call.ts";
-export { parseCacheTTL } from "./tools/http-call.ts";
