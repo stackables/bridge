@@ -25,10 +25,6 @@ export {
 } from "./ExecutionTree.ts";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 
-// ── Internal tools (core language primitives) ───────────────────────────────
-
-export { internal } from "./tools/index.ts";
-
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export { SELF_MODULE } from "./types.ts";

@@ -1,5 +1,6 @@
 import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { parsePath } from "./utils.ts";
+import { internal } from "./tools/index.ts";
 import type {
   Bridge,
   ControlFlowInstruction,
@@ -100,10 +101,12 @@ function pathEquals(a: string[], b: string[]): boolean {
 
 /** Check whether an error is a fatal halt (abort or panic) that must bypass all error boundaries. */
 function isFatalError(err: any): boolean {
-  return err instanceof BridgePanicError ||
+  return (
+    err instanceof BridgePanicError ||
     err instanceof BridgeAbortError ||
     err?.name === "BridgeAbortError" ||
-    err?.name === "BridgePanicError";
+    err?.name === "BridgePanicError"
+  );
 }
 
 /** Execute a control flow instruction, returning a sentinel or throwing. */
@@ -210,7 +213,7 @@ function coerceConstant(raw: string): unknown {
   }
 }
 
-const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function setNested(obj: any, path: string[], value: any): void {
   for (let i = 0; i < path.length - 1; i++) {
@@ -224,7 +227,8 @@ function setNested(obj: any, path: string[], value: any): void {
   }
   if (path.length > 0) {
     const finalKey = path[path.length - 1];
-    if (UNSAFE_KEYS.has(finalKey)) throw new Error(`Unsafe assignment key: ${finalKey}`);
+    if (UNSAFE_KEYS.has(finalKey))
+      throw new Error(`Unsafe assignment key: ${finalKey}`);
     obj[finalKey] = value;
   }
 }
@@ -245,14 +249,16 @@ export class ExecutionTree {
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
+  private toolFns?: ToolMap;
 
   constructor(
     public trunk: Trunk,
     private instructions: Instruction[],
-    private toolFns?: ToolMap,
+    toolFns?: ToolMap,
     private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
+    this.toolFns = { internal, ...(toolFns ?? {}) };
     this.bridge = instructions.find(
       (i): i is Bridge =>
         i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
@@ -499,8 +505,10 @@ export class ExecutionTree {
       const hasElementSource = forkWires.some(
         (w) =>
           ("from" in w && !!w.from.element) ||
-          ("condAnd" in w && (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
-          ("condOr" in w && (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
+          ("condAnd" in w &&
+            (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
+          ("condOr" in w &&
+            (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
       );
       // For __local trunks, also check transitively: if the source is a
       // pipe fork whose own wires reference element data, keep it local.
@@ -618,7 +626,11 @@ export class ExecutionTree {
       // the result — no tool call needed.  For path=[] wires the resolved
       // value may be a primitive (boolean from condAnd/condOr, string from
       // a pipe tool like upperCase), so return the resolved value directly.
-      if (target.module === "__local" || target.field === "__and" || target.field === "__or") {
+      if (
+        target.module === "__local" ||
+        target.field === "__and" ||
+        target.field === "__or"
+      ) {
         for (const [path, value] of resolved) {
           if (path.length === 0) return value;
         }
@@ -646,7 +658,10 @@ export class ExecutionTree {
     }
     const tracer = this.tracer;
     const logger = this.logger;
-    const toolContext: ToolContext = { logger: logger ?? {}, signal: this.signal };
+    const toolContext: ToolContext = {
+      logger: logger ?? {},
+      signal: this.signal,
+    };
     const traceStart = tracer?.now();
     const metricAttrs = {
       "bridge.tool.name": toolName,
@@ -776,16 +791,19 @@ export class ExecutionTree {
     }
 
     let result: any = resolved;
-    
+
     // Root-level null check: if root data is null/undefined
     if (result == null && ref.path.length > 0) {
       if (ref.rootSafe) return undefined;
-      throw new TypeError(`Cannot read properties of ${result} (reading '${ref.path[0]}')`);
+      throw new TypeError(
+        `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
+      );
     }
-    
+
     for (let i = 0; i < ref.path.length; i++) {
       const segment = ref.path[i];
-      if (UNSAFE_KEYS.has(segment)) throw new Error(`Unsafe property traversal: ${segment}`);
+      if (UNSAFE_KEYS.has(segment))
+        throw new Error(`Unsafe property traversal: ${segment}`);
       if (Array.isArray(result) && !/^\d+$/.test(segment)) {
         this.logger?.warn?.(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
@@ -796,7 +814,9 @@ export class ExecutionTree {
       if (result == null && i < ref.path.length - 1) {
         const nextSafe = ref.pathSafe?.[i + 1] ?? false;
         if (nextSafe) return undefined;
-        throw new TypeError(`Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`);
+        throw new TypeError(
+          `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
+        );
       }
     }
     return result;
@@ -830,9 +850,7 @@ export class ExecutionTree {
    * Wires with `safe: true` swallow errors and return undefined.
    * Non-safe wires propagate errors normally.
    */
-  async pullSafe(
-    pulls: Extract<Wire, { from: NodeRef }>[],
-  ): Promise<any> {
+  async pullSafe(pulls: Extract<Wire, { from: NodeRef }>[]): Promise<any> {
     if (pulls.length === 1) {
       const w = pulls[0];
       if (w.safe) {
@@ -968,7 +986,9 @@ export class ExecutionTree {
       }
       if (conditional.falsyControl) {
         const ctrl = conditional.falsyControl;
-        result = result.then((value) => value ? value : applyControlFlow(ctrl));
+        result = result.then((value) =>
+          value ? value : applyControlFlow(ctrl),
+        );
       } else if (conditional.falsyFallback != null) {
         result = result.then((value) => {
           if (value) return value;
@@ -983,13 +1003,22 @@ export class ExecutionTree {
       // ?? nullish-guard
       if (conditional.nullishControl) {
         const ctrl = conditional.nullishControl;
-        result = result.then((value: any) => value != null ? value : applyControlFlow(ctrl));
-      } else if (conditional.nullishFallbackRef || conditional.nullishFallback != null) {
+        result = result.then((value: any) =>
+          value != null ? value : applyControlFlow(ctrl),
+        );
+      } else if (
+        conditional.nullishFallbackRef ||
+        conditional.nullishFallback != null
+      ) {
         result = result.then(async (value: any) => {
           if (value != null) return value;
-          if (conditional.nullishFallbackRef) return this.pullSingle(conditional.nullishFallbackRef);
-          try { return JSON.parse(conditional.nullishFallback!); }
-          catch { return conditional.nullishFallback; }
+          if (conditional.nullishFallbackRef)
+            return this.pullSingle(conditional.nullishFallbackRef);
+          try {
+            return JSON.parse(conditional.nullishFallback!);
+          } catch {
+            return conditional.nullishFallback;
+          }
         });
       }
 
@@ -1001,7 +1030,8 @@ export class ExecutionTree {
           return applyControlFlow(ctrl);
         });
       }
-      if (!conditional.catchFallbackRef && !conditional.catchFallback) return result;
+      if (!conditional.catchFallbackRef && !conditional.catchFallback)
+        return result;
       return result.catch((err: any) => {
         if (isFatalError(err)) throw err;
         if (conditional.catchFallbackRef)
@@ -1019,21 +1049,36 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { condAnd: any }> => "condAnd" in w,
     );
     if (condAndWire) {
-      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condAndWire.condAnd;
+      const {
+        leftRef,
+        rightRef,
+        rightValue,
+        safe: isSafe,
+        rightSafe,
+      } = condAndWire.condAnd;
       let result: Promise<any> = (async () => {
         const leftVal = isSafe
-          ? await this.pullSingle(leftRef).catch((e: any) => { if (isFatalError(e)) throw e; return undefined; })
+          ? await this.pullSingle(leftRef).catch((e: any) => {
+              if (isFatalError(e)) throw e;
+              return undefined;
+            })
           : await this.pullSingle(leftRef);
         if (!leftVal) return false; // short-circuit: left is falsy
         if (rightRef !== undefined) {
           const rightVal = rightSafe
-            ? await this.pullSingle(rightRef).catch((e: any) => { if (isFatalError(e)) throw e; return undefined; })
+            ? await this.pullSingle(rightRef).catch((e: any) => {
+                if (isFatalError(e)) throw e;
+                return undefined;
+              })
             : await this.pullSingle(rightRef);
           return Boolean(rightVal);
         }
         if (rightValue !== undefined) {
-          try { return Boolean(JSON.parse(rightValue)); }
-          catch { return Boolean(rightValue); }
+          try {
+            return Boolean(JSON.parse(rightValue));
+          } catch {
+            return Boolean(rightValue);
+          }
         }
         return Boolean(leftVal);
       })();
@@ -1041,24 +1086,38 @@ export class ExecutionTree {
       // || falsy-guard
       if (condAndWire.falsyControl) {
         const ctrl = condAndWire.falsyControl;
-        result = result.then((value) => value ? value : applyControlFlow(ctrl));
+        result = result.then((value) =>
+          value ? value : applyControlFlow(ctrl),
+        );
       } else if (condAndWire.falsyFallback != null) {
         result = result.then((value) => {
           if (value) return value;
-          try { return JSON.parse(condAndWire.falsyFallback!); }
-          catch { return condAndWire.falsyFallback; }
+          try {
+            return JSON.parse(condAndWire.falsyFallback!);
+          } catch {
+            return condAndWire.falsyFallback;
+          }
         });
       }
       // ?? nullish-guard
       if (condAndWire.nullishControl) {
         const ctrl = condAndWire.nullishControl;
-        result = result.then((value: any) => value != null ? value : applyControlFlow(ctrl));
-      } else if (condAndWire.nullishFallbackRef || condAndWire.nullishFallback != null) {
+        result = result.then((value: any) =>
+          value != null ? value : applyControlFlow(ctrl),
+        );
+      } else if (
+        condAndWire.nullishFallbackRef ||
+        condAndWire.nullishFallback != null
+      ) {
         result = result.then(async (value: any) => {
           if (value != null) return value;
-          if (condAndWire.nullishFallbackRef) return this.pullSingle(condAndWire.nullishFallbackRef);
-          try { return JSON.parse(condAndWire.nullishFallback!); }
-          catch { return condAndWire.nullishFallback; }
+          if (condAndWire.nullishFallbackRef)
+            return this.pullSingle(condAndWire.nullishFallbackRef);
+          try {
+            return JSON.parse(condAndWire.nullishFallback!);
+          } catch {
+            return condAndWire.nullishFallback;
+          }
         });
       }
       // catch error-guard
@@ -1072,9 +1131,13 @@ export class ExecutionTree {
       if (condAndWire.catchFallbackRef || condAndWire.catchFallback) {
         result = result.catch((err: any) => {
           if (isFatalError(err)) throw err;
-          if (condAndWire.catchFallbackRef) return this.pullSingle(condAndWire.catchFallbackRef!);
-          try { return JSON.parse(condAndWire.catchFallback!); }
-          catch { return condAndWire.catchFallback; }
+          if (condAndWire.catchFallbackRef)
+            return this.pullSingle(condAndWire.catchFallbackRef!);
+          try {
+            return JSON.parse(condAndWire.catchFallback!);
+          } catch {
+            return condAndWire.catchFallback;
+          }
         });
       }
       return result;
@@ -1085,21 +1148,36 @@ export class ExecutionTree {
       (w): w is Extract<Wire, { condOr: any }> => "condOr" in w,
     );
     if (condOrWire) {
-      const { leftRef, rightRef, rightValue, safe: isSafe, rightSafe } = condOrWire.condOr;
+      const {
+        leftRef,
+        rightRef,
+        rightValue,
+        safe: isSafe,
+        rightSafe,
+      } = condOrWire.condOr;
       let result: Promise<any> = (async () => {
         const leftVal = isSafe
-          ? await this.pullSingle(leftRef).catch((e: any) => { if (isFatalError(e)) throw e; return undefined; })
+          ? await this.pullSingle(leftRef).catch((e: any) => {
+              if (isFatalError(e)) throw e;
+              return undefined;
+            })
           : await this.pullSingle(leftRef);
         if (leftVal) return true; // short-circuit: left is truthy
         if (rightRef !== undefined) {
           const rightVal = rightSafe
-            ? await this.pullSingle(rightRef).catch((e: any) => { if (isFatalError(e)) throw e; return undefined; })
+            ? await this.pullSingle(rightRef).catch((e: any) => {
+                if (isFatalError(e)) throw e;
+                return undefined;
+              })
             : await this.pullSingle(rightRef);
           return Boolean(rightVal);
         }
         if (rightValue !== undefined) {
-          try { return Boolean(JSON.parse(rightValue)); }
-          catch { return Boolean(rightValue); }
+          try {
+            return Boolean(JSON.parse(rightValue));
+          } catch {
+            return Boolean(rightValue);
+          }
         }
         return Boolean(leftVal);
       })();
@@ -1107,24 +1185,38 @@ export class ExecutionTree {
       // || falsy-guard
       if (condOrWire.falsyControl) {
         const ctrl = condOrWire.falsyControl;
-        result = result.then((value) => value ? value : applyControlFlow(ctrl));
+        result = result.then((value) =>
+          value ? value : applyControlFlow(ctrl),
+        );
       } else if (condOrWire.falsyFallback != null) {
         result = result.then((value) => {
           if (value) return value;
-          try { return JSON.parse(condOrWire.falsyFallback!); }
-          catch { return condOrWire.falsyFallback; }
+          try {
+            return JSON.parse(condOrWire.falsyFallback!);
+          } catch {
+            return condOrWire.falsyFallback;
+          }
         });
       }
       // ?? nullish-guard
       if (condOrWire.nullishControl) {
         const ctrl = condOrWire.nullishControl;
-        result = result.then((value: any) => value != null ? value : applyControlFlow(ctrl));
-      } else if (condOrWire.nullishFallbackRef || condOrWire.nullishFallback != null) {
+        result = result.then((value: any) =>
+          value != null ? value : applyControlFlow(ctrl),
+        );
+      } else if (
+        condOrWire.nullishFallbackRef ||
+        condOrWire.nullishFallback != null
+      ) {
         result = result.then(async (value: any) => {
           if (value != null) return value;
-          if (condOrWire.nullishFallbackRef) return this.pullSingle(condOrWire.nullishFallbackRef);
-          try { return JSON.parse(condOrWire.nullishFallback!); }
-          catch { return condOrWire.nullishFallback; }
+          if (condOrWire.nullishFallbackRef)
+            return this.pullSingle(condOrWire.nullishFallbackRef);
+          try {
+            return JSON.parse(condOrWire.nullishFallback!);
+          } catch {
+            return condOrWire.nullishFallback;
+          }
         });
       }
       // catch error-guard
@@ -1138,9 +1230,13 @@ export class ExecutionTree {
       if (condOrWire.catchFallbackRef || condOrWire.catchFallback) {
         result = result.catch((err: any) => {
           if (isFatalError(err)) throw err;
-          if (condOrWire.catchFallbackRef) return this.pullSingle(condOrWire.catchFallbackRef!);
-          try { return JSON.parse(condOrWire.catchFallback!); }
-          catch { return condOrWire.catchFallback; }
+          if (condOrWire.catchFallbackRef)
+            return this.pullSingle(condOrWire.catchFallbackRef!);
+          try {
+            return JSON.parse(condOrWire.catchFallback!);
+          } catch {
+            return condOrWire.catchFallback;
+          }
         });
       }
       return result;
@@ -1156,12 +1252,20 @@ export class ExecutionTree {
     );
 
     // First wire with each fallback kind wins
-    const falsyFallbackWire = pulls.find((w) => w.falsyFallback != null || w.falsyControl != null);
+    const falsyFallbackWire = pulls.find(
+      (w) => w.falsyFallback != null || w.falsyControl != null,
+    );
     const nullishFallbackWire = pulls.find(
-      (w) => w.nullishFallback != null || w.nullishFallbackRef != null || w.nullishControl != null,
+      (w) =>
+        w.nullishFallback != null ||
+        w.nullishFallbackRef != null ||
+        w.nullishControl != null,
     );
     const catchFallbackWire = pulls.find(
-      (w) => w.catchFallback != null || w.catchFallbackRef != null || w.catchControl != null,
+      (w) =>
+        w.catchFallback != null ||
+        w.catchFallbackRef != null ||
+        w.catchControl != null,
     );
 
     let result: Promise<any> = (async () => {
@@ -1207,7 +1311,9 @@ export class ExecutionTree {
         if (nullishFallbackWire.nullishControl) {
           resolvedValue = applyControlFlow(nullishFallbackWire.nullishControl);
         } else if (nullishFallbackWire.nullishFallbackRef) {
-          resolvedValue = await this.pullSingle(nullishFallbackWire.nullishFallbackRef);
+          resolvedValue = await this.pullSingle(
+            nullishFallbackWire.nullishFallbackRef,
+          );
         } else if (nullishFallbackWire.nullishFallback != null) {
           resolvedValue = coerceConstant(nullishFallbackWire.nullishFallback);
         }

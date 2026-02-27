@@ -5,8 +5,13 @@ import {
   type GraphQLSchema,
   defaultFieldResolver,
 } from "graphql";
-import { ExecutionTree, TraceCollector, type Logger, type ToolTrace, type TraceLevel } from "@stackables/bridge-core";
-import { internal } from "@stackables/bridge-core";
+import {
+  ExecutionTree,
+  TraceCollector,
+  type Logger,
+  type ToolTrace,
+  type TraceLevel,
+} from "@stackables/bridge-core";
 import { std } from "@stackables/bridge-stdlib";
 import type { Instruction, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
@@ -14,7 +19,12 @@ import { SELF_MODULE } from "@stackables/bridge-core";
 export type { Logger };
 
 const noop = () => {};
-const defaultLogger: Logger = { debug: noop, info: noop, warn: noop, error: noop };
+const defaultLogger: Logger = {
+  debug: noop,
+  info: noop,
+  warn: noop,
+  error: noop,
+};
 
 export type BridgeOptions = {
   /** Tool functions available to the engine.
@@ -101,10 +111,10 @@ export function bridgeTransform(
               ? contextMapper(context)
               : (context ?? {});
 
-            // Always include builtinTools; user tools merge on top (shallow)
+            // std is always included; user tools merge on top (shallow)
+            // internal tools are injected automatically by ExecutionTree
             const allTools: ToolMap = {
               std,
-              internal,
               ...(userTools ?? {}),
             };
 
