@@ -7,7 +7,6 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import type { Bridge, ConstDef, NodeRef, ToolDef, Wire } from "../src/index.ts";
-import { SELF_MODULE } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
