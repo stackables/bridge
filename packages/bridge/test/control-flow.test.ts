@@ -429,6 +429,41 @@ bridge Query.test {
     assert.equal(data.length, 2);
     assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
   });
+
+  test("?? continue on root array wire returns [] when source is null", async () => {
+    // Guards against a crash where pullOutputField / response() would throw
+    // TypeError: items is not iterable when resolveWires returns CONTINUE_SYM
+    // for the root array wire itself.
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name
+  } ?? continue
+}`;
+    const tools = {
+      api: async () => ({ items: null }),
+    };
+    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    assert.deepStrictEqual(data, []);
+  });
+
+  test("catch continue on root array wire returns [] when source throws", async () => {
+    const src = `version 1.4
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name
+  } catch continue
+}`;
+    const tools = {
+      api: async () => { throw new Error("service unavailable"); },
+    };
+    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    assert.deepStrictEqual(data, []);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

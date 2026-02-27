@@ -481,81 +481,65 @@ bridge Mutation.submitFeedback {
   {
     name: "Alias (Rename & Cache)",
     description:
-      "Use 'alias' to rename deep paths or cache pipe results — works at bridge body level and inside array mapping blocks",
+      "alias is a fully compatible wire — supports ?., ||, ??, catch, and full expression syntax (math, comparison, not, parentheses, ternary)",
     schema: `
 type Query {
-  searchTrains(from: String!, to: String!): [Journey!]!
+  profile(userId: String!): UserProfile
 }
 
-type Journey {
-  departureTime: String!
-  arrivalTime: String!
-  originStation: String!
-  destinationStation: String!
-  legs: [Leg!]!
-}
-
-type Leg {
-  trainName: String
-  fromStation: String
-  fromTime: String
-  toStation: String
-  toTime: String
+type UserProfile {
+  displayName: String
+  location: String
+  website: String
+  upperName: String
+  isPremium: Boolean
 }
     `,
     bridge: `version 1.4
 
-tool sbbApi from std.httpCall {
-  .baseUrl = "https://transport.opendata.ch/v1"
-  .method = GET
-  .path = "/connections"
+tool userApi from std.httpCall {
+  .baseUrl = "https://jsonplaceholder.typicode.com"
+  .path = "/users/1"
   .cache = 60
-  on error = { "connections": [] }
 }
 
-bridge Query.searchTrains {
-  with sbbApi as api
+bridge Query.profile {
+  with userApi as api
+  with std.str.toUpperCase as uc
   with input as i
   with output as o
 
-  api.from <- i.from
-  api.to <- i.to
+  # 1. Simple rename — give a deeply nested path a short name
+  alias api.address.city as city
 
-  o <- api.connections[] as c {
-    # alias renames deeply nested paths for readability
-    alias c.from as dep
-    alias c.to as arr
+  # 2. Falsy fallback — use "Anonymous" if username is empty or null
+  alias api.username || "Anonymous" as displayName
 
-    .departureTime <- dep.departure
-    .arrivalTime <- arr.arrival
-    .originStation <- dep.station.name
-    .destinationStation <- arr.station.name
+  # 3. Nullish fallback — only override if value is strictly null/undefined
+  alias api.website ?? "https://example.com" as site
 
-    .legs <- c.sections[] as s {
-      .trainName <- s.journey.name || s.journey.category || "Walk"
-      .fromStation <- s.departure.station.name
-      .fromTime <- s.departure.departure
-      .toStation <- s.arrival.station.name
-      .toTime <- s.arrival.arrival
-    }
-  }
+  # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
+  alias uc:api.name catch "UNKNOWN" as upperName
+
+  # 5. Math/comparison expression — alias fully evaluates the expression
+  alias api.id <= 5 as isPremium
+
+  o.displayName <- displayName
+  o.location <- city || "Unknown city"
+  o.website <- site
+  o.upperName <- upperName
+  o.isPremium <- isPremium
 }`,
     queries: [
       {
-        name: "Bern \u2192 Z\u00fcrich",
+        name: "Query 1",
         query: `{
-  searchTrains(from: "Bern", to: "Zürich") {
-    departureTime
-    arrivalTime
-    originStation
-    destinationStation
-    legs {
-      trainName
-      fromStation
-      fromTime
-      toStation
-      toTime
-    }
+  profile(userId: "1") {
+    displayName
+    location
+    website
+    upperName
+    isPremium
   }
 }`,
       },

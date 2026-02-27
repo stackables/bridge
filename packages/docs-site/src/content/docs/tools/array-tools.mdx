@@ -89,7 +89,7 @@ bridge Query.getLatestPost {
 <Aside title="Enforcing strict responses">
 If you expect an API endpoint to return *exactly* one user (e.g., searching by email), but the API unhelpfully wraps it in an array, use `strict = true`.
 
-If the API returns 0 users, or 2+ users, the `first` tool will immediately throw an error. This allows you to catch the bad state with an Error Guard (`??`) and handle it gracefully!
+If the API returns 0 users, or 2+ users, the `first` tool will immediately throw an error. This allows you to catch the bad state with an Error Guard (`catch`) and handle it gracefully!
 
 </Aside>
 
@@ -106,7 +106,7 @@ bridge Query.getUserByEmail {
 
   # If the API returned exactly one user, this succeeds.
   # If it returned 0 or 2+, it throws and falls back to "Unknown".
-  o.name <- first.name ?? "Unknown"
+  o.name <- first.name catch "Unknown"
 }
 
 ```

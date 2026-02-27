@@ -1260,7 +1260,9 @@ export class ExecutionTree {
     if (matches.length === 0) return undefined;
     const result = this.resolveWires(matches);
     if (!array) return result;
-    const items = (await result) as any[];
+    const resolved = await result;
+    if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+    const items = resolved as any[];
     const finalShadowTrees: ExecutionTree[] = [];
     for (const item of items) {
       if (item === BREAK_SYM) break;
@@ -1539,7 +1541,9 @@ export class ExecutionTree {
       }
 
       // Array: create shadow trees for per-element resolution
-      const items = (await response) as any[];
+      const resolved = await response;
+      if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+      const items = resolved as any[];
       const shadowTrees: ExecutionTree[] = [];
       for (const item of items) {
         if (item === BREAK_SYM) break;
@@ -1560,7 +1564,9 @@ export class ExecutionTree {
       if (defineFieldWires.length > 0) {
         const response = this.resolveWires(defineFieldWires);
         if (!array) return response;
-        const items = (await response) as any[];
+        const resolved = await response;
+        if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+        const items = resolved as any[];
         const shadowTrees: ExecutionTree[] = [];
         for (const item of items) {
           if (item === BREAK_SYM) break;

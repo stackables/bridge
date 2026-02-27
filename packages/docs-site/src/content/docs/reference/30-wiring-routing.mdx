@@ -66,7 +66,14 @@ api.body.user {
 
 The `alias` keyword allows you to declare a temporary, reusable node in your graph.
 
-While it is incredibly useful for simply renaming a deeply nested path to make your code more readable, an `alias` is actually a **fully functional evaluation node**. The source expression inside an `alias` supports the exact same Safe Execution (`?.`), Logic (`and`/`or`), and Fallbacks (`||`, `??`, `catch`) as a standard pull wire.
+While it is incredibly useful for simply renaming a deeply nested path to make your code more readable, an `alias` is actually a **fully functional evaluation node**. The source expression inside an `alias` supports the exact same operators as a standard pull wire:
+
+- **Safe Execution** (`?.`) — swallows errors from the source
+- **Logic** (`and`/`or`, `not`) — boolean composition
+- **Math & Comparison** (`+`, `-`, `*`, `/`, `==`, `!=`, `>`, `<`, `>=`, `<=`) — inline arithmetic and comparisons
+- **Parentheses** (`(...)`) — override operator precedence
+- **Ternary** (`? :`) — conditional value selection
+- **Fallbacks** (`||`, `??`, `catch`) — falsy, nullish, and error boundaries
 
 This makes `alias` the perfect tool for pre-sanitizing messy data or breaking complex fallback chains into readable, composable pieces:
 
@@ -80,10 +87,20 @@ alias api.user?.nickname || "Guest" as displayName
 # 3. Safely chain a primitive tool
 alias riskyMathTool catch 0 as safeMathResult
 
+# 4. Inline math/comparison expression
+alias api.price * 1.2 as priceWithTax
+alias api.score >= 80 as isPassing
+
+# 5. Parenthesized expression
+alias (api.a + api.b) * api.rate as total
+
 # Route the sanitized local variables downstream!
 o.zip <- addr.zipCode
 o.name <- displayName
 o.score <- safeMathResult
+o.price <- priceWithTax
+o.pass <- isPassing
+o.total <- total
 
 ```
 

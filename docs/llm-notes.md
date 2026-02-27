@@ -185,29 +185,31 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `=`                             | Constant — sets a fixed value                                                                                                                                                                                                                                                                                                                   |
 | `<-`                            | Wire — pulls data from a source at runtime                                                                                                                                                                                                                                                                                                      |
-| `force <handle>`                | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `?? null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
-| `force <handle> ?? null`        | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure.                                                                                                                                                                              |
+| `force <handle>`                | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `catch null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
+| `force <handle> catch null`     | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure.                                                                                                                                                                              |
 | `<- h1:h2:source`               | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage                                                                                                                                                                                                      |
-| `\|\| <source>`                 | Null-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source resolves to `null`/`undefined`. Multiple `\|\|` alternatives can be chained.                                                                                                                                                          |
-| `\|\| <json>`                   | Null-fallback literal — last item in a `\|\|` chain. If all sources are null, returns this JSON value. Fires on _absent/null values_, not on errors.                                                                                                                                                                                            |
-| `?? <json>`                     | Error-fallback literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values.                                                                                                                                                                                                            |
-| `?? <source>`                   | Error-fallback source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression.                                                                                                                                                                                           |
+| `\|\| <source>`                 | Falsy-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source is **falsy** (`0`, `""`, `false`, `null`, `undefined`). Multiple `\|\|` alternatives can be chained.                                                                                                                                  |
+| `\|\| <json>`                   | Falsy-fallback literal — last item in a `\|\|` chain. If all sources are falsy, returns this JSON value. Fires on _falsy values_, not on errors.                                                                                                                                                                                                |
+| `?? <json>`                     | Nullish-gate literal — if the preceding source is exactly `null` or `undefined`, returns this parsed JSON. Fires on _absent values only_ (respects `0`, `""`, `false` as valid data).                                                                                                                                                          |
+| `?? <source>`                   | Nullish-gate source — if the preceding source is `null` or `undefined`, pulls from this handle.path or pipe chain instead.                                                                                                                                                                                                                      |
+| `catch <json>`                  | Error-boundary literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values.                                                                                                                                                                                                            |
+| `catch <source>`                | Error-boundary source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression.                                                                                                                                                                                           |
 | `on error = <json>`             | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors.                                                                                                                                   |
 | `on error <- <source>`          | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime.                                                                                                                                                                                                                |
 | `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant.                                                                                                                                                        |
 
-**Full COALESCE — `||` and `??` compose into Postgres-style COALESCE + error guard:**
+**Full COALESCE — `||`, `??`, and `catch` compose into Postgres-style COALESCE + error guard:**
 
 ```bridge
-# o.label <- A || B || C || "literal" ?? errorSource
-o.label <- api.label || backup.label || transform:api.code || "unknown" ?? up:i.errDefault
+# o.label <- A || B || C || "literal" catch errorSource
+o.label <- api.label || backup.label || transform:api.code || "unknown" catch up:i.errDefault
 
 # Evaluation order:
 # api.label non-null      → use it (fast, returned immediately)
 # api.label null          → try backup.label
 # backup.label null       → try transform(api.code)  (pipe chain)
 # all null                → "unknown"  (|| json literal)
-# all throw               → up(i.errDefault)  (?? pipe source)
+# all throw               → up(i.errDefault)  (catch pipe source)
 ```
 
 `||` source alternatives desugar to multiple wires with the same target. The engine evaluates all in parallel and returns the first non-null value, so cheaper/faster sources naturally win without a cost model.
@@ -222,13 +224,13 @@ o.textPart <- i.textBody             # prefer user-supplied plain text (fast, al
 o.textPart <- convert:i.htmlBody     # derive from HTML if textBody is absent (needs tool call)
 
 # Inline coalesce form (desugars to the same two wires + literal fallback):
-o.textPart <- i.textBody || convert:i.htmlBody || "empty" ?? i.errorDefault
+o.textPart <- i.textBody || convert:i.htmlBody || "empty" catch i.errorDefault
 ```
 
 - If `i.textBody` is non-null → used immediately, `convert` never runs.
 - If `i.textBody` is null → `convert(htmlBody)` result is used.
 - If all sources are null → `||` literal fires.
-- If all sources throw → `??` source/literal fires.
+- If all sources throw → `catch` source/literal fires.
 
 ### `tool` blocks
 
@@ -363,7 +365,7 @@ The core execution primitive. One is created per GraphQL root field call (Query/
 **Execution flow:**
 
 1. GraphQL resolver calls `response(info.path, isArray)` on the ExecutionTree
-2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all force entries in `bridge.forces` and eagerly schedules their target trunks via `schedule()`. **Critical forces** (no `catchError`) return their promises; the engine awaits them alongside data resolution and propagates errors. **Fire-and-forget forces** (`catchError: true`, from `force handle ?? null` syntax) have `.catch(() => {})` to suppress errors
+2. At root entry (`!info.path.prev`), after `push(args)`, `executeForced()` is called — this finds all force entries in `bridge.forces` and eagerly schedules their target trunks via `schedule()`. **Critical forces** (no `catchError`) return their promises; the engine awaits them alongside data resolution and propagates errors. **Fire-and-forget forces** (`catchError: true`, from `force handle catch null` syntax) have `.catch(() => {})` to suppress errors
 3. `response()` finds matching wires for the current path
 4. For each wire source, calls `pullSingle(ref)` which calls `schedule(target)` if not yet in state
 5. `schedule()` resolves tool wires + bridge wires, builds the input object, calls the tool function with `(input, toolContext)` — `toolContext` carries the engine logger
@@ -375,7 +377,7 @@ Multiple wires targeting the same field are evaluated in parallel. The engine re
 
 - Cheap sources (input args) win over slow tool calls naturally — they're already in state.
 - If all sources resolve to null → resolves `undefined` (allowing `||` to fire).
-- If all sources throw → rejects with `AggregateError` (allowing `??` to fire).
+- If all sources throw → rejects with `AggregateError` (allowing `catch` to fire).
 
 Before this design, `Promise.any()` was used, which raced on fulfillment — meaning a `null` value from a fast source would win over a real value from a slower one. The current implementation skips null/undefined values and only settles once a real value is found or all options are exhausted.
 
@@ -404,18 +406,19 @@ Multi-provider routing was first implemented with a `Record<string, Instruction[
 Fault tolerance is split into three independent layers that compose, innermost-first:
 
 1. **Tool `on error`** — catches only `fn(input)` throws. Returns a constant JSON value or pulls one from context. Inherited through `tool ... from` chains (child overrides parent).
-2. **Wire `||` null-guard** — catches null/undefined resolution. Fires when the source resolves successfully but the value is absent. Can be a JSON literal or a source reference (handle.path or pipe chain).
-3. **Wire `??` error-guard** — catches any failure in the entire resolution chain (tool down, dep failure). Applied as a `.catch()` wrapping the resolved promise (including the `||` layer). Can be a JSON literal **or a source/pipe expression** — if a source, it is scheduled lazily and only executed when the catch fires.
+2. **Wire `||` falsy-guard** — catches falsy resolution (`0`, `""`, `false`, `null`, `undefined`). Fires when the source resolves successfully but the value is absent or falsy. Can be a JSON literal or a source reference (handle.path or pipe chain).
+3. **Wire `??` nullish-gate** — fires only when the preceding source is exactly `null` or `undefined` (respects `0`, `""`, `false` as valid data).
+4. **Wire `catch` error-guard** — catches any failure in the entire resolution chain (tool down, dep failure). Applied as a `.catch()` wrapping the resolved promise. Can be a JSON literal **or a source/pipe expression** — if a source, it is scheduled lazily and only executed when the catch fires.
 
-Firing order when all three are present: `on error` → `||` → `??`. Each layer only fires if the one inside it did not produce a usable value.
+Firing order when all layers are present: `on error` → `||` → `??` → `catch`. Each layer only fires if the one inside it did not produce a usable value.
 
-| Scenario                               | Layer that fires                    |
-| -------------------------------------- | ----------------------------------- |
-| Tool fn throws, `on error` present     | `on error` (tool scope)             |
-| Tool fn throws, no `on error`          | `??` (wire scope)                   |
-| Tool returns `{ label: null }`         | `\|\|`                              |
-| `??` is a source expression, all throw | `??` schedules and calls the source |
-| Tool returns `{ label: "Berlin" }`     | none — real value used              |
+| Scenario                                 | Layer that fires                    |
+| ---------------------------------------- | ----------------------------------- |
+| Tool fn throws, `on error` present       | `on error` (tool scope)             |
+| Tool fn throws, no `on error`            | `catch` (wire scope)                |
+| Tool returns `{ label: null }`           | `\|\|` or `??`                      |
+| `catch` is a source expression, all throw | `catch` schedules and calls the source |
+| Tool returns `{ label: "Berlin" }`       | none — real value used              |
 
 ### Const blocks store raw JSON strings
 
@@ -447,8 +450,8 @@ test/
   property-search.test.ts — integration: reads from test/property-search.bridge file
   tool-features.test.ts   — integration: missing tool, inheritance chain, config pull, tool-to-tool deps
   scheduling.test.ts      — scheduling correctness: diamond dedup, pipe fork parallelism, wall-clock parallelism
-  force-wire.test.ts      — force statement: parser tests (force <handle>, force <handle> ?? null), serializer roundtrip, critical-by-default error propagation, fire-and-forget error suppression, parallel timing
-  resilience.test.ts      — const blocks, tool on error, wire ?? fallback: parser, serializer, end-to-end
+  force-wire.test.ts      — force statement: parser tests (force <handle>, force <handle> catch null), serializer roundtrip, critical-by-default error propagation, fire-and-forget error suppression, parallel timing
+  resilience.test.ts      — const blocks, tool on error, wire catch fallback: parser, serializer, end-to-end
   builtin-tools.test.ts   — built-in tools: unit tests, bundle shape, default/override behaviour, e2e with bridge, inline with syntax, audit tool + force e2e
   _gateway.ts             — test helper (not a test file, not picked up by test runner)
   property-search.bridge  — fixture .bridge file used by property-search.test.ts

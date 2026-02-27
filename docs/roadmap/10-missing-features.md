@@ -4,14 +4,15 @@
 
 `o.currentTempF <- (w.current_weather.temperature * 9 / 5) + 32 ?? 32`
 
-## Coalesce with try/catch
+## Coalesce with error boundary
 
-Current `||` operator does not catch errors? and they need to be handled with `??`, but this is a significant limitation on wire design.
+The `||` and `??` operators handle falsy/nullish data. Error boundaries use the `catch` keyword.
 
-```
-  # TODO: A || B || C | D ?? E
-  #    || - ignore error
-  #    |  - jump to ?? on error 
+```bridge
+  # A || B || C with fallback catch error boundary:
+  o.label <- A || B || C || "default" catch errorSource
+  #    || - fires on falsy/null
+  #    catch - fires on error/exception
 ```
 
 ## Assertions

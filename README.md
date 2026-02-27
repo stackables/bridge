@@ -81,10 +81,10 @@ The `.bridge` language is designed to be scannable.
 | ----------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
 | **Constants**     | `.method = "POST"`            | Sets a static configuration value.                                                   |
 | **Wires**         | `.body <- i.userData`         | Pulls data from a source at runtime.                                                 |
-| **Side Effects**  | `force api ?? null`           | Eagerly schedules a handle. Critical by default; `?? null` makes it fire-and-forget. |
+| **Side Effects**  | `force api catch null`        | Eagerly schedules a handle. Critical by default; `catch null` makes it fire-and-forget. |
 | **Pipes**         | `o.name <- uc:i.name`         | Chains data through a tool right-to-left.                                            |
 | **Null Coalesce** | `o.name <- i.name \|\| "N/A"` | Alternative used if the current source resolves to `null`.                           |
-| **Error Guard**   | `o.price <- api.price ?? 0`   | Alternative used if the current source **throws** an exception.                      |
+| **Error Guard**   | `o.price <- api.price catch 0` | Alternative used if the current source **throws** an exception.                      |
 | **Ternary**       | `o.val <- i.isPro ? a : b`    | Evaluates condition; strictly pulls only the chosen branch.                          |
 | **Node Alias**    | `alias uc:i.name as name`     | Evaluates an expression once and caches it as a local graph node.                    |
 | **Arrays**        | `o <- items[] as it { }`      | Iterates over an array, creating a local shadow scope for each element.              |

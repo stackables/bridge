@@ -201,7 +201,7 @@ The engine instruments **all** tool invocations via all three pillars:
 - **Bridge-wired tools** — tools scheduled via `with <tool> as <alias>` in bridge blocks
 - **Tool-def tools** — tools defined in `tool <name> from <fn> { … }` blocks (traced with both the tool name _and_ the underlying `fn`)
 - **Direct tool functions** — namespace tools like `std.str.toUpperCase`
-- **Error paths** — when a tool throws, the span is marked ERROR, the error counter increments, and `logger.error` fires; if a `??` fallback or `on error` handler fires, the fallback tool gets its own instrumentation
+- **Error paths** — when a tool throws, the span is marked ERROR, the error counter increments, and `logger.error` fires; if a `catch` fallback or `on error` handler fires, the fallback tool gets its own instrumentation
 
 ### Execution-Order Semantics (traces)
 

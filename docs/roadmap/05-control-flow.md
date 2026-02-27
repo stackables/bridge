@@ -9,7 +9,7 @@
 
 ### 1. The "Why"
 
-Currently, The Bridge handles missing data (`||`) and errors (`??`) by falling back to other values. However, some scenarios require **stopping** instead of **falling back**.
+Currently, The Bridge handles missing data (`||`, `??`) and errors (`catch`) by falling back to other values. However, some scenarios require **stopping** instead of **falling back**.
 
 * **`throw`** solves the "Silent Failure" problem where a null value might propagate through the system when it should have triggered a hard stop with a meaningful message.
 * **`continue`** solves the "Deep Filtering" problem, allowing iterations to be discarded based on runtime failures or missing data without crashing the entire request.
@@ -22,9 +22,10 @@ Currently, The Bridge handles missing data (`||`) and errors (`??`) by falling b
 
 The `throw` keyword can be used as the final argument in a fallback chain. It upgrades a data state into a high-level execution error.
 
-* **Syntax:** `source || throw "message"` or `source ?? throw "message"`
-* **Behavior:** * If used with `||`: Triggers if all preceding sources are `null` or `undefined`.
-* If used with `??`: Triggers if the preceding source throws a technical error (timeout, 500, etc.).
+* **Syntax:** `source || throw "message"` or `source ?? throw "message"` or `source catch throw "message"`
+* **Behavior:** * If used with `||`: Triggers if all preceding sources are falsy.
+* If used with `??`: Triggers if the preceding source is `null` or `undefined`.
+* If used with `catch`: Triggers if the preceding source throws a technical error (timeout, 500, etc.).
 
 
 * **Result:** Aborts the current request and returns a formatted GraphQL error.
@@ -57,7 +58,7 @@ bridge Query.userProfile {
   o.username <- api.profile.name || throw "User profile is incomplete or missing"
 
   # Wrap a technical timeout in a business-friendly error
-  o.balance <- api.account.balance ?? throw "Financial service is temporarily unavailable"
+  o.balance <- api.account.balance catch throw "Financial service is temporarily unavailable"
 }
 
 ```
@@ -70,7 +71,7 @@ o.activePromotions <- api.promos[] as p {
   .expiry <- p.expires_at || continue
 
   # 2. If the validation API fails for this specific promo, skip it.
-  alias promoService.check:p.id as status ?? continue
+  alias promoService.check:p.id as status catch continue
   
   .code <- p.code
   .discount <- status.value
