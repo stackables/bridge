@@ -12,6 +12,8 @@ import { createHttpCall } from "./tools/http-call.ts";
 import * as arrays from "./tools/arrays.ts";
 import * as strings from "./tools/strings.ts";
 import { assert } from "./tools/assert.ts";
+import { internal } from "@stackables/bridge-core";
+import type { ToolMap } from "@stackables/bridge-core";
 
 /**
  * Standard built-in tools — available under the `std` namespace.
@@ -27,6 +29,27 @@ export const std = {
   httpCall: httpCallFn,
   assert,
 } as const;
+
+/**
+ * Built-in tools bundle.
+ *
+ * Used as the base for `BridgeOptions.tools`. The `std` and `internal` namespaces
+ * are always included; user-provided tools are merged on top.
+ */
+export const builtinTools: ToolMap = {
+  std,
+  internal,
+};
+
+/**
+ * All known built-in tool names as "namespace.tool" strings.
+ *
+ * Useful for LSP/IDE autocomplete and diagnostics.
+ */
+export const builtinToolNames: readonly string[] = [
+  ...Object.keys(std).map((k) => `std.${k}`),
+  ...Object.keys(internal).map((k) => `internal.${k}`),
+];
 
 export { audit } from "./tools/audit.ts";
 export { createHttpCall } from "./tools/http-call.ts";
