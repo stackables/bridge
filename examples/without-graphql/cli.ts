@@ -18,7 +18,8 @@ import type { Bridge } from "@stackables/bridge";
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-  console.log(`
+  console.log(
+    `
 Usage: node --import tsx/esm cli.ts <bridge-file> [input-json] [options]
 
 Options:
@@ -29,7 +30,8 @@ Options:
 Examples:
   node --import tsx/esm cli.ts weather.bridge '{"city":"Berlin"}'
   node --import tsx/esm cli.ts sbb.bridge '{"from":"Bern","to":"Zürich"}' --trace
-`.trim());
+`.trim(),
+  );
   process.exit(0);
 }
 
@@ -70,13 +72,19 @@ if (bridges.length === 0) {
 }
 
 const operation =
-  operationOverride ??
-  `${bridges[0]!.type}.${bridges[0]!.field}`;
+  operationOverride ?? `${bridges[0]!.type}.${bridges[0]!.field}`;
 
 if (bridges.length > 1 && !operationOverride) {
-  const others = bridges.slice(1).map((b) => `${b.type}.${b.field}`).join(", ");
-  console.error(`Note: Multiple bridges found. Running "${operation}". Others: ${others}`);
-  console.error(`      Use --operation <Type.field> to pick a different one.\n`);
+  const others = bridges
+    .slice(1)
+    .map((b) => `${b.type}.${b.field}`)
+    .join(", ");
+  console.error(
+    `Note: Multiple bridges found. Running "${operation}". Others: ${others}`,
+  );
+  console.error(
+    `      Use --operation <Type.field> to pick a different one.\n`,
+  );
 }
 
 // ── Parse the input ────────────────────────────────────────────────────────
@@ -89,7 +97,10 @@ try {
 }
 
 // ── Execute ───────────────────────────────────────────────────────────────
-console.error(`▶  Running bridge "${operation}" with input:`, JSON.stringify(input));
+console.error(
+  `▶  Running bridge "${operation}" with input:`,
+  JSON.stringify(input),
+);
 console.error("");
 
 const start = Date.now();

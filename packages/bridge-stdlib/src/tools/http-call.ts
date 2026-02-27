@@ -1,11 +1,13 @@
 import { LRUCache } from "lru-cache";
-import type { CacheStore, ToolCallFn } from "@stackables/bridge-core";
+import type { CacheStore, ToolCallFn } from "@stackables/bridge-types";
 
 /** Default in-memory LRU cache with per-entry TTL. */
 function createMemoryCache(maxEntries = 1024): CacheStore {
   const lru = new LRUCache<string, any>({ max: maxEntries });
   return {
-    get(key: string) { return lru.get(key); },
+    get(key: string) {
+      return lru.get(key);
+    },
     set(key: string, value: any, ttlSeconds: number) {
       if (ttlSeconds <= 0) return;
       lru.set(key, value, { ttl: ttlSeconds * 1000 });
@@ -118,7 +120,7 @@ export function createHttpCall(
     if (cached !== undefined) return cached;
 
     const response = await fetchFn(url.toString(), { method, headers, body });
-    const data = await response.json() as Record<string, any>;
+    const data = (await response.json()) as Record<string, any>;
 
     // Determine TTL
     const ttl = mode === "auto" ? parseCacheTTL(response) : Number(mode);

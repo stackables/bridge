@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createHttpCall, parseCacheTTL } from "../src/tools/http-call.ts";
-import type { CacheStore } from "../src/types.ts";
+import { createHttpCall, parseCacheTTL } from "../src/index.ts";
+import type { CacheStore } from "../src/index.ts";
 
 /** Creates a mock Response with optional headers. */
 function mockResponse(data: any, headers?: Record<string, string>): Response {

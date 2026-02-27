@@ -1,4 +1,4 @@
-import type { ToolContext } from "@stackables/bridge-core";
+import type { ToolContext } from "@stackables/bridge-types";
 
 /**
  * Built-in audit tool — logs all inputs via the engine logger.
@@ -39,4 +39,3 @@ export function audit(input: Record<string, any>, context?: ToolContext) {
   log?.(data, "[bridge:audit]");
   return input;
 }
-

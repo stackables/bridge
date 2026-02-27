@@ -1,4 +1,4 @@
-import type { ToolContext } from "@stackables/bridge-core";
+import type { ToolContext } from "@stackables/bridge-types";
 
 export function assert(input: { in: any }, _context?: ToolContext) {
   if (!input.in) {

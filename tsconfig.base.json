@@ -3,6 +3,10 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "@stackables/bridge-types": [
+        "./packages/bridge-types/build/index.d.ts",
+        "./packages/bridge-types/src/index.ts"
+      ],
       "@stackables/bridge-core": [
         "./packages/bridge-core/build/index.d.ts",
         "./packages/bridge-core/src/index.ts"

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -16,7 +16,12 @@ function run(
   const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
-  return executeBridge({ instructions, operation, input, tools });
+  return executeBridge({
+    instructions,
+    operation,
+    input,
+    tools,
+  });
 }
 
 // ── Object output (per-field wires) ─────────────────────────────────────────
@@ -459,7 +464,9 @@ bridge Query.test {
 
   o.name <- displayName
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { nickname: "Alice" });
+    const { data: d1 } = await run(bridgeText, "Query.test", {
+      nickname: "Alice",
+    });
     assert.equal(d1.name, "Alice");
     const { data: d2 } = await run(bridgeText, "Query.test", {});
     assert.equal(d2.name, "Guest");
@@ -605,7 +612,9 @@ bridge Query.test {
 
   o.allowed <- allowed
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { blocked: false });
+    const { data: d1 } = await run(bridgeText, "Query.test", {
+      blocked: false,
+    });
     assert.equal(d1.allowed, true);
     const { data: d2 } = await run(bridgeText, "Query.test", { blocked: true });
     assert.equal(d2.allowed, false);

@@ -2,9 +2,9 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import type { Bridge } from "../src/types.ts";
-import { SELF_MODULE } from "../src/types.ts";
+import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import type { Bridge } from "../src/index.ts";
+import { SELF_MODULE } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Parser: `force <handle>` creates forces entries ─────────────────────────

@@ -2,6 +2,7 @@ import { ExecutionTree, TraceCollector } from "./ExecutionTree.ts";
 import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 import type { Instruction, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
+import { std } from "@stackables/bridge-stdlib";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge instructions (from `parseBridgeDiagnostics`). */
@@ -73,7 +74,12 @@ export async function executeBridge<T = unknown>(
   const [type, field] = parts as [string, string];
   const trunk = { module: SELF_MODULE, type, field };
 
-  const tree = new ExecutionTree(trunk, instructions, options.tools, context);
+  const tree = new ExecutionTree(
+    trunk,
+    instructions,
+    { std, ...(options.tools ?? {}) },
+    context,
+  );
 
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;

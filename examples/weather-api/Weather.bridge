@@ -78,9 +78,9 @@ bridge Query.getWeather {
 
   f.in <- g
 
-  w.lat  <- i.lat || f.lat
-  w.lon <- i.lon || f.lon
-  w.cityName <- upper:i.cityName || f.display_name || "Unknown"
+  w.lat  <- i.lat ?? f.lat
+  w.lon <- i.lon ?? f.lon
+  w.cityName <- upper:i.cityName || f?.display_name || "Unknown"
 
   o <- w
 }

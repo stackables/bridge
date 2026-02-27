@@ -934,414 +934,168 @@ export class ExecutionTree {
     return critical;
   }
 
-  /** Resolve a set of matched wires — constants win, then pull from sources.
-   *  `||` (falsyFallback): fires when all sources resolve to a falsy value.
-   *  `??` (nullishFallback): fires when value is null/undefined.
-   *  `catch` (catchFallback): fires when sources throw an error.
-   *  `? :` (cond/thenRef/elseRef): conditional — pulls only the chosen branch. */
-  private resolveWires(wires: Wire[]): Promise<any> {
-    // Conditional (ternary) wire: evaluate condition, pull only the chosen branch
-    const conditional = wires.find(
-      (w): w is Extract<Wire, { cond: NodeRef }> => "cond" in w,
-    );
-    if (conditional) {
-      // Sibling pull wires from `|| sourceRef` fallbacks
-      const siblingPulls = wires.filter(
-        (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
-      );
+  /**
+   * Resolve a set of matched wires.
+   *
+   * Architecture: two distinct resolution axes —
+   *
+   *  **Falsy Gate** (`||`, within a wire): `falsyFallbackRefs` + `falsyFallback`
+   *    → truthy check — falsy values (0, "", false) trigger fallback chain.
+   *
+   *  **Overdefinition** (across wires): multiple wires target the same path
+   *    → nullish check — only null/undefined falls through to the next wire.
+   *
+   * Per-wire layers:
+   *   Layer 1  — Execution (pullSingle + safe modifier)
+   *   Layer 2a — Falsy Gate   (falsyFallbackRefs → falsyFallback / falsyControl)
+   *   Layer 2b — Nullish Gate  (nullishFallbackRef / nullishFallback / nullishControl)
+   *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
+   *
+   * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
+   * to return or continue to the next wire.
+   */
+  private async resolveWires(wires: Wire[]): Promise<any> {
+    let lastError: any;
 
-      let result: Promise<any> = (async () => {
-        const condValue = await this.pullSingle(conditional.cond);
-        if (condValue) {
-          if (conditional.thenRef !== undefined)
-            return this.pullSingle(conditional.thenRef);
-          if (conditional.thenValue !== undefined) {
-            try {
-              return JSON.parse(conditional.thenValue);
-            } catch {
-              return conditional.thenValue;
-            }
-          }
-          return undefined;
-        } else {
-          if (conditional.elseRef !== undefined)
-            return this.pullSingle(conditional.elseRef);
-          if (conditional.elseValue !== undefined) {
-            try {
-              return JSON.parse(conditional.elseValue);
-            } catch {
-              return conditional.elseValue;
-            }
-          }
-          return undefined;
-        }
-      })();
+    for (const w of wires) {
+      // Constant wire — always wins, no modifiers
+      if ("value" in w) return coerceConstant(w.value);
 
-      // || falsy-guard: try sibling source refs, then literal falsyFallback
-      if (siblingPulls.length > 0) {
-        result = result.then(async (value) => {
-          if (value) return value;
-          return this.pull(siblingPulls.map((w) => w.from));
-        });
-      }
-      if (conditional.falsyControl) {
-        const ctrl = conditional.falsyControl;
-        result = result.then((value) =>
-          value ? value : applyControlFlow(ctrl),
-        );
-      } else if (conditional.falsyFallback != null) {
-        result = result.then((value) => {
-          if (value) return value;
-          try {
-            return JSON.parse(conditional.falsyFallback!);
-          } catch {
-            return conditional.falsyFallback;
-          }
-        });
-      }
-
-      // ?? nullish-guard
-      if (conditional.nullishControl) {
-        const ctrl = conditional.nullishControl;
-        result = result.then((value: any) =>
-          value != null ? value : applyControlFlow(ctrl),
-        );
-      } else if (
-        conditional.nullishFallbackRef ||
-        conditional.nullishFallback != null
-      ) {
-        result = result.then(async (value: any) => {
-          if (value != null) return value;
-          if (conditional.nullishFallbackRef)
-            return this.pullSingle(conditional.nullishFallbackRef);
-          try {
-            return JSON.parse(conditional.nullishFallback!);
-          } catch {
-            return conditional.nullishFallback;
-          }
-        });
-      }
-
-      // catch error-guard
-      if (conditional.catchControl) {
-        const ctrl = conditional.catchControl;
-        return result.catch((err: any) => {
-          if (isFatalError(err)) throw err;
-          return applyControlFlow(ctrl);
-        });
-      }
-      if (!conditional.catchFallbackRef && !conditional.catchFallback)
-        return result;
-      return result.catch((err: any) => {
-        if (isFatalError(err)) throw err;
-        if (conditional.catchFallbackRef)
-          return this.pullSingle(conditional.catchFallbackRef);
-        try {
-          return JSON.parse(conditional.catchFallback!);
-        } catch {
-          return conditional.catchFallback;
-        }
-      });
-    }
-
-    // Short-circuit logical AND: evaluate left, skip right if left is falsy
-    const condAndWire = wires.find(
-      (w): w is Extract<Wire, { condAnd: any }> => "condAnd" in w,
-    );
-    if (condAndWire) {
-      const {
-        leftRef,
-        rightRef,
-        rightValue,
-        safe: isSafe,
-        rightSafe,
-      } = condAndWire.condAnd;
-      let result: Promise<any> = (async () => {
-        const leftVal = isSafe
-          ? await this.pullSingle(leftRef).catch((e: any) => {
-              if (isFatalError(e)) throw e;
-              return undefined;
-            })
-          : await this.pullSingle(leftRef);
-        if (!leftVal) return false; // short-circuit: left is falsy
-        if (rightRef !== undefined) {
-          const rightVal = rightSafe
-            ? await this.pullSingle(rightRef).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(rightRef);
-          return Boolean(rightVal);
-        }
-        if (rightValue !== undefined) {
-          try {
-            return Boolean(JSON.parse(rightValue));
-          } catch {
-            return Boolean(rightValue);
-          }
-        }
-        return Boolean(leftVal);
-      })();
-
-      // || falsy-guard
-      if (condAndWire.falsyControl) {
-        const ctrl = condAndWire.falsyControl;
-        result = result.then((value) =>
-          value ? value : applyControlFlow(ctrl),
-        );
-      } else if (condAndWire.falsyFallback != null) {
-        result = result.then((value) => {
-          if (value) return value;
-          try {
-            return JSON.parse(condAndWire.falsyFallback!);
-          } catch {
-            return condAndWire.falsyFallback;
-          }
-        });
-      }
-      // ?? nullish-guard
-      if (condAndWire.nullishControl) {
-        const ctrl = condAndWire.nullishControl;
-        result = result.then((value: any) =>
-          value != null ? value : applyControlFlow(ctrl),
-        );
-      } else if (
-        condAndWire.nullishFallbackRef ||
-        condAndWire.nullishFallback != null
-      ) {
-        result = result.then(async (value: any) => {
-          if (value != null) return value;
-          if (condAndWire.nullishFallbackRef)
-            return this.pullSingle(condAndWire.nullishFallbackRef);
-          try {
-            return JSON.parse(condAndWire.nullishFallback!);
-          } catch {
-            return condAndWire.nullishFallback;
-          }
-        });
-      }
-      // catch error-guard
-      if (condAndWire.catchControl) {
-        const ctrl = condAndWire.catchControl;
-        return result.catch((err: any) => {
-          if (isFatalError(err)) throw err;
-          return applyControlFlow(ctrl);
-        });
-      }
-      if (condAndWire.catchFallbackRef || condAndWire.catchFallback) {
-        result = result.catch((err: any) => {
-          if (isFatalError(err)) throw err;
-          if (condAndWire.catchFallbackRef)
-            return this.pullSingle(condAndWire.catchFallbackRef!);
-          try {
-            return JSON.parse(condAndWire.catchFallback!);
-          } catch {
-            return condAndWire.catchFallback;
-          }
-        });
-      }
-      return result;
-    }
-
-    // Short-circuit logical OR: evaluate left, skip right if left is truthy
-    const condOrWire = wires.find(
-      (w): w is Extract<Wire, { condOr: any }> => "condOr" in w,
-    );
-    if (condOrWire) {
-      const {
-        leftRef,
-        rightRef,
-        rightValue,
-        safe: isSafe,
-        rightSafe,
-      } = condOrWire.condOr;
-      let result: Promise<any> = (async () => {
-        const leftVal = isSafe
-          ? await this.pullSingle(leftRef).catch((e: any) => {
-              if (isFatalError(e)) throw e;
-              return undefined;
-            })
-          : await this.pullSingle(leftRef);
-        if (leftVal) return true; // short-circuit: left is truthy
-        if (rightRef !== undefined) {
-          const rightVal = rightSafe
-            ? await this.pullSingle(rightRef).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(rightRef);
-          return Boolean(rightVal);
-        }
-        if (rightValue !== undefined) {
-          try {
-            return Boolean(JSON.parse(rightValue));
-          } catch {
-            return Boolean(rightValue);
-          }
-        }
-        return Boolean(leftVal);
-      })();
-
-      // || falsy-guard
-      if (condOrWire.falsyControl) {
-        const ctrl = condOrWire.falsyControl;
-        result = result.then((value) =>
-          value ? value : applyControlFlow(ctrl),
-        );
-      } else if (condOrWire.falsyFallback != null) {
-        result = result.then((value) => {
-          if (value) return value;
-          try {
-            return JSON.parse(condOrWire.falsyFallback!);
-          } catch {
-            return condOrWire.falsyFallback;
-          }
-        });
-      }
-      // ?? nullish-guard
-      if (condOrWire.nullishControl) {
-        const ctrl = condOrWire.nullishControl;
-        result = result.then((value: any) =>
-          value != null ? value : applyControlFlow(ctrl),
-        );
-      } else if (
-        condOrWire.nullishFallbackRef ||
-        condOrWire.nullishFallback != null
-      ) {
-        result = result.then(async (value: any) => {
-          if (value != null) return value;
-          if (condOrWire.nullishFallbackRef)
-            return this.pullSingle(condOrWire.nullishFallbackRef);
-          try {
-            return JSON.parse(condOrWire.nullishFallback!);
-          } catch {
-            return condOrWire.nullishFallback;
-          }
-        });
-      }
-      // catch error-guard
-      if (condOrWire.catchControl) {
-        const ctrl = condOrWire.catchControl;
-        return result.catch((err: any) => {
-          if (isFatalError(err)) throw err;
-          return applyControlFlow(ctrl);
-        });
-      }
-      if (condOrWire.catchFallbackRef || condOrWire.catchFallback) {
-        result = result.catch((err: any) => {
-          if (isFatalError(err)) throw err;
-          if (condOrWire.catchFallbackRef)
-            return this.pullSingle(condOrWire.catchFallbackRef!);
-          try {
-            return JSON.parse(condOrWire.catchFallback!);
-          } catch {
-            return condOrWire.catchFallback;
-          }
-        });
-      }
-      return result;
-    }
-
-    const constant = wires.find(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
-    if (constant) return Promise.resolve(coerceConstant(constant.value));
-
-    const pulls = wires.filter(
-      (w): w is Extract<Wire, { from: NodeRef }> => "from" in w,
-    );
-
-    // First wire with each fallback kind wins
-    const falsyFallbackWire = pulls.find(
-      (w) => w.falsyFallback != null || w.falsyControl != null,
-    );
-    const nullishFallbackWire = pulls.find(
-      (w) =>
-        w.nullishFallback != null ||
-        w.nullishFallbackRef != null ||
-        w.nullishControl != null,
-    );
-    const catchFallbackWire = pulls.find(
-      (w) =>
-        w.catchFallback != null ||
-        w.catchFallbackRef != null ||
-        w.catchControl != null,
-    );
-
-    let result: Promise<any> = (async () => {
-      // ==========================================
-      // LAYER 1 & 2: Node Execution & Data Routing
-      // ==========================================
-      let resolvedValue: any;
-      let hitTruthy = false;
-
-      // --- LAYER 1: Execute Chain & Safe Modifiers ---
-      for (const w of pulls) {
-        if (w.safe) {
-          try {
-            resolvedValue = await this.pullSingle(w.from);
-          } catch (err: any) {
-            // FATAL BYPASS: Do not swallow Aborts or Panics!
-            if (isFatalError(err)) throw err;
-            resolvedValue = undefined; // ?. swallows standard errors
-          }
-        } else {
-          // Strict! If this throws, it skips Layer 2 and hits Layer 3 (catch).
-          resolvedValue = await this.pullSingle(w.from);
-        }
-
-        // --- LAYER 2a: Falsy Gate (||) ---
-        if (resolvedValue) {
-          hitTruthy = true;
-          break; // Short-circuit
-        }
-      }
-
-      // --- LAYER 2a: Falsy Gate Literal / Control ---
-      if (!hitTruthy && falsyFallbackWire) {
-        if (falsyFallbackWire.falsyControl) {
-          resolvedValue = applyControlFlow(falsyFallbackWire.falsyControl);
-        } else {
-          resolvedValue = coerceConstant(falsyFallbackWire.falsyFallback!);
-        }
-      }
-
-      // --- LAYER 2b: Nullish Gate (??) ---
-      if (resolvedValue == null && nullishFallbackWire) {
-        if (nullishFallbackWire.nullishControl) {
-          resolvedValue = applyControlFlow(nullishFallbackWire.nullishControl);
-        } else if (nullishFallbackWire.nullishFallbackRef) {
-          resolvedValue = await this.pullSingle(
-            nullishFallbackWire.nullishFallbackRef,
-          );
-        } else if (nullishFallbackWire.nullishFallback != null) {
-          resolvedValue = coerceConstant(nullishFallbackWire.nullishFallback);
-        }
-      }
-
-      return resolvedValue;
-    })();
-
-    // ==========================================
-    // LAYER 3: The Wire-Level Error Boundary (catch)
-    // ==========================================
-    if (!catchFallbackWire) return result;
-
-    return result.catch((err: any) => {
-      // FATAL BYPASS: Do not apply `catch` fallbacks to Aborts or Panics!
-      if (isFatalError(err)) throw err;
-      if (catchFallbackWire.catchControl) {
-        return applyControlFlow(catchFallbackWire.catchControl);
-      }
-      if (catchFallbackWire.catchFallbackRef) {
-        return this.pullSingle(catchFallbackWire.catchFallbackRef);
-      }
       try {
-        return JSON.parse(catchFallbackWire.catchFallback!);
-      } catch {
-        return catchFallbackWire.catchFallback;
+        // --- Layer 1: Execution ---
+        let resolvedValue: any;
+
+        if ("cond" in w) {
+          const condValue = await this.pullSingle(w.cond);
+          if (condValue) {
+            if (w.thenRef !== undefined)
+              resolvedValue = await this.pullSingle(w.thenRef);
+            else if (w.thenValue !== undefined)
+              resolvedValue = coerceConstant(w.thenValue);
+          } else {
+            if (w.elseRef !== undefined)
+              resolvedValue = await this.pullSingle(w.elseRef);
+            else if (w.elseValue !== undefined)
+              resolvedValue = coerceConstant(w.elseValue);
+          }
+        } else if ("condAnd" in w) {
+          const {
+            leftRef,
+            rightRef,
+            rightValue,
+            safe: isSafe,
+            rightSafe,
+          } = w.condAnd;
+          const leftVal = isSafe
+            ? await this.pullSingle(leftRef).catch((e: any) => {
+                if (isFatalError(e)) throw e;
+                return undefined;
+              })
+            : await this.pullSingle(leftRef);
+          if (!leftVal) {
+            resolvedValue = false;
+          } else if (rightRef !== undefined) {
+            const rightVal = rightSafe
+              ? await this.pullSingle(rightRef).catch((e: any) => {
+                  if (isFatalError(e)) throw e;
+                  return undefined;
+                })
+              : await this.pullSingle(rightRef);
+            resolvedValue = Boolean(rightVal);
+          } else if (rightValue !== undefined) {
+            resolvedValue = Boolean(coerceConstant(rightValue));
+          } else {
+            resolvedValue = Boolean(leftVal);
+          }
+        } else if ("condOr" in w) {
+          const {
+            leftRef,
+            rightRef,
+            rightValue,
+            safe: isSafe,
+            rightSafe,
+          } = w.condOr;
+          const leftVal = isSafe
+            ? await this.pullSingle(leftRef).catch((e: any) => {
+                if (isFatalError(e)) throw e;
+                return undefined;
+              })
+            : await this.pullSingle(leftRef);
+          if (leftVal) {
+            resolvedValue = true;
+          } else if (rightRef !== undefined) {
+            const rightVal = rightSafe
+              ? await this.pullSingle(rightRef).catch((e: any) => {
+                  if (isFatalError(e)) throw e;
+                  return undefined;
+                })
+              : await this.pullSingle(rightRef);
+            resolvedValue = Boolean(rightVal);
+          } else if (rightValue !== undefined) {
+            resolvedValue = Boolean(coerceConstant(rightValue));
+          } else {
+            resolvedValue = Boolean(leftVal);
+          }
+        } else if ("from" in w) {
+          if (w.safe) {
+            try {
+              resolvedValue = await this.pullSingle(w.from);
+            } catch (err: any) {
+              if (isFatalError(err)) throw err;
+              resolvedValue = undefined;
+            }
+          } else {
+            resolvedValue = await this.pullSingle(w.from);
+          }
+        } else {
+          continue;
+        }
+
+        // --- Layer 2a: Falsy Gate (||) ---
+        if (!resolvedValue && w.falsyFallbackRefs?.length) {
+          for (const ref of w.falsyFallbackRefs) {
+            // Assign the fallback value regardless of whether it is truthy or falsy.
+            // e.g. `false || 0` will correctly update resolvedValue to `0`.
+            resolvedValue = await this.pullSingle(ref);
+
+            // If it is truthy, we are done! Short-circuit the || chain.
+            if (resolvedValue) break;
+          }
+        }
+
+        if (!resolvedValue) {
+          if (w.falsyControl) {
+            resolvedValue = applyControlFlow(w.falsyControl);
+          } else if (w.falsyFallback != null) {
+            resolvedValue = coerceConstant(w.falsyFallback);
+          }
+        }
+
+        // --- Layer 2b: Nullish Gate (??) ---
+        if (resolvedValue == null) {
+          if (w.nullishControl) {
+            resolvedValue = applyControlFlow(w.nullishControl);
+          } else if (w.nullishFallbackRef) {
+            resolvedValue = await this.pullSingle(w.nullishFallbackRef);
+          } else if (w.nullishFallback != null) {
+            resolvedValue = coerceConstant(w.nullishFallback);
+          }
+        }
+
+        // --- Overdefinition Boundary ---
+        if (resolvedValue != null) return resolvedValue;
+      } catch (err: any) {
+        // --- Layer 3: Catch ---
+        if (isFatalError(err)) throw err;
+        if (w.catchControl) return applyControlFlow(w.catchControl);
+        if (w.catchFallbackRef) return this.pullSingle(w.catchFallbackRef);
+        if (w.catchFallback != null) return coerceConstant(w.catchFallback);
+        lastError = err;
       }
-    });
+    }
+
+    if (lastError) throw lastError;
+    return undefined;
   }
 
   /**

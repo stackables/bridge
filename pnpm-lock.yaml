@@ -159,6 +159,12 @@ importers:
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.0
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
+      '@stackables/bridge-types':
+        specifier: workspace:*
+        version: link:../bridge-types
     devDependencies:
       '@tsconfig/node22':
         specifier: ^22.0.5
@@ -197,9 +203,9 @@ importers:
 
   packages/bridge-stdlib:
     dependencies:
-      '@stackables/bridge-core':
+      '@stackables/bridge-types':
         specifier: workspace:*
-        version: link:../bridge-core
+        version: link:../bridge-types
       lru-cache:
         specifier: ^11
         version: 11.2.6
@@ -240,6 +246,18 @@ importers:
       vscode-languageserver-textdocument:
         specifier: ^1.0.12
         version: 1.0.12
+
+  packages/bridge-types:
+    devDependencies:
+      '@tsconfig/node22':
+        specifier: ^22.0.5
+        version: 22.0.5
+      '@types/node':
+        specifier: ^25.3.0
+        version: 25.3.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/docs-site:
     dependencies:

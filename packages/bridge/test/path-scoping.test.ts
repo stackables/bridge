@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import type { Bridge, Instruction, Wire } from "../src/types.ts";
-import { SELF_MODULE } from "../src/types.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
+import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import type { Bridge, Instruction, Wire } from "../src/index.ts";
+import { SELF_MODULE } from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

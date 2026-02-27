@@ -1,8 +1,8 @@
 import { createSchema, createYoga } from "graphql-yoga";
-import type { InstructionSource } from "../src/bridge-transform.ts";
-import { bridgeTransform, useBridgeTracing } from "../src/bridge-transform.ts";
-import type { ToolMap } from "../src/types.ts";
-import type { Logger, TraceLevel } from "../src/ExecutionTree.ts";
+import type { InstructionSource } from "../src/index.ts";
+import { bridgeTransform, useBridgeTracing } from "../src/index.ts";
+import type { ToolMap } from "../src/index.ts";
+import type { Logger, TraceLevel } from "../src/index.ts";
 
 type GatewayOptions = {
   context?: Record<string, any>;
