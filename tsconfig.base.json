@@ -1,0 +1,28 @@
+{
+  "extends": "@tsconfig/node22/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@stackables/bridge-core": [
+        "./packages/bridge-core/build/index.d.ts",
+        "./packages/bridge-core/src/index.ts"
+      ],
+      "@stackables/bridge-stdlib": [
+        "./packages/bridge-stdlib/build/index.d.ts",
+        "./packages/bridge-stdlib/src/index.ts"
+      ],
+      "@stackables/bridge-compiler": [
+        "./packages/bridge-compiler/build/index.d.ts",
+        "./packages/bridge-compiler/src/index.ts"
+      ],
+      "@stackables/bridge-graphql": [
+        "./packages/bridge-graphql/build/index.d.ts",
+        "./packages/bridge-graphql/src/index.ts"
+      ],
+      "@stackables/bridge": [
+        "./packages/bridge/build/index.d.ts",
+        "./packages/bridge/src/index.ts"
+      ]
+    }
+  }
+}
