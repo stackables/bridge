@@ -13,7 +13,7 @@ Instead, it relies on a **3-Layer Architecture** that gives you surgical control
 
 By default, if a tool throws a network exception (e.g., HTTP 500, timeout), the error bubbles up and crashes the GraphQL field.
 
-To gracefully handle I/O failures, you use the **Safe Execution Modifier (`?.`)**, perfectly mirroring TypeScript's Optional Chaining. Appending `?.` tells the engine: *"If this tool throws an error, or the data is missing, swallow the error and return `undefined`."*
+To gracefully handle I/O failures, you use the **Safe Execution Modifier (`?.`)**, perfectly mirroring TypeScript's Optional Chaining. Appending `?.` tells the engine: _"If this tool throws an error, or the data is missing, swallow the error and return `undefined`."_
 
 ```bridge
 # STRICT: If the billing API crashes, the field crashes.
@@ -35,13 +35,13 @@ Consider these two lines:
 
 If the `user` API is called but the backend returns a completely empty object `{}`, here is how the engine responds:
 
-* **Scenario 1:** `.info` evaluates safely to `undefined`. We then attempt to access `.name` strictly. **The engine throws a `TypeError` and crashes the field!**
-* **Scenario 2:** `.info` is accessed strictly, resulting in `undefined`. The `?.` on `name` intercepts the subsequent structural crash and safely yields `undefined`.
+- **Scenario 1:** `.info` evaluates safely to `undefined`. We then attempt to access `.name` strictly. **The engine throws a `TypeError` and crashes the field!**
+- **Scenario 2:** `.info` is accessed strictly, resulting in `undefined`. The `?.` on `name` intercepts the subsequent structural crash and safely yields `undefined`.
 
 If the `user` API **throws a 500 Network Error**:
 
-* **Scenario 1:** The `?.` is on the root tool. It intercepts the network crash and yields `undefined`.
-* **Scenario 2:** The root tool is evaluated strictly. The network error **crashes the field!**
+- **Scenario 1:** The `?.` is on the root tool. It intercepts the network crash and yields `undefined`.
+- **Scenario 2:** The root tool is evaluated strictly. The network error **crashes the field!**
 
 ## 2. Layer 2: Data-Level Routing (`||` and `??`)
 
@@ -61,10 +61,10 @@ o.displayName <- userApi?.nickname || "Guest"
 
 ### The Nullish Gate (`??`)
 
-The `??` operator triggers *only* if the left side is exactly `null` or `undefined`. It respects `0`, `""`, and `false` as valid data.
+The `??` operator triggers _only_ if the left side is exactly `null` or `undefined`. It respects `0`, `""`, and `false` as valid data.
 
 ```bridge
-# If the user's balance is exactly $0, we WANT to show 0. 
+# If the user's balance is exactly $0, we WANT to show 0.
 # We only fall back if the data is actually missing.
 o.walletBalance <- billingApi?.balance ?? -1
 
@@ -77,18 +77,18 @@ The `||` and `??` operators **do not catch network errors**. If a strict tool th
 If you want to provide an absolute, final safety net for the entire wire in case any strict evaluation fails, use the `catch` keyword.
 
 ```bridge
-# 1. Evaluate B strictly. 
+# 1. Evaluate B strictly.
 # 2. If it is nullish, evaluate C strictly.
 # 3. If B or C throw a 500 network error, catch it and return "Error".
 o.value <- B.field ?? C.field catch "Error"
 
 ```
 
-The `catch` fallback is evaluated *only* if an unhandled exception occurred during the execution of that specific wire.
+The `catch` fallback is evaluated _only_ if an unhandled exception occurred during the execution of that specific wire.
 
 ## 4. Raising Explicit Errors
 
-Sometimes a fallback isn't enough, and you actively *want* to break the execution flow based on business logic. The Bridge provides explicit control flow keywords to seamlessly bridge the gap between declarative mappings and GraphQL's robust error-handling spec.
+Sometimes a fallback isn't enough, and you actively _want_ to break the execution flow based on business logic. The Bridge provides explicit control flow keywords to seamlessly bridge the gap between declarative mappings and GraphQL's robust error-handling spec.
 
 ### Field Error (`throw`)
 
@@ -123,17 +123,17 @@ This is called **Overdefinition**. Instead of throwing a syntax error or blindly
 
 ### Cost Tiers
 
-| Cost Tier | Sources | Why |
-| --- | --- | --- |
-| **Free (0)** | `input`, `context`, `const`, `alias` | Pure memory reads. Zero I/O overhead. |
-| **Computed (1)** | Tool calls, Pipes, Defines | Require scheduling and possible network I/O. |
+| Cost Tier        | Sources                              | Why                                          |
+| ---------------- | ------------------------------------ | -------------------------------------------- |
+| **Free (0)**     | `input`, `context`, `const`, `alias` | Pure memory reads. Zero I/O overhead.        |
+| **Computed (1)** | Tool calls, Pipes, Defines           | Require scheduling and possible network I/O. |
 
 ### Cheapest-First Resolution
 
 When a target is overdefined, the engine evaluates the sources **cheapest first**:
 
 1. It tries all Free (Cost 0) sources.
-2. If none return truthy data, it moves to Computed (Cost 1) sources.
-3. It stops and returns the very first result it finds.
+2. If they all return `null` or `undefined`, it moves to Computed (Cost 1) sources.
+3. It stops and returns the very first **non-nullish** result it finds.
 
-In the example above, if the user provides `city` in their GraphQL arguments, the engine reads it instantly from memory (`Cost 0`). The expensive geocoding API (`Cost 1`) is **never called**.
+_(Note: The engine respects falsy values like `0`, `""`, and `false`. If a cheap source returns `0`, the engine accepts it and short-circuits, saving the cost of evaluating the more expensive sources.)_
