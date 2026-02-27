@@ -19,7 +19,7 @@ Full IDE support for [The Bridge](https://github.com/stackables/bridge): a decla
 
 ### Syntax Highlighting
 
-- Full syntax highlighting for `.bridge` files (language version 1.4)
+- Full syntax highlighting for `.bridge` files (language version 1.5)
 - Block keyword highlighting: `version`, `const`, `tool`, `define`, `bridge`
 - Wire operator colouring: `<-` (pull), `||` (falsy-coalesce), `??` (nullish gate), `catch` (error boundary), `:` (pipe)
 - `force <handle>` and `force <handle> catch null` keyword highlighting

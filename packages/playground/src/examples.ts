@@ -23,7 +23,7 @@ type Greeting {
   lower: String
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.greet {
   with std.str.toUpperCase as uc
@@ -64,7 +64,7 @@ type Config {
   label: String
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.config {
   with output as o
@@ -101,7 +101,7 @@ type Profile {
   role: String
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.profile {
   with context as ctx
@@ -142,7 +142,7 @@ type Location {
   lon: Float
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 tool geo from std.httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
@@ -210,7 +210,7 @@ type Query {
   searchTrains(from: String!, to: String!): [Journey!]!
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 tool sbbApi from std.httpCall {
   .baseUrl = "https://transport.opendata.ch/v1"
@@ -308,7 +308,7 @@ type EchoResult {
   count: Int
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.echo {
   with input as i
@@ -345,7 +345,7 @@ type PricingResult {
   eligible: Boolean
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.pricing {
   with input as i
@@ -388,7 +388,7 @@ type PricingResult {
   discount: Float
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.pricing {
   with input as i
@@ -434,7 +434,7 @@ type SubmitResult {
   message: String
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 # This tool POSTs feedback to a webhook.
 # We don't read anything from its response —
@@ -495,7 +495,7 @@ type UserProfile {
   isPremium: Boolean
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 tool userApi from std.httpCall {
   .baseUrl = "https://jsonplaceholder.typicode.com"
@@ -562,7 +562,7 @@ type UserProfile {
   badge: String
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.userProfile {
   with input as i
@@ -635,7 +635,7 @@ type Settings {
   notifications: Boolean
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.createPayload {
   with input as i
@@ -714,7 +714,7 @@ type PolicyResult {
   requireMFA: Boolean
 }
     `,
-    bridge: `version 1.4
+    bridge: `version 1.5
 
 bridge Query.evaluate {
   with input as i

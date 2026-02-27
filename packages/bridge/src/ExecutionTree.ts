@@ -315,9 +315,9 @@ export class ExecutionTree {
     // Fall back to std namespace (builtins are callable without std. prefix)
     const stdFn = (this.toolFns as any)?.std?.[name];
     if (typeof stdFn === "function") return stdFn;
-    // Fall back to math namespace (math/comparison tools)
-    const mathFn = (this.toolFns as any)?.math?.[name];
-    return typeof mathFn === "function" ? mathFn : undefined;
+    // Fall back to internal namespace (engine-internal tools: math ops, concat, etc.)
+    const internalFn = (this.toolFns as any)?.internal?.[name];
+    return typeof internalFn === "function" ? internalFn : undefined;
   }
 
   /** Resolve a ToolDef by name, merging the extends chain (cached) */

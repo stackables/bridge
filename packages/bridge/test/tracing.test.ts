@@ -54,7 +54,7 @@ async function execute(
 
 describe("tracing: basics", () => {
   test("traces are returned when trace is enabled", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -81,7 +81,7 @@ o.label <- g.label
   });
 
   test("no traces when tracing is disabled (default)", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -113,7 +113,7 @@ o.label <- g.label
 
 describe("tracing: call order", () => {
   test("traces record sequential order for || chains", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -140,7 +140,7 @@ o.label <- p.label || b.label
   });
 
   test("traces show short-circuit: backup not called when primary succeeds", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -166,7 +166,7 @@ o.label <- p.label || b.label
 
 describe("tracing: errors", () => {
   test("traces capture error message on tool failure", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -200,7 +200,7 @@ o.label <- g.label
   });
 
   test("traces capture both erroring and catch fallback tool", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with primary as p
   with fallback as f
@@ -231,7 +231,7 @@ o.label <- p.label catch f.label
 
 describe("tracing: multi-tool", () => {
   test("multiple independent tools are all traced", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with alpha as a
   with beta as b
@@ -261,7 +261,7 @@ o.score <- b.score
   });
 
   test("trace inputs reflect bridge wire resolution", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 const limits = { "limit": 5 }
 
@@ -292,7 +292,7 @@ o.label <- g.label
 
 describe("tracing: tool-dep (tool blocks)", () => {
   test("tool block calls are traced with fn name", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 tool geocoder from httpCall {
   .baseUrl = "https://api.example.com"
   .method = "GET"
@@ -334,7 +334,7 @@ o.label <- g.label
 
 describe("tracing: timing", () => {
   test("durationMs reflects actual tool execution time", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with slow as s
   with input as i
@@ -359,7 +359,7 @@ o.label <- s.label
   });
 
   test("startedAt values are monotonically ordered", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.lookup {
   with first as f
   with second as s
@@ -390,7 +390,7 @@ o.label <- f.label || s.label
 // ── Trace levels ──────────────────────────────────────────────────────────
 
 describe("tracing: levels", () => {
-  const bridge = `version 1.4
+  const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i
@@ -501,7 +501,7 @@ describe("tracing: weather-style diagnostic", () => {
   `;
 
   // Mirrors Weather.bridge: define + bridge + tool blocks
-  const weatherBridge = `version 1.4
+  const weatherBridge = `version 1.5
 
 tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"

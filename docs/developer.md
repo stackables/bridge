@@ -271,7 +271,7 @@ export const std = {
 test("std.myTool", async () => {
   const result = await execute(
     `
-    version 1.4
+    version 1.5
     tool t from std.myTool
     bridge Query.result {
       with t
@@ -303,7 +303,7 @@ import { createGateway } from "./_gateway.js";
 const { execute } = createGateway({
   typeDefs: `type Query { hello: String }`,
   bridgeText: `
-    version 1.4
+    version 1.5
     bridge Query.hello {
       with const as c
       with output as o

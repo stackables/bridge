@@ -1,4 +1,4 @@
-version 1.4
+version 1.5
 
 # Tool 1: Geocoder — city name → lat/lon (Nominatim, no auth required)
 tool geo from std.httpCall {

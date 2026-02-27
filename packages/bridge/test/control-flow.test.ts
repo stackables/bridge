@@ -27,7 +27,7 @@ function run(
 
 describe("parseBridge: control flow keywords", () => {
   test("throw on || gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -46,7 +46,7 @@ bridge Query.test {
   });
 
   test("panic on ?? gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -65,7 +65,7 @@ bridge Query.test {
   });
 
   test("continue on ?? gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -84,7 +84,7 @@ bridge Query.test {
   });
 
   test("break on ?? gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -103,7 +103,7 @@ bridge Query.test {
   });
 
   test("throw on catch gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -123,7 +123,7 @@ bridge Query.test {
   });
 
   test("panic on catch gate", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -149,7 +149,7 @@ bridge Query.test {
 
 describe("serializeBridge: control flow roundtrip", () => {
   test("throw on || gate round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -174,7 +174,7 @@ bridge Query.test {
   });
 
   test("panic on ?? gate round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -198,7 +198,7 @@ bridge Query.test {
   });
 
   test("continue on ?? gate round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with api as a
@@ -222,7 +222,7 @@ bridge Query.test {
   });
 
   test("break on catch gate round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with api as a
@@ -250,7 +250,7 @@ bridge Query.test {
 
 describe("executeBridge: throw control flow", () => {
   test("throw on || gate raises Error when value is falsy", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -266,7 +266,7 @@ bridge Query.test {
   });
 
   test("throw on || gate does NOT fire when value is truthy", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -277,7 +277,7 @@ bridge Query.test {
   });
 
   test("throw on ?? gate raises Error when value is null", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -293,7 +293,7 @@ bridge Query.test {
   });
 
   test("throw on catch gate raises Error when source throws", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -320,7 +320,7 @@ bridge Query.test {
 
 describe("executeBridge: panic control flow", () => {
   test("panic raises BridgePanicError", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -337,7 +337,7 @@ bridge Query.test {
   });
 
   test("panic bypasses catch gate", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -357,7 +357,7 @@ bridge Query.test {
   });
 
   test("panic bypasses safe navigation (?.)", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -383,7 +383,7 @@ bridge Query.test {
 
 describe("executeBridge: continue/break in arrays", () => {
   test("continue skips null elements in array mapping", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -407,7 +407,7 @@ bridge Query.test {
   });
 
   test("break halts array processing", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -434,7 +434,7 @@ bridge Query.test {
     // Guards against a crash where pullOutputField / response() would throw
     // TypeError: items is not iterable when resolveWires returns CONTINUE_SYM
     // for the root array wire itself.
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -450,7 +450,7 @@ bridge Query.test {
   });
 
   test("catch continue on root array wire returns [] when source throws", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -472,7 +472,7 @@ bridge Query.test {
 
 describe("executeBridge: AbortSignal", () => {
   test("aborted signal prevents tool execution", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -495,7 +495,7 @@ bridge Query.test {
   });
 
   test("abort error bypasses catch gate", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -516,7 +516,7 @@ bridge Query.test {
   });
 
   test("abort error bypasses safe navigation (?.)", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -537,7 +537,7 @@ bridge Query.test {
   });
 
   test("signal is passed to tool context", async () => {
-    const src = `version 1.4
+    const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o

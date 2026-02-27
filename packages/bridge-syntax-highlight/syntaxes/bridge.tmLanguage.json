@@ -20,7 +20,7 @@
   "repository": {
 
     "version-line": {
-      "comment": "version 1.4",
+      "comment": "version 1.5",
       "match": "^\\s*(version)\\s+(\\d+\\.\\d+)",
       "captures": {
         "1": { "name": "keyword.other.version.bridge" },

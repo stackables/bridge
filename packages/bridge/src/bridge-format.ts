@@ -19,7 +19,7 @@ export function parseBridge(text: string): Instruction[] {
   return parseBridgeChevrotain(text);
 }
 
-const BRIDGE_VERSION = "1.4";
+const BRIDGE_VERSION = "1.5";
 
 /** Serialize a ControlFlowInstruction to its textual form. */
 function serializeControl(ctrl: ControlFlowInstruction): string {

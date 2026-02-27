@@ -1,4 +1,4 @@
-version 1.4
+version 1.5
 
 tool dbApi from std.httpCall {
   .baseUrl = "https://v6.db.api.bahn.guru"

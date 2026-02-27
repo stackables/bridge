@@ -44,7 +44,7 @@ describe("parsePath", () => {
 
 describe("parseBridge", () => {
   test("simple bridge with input handle", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.geocode {
   with hereapi.geocode as gc
@@ -102,7 +102,7 @@ gc.q <- i.search
   });
 
   test("tool wires", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.health {
   with api.data as a
@@ -151,7 +151,7 @@ o.output <- ti.result
   });
 
   test("nested output paths", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.search {
   with zillow.find as z
@@ -185,7 +185,7 @@ o.topPick.city    <- z.properties[0].location.city
   });
 
   test("array mapping with element wires", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.search {
   with provider.list as p
@@ -247,7 +247,7 @@ o.results <- p.items[] as item {
   });
 
   test("Mutation type", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
@@ -274,7 +274,7 @@ o.messageId <- sg.headers.x-message-id
   });
 
   test("multiple bridges separated by ---", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.first {
   with a.one as a
@@ -298,7 +298,7 @@ b.y <- i.input
   });
 
   test("context handle", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.search {
   with zillow.find as z
@@ -325,7 +325,7 @@ z.lat <- i.lat
 
 describe("serializeBridge", () => {
   test("simple bridge roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
@@ -341,7 +341,7 @@ gc.q <- i.search
   });
 
   test("tool bridge roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Query.health {
   with hereapi.getCoordinates as geo
   with companyX.getLivingStandard as cx
@@ -364,7 +364,7 @@ o.lifeExpectancy <- ti.result
   });
 
   test("array mapping roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Query.search {
   with hereapi.geocode as gc
   with output as o
@@ -384,7 +384,7 @@ o.results <- gc.items[] as item {
   });
 
   test("Mutation with hyphenated path roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.sendEmail {
   with sendgrid.send as sg
   with input as i
@@ -404,7 +404,7 @@ o.messageId <- sg.headers.x-message-id
   });
 
   test("multi-bridge roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Query.propertySearch {
   with hereapi.geocode as gc
   with zillow.search as z
@@ -513,7 +513,7 @@ o.propertyComments <- pt.result
 
 describe("parseBridge: tool blocks", () => {
   test("parses a simple GET tool", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool hereapi from httpCall {
   with context
@@ -563,7 +563,7 @@ gc.q <- i.search
   });
 
   test("parses POST tool with constant and pull wires", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool sendgrid from httpCall {
   with context
@@ -612,7 +612,7 @@ sg.content <- i.body
   });
 
   test("parses tool with deps (tool-to-tool)", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool authService from httpCall {
   with context
@@ -655,7 +655,7 @@ sb.q <- i.query
 
 describe("serializeBridge: tool roundtrip", () => {
   test("GET tool roundtrips", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 tool hereapi from httpCall {
   with context
   .baseUrl = "https://geocode.search.hereapi.com/v1"
@@ -685,7 +685,7 @@ gc.limit <- i.limit
   });
 
   test("POST tool roundtrips", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 tool sendgrid from httpCall {
   with context
   .baseUrl = "https://api.sendgrid.com/v3"
@@ -715,7 +715,7 @@ o.messageId <- sg.id
   });
 
   test("serialized tool output is human-readable", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 tool hereapi from httpCall {
   with context
   .baseUrl = "https://geocode.search.hereapi.com/v1"
@@ -747,7 +747,7 @@ gc.q <- i.search
 describe("parser robustness", () => {
   test("CRLF line endings are handled", () => {
     const result = parseBridge(
-      "version 1.4\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
+      "version 1.5\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
     );
     assert.equal(result.length, 1);
     assert.equal(result[0].kind, "bridge");
@@ -755,13 +755,13 @@ describe("parser robustness", () => {
 
   test("tabs are treated as spaces", () => {
     const result = parseBridge(
-      "version 1.4\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
+      "version 1.5\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
     );
     assert.equal(result.length, 1);
   });
 
   test("keywords are case-insensitive", () => {
-    const bridge = parseBridge(`version 1.4
+    const bridge = parseBridge(`version 1.5
 
 Bridge Query.geocode {
   With hereapi.geocode as gc
@@ -775,7 +775,7 @@ gc.q <- i.search
   });
 
   test("tool keyword is case-insensitive", () => {
-    const tool = parseBridge(`version 1.4
+    const tool = parseBridge(`version 1.5
 
 tool hereapi from httpCall {
   .baseUrl = "https://example.com"
@@ -786,7 +786,7 @@ tool hereapi from httpCall {
   });
 
   test("--- separator with surrounding whitespace", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool hereapi from httpCall {
   .baseUrl = "https://example.com"
@@ -811,7 +811,7 @@ gc.q <- i.search
   test("duplicate handle throws with line number", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.4
+        parseBridge(`version 1.5
 
 bridge Query.geocode {
   with input as h
@@ -827,7 +827,7 @@ search <- h.q
   test("with before bridge throws with line number", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.4
+        parseBridge(`version 1.5
 with input as i
 bridge Query.geocode {
 
@@ -841,7 +841,7 @@ search <- i.q
   test("error messages include line numbers", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.4
+        parseBridge(`version 1.5
 
 bridge Query.geocode {
   with input as i
@@ -853,7 +853,7 @@ not a valid line
   });
 
   test("with tool keyword is case-insensitive", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 Bridge Query.geocode {
   With myTool as t
@@ -869,7 +869,7 @@ o.result <- t.output
   });
 
   test("with context keyword is case-insensitive", () => {
-    const bridge = parseBridge(`version 1.4
+    const bridge = parseBridge(`version 1.5
 
 Bridge Query.geocode {
   With Context as cfg
@@ -887,7 +887,7 @@ o.result <- cfg.apiKey
 
   test("element mapping works with tab indentation", () => {
     const bridge = parseBridge(
-      "version 1.4\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
+      "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
     ).find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
       bridge.wires.filter((w) => "from" in w && w.from.element).length,
@@ -896,7 +896,7 @@ o.result <- cfg.apiKey
   });
 
   test("inline # comments are stripped from wire lines", () => {
-    const bridge = parseBridge(`version 1.4
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.greet {
   with input as i  # the request
@@ -912,7 +912,7 @@ bridge Query.greet {
   });
 
   test("# inside a string literal is not treated as a comment", () => {
-    const tool = parseBridge(`version 1.4
+    const tool = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   .url = "https://example.com/things#anchor"
@@ -928,7 +928,7 @@ tool myApi from httpCall {
 
 describe("brace block syntax", () => {
   test("bridge block with braces parses identically to indented style", () => {
-    const brace = parseBridge(`version 1.4
+    const brace = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as api
@@ -937,7 +937,7 @@ bridge Query.demo {
 
   o.result <- api.value
 }`);
-    const indent = parseBridge(`version 1.4
+    const indent = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as api
@@ -951,13 +951,13 @@ o.result <- api.value
   });
 
   test("tool block with braces parses identically to indented style", () => {
-    const brace = parseBridge(`version 1.4
+    const brace = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   .baseUrl = "https://example.com"
   .method = GET
 }`);
-    const indent = parseBridge(`version 1.4
+    const indent = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   .baseUrl = "https://example.com"
@@ -968,7 +968,7 @@ tool myApi from httpCall {
   });
 
   test("indented } inside on error value is not stripped", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   on error = {
@@ -985,7 +985,7 @@ tool myApi from httpCall {
   });
 
   test("mixed brace and indent blocks in same file", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool api from httpCall {
   .baseUrl = "https://example.com"

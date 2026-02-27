@@ -24,7 +24,7 @@ function run(
 
 describe("prototype pollution: setNested guard", () => {
   test("blocks __proto__ via bridge wire input path", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -42,7 +42,7 @@ bridge Query.test {
   });
 
   test("blocks constructor via bridge wire input path", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -60,7 +60,7 @@ bridge Query.test {
   });
 
   test("blocks prototype via bridge wire input path", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -80,7 +80,7 @@ bridge Query.test {
 
 describe("unsafe property traversal: pullSingle guard", () => {
   test("blocks __proto__ traversal on source ref", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -96,7 +96,7 @@ bridge Query.test {
   });
 
   test("blocks constructor traversal on source ref", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -114,7 +114,7 @@ bridge Query.test {
 
 describe("unsafe tool lookup guard", () => {
   test("lookupToolFn blocks __proto__ in dotted tool name", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with foo.__proto__.bar as evil
   with output as o
@@ -130,7 +130,7 @@ bridge Query.test {
   });
 
   test("lookupToolFn blocks constructor in dotted tool name", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with foo.constructor as evil
   with output as o
@@ -146,7 +146,7 @@ bridge Query.test {
   });
 
   test("lookupToolFn blocks prototype in dotted tool name", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.test {
   with foo.prototype as evil
   with output as o

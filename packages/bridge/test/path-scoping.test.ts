@@ -21,7 +21,7 @@ function run(
 
 describe("path scoping – parser", () => {
   test("simple scope block with constants", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with output as o
@@ -50,7 +50,7 @@ bridge Query.test {
   });
 
   test("scope block with pull wires", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -77,7 +77,7 @@ bridge Query.test {
   });
 
   test("nested scope blocks", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -129,7 +129,7 @@ bridge Query.test {
   });
 
   test("scope block with pipe operator", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with std.str.toUpperCase as uc
@@ -146,7 +146,7 @@ bridge Query.test {
   });
 
   test("scope block with fallback operators", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -173,7 +173,7 @@ bridge Query.test {
   });
 
   test("scope block with expression", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -189,7 +189,7 @@ bridge Query.test {
   });
 
   test("scope block with ternary", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -206,7 +206,7 @@ bridge Query.test {
   });
 
   test("scope block with string interpolation", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -222,7 +222,7 @@ bridge Query.test {
   });
 
   test("mixed flat wires and scope blocks", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -246,7 +246,7 @@ bridge Query.test {
   });
 
   test("scope block on tool handle", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 tool api from std.httpCall {
   .baseUrl = "https://api.example.com"
@@ -277,7 +277,7 @@ bridge Mutation.createUser {
   });
 
   test("scope blocks produce same wires as flat syntax", () => {
-    const scopedResult = parseBridge(`version 1.4
+    const scopedResult = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -294,7 +294,7 @@ bridge Query.test {
   }
 }`);
 
-    const flatResult = parseBridge(`version 1.4
+    const flatResult = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -320,7 +320,7 @@ bridge Query.test {
 
 describe("path scoping – serializer round-trip", () => {
   test("scoped wires round-trip through serializer as flat wires", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -341,7 +341,7 @@ bridge Query.test {
   });
 
   test("deeply nested scope round-trips correctly", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -371,7 +371,7 @@ bridge Query.test {
 
 describe("path scoping – execution", () => {
   test("scope block constants resolve at runtime", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.config {
   with output as o
@@ -386,7 +386,7 @@ bridge Query.config {
   });
 
   test("scope block pull wires resolve at runtime", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.user {
   with input as i
@@ -408,7 +408,7 @@ bridge Query.user {
   });
 
   test("nested scope blocks resolve deeply nested objects", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.profile {
   with input as i
@@ -427,7 +427,7 @@ bridge Query.profile {
     });
 
     // Then verify scope block syntax produces identical result
-    const scopedBridge = `version 1.4
+    const scopedBridge = `version 1.5
 
 bridge Query.profile {
   with input as i
@@ -454,7 +454,7 @@ bridge Query.profile {
   });
 
   test("scope block on tool input wires to tool correctly", () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 tool api from std.httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
@@ -482,7 +482,7 @@ bridge Query.test {
   });
 
   test("alias inside nested scope blocks parses correctly", () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.user {
   with std.str.toUpperCase as uc
@@ -526,7 +526,7 @@ bridge Query.user {
 
 describe("path scoping – array mapper blocks", () => {
   test("scope block with constant inside array mapper produces element wire", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -550,7 +550,7 @@ bridge Query.test {
   });
 
   test("scope block with pull wire inside array mapper references iterator", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -573,7 +573,7 @@ bridge Query.test {
   });
 
   test("nested scope blocks inside array mapper flatten to correct paths", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -597,7 +597,7 @@ bridge Query.test {
   });
 
   test("array mapper scope block and flat element lines coexist", () => {
-    const result = parseBridge(`version 1.4
+    const result = parseBridge(`version 1.5
 
 bridge Query.test {
   with input as i
@@ -633,7 +633,7 @@ bridge Query.test {
   });
 
   test("array mapper scope block executes correctly at runtime", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -656,7 +656,7 @@ bridge Query.test {
   });
 
   test("nested scope blocks inside array mapper execute correctly", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 
 bridge Query.test {
   with input as i

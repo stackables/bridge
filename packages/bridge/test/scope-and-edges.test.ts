@@ -42,7 +42,7 @@ describe("nested shadow scope chain", () => {
   `;
 
   // Map the outer array with [] as {}, pass inner array through
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.plan {
   with router as r
   with input as i
@@ -158,7 +158,7 @@ o.journeys <- r.journeys[] as j {
       }
     `;
 
-    const contextBridgeText = `version 1.4
+    const contextBridgeText = `version 1.5
 tool routeApi from httpCall {
   with context
   .baseUrl = "http://mock"
@@ -252,7 +252,7 @@ describe("tool extends with duplicate target override", () => {
     //   2. .headers.Authorization = "fallback"     (constant, e.g. default)
     // Child overrides with a single constant.
     // Bug: findIndex replaces #1, but #2 leaks through.
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 tool base from myTool {
   with context
   .headers.Authorization <- context.token
@@ -311,7 +311,7 @@ o.name <- b.name
     // Parent: .method = POST (another constant — contrived but valid parse)
     // Child: .method <- context.httpMethod (pull)
     // Bug: First parent wire replaced, second leaks
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 tool base from myTool {
   .baseUrl = "http://test"
   .method = GET
@@ -374,7 +374,7 @@ describe("array index in output path", () => {
   });
 
   test("explicit index on output LHS should either error at parse or work at runtime", () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.thing {
   with api as a
   with input as i
@@ -459,7 +459,7 @@ describe("nested array-in-array mapping", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 
 tool trainApi from httpCall {
   .baseUrl = "http://mock"

@@ -14,7 +14,7 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridgeText = `version 1.4
+const bridgeText = `version 1.5
 bridge Query.livingStandard {
   with hereapi.geocode as gc
   with companyX.getLivingStandard as cx

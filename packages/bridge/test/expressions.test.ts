@@ -3,16 +3,7 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { multiply } from "../src/tools/multiply.ts";
-import { divide } from "../src/tools/divide.ts";
-import { add } from "../src/tools/add.ts";
-import { subtract } from "../src/tools/subtract.ts";
-import { eq } from "../src/tools/eq.ts";
-import { neq } from "../src/tools/neq.ts";
-import { gt } from "../src/tools/gt.ts";
-import { gte } from "../src/tools/gte.ts";
-import { lt } from "../src/tools/lt.ts";
-import { lte } from "../src/tools/lte.ts";
+import { multiply, divide, add, subtract, eq, neq, gt, gte, lt, lte } from "../src/tools/internal.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Unit tests for math/comparison tools ────────────────────────────────────
@@ -69,7 +60,7 @@ describe("comparison tools return boolean", () => {
 
 describe("expressions: parser desugaring", () => {
   test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -92,7 +83,7 @@ bridge Query.convert {
       "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
     };
     for (const [op, fn] of Object.entries(ops)) {
-      const instructions = parseBridge(`version 1.4
+      const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -107,7 +98,7 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 5 / 10", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -122,7 +113,7 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 2 > 6", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -137,7 +128,7 @@ bridge Query.test {
   });
 
   test("two source refs: i.price * i.qty", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -154,7 +145,7 @@ bridge Query.calc {
   });
 
   test("expression in array mapping element", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.list {
   with pricing.list as api
   with input as i
@@ -176,7 +167,7 @@ bridge Query.list {
 
 describe("expressions: round-trip serialization", () => {
   test("multiply expression serializes and re-parses", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -196,7 +187,7 @@ bridge Query.convert {
   });
 
   test("comparison expression round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -209,7 +200,7 @@ bridge Query.check {
   });
 
   test("chained expression round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -222,7 +213,7 @@ bridge Query.test {
   });
 
   test("two source refs round-trip", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -265,7 +256,7 @@ const mathTypeDefs = /* GraphQL */ `
 
 describe("expressions: execution", () => {
   test("multiply: dollars to cents", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -281,7 +272,7 @@ bridge Query.convert {
   });
 
   test("divide: halve a value", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -297,7 +288,7 @@ bridge Query.convert {
   });
 
   test("multiply two source refs: price * quantity", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -313,7 +304,7 @@ bridge Query.calc {
   });
 
   test("comparison >= returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -335,7 +326,7 @@ bridge Query.check {
   });
 
   test("comparison > returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -357,7 +348,7 @@ bridge Query.check {
   });
 
   test("comparison == with string returns true/false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -379,7 +370,7 @@ bridge Query.check {
   });
 
   test("expression with tool source", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
@@ -403,7 +394,7 @@ bridge Query.convert {
   });
 
   test("chained expression: i.dollars * 5 / 10", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -420,7 +411,7 @@ bridge Query.convert {
   });
 
   test("expression in array mapping", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.products {
   with pricing.list as api
   with output as o
@@ -454,7 +445,7 @@ bridge Query.products {
 
 describe("expressions: operator precedence", () => {
   test("i.base + i.tax * 2 — multiplication before addition", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -470,7 +461,7 @@ bridge Query.calc {
   });
 
   test("precedence: a + b * c executes correctly", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -491,7 +482,7 @@ bridge Query.calc {
   });
 
   test("precedence: a * b + c * d", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -512,7 +503,7 @@ bridge Query.calc {
   });
 
   test("precedence: comparison after arithmetic — i.base + i.tax * 2 > 100", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -540,7 +531,7 @@ bridge Query.check {
   });
 
   test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -561,7 +552,7 @@ bridge Query.calc {
 
 describe("expressions: fallback integration", () => {
   test("expression with catch error fallback: i.value * 100 catch -1", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
@@ -588,7 +579,7 @@ bridge Query.convert {
 
   test("expression with || null coalesce: (i.value ?? 1) * 2", async () => {
     // This tests coalescing on the source BEFORE the expression
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -640,9 +631,7 @@ describe("expressions: non-number handling", () => {
 
 // ── Boolean logic tools ─────────────────────────────────────────────────────
 
-import { and } from "../src/tools/and.ts";
-import { or } from "../src/tools/or.ts";
-import { not } from "../src/tools/not.ts";
+import { and, or, not } from "../src/tools/internal.ts";
 
 describe("boolean logic tools", () => {
   test("and", () => {
@@ -678,7 +667,7 @@ describe("boolean logic: parser desugaring", () => {
       "or": "__or",
     };
     for (const [op, fn] of Object.entries(boolOps)) {
-      const instructions = parseBridge(`version 1.4
+      const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -693,7 +682,7 @@ bridge Query.test {
   });
 
   test("not prefix desugars to not tool fork", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -708,7 +697,7 @@ bridge Query.test {
   });
 
   test("combined: (a > 18 and b) or c == \"ADMIN\"", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -736,7 +725,7 @@ describe("boolean logic: end-to-end", () => {
   `;
 
   test("and expression: age > 18 and verified", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -757,7 +746,7 @@ bridge Query.check {
   });
 
   test("or expression: approved or role == ADMIN", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -774,7 +763,7 @@ bridge Query.check {
   });
 
   test("not prefix: not i.verified", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -799,7 +788,7 @@ bridge Query.check {
 
 describe("boolean logic: serializer round-trip", () => {
   test("and expression round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -817,7 +806,7 @@ bridge Query.test {
   });
 
   test("or expression round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -834,7 +823,7 @@ bridge Query.test {
   });
 
   test("not prefix round-trips", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -855,7 +844,7 @@ bridge Query.test {
 
 describe("parenthesized expressions: parser desugaring", () => {
   test("(A and B) or C — groups correctly", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -871,7 +860,7 @@ bridge Query.test {
   });
 
   test("A or (B and C) — groups correctly", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -887,7 +876,7 @@ bridge Query.test {
   });
 
   test("not (A and B) — not wraps grouped expr", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -902,7 +891,7 @@ bridge Query.test {
   });
 
   test("(i.price + i.discount) * i.qty — math with parens", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -924,7 +913,7 @@ describe("parenthesized expressions: end-to-end", () => {
   `;
 
   test("A or (B and C): true or (false and false) = true", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -940,7 +929,7 @@ bridge Query.check {
   });
 
   test("A or (B and C): false or (true and true) = true", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -956,7 +945,7 @@ bridge Query.check {
   });
 
   test("(A or B) and C: (true or false) and false = false", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -972,7 +961,7 @@ bridge Query.check {
   });
 
   test("not (A and B): not (true and false) = true", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -993,7 +982,7 @@ bridge Query.check {
   `;
 
   test("(price + discount) * qty: (10 + 5) * 3 = 45", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -1013,7 +1002,7 @@ bridge Query.calc {
 
 describe("parenthesized expressions: serializer round-trip", () => {
   test("(A + B) * C round-trips with parentheses", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -1032,7 +1021,7 @@ bridge Query.test {
   });
 
   test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -1059,7 +1048,7 @@ import { executeBridge } from "../src/execute-bridge.ts";
 describe("and/or short-circuit behavior", () => {
   test("and short-circuits: right side not evaluated when left is false", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1085,7 +1074,7 @@ bridge Query.test {
 
   test("and evaluates right side when left is true", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1111,7 +1100,7 @@ bridge Query.test {
 
   test("or short-circuits: right side not evaluated when left is true", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1137,7 +1126,7 @@ bridge Query.test {
 
   test("or evaluates right side when left is false", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1166,7 +1155,7 @@ bridge Query.test {
 
 describe("safe flag propagation in expressions", () => {
   test("safe flag propagated through expression: api?.value > 5 does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1191,7 +1180,7 @@ bridge Query.test {
   });
 
   test("safe flag on not prefix: not api?.verified does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1215,7 +1204,7 @@ bridge Query.test {
   });
 
   test("safe flag in condAnd: api?.active and i.flag does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1239,7 +1228,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand: i.flag and api?.active does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1263,7 +1252,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand of comparison: i.a > api?.score does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1287,7 +1276,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand of or: i.flag or api?.fallback does not crash", async () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api

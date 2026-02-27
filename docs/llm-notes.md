@@ -137,10 +137,10 @@ bridgeTransform(schema, instructions, {
 Every `.bridge` file must begin with a version declaration — the parser rejects anything without it:
 
 ```bridge
-version 1.4
+version 1.5
 ```
 
-This must be the first non-blank, non-comment line. The current parser accepts only `1.4`; any other version string is a hard error.
+This must be the first non-blank, non-comment line. The current parser accepts only `1.5`; any other version string is a hard error.
 
 ### Reserved Words
 

@@ -31,9 +31,11 @@ function bridgeCompletions(ctx: CompletionContext): CompletionResult | null {
   const completions = svc.getCompletions({ line: lineNum, character });
   if (completions.length === 0) return null;
 
-  // Calculate how much of the current token to replace
+  // Calculate how much of the current partial token to replace.
+  // nsDotMatch handles deep std paths like "std.", "std.arr.", "std.arr.fi"
+  // and captures only the last (partial) segment after the final dot.
   const textBefore = line.text.slice(0, character);
-  const nsDotMatch = textBefore.match(/\b(?:std|math)\.(\w*)$/);
+  const nsDotMatch = textBefore.match(/\bstd(?:\.\w+)*\.(\w*)$/);
   const contextMatch = textBefore.match(
     /(?:^\s*with\s+|(?:from|extends)\s+)(\S*)$/,
   );
@@ -41,6 +43,8 @@ function bridgeCompletions(ctx: CompletionContext): CompletionResult | null {
 
   return {
     from: ctx.pos - partial.length,
+    // Keep completions valid while user types more word chars after the dot
+    validFor: /^\w*$/,
     options: completions.map((c) => ({
       label: c.label,
       type: kindMap[c.kind] ?? "text",

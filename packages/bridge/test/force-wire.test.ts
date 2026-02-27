@@ -11,7 +11,7 @@ import { createGateway } from "./_gateway.ts";
 
 describe("parseBridge: force <handle>", () => {
   test("regular bridge has no forces", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -27,7 +27,7 @@ o.result <- t.output
   });
 
   test("force statement creates a forces entry", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Mutation.audit {
   with logger.log as lg
@@ -47,7 +47,7 @@ force lg
   });
 
   test("force and regular wires coexist", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Query.demo {
   with mainApi as m
@@ -78,7 +78,7 @@ o.result <- m.data
   });
 
   test("multiple force statements", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -101,7 +101,7 @@ force mt
   test("force on undeclared handle throws", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.4
+        parseBridge(`version 1.5
 
 bridge Query.demo {
   with input as i
@@ -115,7 +115,7 @@ force unknown
   });
 
   test("force on simple (non-dotted) tool handle", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -138,7 +138,7 @@ o.result <- t.out
 
   test("force without any wires to the handle", () => {
     // The whole point of force — handle has no output wires, just triggers execution
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with sideEffect as se
@@ -161,7 +161,7 @@ o.ok = "true"
   });
 
   test("force catch null sets catchError flag", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with analytics as ping
@@ -181,7 +181,7 @@ o.ok = "true"
   });
 
   test("mixed critical and fire-and-forget forces", () => {
-    const [bridge] = parseBridge(`version 1.4
+    const [bridge] = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -208,7 +208,7 @@ force mt catch null
 
 describe("serializeBridge: force statement roundtrip", () => {
   test("force statement roundtrips", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
@@ -225,7 +225,7 @@ force lg
   });
 
   test("mixed force and regular wires roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Query.demo {
   with mainApi as m
   with audit.log as audit
@@ -245,7 +245,7 @@ o.result <- m.data
   });
 
   test("serialized output contains force syntax", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.audit {
   with logger.log as lg
   with input as i
@@ -266,7 +266,7 @@ force lg
   });
 
   test("force catch null roundtrips", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.audit {
   with analytics as ping
   with input as i
@@ -286,7 +286,7 @@ force ping catch null
   });
 
   test("mixed critical and fire-and-forget roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.multi {
   with logger.log as lg
   with metrics.emit as mt
@@ -305,7 +305,7 @@ force mt catch null
   });
 
   test("multiple force statements roundtrip", () => {
-    const input = `version 1.4
+    const input = `version 1.5
 bridge Mutation.multi {
   with logger.log as lg
   with metrics.emit as mt
@@ -340,7 +340,7 @@ describe("force statement: end-to-end execution", () => {
     let auditCalled = false;
     let auditInput: any = null;
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
@@ -396,7 +396,7 @@ o.title <- m.title
       }
     `;
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Mutation.createUser {
   with userApi.create as u
   with audit.log as audit
@@ -440,7 +440,7 @@ o.id <- u.id
     let auditStart = 0;
     const t0 = performance.now();
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
@@ -498,7 +498,7 @@ o.title <- m.title
       }
     `;
 
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Mutation.fire {
   with sideEffect as se
   with input as i
@@ -534,7 +534,7 @@ o.ok = "true"
   });
 
   test("critical forced tool error DOES break the response (GraphQL)", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with mainApi as m
   with audit.log as audit
@@ -570,7 +570,7 @@ o.title <- m.title
   });
 
   test("fire-and-forget (catch null) error does NOT break the response", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.search {
   with mainApi as m
   with audit.log as audit

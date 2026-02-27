@@ -51,7 +51,7 @@ describe("scheduling: diamond dependency dedup + parallelism", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.dashboard {
   with geo.code as gc
   with weather.get as w
@@ -220,7 +220,7 @@ describe("scheduling: pipe forks run in parallel", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 tool double from slowDoubler
 
 
@@ -287,7 +287,7 @@ describe("scheduling: chained pipes execute in correct order", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.processed {
   with input as i
   with toUpper as tu
@@ -369,7 +369,7 @@ describe("scheduling: shared tool dedup across pipe and direct consumers", () =>
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.info {
   with geo.lookup as g
   with toUpper as tu
@@ -432,7 +432,7 @@ describe("scheduling: independent tools execute with true parallelism", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 bridge Query.trio {
   with svc.a as sa
   with svc.b as sb
@@ -508,7 +508,7 @@ describe("scheduling: tool-level deps resolve in parallel", () => {
     }
   `;
 
-  const bridgeText = `version 1.4
+  const bridgeText = `version 1.5
 tool authService from httpCall {
   with context
   .baseUrl = "https://auth.test"

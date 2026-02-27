@@ -19,7 +19,7 @@ function run(
 
 describe("ternary: parser", () => {
   test("simple ref ? ref : ref produces a conditional wire", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -37,7 +37,7 @@ bridge Query.pricing {
   });
 
   test("string literal branches produce thenValue / elseValue", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.label {
   with input as i
   with output as o
@@ -52,7 +52,7 @@ bridge Query.label {
   });
 
   test("numeric literal branches produce thenValue / elseValue", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -67,7 +67,7 @@ bridge Query.pricing {
   });
 
   test("boolean literal branches", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -82,7 +82,7 @@ bridge Query.check {
   });
 
   test("null literal branch", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -97,7 +97,7 @@ bridge Query.check {
   });
 
   test("condition with expression chain: i.age >= 18 ? a : b", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -115,7 +115,7 @@ bridge Query.check {
   });
 
   test("|| literal fallback stored on conditional wire", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -129,7 +129,7 @@ bridge Query.pricing {
   });
 
   test("catch literal fallback stored on conditional wire", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -147,7 +147,7 @@ bridge Query.pricing {
 
 describe("ternary: round-trip serialization", () => {
   test("simple ref ternary round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -164,7 +164,7 @@ bridge Query.pricing {
   });
 
   test("string literal ternary round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.label {
   with input as i
   with output as o
@@ -182,7 +182,7 @@ bridge Query.label {
   });
 
   test("expression condition ternary round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -198,7 +198,7 @@ bridge Query.check {
   });
 
   test("|| literal fallback round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -211,7 +211,7 @@ bridge Query.pricing {
   });
 
   test("catch literal fallback round-trips", () => {
-    const text = `version 1.4
+    const text = `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -229,7 +229,7 @@ bridge Query.pricing {
 describe("ternary: execution — truthy condition", () => {
   test("selects then branch when condition is truthy", async () => {
     const { data } = await run(
-      `version 1.4
+      `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -243,7 +243,7 @@ bridge Query.pricing {
 
   test("selects else branch when condition is falsy", async () => {
     const { data } = await run(
-      `version 1.4
+      `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -258,7 +258,7 @@ bridge Query.pricing {
 
 describe("ternary: execution — literal branches", () => {
   test("string literal then branch", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.label {
   with input as i
   with output as o
@@ -272,7 +272,7 @@ bridge Query.label {
   });
 
   test("numeric literal branches", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -288,7 +288,7 @@ bridge Query.pricing {
 
 describe("ternary: execution — expression condition", () => {
   test("i.age >= 18 selects then branch for adult", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -304,7 +304,7 @@ bridge Query.check {
 
 describe("ternary: execution — fallbacks", () => {
   test("|| literal fallback fires when chosen branch is null", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
@@ -316,7 +316,7 @@ bridge Query.pricing {
   });
 
   test("catch literal fallback fires when chosen branch throws", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.pricing {
   with pro.getPrice as proTool
   with input as i
@@ -329,7 +329,7 @@ bridge Query.pricing {
   });
 
   test("|| sourceRef fallback fires when chosen branch is null", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.pricing {
   with fallback.getPrice as fb
   with input as i
@@ -348,7 +348,7 @@ describe("ternary: execution — tool branches (lazy evaluation)", () => {
     let proCalls = 0;
     let basicCalls = 0;
 
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.smartPrice {
   with pro.getPrice as proTool
   with basic.getPrice as basicTool
@@ -377,7 +377,7 @@ bridge Query.smartPrice {
 
 describe("ternary: execution — in array mapping", () => {
   test("ternary works inside array element mapping", async () => {
-    const bridge = `version 1.4
+    const bridge = `version 1.5
 bridge Query.products {
   with catalog.list as api
   with output as o

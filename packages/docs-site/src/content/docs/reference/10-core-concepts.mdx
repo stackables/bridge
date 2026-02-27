@@ -53,7 +53,7 @@ When multiple wires read from the *same* node, the engine only executes that nod
 A `.bridge` file is a collection of static definitions. Because the execution is demand-driven, **the order of blocks in the file does not matter.** Every file must begin with a `version` declaration, followed by any number of `const`, `tool`, `define`, and `bridge` blocks. Blocks are separated by blank lines, and comments start with `#`.
 
 ```bridge
-version 2.0
+version 1.5
 
 # 1. CONST: Shared static data
 const defaultCurrency = "EUR"
