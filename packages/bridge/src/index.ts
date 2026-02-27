@@ -29,7 +29,7 @@ export {
   builtinToolNames,
   builtinTools,
   createHttpCall,
-  math,
+  internal,
   std,
 } from "./tools/index.ts";
 export type {

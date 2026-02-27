@@ -28,7 +28,7 @@ A good policy engine needs context. If a user tries to initiate a large money tr
 Instead of writing sequential `await` calls that slow down the user experience, The Bridge automatically "fans out" these requests concurrently.
 
 ```bridge
-version 1.4
+version 1.5
 
 tool kycApi from std.httpCall { .baseUrl = "[https://api.internal/compliance](https://api.internal/compliance)" }
 tool riskApi from std.httpCall { .baseUrl = "[https://api.internal/risk](https://api.internal/risk)" }
@@ -100,7 +100,7 @@ Query.canInitiateTransfer {
   with rules.calculateRiskMatrix as matrixEvaluator
 
   # Pipe the cleanly fetched data directly into your TypeScript tool
-  # using the standard v1.4 block assignment shorthand
+  # using the standard v1.5 block assignment shorthand
   matrixEvaluator {
     .kycStatus <- kyc.status ?? "UNKNOWN"
     .score <- risk.score ?? 100

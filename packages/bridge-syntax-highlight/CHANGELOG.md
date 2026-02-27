@@ -15,9 +15,9 @@ All notable changes to the "bridge" extension will be documented in this file.
 
 ### Added
 
-- Syntax highlighting for Bridge language version 1.4
+- Syntax highlighting for Bridge language version 1.5
 - Support for all top-level blocks: `version`, `const`, `tool`, `define`, `bridge`
-- Wire operator highlighting: `<-`, `<-!`, `||`, `??`, `catch`, `:`
+- Wire operator highlighting: `<-`, `||`, `??`, `catch`, `:`
 - Array mapping syntax: `source[] as iter { … }`
 - Constant assignment highlighting: `.property = value`
 - Built-in handle highlighting: `input`, `output`, `context`

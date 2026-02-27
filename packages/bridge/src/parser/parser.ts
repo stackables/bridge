@@ -139,7 +139,7 @@ class BridgeParser extends CstParser {
     });
   });
 
-  /** version 1.4 */
+  /** version 1.5 */
   public versionDecl = this.RULE("versionDecl", () => {
     this.CONSUME(VersionKw);
     this.CONSUME(NumberLiteral, { LABEL: "ver" });
@@ -1164,7 +1164,7 @@ const parserInstance = new BridgeParser();
 // Lenient instance: error recovery enabled (used by parseBridgeDiagnostics)
 const diagParserInstance = new BridgeParser({ recovery: true });
 
-const BRIDGE_VERSION = "1.4";
+const BRIDGE_VERSION = "1.5";
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public API
@@ -3226,7 +3226,7 @@ function buildBridgeBody(
     return buildSourceExprSafe(sourceNode, lineNum).ref;
   }
 
-  // ── Helper: desugar template string into synthetic std.concat fork ─────
+  // ── Helper: desugar template string into synthetic internal.concat fork ─────
 
   function desugarTemplateString(
     segs: TemplateSeg[],
@@ -3739,7 +3739,7 @@ function buildBridgeBody(
   }
 
   /**
-   * Desugar a `not` prefix into a synthetic unary fork that calls `math.not`.
+   * Desugar a `not` prefix into a synthetic unary fork that calls `internal.not`.
    * Wraps the given ref:  not(sourceRef) → __expr fork with { a: sourceRef }
    */
   function desugarNot(sourceRef: NodeRef, _lineNum: number, safe?: boolean): NodeRef {
@@ -4414,7 +4414,7 @@ function buildBridgeBody(
       };
 
       if (segs) {
-        // Template string — desugar to synthetic std.concat fork
+        // Template string — desugar to synthetic internal.concat fork
         const concatOutRef = desugarTemplateString(segs, lineNum);
         wires.push({ from: concatOutRef, to: toRef, pipe: true, ...lastAttrs });
       } else {

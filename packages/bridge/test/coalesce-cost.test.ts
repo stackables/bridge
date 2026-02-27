@@ -26,7 +26,7 @@ const typeDefs = /* GraphQL */ `
 
 describe("|| sequential short-circuit", () => {
   test("primary succeeds → backup is never called", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -53,7 +53,7 @@ o.label <- p.label || b.label
   });
 
   test("primary returns null → backup is called", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -84,7 +84,7 @@ o.label <- p.label || b.label
       type Query { lookup(q: String!): Result }
       type Result { label: String }
     `;
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -114,7 +114,7 @@ o.label <- a.label || b.label || c.label
   });
 
   test("|| with literal fallback: both null → literal, no extra calls", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -141,7 +141,7 @@ o.label <- p.label || b.label || "default"
   });
 
   test("strict throw exits || chain — backup not called (no catch)", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -169,7 +169,7 @@ o.label <- p.label || b.label
   });
 
   test("|| + catch combined: strict throw → catch fires", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with primary as p
   with backup as b
@@ -200,7 +200,7 @@ o.label <- p.label || b.label || "null-default" catch "error-default"
 
 describe("overdefinition: authored order respected", () => {
   test("first wire wins when both are non-null (left-to-right)", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -228,7 +228,7 @@ o.label <- i.hint
   });
 
   test("input is null → falls through to tool call", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -258,7 +258,7 @@ o.label <- i.hint
   test("overdefinition respects authored order — first wire wins", async () => {
     // The expensive tool wire is written FIRST, so it is evaluated first.
     // Left-to-right semantics mean the tool result wins.
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with input as i
@@ -285,7 +285,7 @@ o.label <- i.hint
   });
 
   test("authored order: tool before context — tool wins", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
   with context as ctx
@@ -317,7 +317,7 @@ o.label <- ctx.defaultLabel
   });
 
   test("two tool sources with same cost — file order preserved", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -352,7 +352,7 @@ o.label <- b.label
 
 describe("coalesce edge cases", () => {
   test("single source: no sorting or short-circuit needed", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with myApi as api
   with input as i
@@ -374,7 +374,7 @@ o.label <- api.label
   });
 
   test("?. with || fallback: error → undefined, null → falls through to literal", async () => {
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -402,7 +402,7 @@ o.label <- a?.label || b.label || "last-resort"
   test("independent targets still resolve concurrently", async () => {
     // label comes from svcA, score comes from svcB — these are different
     // targets and should run in parallel, not sequentially.
-    const bridgeText = `version 1.4
+    const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
   with svcB as b
@@ -468,7 +468,7 @@ function run(
 
 describe("?. safe execution modifier", () => {
   test("parser detects ?. and sets safe flag on wire", () => {
-    const instructions = parseBridge(`version 1.4
+    const instructions = parseBridge(`version 1.5
 bridge Query.lookup {
   with api.fetch as api
   with input as i
@@ -486,7 +486,7 @@ bridge Query.lookup {
 
   test("?. swallows tool error and returns undefined", async () => {
     const { data } = await run(
-      `version 1.4
+      `version 1.5
 bridge Query.lookup {
   with failing.api as api
   with input as i
@@ -508,7 +508,7 @@ bridge Query.lookup {
 
   test("?. with || fallback: error returns undefined then || kicks in", async () => {
     const { data } = await run(
-      `version 1.4
+      `version 1.5
 bridge Query.lookup {
   with failing.api as api
   with input as i
@@ -530,7 +530,7 @@ bridge Query.lookup {
 
   test("?. passes through value when tool succeeds", async () => {
     const { data } = await run(
-      `version 1.4
+      `version 1.5
 bridge Query.lookup {
   with good.api as api
   with input as i
@@ -549,7 +549,7 @@ bridge Query.lookup {
   });
 
   test("safe execution round-trips through serializer", () => {
-    const src = `version 1.4
+    const src = `version 1.5
 
 bridge Query.lookup {
   with api.fetch as api

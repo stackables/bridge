@@ -39,7 +39,7 @@ The VS Code extension (`bridge-syntax-highlight`) uses a TextMate grammar (`brid
 We maintain a lightweight **StreamLanguage tokenizer** (`src/codemirror/bridge-lang.ts`, ~200 lines) that mirrors the TextMate grammar rules:
 
 - Same keyword set (`bridge`, `tool`, `define`, `const`, `with`, `version`, `on error`)
-- Same operator highlight (`<-`, `<-!`, `||`, `??`, `catch`, `=`, `:`)
+- Same operator highlight (`<-`, `||`, `??`, `catch`, `=`, `:`)
 - Same contextual header parsing (`bridge Type.field`, `tool name from source`, `with target as alias`)
 - Same literals (strings, numbers, booleans, HTTP methods, URL paths)
 

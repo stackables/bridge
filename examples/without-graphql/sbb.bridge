@@ -1,4 +1,4 @@
-version 1.4
+version 1.5
 
 # Swiss public transport API — connects to transport.opendata.ch
 # Returns an array of journey connections with full leg details.

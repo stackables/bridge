@@ -49,7 +49,7 @@ for (const fqn of builtinToolNames) {
   (toolsByNamespace[ns] ??= []).push(name);
 }
 
-const BUILTIN_REF_RE = /\b((?:std|math)\.[A-Za-z_]\w*)\b/g;
+const BUILTIN_REF_RE = /\b((?:std|internal)\.[A-Za-z_]\w*)\b/g;
 
 // ── Language Service ───────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ export class BridgeLanguageService {
 
     const diags = [...this.parserDiagnostics];
 
-    // Scan for unknown std.*/math.* tool references
+    // Scan for unknown std.*/internal.* tool references
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
       if (line.trimStart().startsWith("#")) continue;
@@ -127,8 +127,8 @@ export class BridgeLanguageService {
     const lineText = this.lines[pos.line] ?? "";
     const textBefore = lineText.slice(0, pos.character);
 
-    // After "std." or "math." → suggest tool names within that namespace
-    const nsDotMatch = textBefore.match(/\b(std|math)\.\w*$/);
+    // After "std." or "internal." → suggest tool names within that namespace
+    const nsDotMatch = textBefore.match(/\b(std|internal)\.\w*$/);
     if (nsDotMatch) {
       const ns = nsDotMatch[1];
       const names = toolsByNamespace[ns] ?? [];

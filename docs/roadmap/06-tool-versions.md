@@ -19,7 +19,7 @@ The `with` statement is updated to support an optional version tag using the `@`
 * **Explicit Versioning:** If a version is provided (e.g., `@2.x`), the engine uses that specific range for resolution.
 
 ```bridge
-version 1.4
+version 1.5
 
 # 1. Standard Library resolution (uses v1.4.x based on file header)
 with std.str.upper

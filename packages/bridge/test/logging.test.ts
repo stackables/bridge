@@ -24,7 +24,7 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridge = `version 1.4
+const bridge = `version 1.5
 bridge Query.lookup {
   with geocoder as g
   with input as i

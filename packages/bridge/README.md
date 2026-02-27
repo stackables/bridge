@@ -36,7 +36,7 @@ type Query {
 Create your `logic.bridge` file to implement the resolver for that specific field. This is your "Implementation."
 
 ```bridge
-version 1.4
+version 1.5
 
 tool geo from httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
