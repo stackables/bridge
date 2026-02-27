@@ -4437,7 +4437,57 @@ function buildBridgeBody(
       const srcRef = firstParenNode
         ? resolveParenExpr(firstParenNode, lineNum)
         : buildSourceExpr(firstSourceNode!, lineNum);
-      wires.push({ from: srcRef, to: toRef });
+
+      // Process coalesce modifiers on the array wire (same as plain pull wires)
+      let arrayFalsyFallback: string | undefined;
+      let arrayFalsyControl: ControlFlowInstruction | undefined;
+      const arrayNullAltRefs: NodeRef[] = [];
+      for (const alt of subs(wireNode, "nullAlt")) {
+        const altResult = extractCoalesceAlt(alt, lineNum);
+        if ("literal" in altResult) { arrayFalsyFallback = altResult.literal; }
+        else if ("control" in altResult) { arrayFalsyControl = altResult.control; }
+        else { arrayNullAltRefs.push(altResult.sourceRef); }
+      }
+      let arrayNullishFallback: string | undefined;
+      let arrayNullishControl: ControlFlowInstruction | undefined;
+      let arrayNullishFallbackRef: NodeRef | undefined;
+      let arrayNullishFallbackInternalWires: Wire[] = [];
+      const arrayNullishAlt = sub(wireNode, "nullishAlt");
+      if (arrayNullishAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(arrayNullishAlt, lineNum);
+        if ("literal" in altResult) { arrayNullishFallback = altResult.literal; }
+        else if ("control" in altResult) { arrayNullishControl = altResult.control; }
+        else { arrayNullishFallbackRef = altResult.sourceRef; arrayNullishFallbackInternalWires = wires.splice(preLen); }
+      }
+      let arrayCatchFallback: string | undefined;
+      let arrayCatchControl: ControlFlowInstruction | undefined;
+      let arrayCatchFallbackRef: NodeRef | undefined;
+      let arrayCatchFallbackInternalWires: Wire[] = [];
+      const arrayCatchAlt = sub(wireNode, "catchAlt");
+      if (arrayCatchAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(arrayCatchAlt, lineNum);
+        if ("literal" in altResult) { arrayCatchFallback = altResult.literal; }
+        else if ("control" in altResult) { arrayCatchControl = altResult.control; }
+        else { arrayCatchFallbackRef = altResult.sourceRef; arrayCatchFallbackInternalWires = wires.splice(preLen); }
+      }
+      const arrayWireAttrs = {
+        ...(arrayFalsyFallback ? { falsyFallback: arrayFalsyFallback } : {}),
+        ...(arrayFalsyControl ? { falsyControl: arrayFalsyControl } : {}),
+        ...(arrayNullishFallback ? { nullishFallback: arrayNullishFallback } : {}),
+        ...(arrayNullishFallbackRef ? { nullishFallbackRef: arrayNullishFallbackRef } : {}),
+        ...(arrayNullishControl ? { nullishControl: arrayNullishControl } : {}),
+        ...(arrayCatchFallback ? { catchFallback: arrayCatchFallback } : {}),
+        ...(arrayCatchFallbackRef ? { catchFallbackRef: arrayCatchFallbackRef } : {}),
+        ...(arrayCatchControl ? { catchControl: arrayCatchControl } : {}),
+      };
+      wires.push({ from: srcRef, to: toRef, ...arrayWireAttrs });
+      for (const ref of arrayNullAltRefs) {
+        wires.push({ from: ref, to: toRef });
+      }
+      wires.push(...arrayNullishFallbackInternalWires);
+      wires.push(...arrayCatchFallbackInternalWires);
 
       const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
       assertNotReserved(iterName, lineNum, "iterator handle");
