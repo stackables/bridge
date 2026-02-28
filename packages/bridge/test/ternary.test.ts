@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
+import { BridgePanicError } from "../src/index.ts";
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -107,9 +111,13 @@ bridge Query.check {
     const bridge = instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
-    assert.ok(condWire.cond.instance != null && condWire.cond.instance >= 100000,
-      "cond should be an expression fork result");
-    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    assert.ok(
+      condWire.cond.instance != null && condWire.cond.instance >= 100000,
+      "cond should be an expression fork result",
+    );
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandle, "should have expression fork");
     assert.equal(exprHandle.baseTrunk.field, "gte");
   });
@@ -156,7 +164,10 @@ bridge Query.pricing {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("? i.proPrice : i.basicPrice"), `got: ${serialized}`);
+    assert.ok(
+      serialized.includes("? i.proPrice : i.basicPrice"),
+      `got: ${serialized}`,
+    );
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
@@ -173,7 +184,10 @@ bridge Query.label {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes(`? "premium" : "basic"`), `got: ${serialized}`);
+    assert.ok(
+      serialized.includes(`? "premium" : "basic"`),
+      `got: ${serialized}`,
+    );
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
@@ -207,7 +221,10 @@ bridge Query.pricing {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("? i.proPrice : i.basicPrice || 0"), `got: ${serialized}`);
+    assert.ok(
+      serialized.includes("? i.proPrice : i.basicPrice || 0"),
+      `got: ${serialized}`,
+    );
   });
 
   test("catch literal fallback round-trips", () => {
@@ -220,7 +237,10 @@ bridge Query.pricing {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("? i.proPrice : i.basicPrice catch -1"), `got: ${serialized}`);
+    assert.ok(
+      serialized.includes("? i.proPrice : i.basicPrice catch -1"),
+      `got: ${serialized}`,
+    );
   });
 });
 
@@ -294,10 +314,18 @@ bridge Query.check {
   with output as o
   o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
 }`;
-    const adult = await run(bridge, "Query.check", { age: 20, proPrice: 99, basicPrice: 9 });
+    const adult = await run(bridge, "Query.check", {
+      age: 20,
+      proPrice: 99,
+      basicPrice: 9,
+    });
     assert.equal((adult.data as any).result, 99);
 
-    const minor = await run(bridge, "Query.check", { age: 15, proPrice: 99, basicPrice: 9 });
+    const minor = await run(bridge, "Query.check", {
+      age: 15,
+      proPrice: 99,
+      basicPrice: 9,
+    });
     assert.equal((minor.data as any).result, 9);
   });
 });
@@ -311,7 +339,10 @@ bridge Query.pricing {
   o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
 }`;
     // basicPrice is absent (null/undefined) → fallback 0
-    const { data } = await run(bridge, "Query.pricing", { isPro: false, proPrice: 99 });
+    const { data } = await run(bridge, "Query.pricing", {
+      isPro: false,
+      proPrice: 99,
+    });
     assert.equal((data as any).amount, 0);
   });
 
@@ -323,8 +354,17 @@ bridge Query.pricing {
   with output as o
   o.amount <- i.isPro ? proTool.price : i.basicPrice catch -1
 }`;
-    const tools = { "pro.getPrice": async () => { throw new Error("api down"); } };
-    const { data } = await run(bridge, "Query.pricing", { isPro: true, basicPrice: 9 }, tools);
+    const tools = {
+      "pro.getPrice": async () => {
+        throw new Error("api down");
+      },
+    };
+    const { data } = await run(
+      bridge,
+      "Query.pricing",
+      { isPro: true, basicPrice: 9 },
+      tools,
+    );
     assert.equal((data as any).amount, -1);
   });
 
@@ -338,7 +378,12 @@ bridge Query.pricing {
 }`;
     const tools = { "fallback.getPrice": async () => ({ defaultPrice: 5 }) };
     // basicPrice absent → chosen branch null → fallback tool fires
-    const { data } = await run(bridge, "Query.pricing", { isPro: false, proPrice: 99 }, tools);
+    const { data } = await run(
+      bridge,
+      "Query.pricing",
+      { isPro: false, proPrice: 99 },
+      tools,
+    );
     assert.equal((data as any).amount, 5);
   });
 });
@@ -357,8 +402,14 @@ bridge Query.smartPrice {
   o.price <- i.isPro ? proTool.price : basicTool.price
 }`;
     const tools = {
-      "pro.getPrice": async () => { proCalls++; return { price: 99.99 }; },
-      "basic.getPrice": async () => { basicCalls++; return { price: 9.99 }; },
+      "pro.getPrice": async () => {
+        proCalls++;
+        return { price: 99.99 };
+      },
+      "basic.getPrice": async () => {
+        basicCalls++;
+        return { price: 9.99 };
+      },
     };
 
     // When isPro=true: only proTool should be called
@@ -368,7 +419,12 @@ bridge Query.smartPrice {
     assert.equal(basicCalls, 0, "basicTool not called");
 
     // When isPro=false: only basicTool should be called
-    const basic = await run(bridge, "Query.smartPrice", { isPro: false }, tools);
+    const basic = await run(
+      bridge,
+      "Query.smartPrice",
+      { isPro: false },
+      tools,
+    );
     assert.equal((basic.data as any).price, 9.99);
     assert.equal(proCalls, 1, "proTool still called only once");
     assert.equal(basicCalls, 1, "basicTool called once");
@@ -403,3 +459,121 @@ bridge Query.products {
   });
 });
 
+describe("ternary: alias + fallback modifiers (Lazy Gate)", () => {
+  test("alias ternary + ?? panic fires on false branch → null", async () => {
+    const src = `version 1.5
+bridge Query.location {
+  with geoApi as geo
+  with input as i
+  with output as o
+
+  alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
+
+  geo.q <- ageChecked?.city
+
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}`;
+    const tools = {
+      geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
+    };
+    await assert.rejects(
+      () => run(src, "Query.location", { age: 15, city: "Zurich" }, tools),
+      (err: Error) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.equal(err.message, "Must be 18 or older");
+        return true;
+      },
+    );
+  });
+
+  test("alias ternary + ?? panic does NOT fire when condition is true", async () => {
+    const src = `version 1.5
+bridge Query.location {
+  with geoApi as geo
+  with input as i
+  with output as o
+
+  alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
+
+  geo.q <- ageChecked?.city
+
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}`;
+    const tools = {
+      geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
+    };
+    const { data } = await run(
+      src,
+      "Query.location",
+      { age: 25, city: "Zurich" },
+      tools,
+    );
+    assert.equal((data as any).lat, 47.37);
+    assert.equal((data as any).lon, 8.54);
+  });
+
+  test("alias ternary + || literal fallback", async () => {
+    const src = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+  alias i.score >= 50 ? i.grade : null || "F" as grade
+  o.grade <- grade
+}`;
+    const { data } = await run(src, "Query.test", { score: 30 });
+    assert.equal((data as any).grade, "F");
+  });
+
+  test("alias ternary + || ref fallback", async () => {
+    const src = `version 1.5
+bridge Query.test {
+  with fallback.api as fb
+  with input as i
+  with output as o
+  alias i.score >= 50 ? i.grade : null || fb.grade as grade
+  o.grade <- grade
+}`;
+    const tools = {
+      "fallback.api": async () => ({ grade: "F" }),
+    };
+    const { data } = await run(src, "Query.test", { score: 30 }, tools);
+    assert.equal((data as any).grade, "F");
+  });
+
+  test("alias ternary + catch literal fallback", async () => {
+    const src = `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  alias a.ok ? a.value : a.alt catch "safe" as result
+  o.val <- result
+}`;
+    const tools = {
+      api: async () => {
+        throw new Error("boom");
+      },
+    };
+    const { data } = await run(src, "Query.test", {}, tools);
+    assert.equal((data as any).val, "safe");
+  });
+
+  test("string alias ternary + ?? panic", async () => {
+    const src = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+  alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
+  o.msg <- result
+}`;
+    await assert.rejects(
+      () => run(src, "Query.test", { secret: "world" }),
+      (err: Error) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.equal(err.message, "wrong secret");
+        return true;
+      },
+    );
+  });
+});
