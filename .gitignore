@@ -7,3 +7,4 @@ dist
 .wrangler
 .DS_Store
 coverage
+packages/*/lcov.info
