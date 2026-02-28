@@ -7,12 +7,17 @@
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "lint:types": "pnpm -r --filter './packages/*' lint:types",
+    "lint:eslint": "eslint .",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
     "ci:publish": "pnpm publish -r"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
-    "@tsconfig/node24": "^24.0.4"
+    "@eslint/js": "^10.0.1",
+    "@tsconfig/node24": "^24.0.4",
+    "eslint": "^10.0.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
   }
 }
