@@ -33,7 +33,7 @@ bridge Query.test {
   with output as o
   o.name <- i.name || throw "name is required"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -52,7 +52,7 @@ bridge Query.test {
   with output as o
   o.name <- i.name ?? panic "fatal: name cannot be null"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -74,7 +74,7 @@ bridge Query.test {
     .name <- item.name ?? continue
   }
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
@@ -93,7 +93,7 @@ bridge Query.test {
     .name <- item.name ?? break
   }
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
@@ -110,7 +110,7 @@ bridge Query.test {
   with output as o
   o.name <- a.name catch throw "api failed"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -130,7 +130,7 @@ bridge Query.test {
   with output as o
   o.name <- a.name catch panic "unrecoverable"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -161,7 +161,7 @@ bridge Query.test {
     assert.ok(out.includes('|| throw "name is required"'));
     // Parse again and compare AST
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -185,7 +185,7 @@ bridge Query.test {
     const out = serializeBridge(instructions);
     assert.ok(out.includes('?? panic "fatal"'));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -212,7 +212,7 @@ bridge Query.test {
     const out = serializeBridge(instructions);
     assert.ok(out.includes("?? continue"));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.find((i): i is Bridge => i.kind === "bridge")!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
@@ -234,7 +234,7 @@ bridge Query.test {
     const out = serializeBridge(instructions);
     assert.ok(out.includes("catch break"));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",

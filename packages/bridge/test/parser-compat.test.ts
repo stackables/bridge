@@ -582,3 +582,84 @@ tool myApi from std.httpCall {
 }`,
   );
 });
+
+// ── Version declaration handling ────────────────────────────────────────────
+
+describe("parser — version declaration", () => {
+  it("version 1.5 is accepted", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.length > 0);
+  });
+
+  it("version 1.7 is accepted (future minor within same major)", () => {
+    const result = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.length > 0);
+  });
+
+  it("version 1.12 is accepted", () => {
+    const result = parseBridge(`version 1.12
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.length > 0);
+  });
+
+  it("version 2.0 is rejected (different major)", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 2.0
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /major version/i,
+    );
+  });
+
+  it("version 0.9 is rejected (different major)", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 0.9
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /major version/i,
+    );
+  });
+
+  it("VersionDecl instruction is emitted", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    const vDecl = result.find((i) => i.kind === "version");
+    assert.ok(vDecl);
+    if (vDecl && vDecl.kind === "version") {
+      assert.equal(vDecl.version, "1.5");
+    }
+  });
+
+  it("VersionDecl preserves declared version (1.7)", () => {
+    const result = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    const vDecl = result.find((i) => i.kind === "version");
+    assert.ok(vDecl);
+    if (vDecl && vDecl.kind === "version") {
+      assert.equal(vDecl.version, "1.7");
+    }
+  });
+});

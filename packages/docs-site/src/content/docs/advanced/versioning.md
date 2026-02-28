@@ -120,7 +120,36 @@ Every bridge file starts with a `version` header that declares the **language ve
 version 1.5
 ```
 
-This header controls which syntax features are available and is coupled with the standard library version. When the standard library (`@stackables/bridge-stdlib`) is published at version `1.5.x`, bridge files with `version 1.5` are guaranteed access to all `std.*` tools available in that release.
+This header serves two purposes:
+
+1. **Syntax compatibility** — the parser accepts any file within the same major version (e.g. `1.5`, `1.7`, `1.12`). A major version bump (e.g. `2.0`) indicates breaking syntax changes and will be rejected by a `1.x` parser.
+2. **Standard library minimum version** — the engine checks that the installed `@stackables/bridge-stdlib` satisfies the declared version.
+
+### Compatibility rules
+
+| Bridge file   | Installed std | Result                                        |
+| ------------- | ------------- | --------------------------------------------- |
+| `version 1.5` | `1.5.0`       | ✅ Works                                      |
+| `version 1.5` | `1.5.7`       | ✅ Works (patch is irrelevant)                |
+| `version 1.5` | `1.7.0`       | ✅ Works (newer minor is backward compatible) |
+| `version 1.7` | `1.5.0`       | ❌ Error: std too old                         |
+| `version 1.7` | `1.7.0`       | ✅ Works                                      |
+| `version 2.0` | `1.x`         | ❌ Error: different major version             |
+
+Within the same major version, the standard library only adds tools and features — it never removes or changes existing behavior. This means:
+
+- **Old bridges always work** on newer std releases (forward compatible).
+- **New bridges fail early** on older std releases with a clear error message telling you exactly which version to install.
+
+### Error messages
+
+When the version check fails, you get an actionable error:
+
+```
+Bridge version 1.7 requires standard library ≥ 1.7,
+but the installed @stackables/bridge-stdlib is 1.5.0.
+Update @stackables/bridge-stdlib to 1.7.0 or later.
+```
 
 ## Best practices
 

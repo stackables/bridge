@@ -6,6 +6,7 @@ import type {
   Instruction,
   NodeRef,
   ToolDef,
+  VersionDecl,
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
@@ -32,6 +33,10 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
 // ── Serializer ───────────────────────────────────────────────────────────────
 
 export function serializeBridge(instructions: Instruction[]): string {
+  const versionDecl = instructions.find(
+    (i): i is VersionDecl => i.kind === "version",
+  );
+  const version = versionDecl?.version ?? BRIDGE_VERSION;
   const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
   const tools = instructions.filter((i): i is ToolDef => i.kind === "tool");
   const consts = instructions.filter((i): i is ConstDef => i.kind === "const");
@@ -62,7 +67,7 @@ export function serializeBridge(instructions: Instruction[]): string {
     blocks.push(serializeBridgeBlock(bridge));
   }
 
-  return `version ${BRIDGE_VERSION}\n\n` + blocks.join("\n\n") + "\n";
+  return `version ${version}\n\n` + blocks.join("\n\n") + "\n";
 }
 
 /**

@@ -15,6 +15,10 @@ export type {
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
 
+// ── Version check ───────────────────────────────────────────────────────────
+
+export { checkStdVersion, getBridgeVersion } from "./version-check.ts";
+
 // ── Execution tree (advanced) ───────────────────────────────────────────────
 
 export {
@@ -43,6 +47,7 @@ export type {
   ToolDep,
   ToolMap,
   ToolWire,
+  VersionDecl,
   Wire,
 } from "./types.ts";
 

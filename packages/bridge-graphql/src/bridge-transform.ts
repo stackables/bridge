@@ -8,11 +8,12 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
+  checkStdVersion,
   type Logger,
   type ToolTrace,
   type TraceLevel,
 } from "@stackables/bridge-core";
-import { std } from "@stackables/bridge-stdlib";
+import { std, STD_VERSION } from "@stackables/bridge-stdlib";
 import type { Instruction, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 
@@ -93,6 +94,9 @@ export function bridgeTransform(
               typeof instructions === "function"
                 ? instructions(context)
                 : instructions;
+
+            // Verify the installed std satisfies the bridge's declared version
+            checkStdVersion(activeInstructions, STD_VERSION);
 
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,

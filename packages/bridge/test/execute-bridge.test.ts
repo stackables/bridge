@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
+import { checkStdVersion, getBridgeVersion } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -713,6 +714,120 @@ bridge Query.foo {
     await assert.rejects(
       () => run(bridgeText, "Query.bar", {}),
       /No bridge definition found/,
+    );
+  });
+});
+
+// ── Version compatibility ───────────────────────────────────────────────────
+
+describe("version compatibility: getBridgeVersion", () => {
+  test("extracts version from parsed instructions", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.equal(getBridgeVersion(instructions), "1.5");
+  });
+
+  test("extracts future version 1.7", () => {
+    const instructions = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.equal(getBridgeVersion(instructions), "1.7");
+  });
+
+  test("returns undefined for instructions without VersionDecl", () => {
+    assert.equal(getBridgeVersion([]), undefined);
+  });
+});
+
+describe("version compatibility: checkStdVersion", () => {
+  const instructions15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  const instructions17 = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  test("bridge 1.5 + std 1.5.0 → OK", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions15, "1.5.0"));
+  });
+
+  test("bridge 1.5 + std 1.5.7 → OK (patch doesn't matter)", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions15, "1.5.7"));
+  });
+
+  test("bridge 1.5 + std 1.7.0 → OK (newer minor is backward compatible)", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions15, "1.7.0"));
+  });
+
+  test("bridge 1.7 + std 1.5.0 → ERROR (std too old)", () => {
+    assert.throws(
+      () => checkStdVersion(instructions17, "1.5.0"),
+      /requires standard library ≥ 1\.7.*installed.*1\.5\.0/,
+    );
+  });
+
+  test("bridge 1.7 + std 1.7.0 → OK (exact match)", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions17, "1.7.0"));
+  });
+
+  test("bridge 1.7 + std 1.7.3 → OK (same minor, higher patch)", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions17, "1.7.3"));
+  });
+
+  test("bridge 1.7 + std 1.9.0 → OK (newer minor)", () => {
+    assert.doesNotThrow(() => checkStdVersion(instructions17, "1.9.0"));
+  });
+
+  test("bridge 1.7 + std 2.0.0 → ERROR (different major)", () => {
+    assert.throws(
+      () => checkStdVersion(instructions17, "2.0.0"),
+      /different major version/,
+    );
+  });
+
+  test("no VersionDecl → no error (graceful)", () => {
+    assert.doesNotThrow(() => checkStdVersion([], "1.5.0"));
+  });
+});
+
+describe("version compatibility: executeBridge integration", () => {
+  test("version 1.5 bridge executes normally on current std", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with output as o
+  o.greeting = "hello"
+}`,
+      "Query.test",
+      {},
+    );
+    assert.deepStrictEqual(data, { greeting: "hello" });
+  });
+
+  test("version 1.7 bridge throws at execution time when std is 1.5", async () => {
+    // The current STD_VERSION is "1.5.0", so a version 1.7 bridge should fail
+    await assert.rejects(
+      () =>
+        run(
+          `version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`,
+          "Query.test",
+          {},
+        ),
+      /requires standard library ≥ 1\.7/,
     );
   });
 });

@@ -55,8 +55,8 @@ o.search <- i.search
 gc.q <- i.search
 
 }`);
-    assert.equal(result.length, 1);
-    const bridge = result[0] as Bridge;
+    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.kind, "bridge");
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
@@ -113,9 +113,9 @@ ti.value <- a.raw
 o.output <- ti.result
 
 }`);
-    assert.equal(result.length, 1);
+    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
 
-    const bridge = result[0] as Bridge;
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
       from: {
@@ -161,7 +161,7 @@ o.topPick.address <- z.properties[0].streetAddress
 o.topPick.city    <- z.properties[0].location.city
 
 }`);
-    const bridge = result[0] as Bridge;
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.deepStrictEqual(bridge.wires[0].from, {
       module: "zillow",
       type: "Query",
@@ -197,7 +197,7 @@ o.results <- p.items[] as item {
 }
 
 }`);
-    const bridge = result[0] as Bridge;
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.wires.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
       from: {
@@ -258,7 +258,7 @@ sg.content <- i.body
 o.messageId <- sg.headers.x-message-id
 
 }`);
-    const bridge = result[0] as Bridge;
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.type, "Mutation");
     assert.deepStrictEqual(bridge.wires[0].to, {
       module: "sendgrid",
@@ -309,7 +309,7 @@ z.maxPrice <- c.maxBudget
 z.lat <- i.lat
 
 }`);
-    const bridge = result[0] as Bridge;
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
     assert.deepStrictEqual(bridge.wires[0].from, {
@@ -751,15 +751,15 @@ describe("parser robustness", () => {
     const result = parseBridge(
       "version 1.5\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
     );
-    assert.equal(result.length, 1);
-    assert.equal(result[0].kind, "bridge");
+    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
+    assert.equal(result.find((i) => i.kind === "bridge")!.kind, "bridge");
   });
 
   test("tabs are treated as spaces", () => {
     const result = parseBridge(
       "version 1.5\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
     );
-    assert.equal(result.length, 1);
+    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
   });
 
   test("keywords are case-insensitive", () => {
@@ -771,7 +771,7 @@ Bridge Query.geocode {
 
 gc.q <- i.search
 
-}`)[0] as Bridge;
+}`).find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
   });
@@ -782,7 +782,7 @@ gc.q <- i.search
 tool hereapi from httpCall {
   .baseUrl = "https://example.com"
 
-}`)[0] as ToolDef;
+}`).find((i): i is ToolDef => i.kind === "tool")!;
     assert.equal(tool.name, "hereapi");
     assert.equal(tool.fn, "httpCall");
   });
@@ -807,7 +807,7 @@ bridge Query.geocode {
 gc.q <- i.search
 
 }`);
-    assert.equal(result.length, 3);
+    assert.equal(result.filter((i) => i.kind !== "version").length, 3);
   });
 
   test("duplicate handle throws with line number", () => {
@@ -978,7 +978,7 @@ tool myApi from httpCall {
     "lon": 0
   }
 }`);
-    const tool = result[0] as ToolDef;
+    const tool = result.find((i): i is ToolDef => i.kind === "tool")!;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
@@ -1113,6 +1113,36 @@ bridge Query.test {
     assert.ok(
       !serialized.includes("@"),
       `should have no @ sign: ${serialized}`,
+    );
+  });
+});
+
+describe("version tags: VersionDecl in serializer", () => {
+  test("serializer preserves declared version from VersionDecl", () => {
+    const src = `version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.7\n"),
+      `expected 'version 1.7' header, got: ${serialized.slice(0, 30)}`,
+    );
+  });
+
+  test("version 1.5 round-trips correctly", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.5\n"),
+      `expected 'version 1.5' header, got: ${serialized.slice(0, 30)}`,
     );
   });
 });

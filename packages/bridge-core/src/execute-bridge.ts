@@ -2,7 +2,8 @@ import { ExecutionTree, TraceCollector } from "./ExecutionTree.ts";
 import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 import type { Instruction, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { std } from "@stackables/bridge-stdlib";
+import { std, STD_VERSION } from "@stackables/bridge-stdlib";
+import { checkStdVersion } from "./version-check.ts";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge instructions (from `parseBridgeDiagnostics`). */
@@ -73,6 +74,9 @@ export async function executeBridge<T = unknown>(
 
   const [type, field] = parts as [string, string];
   const trunk = { module: SELF_MODULE, type, field };
+
+  // Verify the installed std satisfies the bridge's declared version
+  checkStdVersion(instructions, STD_VERSION);
 
   const tree = new ExecutionTree(
     trunk,

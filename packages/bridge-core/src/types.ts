@@ -271,8 +271,22 @@ export type ConstDef = {
   value: string;
 };
 
+/**
+ * Version declaration — records the bridge file's declared language version.
+ *
+ * Emitted by the parser as the first instruction. Used at runtime to verify
+ * that the standard library satisfies the bridge's minimum version requirement.
+ *
+ * Example:  `version 1.5`  →  `{ kind: "version", version: "1.5" }`
+ */
+export type VersionDecl = {
+  kind: "version";
+  /** Declared version string, e.g. "1.5" */
+  version: string;
+};
+
 /** Union of all instruction types */
-export type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
+export type Instruction = VersionDecl | Bridge | ToolDef | ConstDef | DefineDef;
 
 /**
  * Define block — a reusable named subgraph (pipeline / macro).

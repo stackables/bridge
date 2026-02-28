@@ -77,6 +77,7 @@ import type {
   ToolDef,
   ToolDep,
   ToolWire,
+  VersionDecl,
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
@@ -1200,6 +1201,7 @@ const parserInstance = new BridgeParser();
 const diagParserInstance = new BridgeParser({ recovery: true });
 
 const BRIDGE_VERSION = "1.5";
+const BRIDGE_MAJOR = 1;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public API
@@ -2658,10 +2660,26 @@ function toBridgeAst(
   }
   const versionTok = tok(versionDecl, "ver");
   const versionNum = versionTok?.image;
-  if (versionNum !== BRIDGE_VERSION) {
+  if (!versionNum) {
     throw new Error(
-      `Unsupported bridge version "${versionNum}". This parser requires: version ${BRIDGE_VERSION}`,
+      `Missing version number. Bridge files must begin with: version ${BRIDGE_VERSION}`,
     );
+  }
+  // Accept any version with the same major number (e.g. 1.5, 1.7, 1.12).
+  // Breaking syntax changes bump the major → a 2.x file won't parse here.
+  const vParts = versionNum.split(".");
+  const vMajor = parseInt(vParts[0], 10);
+  if (isNaN(vMajor) || vMajor !== BRIDGE_MAJOR) {
+    throw new Error(
+      `Unsupported bridge major version "${versionNum}". This parser supports version ${BRIDGE_MAJOR}.x`,
+    );
+  }
+
+  // Emit a VersionDecl instruction so the runtime can verify std compatibility.
+  const versionInst: VersionDecl = { kind: "version", version: versionNum };
+  instructions.push(versionInst);
+  if (versionTok) {
+    startLines.set(versionInst, versionTok.startLine ?? 1);
   }
 
   // Process in source order (same as old parser: all blocks sequentially)

@@ -11,7 +11,7 @@ import { createGateway } from "./_gateway.ts";
 
 describe("parseBridge: force <handle>", () => {
   test("regular bridge has no forces", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -21,13 +21,13 @@ bridge Query.demo {
 t.action <- i.name
 o.result <- t.output
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.equal(bridge.forces, undefined);
   });
 
   test("force statement creates a forces entry", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.audit {
   with logger.log as lg
@@ -36,7 +36,7 @@ bridge Mutation.audit {
 lg.action <- i.event
 force lg
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces, "should have forces");
     assert.equal(bridge.forces!.length, 1);
@@ -47,7 +47,7 @@ force lg
   });
 
   test("force and regular wires coexist", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with mainApi as m
@@ -60,7 +60,7 @@ audit.action <- i.query
 force audit
 o.result <- m.data
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -78,7 +78,7 @@ o.result <- m.data
   });
 
   test("multiple force statements", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -90,7 +90,7 @@ mt.name <- i.event
 force lg
 force mt
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);
@@ -115,7 +115,7 @@ force unknown
   });
 
   test("force on simple (non-dotted) tool handle", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -126,7 +126,7 @@ t.in <- i.name
 force t
 o.result <- t.out
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -138,7 +138,7 @@ o.result <- t.out
 
   test("force without any wires to the handle", () => {
     // The whole point of force — handle has no output wires, just triggers execution
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with sideEffect as se
@@ -149,7 +149,7 @@ se.action = "fire"
 force se
 o.ok = "true"
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces![0].handle, "se");
@@ -161,7 +161,7 @@ o.ok = "true"
   });
 
   test("force catch null sets catchError flag", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with analytics as ping
@@ -172,7 +172,7 @@ ping.event <- i.event
 force ping catch null
 o.ok = "true"
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -181,7 +181,7 @@ o.ok = "true"
   });
 
   test("mixed critical and fire-and-forget forces", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -193,7 +193,7 @@ mt.name <- i.event
 force lg
 force mt catch null
 
-}`) as Bridge[];
+}`).find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);
