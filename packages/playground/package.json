@@ -1,6 +1,5 @@
 {
   "name": "@stackables/bridge-playground",
-  "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -16,7 +15,7 @@
     "@codemirror/autocomplete": "^6.20.0",
     "@codemirror/commands": "^6.10.2",
     "@codemirror/lang-json": "^6.0.2",
-    "@codemirror/language": "^6.12.1",
+    "@codemirror/language": "^6.12.2",
     "@codemirror/lint": "^6.9.4",
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.15",
@@ -37,8 +36,8 @@
     "tailwind-merge": "3.5.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.25.5",
-    "@cloudflare/workers-types": "^4.20260303.0",
+    "@cloudflare/vite-plugin": "^1.25.6",
+    "@cloudflare/workers-types": "^4.20260305.0",
     "@tailwindcss/vite": "4.2.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -46,6 +45,6 @@
     "tailwindcss": "4.2.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "wrangler": "^4.68.1"
+    "wrangler": "^4.69.0"
   }
 }

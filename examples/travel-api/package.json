@@ -1,6 +1,5 @@
 {
-  "name": "@stackables/bridge-example-travel-api",
-  "version": "0.0.1",
+  "name": "@examples/bridge-example-travel-api",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +11,6 @@
     "graphql-yoga": "^5.18.0"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0"
+    "@types/node": "^25.3.2"
   }
 }

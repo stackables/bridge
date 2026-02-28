@@ -33,14 +33,14 @@
   "homepage": "https://github.com/stackables/bridge#readme",
   "devDependencies": {
     "@graphql-tools/executor-http": "^3.1.0",
-    "@types/node": "^25.3.0",
-    "graphql": "^16",
+    "@types/node": "^25.3.2",
+    "graphql": "^16.13.0",
     "graphql-yoga": "^5.18.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-compiler": "workspace:*",
+    "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-graphql": "workspace:*",
     "@stackables/bridge-stdlib": "workspace:*"
   },

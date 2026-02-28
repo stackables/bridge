@@ -17,8 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepack": "pnpm build",
-    "release": "npx --no-install semantic-release -e semantic-release-monorepo"
+    "prepack": "pnpm build"
   },
   "repository": {
     "type": "git",
@@ -26,7 +25,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.3.2",
     "typescript": "^5.9.3"
   },
   "publishConfig": {

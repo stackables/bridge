@@ -19,8 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
-    "release": "npx --no-install semantic-release -e semantic-release-monorepo"
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -29,10 +28,10 @@
   "license": "MIT",
   "dependencies": {
     "@stackables/bridge-types": "workspace:*",
-    "lru-cache": "^11"
+    "lru-cache": "^11.2.6"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.3.2",
     "typescript": "^5.9.3"
   },
   "publishConfig": {
