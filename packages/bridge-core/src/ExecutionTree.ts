@@ -3,8 +3,8 @@ import { parsePath } from "./utils.ts";
 import { internal } from "./tools/index.ts";
 import type {
   Bridge,
+  BridgeDocument,
   ControlFlowInstruction,
-  Instruction,
   NodeRef,
   ToolCallFn,
   ToolContext,
@@ -259,12 +259,13 @@ export class ExecutionTree {
 
   constructor(
     public trunk: Trunk,
-    private instructions: Instruction[],
+    private document: BridgeDocument,
     toolFns?: ToolMap,
     private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
     this.toolFns = { internal, ...(toolFns ?? {}) };
+    const instructions = document.instructions;
     this.bridge = instructions.find(
       (i): i is Bridge =>
         i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
@@ -392,7 +393,7 @@ export class ExecutionTree {
     if (this.toolDefCache.has(name))
       return this.toolDefCache.get(name) ?? undefined;
 
-    const toolDefs = this.instructions.filter(
+    const toolDefs = this.document.instructions.filter(
       (i): i is ToolDef => i.kind === "tool",
     );
     const base = toolDefs.find((t) => t.name === name);
@@ -810,7 +811,7 @@ export class ExecutionTree {
   shadow(): ExecutionTree {
     const child = new ExecutionTree(
       this.trunk,
-      this.instructions,
+      this.document,
       this.toolFns,
       undefined,
       this,

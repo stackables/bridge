@@ -15,22 +15,22 @@ function run(
   input: Record<string, unknown> = {},
   tools: Record<string, any> = {},
 ) {
-  const instructions = parseBridge(bridgeText);
-  return executeBridge({ instructions, operation, input, tools });
+  const document = parseBridge(bridgeText);
+  return executeBridge({ document, operation, input, tools });
 }
 
 // ── Parser / desugaring tests ─────────────────────────────────────────────
 
 describe("ternary: parser", () => {
   test("simple ref ? ref : ref produces a conditional wire", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire, "should have a conditional wire");
     assert.ok("cond" in condWire);
@@ -41,14 +41,14 @@ bridge Query.pricing {
   });
 
   test("string literal branches produce thenValue / elseValue", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.label {
   with input as i
   with output as o
 
   o.tier <- i.isPro ? "premium" : "basic"
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, '"premium"');
@@ -56,14 +56,14 @@ bridge Query.label {
   });
 
   test("numeric literal branches produce thenValue / elseValue", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
 
   o.discount <- i.isPro ? 20 : 0
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, "20");
@@ -71,14 +71,14 @@ bridge Query.pricing {
   });
 
   test("boolean literal branches", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- i.cond ? true : false
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, "true");
@@ -86,14 +86,14 @@ bridge Query.check {
   });
 
   test("null literal branch", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- i.cond ? i.value : null
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.ok(condWire.thenRef, "thenRef should be NodeRef");
@@ -101,14 +101,14 @@ bridge Query.check {
   });
 
   test("condition with expression chain: i.age >= 18 ? a : b", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- i.age >= 18 ? i.proValue : i.basicValue
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.ok(
@@ -123,28 +123,28 @@ bridge Query.check {
   });
 
   test("|| literal fallback stored on conditional wire", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.falsyFallback, "0");
   });
 
   test("catch literal fallback stored on conditional wire", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.pricing {
   with input as i
   with output as o
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
 }`);
-    const bridge = instructions.find((inst) => inst.kind === "bridge")!;
+    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.catchFallback, "-1");
@@ -162,14 +162,16 @@ bridge Query.pricing {
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("? i.proPrice : i.basicPrice"),
       `got: ${serialized}`,
     );
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((inst) => inst.kind === "bridge")!;
+    const bridge = reparsed.instructions.find(
+      (inst) => inst.kind === "bridge",
+    )!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire, "re-parsed should have conditional wire");
   });
@@ -182,14 +184,16 @@ bridge Query.label {
 
   o.tier <- i.isPro ? "premium" : "basic"
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes(`? "premium" : "basic"`),
       `got: ${serialized}`,
     );
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((inst) => inst.kind === "bridge")!;
+    const bridge = reparsed.instructions.find(
+      (inst) => inst.kind === "bridge",
+    )!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, '"premium"');
@@ -203,8 +207,8 @@ bridge Query.check {
 
   o.result <- i.age >= 18 ? i.proValue : i.basicValue
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("i.age >= 18 ? i.proValue : i.basicValue"),
       `got: ${serialized}`,
@@ -219,8 +223,8 @@ bridge Query.pricing {
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("? i.proPrice : i.basicPrice || 0"),
       `got: ${serialized}`,
@@ -235,8 +239,8 @@ bridge Query.pricing {
 
   o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("? i.proPrice : i.basicPrice catch -1"),
       `got: ${serialized}`,

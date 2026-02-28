@@ -21,7 +21,7 @@ bridge Query.demo {
 t.action <- i.name
 o.result <- t.output
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.equal(bridge.forces, undefined);
   });
@@ -36,7 +36,7 @@ bridge Mutation.audit {
 lg.action <- i.event
 force lg
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces, "should have forces");
     assert.equal(bridge.forces!.length, 1);
@@ -60,7 +60,7 @@ audit.action <- i.query
 force audit
 o.result <- m.data
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -90,7 +90,7 @@ mt.name <- i.event
 force lg
 force mt
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);
@@ -126,7 +126,7 @@ t.in <- i.name
 force t
 o.result <- t.out
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -149,7 +149,7 @@ se.action = "fire"
 force se
 o.ok = "true"
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces![0].handle, "se");
@@ -172,7 +172,7 @@ ping.event <- i.event
 force ping catch null
 o.ok = "true"
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -193,7 +193,7 @@ mt.name <- i.event
 force lg
 force mt catch null
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);

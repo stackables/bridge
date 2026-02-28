@@ -100,7 +100,7 @@ export class BridgeLanguageService {
     }
 
     const result = parseBridgeDiagnostics(text);
-    this.instructions = result.instructions;
+    this.instructions = result.document.instructions;
     this.startLines = result.startLines;
     this.parserDiagnostics = result.diagnostics;
   }

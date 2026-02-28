@@ -68,6 +68,7 @@ import {
 
 import type {
   Bridge,
+  BridgeDocument,
   ConstDef,
   ControlFlowInstruction,
   DefineDef,
@@ -77,7 +78,6 @@ import type {
   ToolDef,
   ToolDep,
   ToolWire,
-  VersionDecl,
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
@@ -1220,7 +1220,7 @@ export const PARSER_VERSION = {
 //  Public API
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function parseBridgeChevrotain(text: string): Instruction[] {
+export function parseBridgeChevrotain(text: string): BridgeDocument {
   return internalParse(text);
 }
 
@@ -1236,7 +1236,7 @@ export type BridgeDiagnostic = {
 };
 
 export type BridgeParseResult = {
-  instructions: Instruction[];
+  document: BridgeDocument;
   diagnostics: BridgeDiagnostic[];
   /** 1-based start line for each top-level instruction */
   startLines: Map<Instruction, number>;
@@ -1288,11 +1288,11 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
   }
 
   // 3. Visit → AST (semantic errors thrown as "Line N: ..." messages)
-  let instructions: Instruction[] = [];
+  let document: BridgeDocument = { instructions: [] };
   let startLines = new Map<Instruction, number>();
   try {
     const result = toBridgeAst(cst, []);
-    instructions = result.instructions;
+    document = { version: result.version, instructions: result.instructions };
     startLines = result.startLines;
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
@@ -1308,13 +1308,13 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
     });
   }
 
-  return { instructions, diagnostics, startLines };
+  return { document, diagnostics, startLines };
 }
 
 function internalParse(
   text: string,
   previousInstructions?: Instruction[],
-): Instruction[] {
+): BridgeDocument {
   // 1. Lex
   const lexResult = BridgeLexer.tokenize(text);
   if (lexResult.errors.length > 0) {
@@ -1331,7 +1331,8 @@ function internalParse(
   }
 
   // 3. Visit → AST
-  return toBridgeAst(cst, previousInstructions).instructions;
+  const result = toBridgeAst(cst, previousInstructions);
+  return { version: result.version, instructions: result.instructions };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2655,7 +2656,11 @@ function processElementScopeLines(
 function toBridgeAst(
   cst: CstNode,
   previousInstructions?: Instruction[],
-): { instructions: Instruction[]; startLines: Map<Instruction, number> } {
+): {
+  version: string;
+  instructions: Instruction[];
+  startLines: Map<Instruction, number>;
+} {
   const instructions: Instruction[] = [];
   const startLines = new Map<Instruction, number>();
 
@@ -2693,12 +2698,8 @@ function toBridgeAst(
     );
   }
 
-  // Emit a VersionDecl instruction so the runtime can verify std compatibility.
-  const versionInst: VersionDecl = { kind: "version", version: versionNum };
-  instructions.push(versionInst);
-  if (versionTok) {
-    startLines.set(versionInst, versionTok.startLine ?? 1);
-  }
+  // Store the declared version (lives on BridgeDocument, not in instructions).
+  const version = versionNum;
 
   // Process in source order (same as old parser: all blocks sequentially)
   // Chevrotain stores them by rule name, so we need to interleave by offset.
@@ -2768,7 +2769,7 @@ function toBridgeAst(
     }
   }
 
-  return { instructions, startLines };
+  return { version, instructions, startLines };
 }
 
 // ── Const ───────────────────────────────────────────────────────────────
@@ -2934,9 +2935,11 @@ function buildBridge(
     ].join("\n");
 
     const result = internalParse(expandedText, previousInstructions);
-    const bridgeInst = result.find((i): i is Bridge => i.kind === "bridge");
+    const bridgeInst = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    );
     if (bridgeInst) bridgeInst.passthrough = passthroughName;
-    return result;
+    return result.instructions;
   }
 
   // Full bridge block

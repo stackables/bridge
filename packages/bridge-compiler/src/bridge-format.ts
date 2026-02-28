@@ -1,12 +1,11 @@
 import type {
   Bridge,
+  BridgeDocument,
   ConstDef,
   ControlFlowInstruction,
   DefineDef,
-  Instruction,
   NodeRef,
   ToolDef,
-  VersionDecl,
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
@@ -16,7 +15,7 @@ export { parsePath } from "@stackables/bridge-core";
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.
  */
-export function parseBridge(text: string): Instruction[] {
+export function parseBridge(text: string): BridgeDocument {
   return parseBridgeChevrotain(text);
 }
 
@@ -32,11 +31,9 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
 
 // ── Serializer ───────────────────────────────────────────────────────────────
 
-export function serializeBridge(instructions: Instruction[]): string {
-  const versionDecl = instructions.find(
-    (i): i is VersionDecl => i.kind === "version",
-  );
-  const version = versionDecl?.version ?? BRIDGE_VERSION;
+export function serializeBridge(doc: BridgeDocument): string {
+  const version = doc.version ?? BRIDGE_VERSION;
+  const { instructions } = doc;
   const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
   const tools = instructions.filter((i): i is ToolDef => i.kind === "tool");
   const consts = instructions.filter((i): i is ConstDef => i.kind === "const");

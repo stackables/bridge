@@ -15,10 +15,10 @@ function run(
   tools: Record<string, any> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
-  return executeBridge({ instructions, operation, input, tools });
+  return executeBridge({ document, operation, input, tools });
 }
 
 // ── String interpolation execution tests ────────────────────────────────────

@@ -40,16 +40,28 @@ o.label <- p.label || b.label
 }`;
     const callLog: string[] = [];
     const tools = {
-      primary: async () => { callLog.push("primary"); return { label: "P" }; },
-      backup:  async () => { callLog.push("backup");  return { label: "B" }; },
+      primary: async () => {
+        callLog.push("primary");
+        return { label: "P" };
+      },
+      backup: async () => {
+        callLog.push("backup");
+        return { label: "B" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "P");
-    assert.deepStrictEqual(callLog, ["primary"], "backup should never be called");
+    assert.deepStrictEqual(
+      callLog,
+      ["primary"],
+      "backup should never be called",
+    );
   });
 
   test("primary returns null → backup is called", async () => {
@@ -67,22 +79,38 @@ o.label <- p.label || b.label
 }`;
     const callLog: string[] = [];
     const tools = {
-      primary: async () => { callLog.push("primary"); return { label: null }; },
-      backup:  async () => { callLog.push("backup");  return { label: "B" }; },
+      primary: async () => {
+        callLog.push("primary");
+        return { label: null };
+      },
+      backup: async () => {
+        callLog.push("backup");
+        return { label: "B" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "B");
-    assert.deepStrictEqual(callLog, ["primary", "backup"], "backup called after primary returned null");
+    assert.deepStrictEqual(
+      callLog,
+      ["primary", "backup"],
+      "backup called after primary returned null",
+    );
   });
 
   test("3-source chain: first truthy wins, later sources skipped", async () => {
     const threeSourceTypes = /* GraphQL */ `
-      type Query { lookup(q: String!): Result }
-      type Result { label: String }
+      type Query {
+        lookup(q: String!): Result
+      }
+      type Result {
+        label: String
+      }
     `;
     const bridgeText = `version 1.5
 bridge Query.lookup {
@@ -100,15 +128,26 @@ o.label <- a.label || b.label || c.label
 }`;
     const callLog: string[] = [];
     const tools = {
-      svcA: async () => { callLog.push("A"); return { label: null }; },
-      svcB: async () => { callLog.push("B"); return { label: "from-B" }; },
-      svcC: async () => { callLog.push("C"); return { label: "from-C" }; },
+      svcA: async () => {
+        callLog.push("A");
+        return { label: null };
+      },
+      svcB: async () => {
+        callLog.push("B");
+        return { label: "from-B" };
+      },
+      svcC: async () => {
+        callLog.push("C");
+        return { label: "from-C" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(threeSourceTypes, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(threeSourceTypes, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "from-B");
     assert.deepStrictEqual(callLog, ["A", "B"], "C should never be called");
   });
@@ -128,16 +167,28 @@ o.label <- p.label || b.label || "default"
 }`;
     const callLog: string[] = [];
     const tools = {
-      primary: async () => { callLog.push("primary"); return { label: null }; },
-      backup:  async () => { callLog.push("backup");  return { label: null }; },
+      primary: async () => {
+        callLog.push("primary");
+        return { label: null };
+      },
+      backup: async () => {
+        callLog.push("backup");
+        return { label: null };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "default");
-    assert.deepStrictEqual(callLog, ["primary", "backup"], "both called, then literal fires");
+    assert.deepStrictEqual(
+      callLog,
+      ["primary", "backup"],
+      "both called, then literal fires",
+    );
   });
 
   test("strict throw exits || chain — backup not called (no catch)", async () => {
@@ -155,17 +206,29 @@ o.label <- p.label || b.label
 }`;
     const callLog: string[] = [];
     const tools = {
-      primary: async () => { callLog.push("primary"); throw new Error("boom"); },
-      backup:  async () => { callLog.push("backup"); return { label: "B" }; },
+      primary: async () => {
+        callLog.push("primary");
+        throw new Error("boom");
+      },
+      backup: async () => {
+        callLog.push("backup");
+        return { label: "B" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     // strict source throws → error exits || chain → no catch → GraphQL error
     assert.ok(result.errors?.length, "strict throw → GraphQL error");
-    assert.deepStrictEqual(callLog, ["primary"], "backup never called — strict throw exits chain");
+    assert.deepStrictEqual(
+      callLog,
+      ["primary"],
+      "backup never called — strict throw exits chain",
+    );
   });
 
   test("|| + catch combined: strict throw → catch fires", async () => {
@@ -183,16 +246,28 @@ o.label <- p.label || b.label || "null-default" catch "error-default"
 }`;
     const callLog: string[] = [];
     const tools = {
-      primary: async () => { callLog.push("primary"); throw new Error("down"); },
-      backup:  async () => { callLog.push("backup");  throw new Error("also down"); },
+      primary: async () => {
+        callLog.push("primary");
+        throw new Error("down");
+      },
+      backup: async () => {
+        callLog.push("backup");
+        throw new Error("also down");
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "error-default");
-    assert.deepStrictEqual(callLog, ["primary"], "strict throw exits || — catch fires immediately");
+    assert.deepStrictEqual(
+      callLog,
+      ["primary"],
+      "strict throw exits || — catch fires immediately",
+    );
   });
 });
 
@@ -213,10 +288,13 @@ o.label <- i.hint
 }`;
     const callLog: string[] = [];
     const tools = {
-      expensiveApi: async () => { callLog.push("expensiveApi"); return { label: "expensive" }; },
+      expensiveApi: async () => {
+        callLog.push("expensiveApi");
+        return { label: "expensive" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -224,7 +302,11 @@ o.label <- i.hint
     });
     // Authored order: api.label is first → wins
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(callLog, ["expensiveApi"], "first wire evaluated first");
+    assert.deepStrictEqual(
+      callLog,
+      ["expensiveApi"],
+      "first wire evaluated first",
+    );
   });
 
   test("input is null → falls through to tool call", async () => {
@@ -241,10 +323,13 @@ o.label <- i.hint
 }`;
     const callLog: string[] = [];
     const tools = {
-      expensiveApi: async () => { callLog.push("expensiveApi"); return { label: "from-api" }; },
+      expensiveApi: async () => {
+        callLog.push("expensiveApi");
+        return { label: "from-api" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // hint is null (not provided) → engine falls through to the API
@@ -252,7 +337,11 @@ o.label <- i.hint
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "from-api");
-    assert.deepStrictEqual(callLog, ["expensiveApi"], "API called when input is null");
+    assert.deepStrictEqual(
+      callLog,
+      ["expensiveApi"],
+      "API called when input is null",
+    );
   });
 
   test("overdefinition respects authored order — first wire wins", async () => {
@@ -271,17 +360,24 @@ o.label <- i.hint
 }`;
     const callLog: string[] = [];
     const tools = {
-      expensiveApi: async () => { callLog.push("expensiveApi"); return { label: "expensive" }; },
+      expensiveApi: async () => {
+        callLog.push("expensiveApi");
+        return { label: "expensive" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
       document: parse(`{ lookup(q: "x", hint: "from-input") { label } }`),
     });
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(callLog, ["expensiveApi"], "first wire wins — authored order matters");
+    assert.deepStrictEqual(
+      callLog,
+      ["expensiveApi"],
+      "first wire wins — authored order matters",
+    );
   });
 
   test("authored order: tool before context — tool wins", async () => {
@@ -299,10 +395,13 @@ o.label <- ctx.defaultLabel
 }`;
     const callLog: string[] = [];
     const tools = {
-      expensiveApi: async () => { callLog.push("api"); return { label: "expensive" }; },
+      expensiveApi: async () => {
+        callLog.push("api");
+        return { label: "expensive" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {
       tools,
       context: { defaultLabel: "from-context" },
     });
@@ -313,7 +412,11 @@ o.label <- ctx.defaultLabel
     });
     // api.label is first wire → evaluated first → wins
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(callLog, ["api"], "authored order: api first, context second");
+    assert.deepStrictEqual(
+      callLog,
+      ["api"],
+      "authored order: api first, context second",
+    );
   });
 
   test("two tool sources with same cost — file order preserved", async () => {
@@ -332,11 +435,17 @@ o.label <- b.label
 }`;
     const callLog: string[] = [];
     const tools = {
-      svcA: async () => { callLog.push("A"); return { label: "from-A" }; },
-      svcB: async () => { callLog.push("B"); return { label: "from-B" }; },
+      svcA: async () => {
+        callLog.push("A");
+        return { label: "from-A" };
+      },
+      svcB: async () => {
+        callLog.push("B");
+        return { label: "from-B" };
+      },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -344,7 +453,11 @@ o.label <- b.label
     });
     // Authored order: A is first in the bridge → wins.
     assert.equal(result.data.lookup.label, "from-A");
-    assert.deepStrictEqual(callLog, ["A"], "B never called — A is first, short-circuits");
+    assert.deepStrictEqual(
+      callLog,
+      ["A"],
+      "B never called — A is first, short-circuits",
+    );
   });
 });
 
@@ -365,11 +478,13 @@ o.label <- api.label
     const tools = {
       myApi: async () => ({ label: "hello" }),
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "hello");
   });
 
@@ -387,14 +502,18 @@ o.label <- a?.label || b.label || "last-resort"
 
 }`;
     const tools = {
-      svcA: async () => { throw new Error("A down"); },
+      svcA: async () => {
+        throw new Error("A down");
+      },
       svcB: async () => ({ label: null }),
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     // A throws but ?. swallows → undefined (falsy), B returns null (falsy) → literal fires
     assert.equal(result.data.lookup.label, "last-resort");
   });
@@ -431,11 +550,13 @@ o.score <- b.score
         return { score: 42 };
       },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label score } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label score } }`),
+    });
     assert.equal(result.data.lookup.label, "A");
     assert.equal(result.data.lookup.score, 42);
 
@@ -460,15 +581,15 @@ function run(
   tools: Record<string, any> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
-  return executeBridge({ instructions, operation, input, tools });
+  return executeBridge({ document, operation, input, tools });
 }
 
 describe("?. safe execution modifier", () => {
   test("parser detects ?. and sets safe flag on wire", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.lookup {
   with api.fetch as api
   with input as i
@@ -477,7 +598,7 @@ bridge Query.lookup {
   api.q <- i.q
   o.label <- api?.label
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const safePull = bridge.wires.find(
       (w) => "from" in w && "safe" in w && w.safe,
     );
@@ -560,13 +681,13 @@ bridge Query.lookup {
   o.label <- api?.label catch "default"
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("?."), "serialized contains ?.");
     assert.ok(serialized.includes("catch"), "serialized contains catch");
     // Re-parse round-trips
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((i) => i.kind === "bridge")!;
+    const bridge = reparsed.instructions.find((i) => i.kind === "bridge")!;
     const safePull = bridge.wires.find(
       (w) => "from" in w && "safe" in w && w.safe,
     );

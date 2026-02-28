@@ -55,8 +55,13 @@ o.search <- i.search
 gc.q <- i.search
 
 }`);
-    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    assert.equal(
+      result.instructions.filter((i) => i.kind !== "version").length,
+      1,
+    );
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.equal(bridge.kind, "bridge");
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
@@ -113,9 +118,14 @@ ti.value <- a.raw
 o.output <- ti.result
 
 }`);
-    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
+    assert.equal(
+      result.instructions.filter((i) => i.kind !== "version").length,
+      1,
+    );
 
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
       from: {
@@ -161,7 +171,9 @@ o.topPick.address <- z.properties[0].streetAddress
 o.topPick.city    <- z.properties[0].location.city
 
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.deepStrictEqual(bridge.wires[0].from, {
       module: "zillow",
       type: "Query",
@@ -197,7 +209,9 @@ o.results <- p.items[] as item {
 }
 
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.equal(bridge.wires.length, 3);
     assert.deepStrictEqual(bridge.wires[0], {
       from: {
@@ -258,7 +272,9 @@ sg.content <- i.body
 o.messageId <- sg.headers.x-message-id
 
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.equal(bridge.type, "Mutation");
     assert.deepStrictEqual(bridge.wires[0].to, {
       module: "sendgrid",
@@ -291,7 +307,9 @@ bridge Query.second {
 b.y <- i.input
 
 }`);
-    const bridges = result.filter((i): i is Bridge => i.kind === "bridge");
+    const bridges = result.instructions.filter(
+      (i): i is Bridge => i.kind === "bridge",
+    );
     assert.equal(bridges.length, 2);
     assert.equal(bridges[0].field, "first");
     assert.equal(bridges[1].field, "second");
@@ -309,7 +327,9 @@ z.maxPrice <- c.maxBudget
 z.lat <- i.lat
 
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
     assert.deepStrictEqual(bridge.wires[0].from, {
@@ -501,7 +521,7 @@ o.propertyComments <- pt.result
         ],
       },
     ];
-    const output = serializeBridge(instructions);
+    const output = serializeBridge({ instructions });
     assert.ok(output.includes("bridge Mutation.sendEmail"));
     assert.ok(output.includes("with sendgrid.send as sg"));
     assert.ok(output.includes("sg.content <- i.body"));
@@ -533,7 +553,9 @@ bridge Query.geocode {
 gc.q <- i.search
 
 }`);
-    const tools = result.filter((i): i is ToolDef => i.kind === "tool");
+    const tools = result.instructions.filter(
+      (i): i is ToolDef => i.kind === "tool",
+    );
     assert.equal(tools.length, 2);
 
     const root = tools.find((t) => t.name === "hereapi")!;
@@ -584,7 +606,7 @@ bridge Mutation.sendEmail {
 sg.content <- i.body
 
 }`);
-    const root = result.find(
+    const root = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
     assert.deepStrictEqual(root.wires, [
@@ -601,7 +623,7 @@ sg.content <- i.body
       { target: "headers.X-Custom", kind: "constant", value: "static-value" },
     ]);
 
-    const child = result.find(
+    const child = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
     )!;
     assert.equal(child.extends, "sendgrid");
@@ -636,7 +658,7 @@ bridge Query.data {
 sb.q <- i.query
 
 }`);
-    const serviceB = result.find(
+    const serviceB = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
     )!;
     assert.deepStrictEqual(serviceB.deps, [
@@ -751,15 +773,24 @@ describe("parser robustness", () => {
     const result = parseBridge(
       "version 1.5\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
     );
-    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
-    assert.equal(result.find((i) => i.kind === "bridge")!.kind, "bridge");
+    assert.equal(
+      result.instructions.filter((i) => i.kind !== "version").length,
+      1,
+    );
+    assert.equal(
+      result.instructions.find((i) => i.kind === "bridge")!.kind,
+      "bridge",
+    );
   });
 
   test("tabs are treated as spaces", () => {
     const result = parseBridge(
       "version 1.5\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
     );
-    assert.equal(result.filter((i) => i.kind !== "version").length, 1);
+    assert.equal(
+      result.instructions.filter((i) => i.kind !== "version").length,
+      1,
+    );
   });
 
   test("keywords are case-insensitive", () => {
@@ -771,7 +802,7 @@ Bridge Query.geocode {
 
 gc.q <- i.search
 
-}`).find((i): i is Bridge => i.kind === "bridge")!;
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
   });
@@ -782,7 +813,7 @@ gc.q <- i.search
 tool hereapi from httpCall {
   .baseUrl = "https://example.com"
 
-}`).find((i): i is ToolDef => i.kind === "tool")!;
+}`).instructions.find((i): i is ToolDef => i.kind === "tool")!;
     assert.equal(tool.name, "hereapi");
     assert.equal(tool.fn, "httpCall");
   });
@@ -807,7 +838,10 @@ bridge Query.geocode {
 gc.q <- i.search
 
 }`);
-    assert.equal(result.filter((i) => i.kind !== "version").length, 3);
+    assert.equal(
+      result.instructions.filter((i) => i.kind !== "version").length,
+      3,
+    );
   });
 
   test("duplicate handle throws with line number", () => {
@@ -865,7 +899,9 @@ Bridge Query.geocode {
 o.result <- t.output
 
 }`);
-    const bridge = result.find((i) => i.kind === "bridge") as Bridge;
+    const bridge = result.instructions.find(
+      (i) => i.kind === "bridge",
+    ) as Bridge;
     const toolHandle = bridge.handles.find((h) => h.kind === "tool");
     assert.notEqual(toolHandle, undefined);
   });
@@ -880,7 +916,7 @@ Bridge Query.geocode {
 
 o.result <- cfg.apiKey
 
-}`).find((i) => i.kind === "bridge") as Bridge;
+}`).instructions.find((i) => i.kind === "bridge") as Bridge;
     assert.notEqual(
       bridge.handles.find((h) => h.kind === "context"),
       undefined,
@@ -890,7 +926,7 @@ o.result <- cfg.apiKey
   test("element mapping works with tab indentation", () => {
     const bridge = parseBridge(
       "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
-    ).find((i) => i.kind === "bridge") as Bridge;
+    ).instructions.find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
       bridge.wires.filter((w) => "from" in w && w.from.element).length,
       2,
@@ -905,7 +941,7 @@ bridge Query.greet {
   with output as o # the response
 
   o.name <- i.username # copy the name across
-}`).find((inst) => inst.kind === "bridge") as Bridge;
+}`).instructions.find((inst) => inst.kind === "bridge") as Bridge;
     const wire = bridge.wires.find(
       (w) => "from" in w && !("value" in w),
     ) as Wire;
@@ -918,7 +954,7 @@ bridge Query.greet {
 
 tool myApi from httpCall {
   .url = "https://example.com/things#anchor"
-}`).find((inst) => inst.kind === "tool") as ToolDef;
+}`).instructions.find((inst) => inst.kind === "tool") as ToolDef;
     const urlWire = tool.wires.find(
       (w) => w.kind === "constant" && w.target === "url",
     ) as { kind: "constant"; target: string; value: string };
@@ -978,7 +1014,9 @@ tool myApi from httpCall {
     "lon": 0
   }
 }`);
-    const tool = result.find((i): i is ToolDef => i.kind === "tool")!;
+    const tool = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool",
+    )!;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
@@ -1001,8 +1039,14 @@ bridge Query.demo {
 o.result <- api.value
 
 }`);
-    assert.equal(result.filter((i) => i.kind === "tool").length, 1);
-    assert.equal(result.filter((i) => i.kind === "bridge").length, 1);
+    assert.equal(
+      result.instructions.filter((i) => i.kind === "tool").length,
+      1,
+    );
+    assert.equal(
+      result.instructions.filter((i) => i.kind === "bridge").length,
+      1,
+    );
   });
 });
 
@@ -1017,7 +1061,9 @@ bridge Query.test {
   with output as o
   o.val <- utils.result
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const toolHandle = bridge.handles.find(
       (h) => h.kind === "tool" && h.handle === "utils",
     );
@@ -1036,7 +1082,9 @@ bridge Query.test {
   with output as o
   o.val <- utils.result
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const toolHandle = bridge.handles.find(
       (h) => h.kind === "tool" && h.handle === "utils",
     );
@@ -1052,7 +1100,9 @@ tool myApi from std.httpCall {
   with stripe@2.0 as pay
   .baseUrl = "https://api.example.com"
 }`);
-    const toolDef = result.find((i): i is ToolDef => i.kind === "tool")!;
+    const toolDef = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool",
+    )!;
     const dep = toolDef.deps.find(
       (d) => d.kind === "tool" && d.handle === "pay",
     );
@@ -1081,7 +1131,9 @@ bridge Query.test {
     );
     // Re-parse and verify
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = reparsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const h = bridge.handles.find(
       (h) => h.kind === "tool" && h.handle === "utils",
     );

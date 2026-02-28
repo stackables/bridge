@@ -1,7 +1,7 @@
 /**
  * @stackables/bridge-compiler — Bridge DSL parser, serializer, and language service.
  *
- * Turns `.bridge` source text into `Instruction[]` (JSON AST) and provides
+ * Turns `.bridge` source text into `BridgeDocument` (JSON AST) and provides
  * IDE intelligence (diagnostics, completions, hover).
  */
 

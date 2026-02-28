@@ -52,7 +52,7 @@ for (let i = 1; i < args.length; i++) {
 
 // ── Load and parse the bridge file ────────────────────────────────────────
 const source = readFileSync(bridgeFile, "utf8");
-const { instructions, diagnostics } = parseBridgeDiagnostics(source);
+const { document, diagnostics } = parseBridgeDiagnostics(source);
 
 const errors = diagnostics.filter((d) => d.severity === "error");
 if (errors.length > 0) {
@@ -64,7 +64,9 @@ if (errors.length > 0) {
 }
 
 // ── Resolve the operation name ─────────────────────────────────────────────
-const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
+const bridges = document.instructions.filter(
+  (i): i is Bridge => i.kind === "bridge",
+);
 
 if (bridges.length === 0) {
   console.error(`No bridge definitions found in ${bridgeFile}`);
@@ -105,7 +107,7 @@ console.error("");
 
 const start = Date.now();
 const { data, traces } = await executeBridge({
-  instructions,
+  document,
   operation,
   input,
   trace: enableTrace ? "full" : "off",

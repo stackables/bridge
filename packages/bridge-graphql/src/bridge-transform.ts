@@ -18,7 +18,7 @@ import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
 } from "@stackables/bridge-stdlib";
-import type { Instruction, ToolMap } from "@stackables/bridge-core";
+import type { BridgeDocument, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 
 export type { Logger };
@@ -62,14 +62,14 @@ export type BridgeOptions = {
   logger?: Logger;
 };
 
-/** Instructions can be a static array or a function that selects per-request */
-export type InstructionSource =
-  | Instruction[]
-  | ((context: any) => Instruction[]);
+/** Document can be a static BridgeDocument or a function that selects per-request */
+export type DocumentSource =
+  | BridgeDocument
+  | ((context: any) => BridgeDocument);
 
 export function bridgeTransform(
   schema: GraphQLSchema,
-  instructions: InstructionSource,
+  document: DocumentSource,
   options?: BridgeOptions,
 ): GraphQLSchema {
   const userTools = options?.tools ?? {};
@@ -102,15 +102,13 @@ export function bridgeTransform(
         ) {
           // Start execution tree at query/mutation root
           if (!source && !info.path.prev) {
-            const activeInstructions =
-              typeof instructions === "function"
-                ? instructions(context)
-                : instructions;
+            const activeDoc =
+              typeof document === "function" ? document(context) : document;
 
             // Resolve which std to use: bundled, or a versioned namespace from tools
             const { namespace: activeStd, version: activeStdVersion } =
               resolveStd(
-                activeInstructions,
+                activeDoc.version,
                 bundledStd,
                 BUNDLED_STD_VERSION,
                 userTools,
@@ -124,12 +122,16 @@ export function bridgeTransform(
             };
 
             // Verify all @version-tagged handles can be satisfied
-            checkHandleVersions(activeInstructions, allTools, activeStdVersion);
+            checkHandleVersions(
+              activeDoc.instructions,
+              allTools,
+              activeStdVersion,
+            );
 
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,
             // allowing hand-coded resolvers to coexist with bridge-powered ones.
-            const hasBridge = activeInstructions.some(
+            const hasBridge = activeDoc.instructions.some(
               (i) =>
                 i.kind === "bridge" &&
                 i.type === typeName &&
@@ -145,7 +147,7 @@ export function bridgeTransform(
 
             source = new ExecutionTree(
               trunk,
-              activeInstructions,
+              activeDoc,
               allTools,
               bridgeContext,
             );

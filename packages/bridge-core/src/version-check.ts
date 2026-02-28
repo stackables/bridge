@@ -1,21 +1,18 @@
 import type {
   Bridge,
+  BridgeDocument,
   DefineDef,
   Instruction,
   ToolDef,
   ToolMap,
-  VersionDecl,
 } from "./types.ts";
 
 /**
- * Extract the declared bridge version from an instruction set.
- * Returns `undefined` if no VersionDecl instruction is present.
+ * Extract the declared bridge version from a document.
+ * Returns `undefined` if no version was declared.
  */
-export function getBridgeVersion(
-  instructions: Instruction[],
-): string | undefined {
-  const decl = instructions.find((i): i is VersionDecl => i.kind === "version");
-  return decl?.version;
+export function getBridgeVersion(doc: BridgeDocument): string | undefined {
+  return doc.version;
 }
 
 /**
@@ -30,28 +27,27 @@ export function getBridgeVersion(
  * @throws Error with an actionable message when the std is incompatible.
  */
 export function checkStdVersion(
-  instructions: Instruction[],
+  version: string | undefined,
   stdVersion: string,
 ): void {
-  const bridgeVersion = getBridgeVersion(instructions);
-  if (!bridgeVersion) return; // no version declared — nothing to check
+  if (!version) return; // no version declared — nothing to check
 
-  const bParts = bridgeVersion.split(".").map(Number);
+  const bParts = version.split(".").map(Number);
   const sParts = stdVersion.split(".").map(Number);
   const [bMajor = 0, bMinor = 0] = bParts;
   const [sMajor = 0, sMinor = 0] = sParts;
 
   if (bMajor !== sMajor) {
     throw new Error(
-      `Bridge version ${bridgeVersion} requires a ${bMajor}.x standard library, ` +
+      `Bridge version ${version} requires a ${bMajor}.x standard library, ` +
         `but the provided std is ${stdVersion} (major version ${sMajor}). ` +
-        `Provide a compatible std as "std@${bridgeVersion}" in the tools map.`,
+        `Provide a compatible std as "std@${version}" in the tools map.`,
     );
   }
 
   if (bMinor > sMinor) {
     throw new Error(
-      `Bridge version ${bridgeVersion} requires standard library ≥ ${bMajor}.${bMinor}, ` +
+      `Bridge version ${version} requires standard library ≥ ${bMajor}.${bMinor}, ` +
         `but the installed @stackables/bridge-stdlib is ${stdVersion}. ` +
         `Update @stackables/bridge-stdlib to ${bMajor}.${bMinor}.0 or later.`,
     );
@@ -71,17 +67,16 @@ export function checkStdVersion(
  * @throws Error with an actionable message when no compatible std is found.
  */
 export function resolveStd(
-  instructions: Instruction[],
+  version: string | undefined,
   bundledStd: ToolMap,
   bundledStdVersion: string,
   userTools: ToolMap = {},
 ): { namespace: ToolMap; version: string } {
-  const bridgeVersion = getBridgeVersion(instructions);
-  if (!bridgeVersion) {
+  if (!version) {
     return { namespace: bundledStd, version: bundledStdVersion };
   }
 
-  const [bMajor = 0, bMinor = 0] = bridgeVersion.split(".").map(Number);
+  const [bMajor = 0, bMinor = 0] = version.split(".").map(Number);
   const [sMajor = 0, sMinor = 0] = bundledStdVersion.split(".").map(Number);
 
   // Bundled std satisfies the bridge version
@@ -109,14 +104,14 @@ export function resolveStd(
   // No compatible std found — produce actionable error
   if (bMajor !== sMajor) {
     throw new Error(
-      `Bridge version ${bridgeVersion} requires a ${bMajor}.x standard library, ` +
+      `Bridge version ${version} requires a ${bMajor}.x standard library, ` +
         `but the bundled std is ${bundledStdVersion} (major version ${sMajor}). ` +
-        `Provide a compatible std as "std@${bridgeVersion}" in the tools map.`,
+        `Provide a compatible std as "std@${version}" in the tools map.`,
     );
   }
 
   throw new Error(
-    `Bridge version ${bridgeVersion} requires standard library ≥ ${bMajor}.${bMinor}, ` +
+    `Bridge version ${version} requires standard library ≥ ${bMajor}.${bMinor}, ` +
       `but the installed @stackables/bridge-stdlib is ${bundledStdVersion}. ` +
       `Update @stackables/bridge-stdlib to ${bMajor}.${bMinor}.0 or later.`,
   );

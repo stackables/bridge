@@ -285,8 +285,21 @@ export type VersionDecl = {
   version: string;
 };
 
-/** Union of all instruction types */
-export type Instruction = VersionDecl | Bridge | ToolDef | ConstDef | DefineDef;
+/** Union of all instruction types (excludes VersionDecl — version lives on BridgeDocument) */
+export type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
+
+/**
+ * Parsed bridge document — the structured output of the compiler.
+ *
+ * Wraps the instruction array with document-level metadata (version) and
+ * provides a natural home for future pre-computed optimisations.
+ */
+export interface BridgeDocument {
+  /** Declared language version (from `version X.Y` header). */
+  version?: string;
+  /** All instructions: bridge, tool, const, and define blocks. */
+  instructions: Instruction[];
+}
 
 /**
  * Define block — a reusable named subgraph (pipeline / macro).

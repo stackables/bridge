@@ -4,7 +4,12 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import type { Bridge, Instruction, Wire } from "../src/index.ts";
+import type {
+  Bridge,
+  BridgeDocument,
+  Instruction,
+  Wire,
+} from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -15,8 +20,8 @@ function run(
   input: Record<string, unknown> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as Instruction[];
-  return executeBridge({ instructions, operation, input });
+  const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
+  return executeBridge({ document, operation, input });
 }
 
 // ── Parser tests ────────────────────────────────────────────────────────────
@@ -33,7 +38,9 @@ bridge Query.test {
     .lang = "en"
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.ok(bridge);
     const constWires = bridge.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
@@ -63,7 +70,9 @@ bridge Query.test {
     .email <- i.email
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -96,7 +105,9 @@ bridge Query.test {
     }
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wires = bridge.wires;
 
     // Pull wires
@@ -143,7 +154,9 @@ bridge Query.test {
     .id <- i.id
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
   });
 
@@ -159,7 +172,9 @@ bridge Query.test {
     .value <- i.value catch 0
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -186,7 +201,9 @@ bridge Query.test {
     .eligible <- i.amount >= 50
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
   });
 
@@ -202,7 +219,9 @@ bridge Query.test {
     .price <- i.isPro ? i.proPrice : i.basicPrice
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const ternaryWires = bridge.wires.filter((w) => "cond" in w);
     assert.equal(ternaryWires.length, 2);
   });
@@ -219,7 +238,9 @@ bridge Query.test {
     .url <- "/users/{i.id}/profile"
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
   });
 
@@ -237,7 +258,9 @@ bridge Query.test {
   }
   o.status = true
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const constWires = bridge.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
@@ -266,7 +289,9 @@ bridge Mutation.createUser {
   }
   o.success = true
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -307,10 +332,10 @@ bridge Query.test {
   o.user.settings.theme = "dark"
 }`);
 
-    const scopedBridge = scopedResult.find(
+    const scopedBridge = scopedResult.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const flatBridge = flatResult.find(
+    const flatBridge = flatResult.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
 
@@ -337,8 +362,12 @@ bridge Query.test {
     const serialized = serializeBridge(parsed);
     const reparsed = parseBridge(serialized);
 
-    const bridge1 = parsed.find((i): i is Bridge => i.kind === "bridge")!;
-    const bridge2 = reparsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge1 = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const bridge2 = reparsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.deepStrictEqual(bridge1.wires, bridge2.wires);
   });
 
@@ -363,8 +392,12 @@ bridge Query.test {
     const serialized = serializeBridge(parsed);
     const reparsed = parseBridge(serialized);
 
-    const bridge1 = parsed.find((i): i is Bridge => i.kind === "bridge")!;
-    const bridge2 = reparsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge1 = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const bridge2 = reparsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     assert.deepStrictEqual(bridge1.wires, bridge2.wires);
   });
 });
@@ -475,7 +508,9 @@ bridge Query.test {
   o.success = true
 }`;
     const parsed = parseBridge(bridge);
-    const br = parsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const br = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = br.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -500,7 +535,9 @@ bridge Query.user {
   }
 }`;
     const parsed = parseBridge(bridge);
-    const br = parsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const br = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = br.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -540,7 +577,9 @@ bridge Query.test {
     }
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const constWires = bridge.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
@@ -564,7 +603,9 @@ bridge Query.test {
     }
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWires = bridge.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
@@ -589,7 +630,9 @@ bridge Query.test {
     }
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const constWires = bridge.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
@@ -613,7 +656,9 @@ bridge Query.test {
     }
   }
 }`);
-    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const constWires = bridge.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );

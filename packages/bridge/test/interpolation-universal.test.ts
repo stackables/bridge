@@ -9,8 +9,8 @@ function run(
   input: Record<string, unknown> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw));
-  return executeBridge({ instructions, operation, input });
+  const document = JSON.parse(JSON.stringify(raw));
+  return executeBridge({ document, operation, input });
 }
 
 describe("universal interpolation: fallback (||)", () => {

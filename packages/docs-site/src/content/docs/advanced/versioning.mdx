@@ -1,0 +1,158 @@
+---
+title: Tool Versioning
+description: Pin tool dependencies to specific versions for reproducible builds and safe upgrades.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+As your Bridge graphs move from development to production, predictability becomes critical. The Bridge provides a robust versioning system at both the **File Level** (for the language and standard library) and the **Tool Level** (for individual microservices and utilities).
+
+## 1. The `version` Header (File Level)
+
+Every Bridge file must begin with a `version` header. This tells the engine exactly how to parse the file and what baseline capabilities it expects from the host environment.
+
+```bridge
+version 1.5
+
+bridge Query.search {
+  # ...
+}
+
+```
+
+The version header serves two primary purposes:
+
+1. **Syntax Compatibility:** Ensures the parser understands the grammar used in the file.
+2. **Standard Library Minimums:** Guarantees the host application has a compatible `@stackables/bridge-stdlib` installed.
+
+### Compatibility Rules
+
+Within the same major version (e.g., `1.x`), the standard library only _adds_ tools and features; it never removes or changes existing behavior. This ensures **forward compatibility**.
+
+| Bridge File   | Installed Stdlib | Result                                            |
+| ------------- | ---------------- | ------------------------------------------------- |
+| `version 1.5` | `1.5.0`          | ✅ **Works** (Exact match)                        |
+| `version 1.5` | `1.7.0`          | ✅ **Works** (Newer minor is backward compatible) |
+| `version 1.7` | `1.5.0`          | ❌ **Error** (Host standard library is too old)   |
+| `version 2.0` | `1.x`            | ❌ **Error** (Major version mismatch)             |
+
+If the version check fails, the engine throws an actionable error before execution begins:
+
+> _Bridge version 1.7 requires standard library ≥ 1.7, but the installed @stackables/bridge-stdlib is 1.5.0. Update @stackables/bridge-stdlib to 1.7.0 or later._
+
+### Cross-Major Version Support
+
+When a new major version of the standard library is released (e.g., `2.0`), you do not have to rewrite your old `1.x` bridge files. You can inject older standard libraries directly into the host runtime using a **versioned namespace key**.
+
+```typescript
+// Server-side injection
+import { std as stdV1 } from "@stackables/bridge-stdlib-v1";
+import { executeBridge } from "@stackables/bridge";
+
+const { data } = await executeBridge({
+  document,
+  operation: "Query.myField",
+  input: { city: "Berlin" },
+  // Inject the legacy 1.x std alongside the new one
+  tools: { "std@1.5": stdV1 },
+});
+```
+
+## 2. Tool Versioning (Component Level)
+
+By default, a bridge file silently picks up whatever version of a tool the host application provides. While this is fast for prototyping, production systems require strict **Tool Versioning** (`@version`).
+
+Pinning tools guarantees:
+
+- **Reproducibility:** The graph executes identically on every deploy.
+- **Safe Upgrades:** You can update a microservice in one bridge without breaking other bridges that rely on the older version.
+- **Auditability:** You can see exactly which dependency versions are required just by reading the `.bridge` file.
+
+### Syntax
+
+Add a version tag directly after the tool name in your `with` statement using the `@` symbol:
+
+```bridge
+bridge Query.weather {
+  # 1. Standard Tool (Exact Pin)
+  with geocoder@2.1.3 as geo
+
+  # 2. Namespaced Tool (Minor Pin)
+  with myCorp.weather.forecast@1.3 as fc
+
+  # 3. Standard Library Tool (Major Pin)
+  with std.str.upper@1 as upper
+
+  # ...
+}
+
+```
+
+You can also use version tags when composing tools inside a `tool` block:
+
+```bridge
+tool enrichedSearch from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}
+
+```
+
+### Side-by-Side Versions
+
+Different handles within the same bridge can safely reference the **same tool at different versions**. The engine isolates and resolves each handle independently.
+
+```bridge
+bridge Query.format {
+  with std.str.toUpperCase as up         # Uses bundled system default
+  with std.str.toLowerCase@9.1 as lo     # Uses injected custom version
+
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
+}
+
+```
+
+## 3. How Version Resolution Works
+
+The Bridge engine validates all versioned tool handles at startup—**before** any data is processed or network calls are made.
+
+For each handle featuring a `@version` tag, the engine evaluates the host application's `tools` map in the following strict order:
+
+1. **Flat Key Lookup:** The engine looks for an exact string match (e.g., `"std.str.toLowerCase@9.1"`).
+2. **Namespace Lookup:** The engine looks for a matching versioned root namespace (e.g., `"std.str@9.1"` or `"myApi@2.0"`) and traverses the object path.
+3. **Standard Library Check:** For `std.*` tools, if no custom key is provided, the engine checks if the bundled system library satisfies the requested version.
+4. **Fatal Error:** If no matching tool is found, the engine aborts and throws an actionable error.
+
+### Injecting Custom Versioned Tools
+
+You can satisfy version requirements by passing flat keys or nested objects into your host server's `tools` configuration:
+
+```typescript
+import { bridgeTransform, parseBridge } from "@stackables/bridge";
+
+const schema = bridgeTransform(baseSchema, parseBridge(bridgeText), {
+  tools: {
+    // 1. Flat versioned key (Single Tool override)
+    "std.str.toLowerCase@9.1": (opts: { in: string }) => opts.in?.toLowerCase(),
+
+    // 2. Versioned namespace key (Entire API override)
+    "myApi@2.0": {
+      getData: async (input) =>
+        fetch(`https://api-v2.example.com/data?q=${input.query}`).then((r) =>
+          r.json(),
+        ),
+      getUser: async (input) =>
+        fetch(`https://api-v2.example.com/user/${input.id}`).then((r) =>
+          r.json(),
+        ),
+    },
+  },
+});
+```
+
+## 4. Best Practices
+
+- **Start Loose, Finish Strict:** Do not bother versioning tools during initial prototyping. Add `@version` tags only when the graph is stable and ready for production lockdown.
+- **Pin Production Bridges:** Always pin external API tools in production to prevent unexpected breakages when the underlying microservices upgrade.
+- **Synchronize Tags:** If multiple bridges compose the exact same tool, ensure they agree on the version tag to reduce memory overhead and caching complexity on the server.

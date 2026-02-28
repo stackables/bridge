@@ -17,7 +17,7 @@ const root = join(__dirname, "..", "..", "..");
 function compat(label: string, text: string) {
   it(label, () => {
     const result = parseBridge(text);
-    assert.ok(Array.isArray(result), "should return an array");
+    assert.ok(Array.isArray(result.instructions), "should return an array");
   });
 }
 
@@ -353,7 +353,7 @@ describe("parser — real .bridge files", () => {
     it(name, () => {
       const text = readFileSync(filePath, "utf-8");
       const result = parseBridge(text);
-      assert.ok(Array.isArray(result), "should return an array");
+      assert.ok(Array.isArray(result.instructions), "should return an array");
     });
   }
 });
@@ -595,7 +595,7 @@ bridge Query.test {
   with output as o
   o.x = "ok"
 }`);
-    assert.ok(result.length > 0);
+    assert.ok(result.instructions.length > 0);
   });
 
   it("version 1.7 is accepted (future minor within same major)", () => {
@@ -604,7 +604,7 @@ bridge Query.test {
   with output as o
   o.x = "ok"
 }`);
-    assert.ok(result.length > 0);
+    assert.ok(result.instructions.length > 0);
   });
 
   it("version 1.12 is accepted", () => {
@@ -613,7 +613,7 @@ bridge Query.test {
   with output as o
   o.x = "ok"
 }`);
-    assert.ok(result.length > 0);
+    assert.ok(result.instructions.length > 0);
   });
 
   it("version 2.0 is rejected (above max supported major)", () => {
@@ -646,11 +646,8 @@ bridge Query.test {
   with output as o
   o.x = "ok"
 }`);
-    const vDecl = result.find((i) => i.kind === "version");
-    assert.ok(vDecl);
-    if (vDecl && vDecl.kind === "version") {
-      assert.equal(vDecl.version, "1.5");
-    }
+    assert.ok(result.version);
+    assert.equal(result.version, "1.5");
   });
 
   it("VersionDecl preserves declared version (1.7)", () => {
@@ -659,11 +656,8 @@ bridge Query.test {
   with output as o
   o.x = "ok"
 }`);
-    const vDecl = result.find((i) => i.kind === "version");
-    assert.ok(vDecl);
-    if (vDecl && vDecl.kind === "version") {
-      assert.equal(vDecl.version, "1.7");
-    }
+    assert.ok(result.version);
+    assert.equal(result.version, "1.7");
   });
 
   it("PARSER_VERSION exports current version and supported range", () => {

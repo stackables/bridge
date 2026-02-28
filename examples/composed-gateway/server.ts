@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import {
   bridgeTransform,
+  mergeBridgeDocuments,
   parseBridge,
   useBridgeTracing,
 } from "@stackables/bridge";
@@ -34,17 +35,20 @@ const quotesTypeDefs = readFileSync(
 
 // ── 2. Load bridge instructions ──────────────────────────────────────────
 
-const weatherInstructions = parseBridge(
-  readFileSync(new URL("../weather-api/Weather.bridge", import.meta.url), "utf-8"),
+const weatherDocument = parseBridge(
+  readFileSync(
+    new URL("../weather-api/Weather.bridge", import.meta.url),
+    "utf-8",
+  ),
 );
 
-const quotesInstructions = parseBridge(
+const quotesDocument = parseBridge(
   readFileSync(new URL("./Quotes.bridge", import.meta.url), "utf-8"),
 );
 
-// Concatenate — bridgeTransform matches by type+field, so instructions from
+// Merge — bridgeTransform matches by type+field, so instructions from
 // different domains coexist without conflict.
-const allInstructions = [...weatherInstructions, ...quotesInstructions];
+const allDocument = mergeBridgeDocuments(weatherDocument, quotesDocument);
 
 // ── 3. In-memory store for the hand-coded mutation ───────────────────────
 
@@ -83,7 +87,7 @@ const baseSchema = createSchema({
 // Apply bridge transform once — covers both Weather and Quotes.
 // Fields without a matching bridge instruction (Mutation.saveQuote) are
 // passed through to their original resolvers.
-const schema = bridgeTransform(baseSchema, allInstructions, {
+const schema = bridgeTransform(baseSchema, allDocument, {
   trace: "full",
   logger: console,
 });
@@ -104,8 +108,12 @@ if (process.argv[1] === import.meta.filename) {
     console.log("Composed gateway running at http://localhost:4000/graphql");
     console.log("");
     console.log("Try:");
-    console.log('  Weather:  { getWeatherByName(cityName: "Paris") { city currentTemp } }');
+    console.log(
+      '  Weather:  { getWeatherByName(cityName: "Paris") { city currentTemp } }',
+    );
     console.log("  Quote:    { randomQuote { text author } }");
-    console.log('  Mutation: mutation { saveQuote(text: "Hello", author: "World") { id savedAt } }');
+    console.log(
+      '  Mutation: mutation { saveQuote(text: "Hello", author: "World") { id savedAt } }',
+    );
   });
 }

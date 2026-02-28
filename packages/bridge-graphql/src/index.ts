@@ -12,4 +12,4 @@ export {
   getBridgeTraces,
   useBridgeTracing,
 } from "./bridge-transform.ts";
-export type { BridgeOptions, InstructionSource } from "./bridge-transform.ts";
+export type { BridgeOptions, DocumentSource } from "./bridge-transform.ts";

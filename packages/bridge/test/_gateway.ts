@@ -1,5 +1,5 @@
 import { createSchema, createYoga } from "graphql-yoga";
-import type { InstructionSource } from "../src/index.ts";
+import type { DocumentSource } from "../src/index.ts";
 import { bridgeTransform, useBridgeTracing } from "../src/index.ts";
 import type { ToolMap } from "../src/index.ts";
 import type { Logger, TraceLevel } from "../src/index.ts";
@@ -15,14 +15,14 @@ type GatewayOptions = {
 
 export function createGateway(
   typeDefs: string,
-  instructions: InstructionSource,
+  document: DocumentSource,
   options?: GatewayOptions,
 ) {
   const schema = createSchema({ typeDefs });
   const tracing = options?.trace ?? "off";
 
   return createYoga({
-    schema: bridgeTransform(schema, instructions, {
+    schema: bridgeTransform(schema, document, {
       tools: options?.tools,
       trace: tracing,
       logger: options?.logger,

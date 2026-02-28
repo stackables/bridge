@@ -3,9 +3,9 @@ title: Package Selection
 description: How to choose the right Bridge packages for your use case to optimize bundle size and performance.
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+import { Steps } from "@astrojs/starlight/components";
 
-The Bridge is built à la carte. While you *can* install the entire ecosystem in one go, you probably don't want to drag a parser and a full GraphQL adapter into a lightweight Cloudflare Worker.
+The Bridge is built à la carte. While you _can_ install the entire ecosystem in one go, you probably don't want to drag a parser and a full GraphQL adapter into a lightweight Cloudflare Worker.
 
 By splitting the engine into modular packages, you can ship exactly what you need—and nothing you don't—keeping your production bundles small.
 
@@ -13,12 +13,12 @@ By splitting the engine into modular packages, you can ship exactly what you nee
 
 Choose your packages based on where and how you plan to execute your graphs.
 
-| Package | Role | When to use it |
-| --- | --- | --- |
-| **`@stackables/bridge`** | **The All-in-One** | Quick starts, monoliths, or when bundle size doesn't matter. |
-| **`@stackables/bridge-core`** | **The Engine** | Edge workers, serverless functions, and running pre-compiled `.bridge` files. |
-| **`@stackables/bridge-compiler`** | **The Parser** | Compiling `.bridge` files to JSON at build time, or parsing on the fly at startup. |
-| **`@stackables/bridge-graphql`** | **The Adapter** | Wiring Bridge instructions directly into an Apollo or Yoga GraphQL schema. |
+| Package                           | Role               | When to use it                                                                     |
+| --------------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| **`@stackables/bridge`**          | **The All-in-One** | Quick starts, monoliths, or when bundle size doesn't matter.                       |
+| **`@stackables/bridge-core`**     | **The Engine**     | Edge workers, serverless functions, and running pre-compiled `.bridge` files.      |
+| **`@stackables/bridge-compiler`** | **The Parser**     | Compiling `.bridge` files to JSON at build time, or parsing on the fly at startup. |
+| **`@stackables/bridge-graphql`**  | **The Adapter**    | Wiring Bridge documents directly into an Apollo or Yoga GraphQL schema.            |
 
 ---
 
@@ -28,7 +28,7 @@ Not sure which ones to pick? Here are the two most common architectural patterns
 
 ### Workflow A: The Standard GraphQL Server (JIT)
 
-*This is the most common setup and the default in our Getting Started guide.*
+_This is the most common setup and the default in our Getting Started guide._
 
 If you are running a traditional Node.js GraphQL server, you will usually parse your `.bridge` files "Just-In-Time" (JIT) right when the server starts up, and wire them into your schema. For this, you need the compiler and the GraphQL adapter.
 
@@ -40,21 +40,22 @@ npm install @stackables/bridge-graphql @stackables/bridge-compiler graphql
 import { parseBridgeDiagnostics } from "@stackables/bridge-compiler";
 import { bridgeTransform } from "@stackables/bridge-graphql";
 
-// Read the files, parse them into AST instructions, and attach them to the schema
+// Read the files, parse them into BridgeDocuments, and attach them to the schema
 ```
 
-*(Note: If you don't mind the slightly larger `node_modules` folder, you can simply install `@stackables/bridge` to grab all of these in one import).*
+_(Note: If you don't mind the slightly larger `node_modules` folder, you can simply install `@stackables/bridge` to grab all of these in one import)._
 
 ### Workflow B: The Lean Edge Worker (AOT)
 
 If you are deploying to a constrained environment like a Cloudflare Worker or a Vercel Edge function, you want the absolute smallest bundle possible.
 
-Instead of parsing files on the server, you parse them "Ahead-Of-Time" (AOT) during your CI/CD build step. This means you only ship the compiled JSON instructions and the lightweight execution engine to production.
+Instead of parsing files on the server, you parse them "Ahead-Of-Time" (AOT) during your CI/CD build step. This means you only ship the compiled JSON document and the lightweight execution engine to production.
 
 <Steps>
 
 1. **The Build Step (Dev/CI)**
    Install the compiler as a dev dependency so it never touches your production bundle.
+
    ```bash
    npm install --save-dev @stackables/bridge-compiler
    ```
@@ -63,17 +64,19 @@ Instead of parsing files on the server, you parse them "Ahead-Of-Time" (AOT) dur
 
 2. **The Production Runtime**
    Install only the core execution engine for your runtime.
+
    ```bash
    npm install @stackables/bridge-core
    ```
 
    At runtime, simply feed the pre-compiled JSON into the engine!
+
    ```typescript
    import { executeBridge } from "@stackables/bridge-core";
-   import instructions from "./bridge.json" assert { type: "json" };
+   import document from "./bridge.json" assert { type: "json" };
 
    const { data } = await executeBridge({
-     instructions,
+     document,
      operation: "Query.search",
      input: { q: req.query.q },
    });

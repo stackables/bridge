@@ -7,14 +7,14 @@ const typeDefs = readFileSync(
   new URL("./BuiltinTools.graphql", import.meta.url),
   "utf-8",
 );
-const instructions = parseBridge(
+const document = parseBridge(
   readFileSync(new URL("./builtin-tools.bridge", import.meta.url), "utf-8"),
 );
 
 // Custom tools merge alongside the std namespace automatically.
 // Versioned tool keys (e.g. "std.str.toLowerCase@999.1") satisfy
 // @version constraints declared in the bridge file.
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+const schema = bridgeTransform(createSchema({ typeDefs }), document, {
   tools: {
     getEmployees: async () => ({
       employees: [

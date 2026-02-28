@@ -11,7 +11,7 @@ The Bridge is a declarative dataflow engine for GraphQL. Instead of resolvers, y
 The pipeline has two phases:
 
 ```
-.bridge text  ──► [Lexer] ──► [Parser] ──► AST (Instruction[])
+.bridge text  ──► [Lexer] ──► [Parser] ──► BridgeDocument
                                                      │
 GraphQL request ──► [bridgeTransform] ──► [ExecutionTree] ──► response
 ```
@@ -28,7 +28,7 @@ packages/bridge/src/
 │   ├── index.ts          Thin entry point — exposes parseBridge + diagnostics API
 │   ├── lexer.ts          Chevrotain tokens: keywords, operators, literals
 │   └── parser.ts         Chevrotain CstParser + CST→AST visitor (toBridgeAst)
-├── bridge-format.ts      Round-trip serializer: Instruction[] → .bridge text
+├── bridge-format.ts      Round-trip serializer: BridgeDocument → .bridge text
 ├── bridge-transform.ts   GraphQL schema transformer — wraps field resolvers
 ├── ExecutionTree.ts      Pull-based execution engine (the core runtime)
 ├── utils.ts              parsePath helper ("a.b[0].c" → ["a","b","0","c"])
@@ -68,7 +68,7 @@ export const MyKw = createToken({
 
 The parser is a Chevrotain `CstParser` (Concrete Syntax Tree). The grammar is defined as methods on the `BridgeParser` class (starts ~line 90). Each method corresponds to a grammar rule, using Chevrotain primitives (`this.CONSUME`, `this.SUBRULE`, `this.OPTION`, `this.MANY`, `this.OR`).
 
-The parser produces a CST — a tree of named child arrays — which is intentionally untyped. The **visitor** (`toBridgeAst`, ~line 820) converts the CST into typed `Instruction[]` AST nodes.
+The parser produces a CST — a tree of named child arrays — which is intentionally untyped. The **visitor** (`toBridgeAst`, ~line 820) converts the CST into a typed `BridgeDocument` containing `Instruction[]` AST nodes.
 
 Key grammar entry points:
 
@@ -84,9 +84,14 @@ Key grammar entry points:
 
 ### AST Types (`src/types.ts`)
 
-The output of parsing is `Instruction[]`:
+The output of parsing is a `BridgeDocument`:
 
 ```typescript
+interface BridgeDocument {
+  version?: string; // from `version X.Y` header
+  instructions: Instruction[];
+}
+
 type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
 ```
 
@@ -210,7 +215,7 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 ## The Serializer (`src/bridge-format.ts`)
 
-`formatBridge(instructions)` converts the AST back to `.bridge` text. This is used by developer tooling (auto-format, VS Code extension). The serializer:
+`serializeBridge(document)` converts a `BridgeDocument` back to `.bridge` text. This is used by developer tooling (auto-format, VS Code extension). The serializer:
 
 1. Calls `buildHandleMap` to map canonical trunk keys back to human-readable handle names
 2. Serializes each `Bridge` block with its `with` declarations and wire body
@@ -221,10 +226,10 @@ When `options.trace` is set to `"basic"` or `"full"`, each tool call is recorded
 
 ## The GraphQL Transform (`src/bridge-transform.ts`)
 
-`bridgeTransform(schema, instructions, options?)` uses `@graphql-tools/utils/mapSchema` to walk every field in the schema and wrap its resolver. The wrapper:
+`bridgeTransform(schema, document, options?)` uses `@graphql-tools/utils/mapSchema` to walk every field in the schema and wrap its resolver. The wrapper:
 
 1. At the root field (no `path.prev`): checks if a `Bridge` instruction exists for this field. If not, falls through to the original resolver — hand-written resolvers coexist fine.
-2. Creates an `ExecutionTree` with the active instructions, tools, and context
+2. Creates an `ExecutionTree` with the active document, tools, and context
 3. Calls `tree.pull(outputRefs)` — the engine does the rest
 4. Returns the result as an `ExecutionTree` so nested fields can continue pulling from the same shared state
 

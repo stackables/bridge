@@ -52,10 +52,10 @@ src/
 
 ```typescript
 import { parseBridge } from "@stackables/bridge";
-// parsesBridge(text: string): Instruction[]
+// parseBridge(text: string): BridgeDocument
 
 import { bridgeTransform } from "@stackables/bridge";
-// bridgeTransform(schema: GraphQLSchema, instructions: InstructionSource, options?: BridgeOptions): GraphQLSchema
+// bridgeTransform(schema: GraphQLSchema, document: DocumentSource, options?: BridgeOptions): GraphQLSchema
 
 import {
   builtinTools,
@@ -75,7 +75,8 @@ import {
 // Types
 import type {
   BridgeOptions,
-  InstructionSource,
+  BridgeDocument,
+  DocumentSource,
   Instruction,
   ToolCallFn,
   ToolContext,
@@ -87,13 +88,13 @@ import type {
 // ToolCallFn — (input: Record<string, any>, context?: ToolContext) => Promise<Record<string, any>>
 ```
 
-### `InstructionSource`
+### `DocumentSource`
 
 ```typescript
-type InstructionSource = Instruction[] | ((context: any) => Instruction[]);
+type DocumentSource = BridgeDocument | ((context: any) => BridgeDocument);
 ```
 
-Can be a static array or a **per-request function** for multi-provider routing. The function receives the full GraphQL context. Schema is built once — the function is called per request inside the resolver.
+Can be a static document or a **per-request function** for multi-provider routing. The function receives the full GraphQL context. Schema is built once — the function is called per request inside the resolver.
 
 ### `BridgeOptions`
 
@@ -181,22 +182,22 @@ Consts are accessed via `with const as c` in tool or bridge blocks, then referen
 
 ### Operators
 
-| Operator                        | Meaning                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `=`                             | Constant — sets a fixed value                                                                                                                                                                                                                                                                                                                   |
-| `<-`                            | Wire — pulls data from a source at runtime                                                                                                                                                                                                                                                                                                      |
+| Operator                        | Meaning                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `=`                             | Constant — sets a fixed value                                                                                                                                                                                                                                                                                                                      |
+| `<-`                            | Wire — pulls data from a source at runtime                                                                                                                                                                                                                                                                                                         |
 | `force <handle>`                | Force statement — eagerly schedules the named handle even if no field demands its output. **Critical by default**: if the forced tool throws, the error propagates into the response. Append `catch null` for fire-and-forget (error-swallowing) behaviour. Used for side-effect tools (audit logging, analytics, cache warming, payment capture). |
-| `force <handle> catch null`     | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure.                                                                                                                                                                              |
-| `<- h1:h2:source`               | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage                                                                                                                                                                                                      |
-| `\|\| <source>`                 | Falsy-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source is **falsy** (`0`, `""`, `false`, `null`, `undefined`). Multiple `\|\|` alternatives can be chained.                                                                                                                                  |
-| `\|\| <json>`                   | Falsy-fallback literal — last item in a `\|\|` chain. If all sources are falsy, returns this JSON value. Fires on _falsy values_, not on errors.                                                                                                                                                                                                |
-| `?? <json>`                     | Nullish-gate literal — if the preceding source is exactly `null` or `undefined`, returns this parsed JSON. Fires on _absent values only_ (respects `0`, `""`, `false` as valid data).                                                                                                                                                          |
-| `?? <source>`                   | Nullish-gate source — if the preceding source is `null` or `undefined`, pulls from this handle.path or pipe chain instead.                                                                                                                                                                                                                      |
-| `catch <json>`                  | Error-boundary literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values.                                                                                                                                                                                                            |
-| `catch <source>`                | Error-boundary source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression.                                                                                                                                                                                           |
-| `on error = <json>`             | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors.                                                                                                                                   |
-| `on error <- <source>`          | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime.                                                                                                                                                                                                                |
-| `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant.                                                                                                                                                        |
+| `force <handle> catch null`     | Fire-and-forget force — eagerly schedules the handle but silently catches any errors. The main response is never affected by the forced tool's success or failure.                                                                                                                                                                                 |
+| `<- h1:h2:source`               | Pipe chain — all handles must be declared with `with`; routes source → h2.in → h1.in; each handle's full return value feeds the next stage                                                                                                                                                                                                         |
+| `\|\| <source>`                 | Falsy-coalesce next — inline alternative source (handle.path or pipe chain). Tried if the preceding source is **falsy** (`0`, `""`, `false`, `null`, `undefined`). Multiple `\|\|` alternatives can be chained.                                                                                                                                    |
+| `\|\| <json>`                   | Falsy-fallback literal — last item in a `\|\|` chain. If all sources are falsy, returns this JSON value. Fires on _falsy values_, not on errors.                                                                                                                                                                                                   |
+| `?? <json>`                     | Nullish-gate literal — if the preceding source is exactly `null` or `undefined`, returns this parsed JSON. Fires on _absent values only_ (respects `0`, `""`, `false` as valid data).                                                                                                                                                              |
+| `?? <source>`                   | Nullish-gate source — if the preceding source is `null` or `undefined`, pulls from this handle.path or pipe chain instead.                                                                                                                                                                                                                         |
+| `catch <json>`                  | Error-boundary literal — if the entire resolution chain **throws**, returns this parsed JSON. Fires on _errors_, not on null values.                                                                                                                                                                                                               |
+| `catch <source>`                | Error-boundary source — if the entire resolution chain throws, pulls from this handle.path or pipe chain instead. Can be any valid source expression.                                                                                                                                                                                              |
+| `on error = <json>`             | Tool-level fallback — declared inside a tool block. If `fn(input)` throws, the tool returns the parsed JSON instead of propagating the error. Only catches tool execution errors, not wire resolution errors.                                                                                                                                      |
+| `on error <- <source>`          | Tool-level fallback from source — same as above but pulls the fallback value from context or another tool dependency at runtime.                                                                                                                                                                                                                   |
+| `o.field <- src[] as i { ... }` | Array mapping — iterates source array. The iterator `i` is declared with `as i`. `i.field` references the current element. `.field = "value"` inside the block sets an element constant.                                                                                                                                                           |
 
 **Full COALESCE — `||`, `??`, and `catch` compose into Postgres-style COALESCE + error guard:**
 
@@ -397,9 +398,9 @@ The old API had a `provider` keyword and a `legacyProviderCall` option. All of t
 
 The engine passes the full GraphQL context to `with context` — no wrapping under `context.config` or `context.bridge`. Users control what’s on the context at the server level. To restrict access, pass a `contextMapper` function to `bridgeTransform()`.
 
-### Function-based `InstructionSource` instead of `Record<string, Instruction[]>`
+### Function-based `DocumentSource` instead of `Record<string, Instruction[]>`
 
-Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => Instruction[]`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
+Multi-provider routing was first implemented with a `Record<string, Instruction[]>` map + `context.bridge.implementation` key. This was replaced with a function signature: `(context) => BridgeDocument`. Rationale: the engine doesn't need to know how routing works — the user writes the lookup function and has full control. The Record pattern is still possible, just done by the user in their function.
 
 ### Three-layer fallback architecture
 
@@ -412,13 +413,13 @@ Fault tolerance is split into three independent layers that compose, innermost-f
 
 Firing order when all layers are present: `on error` → `||` → `??` → `catch`. Each layer only fires if the one inside it did not produce a usable value.
 
-| Scenario                                 | Layer that fires                    |
-| ---------------------------------------- | ----------------------------------- |
-| Tool fn throws, `on error` present       | `on error` (tool scope)             |
-| Tool fn throws, no `on error`            | `catch` (wire scope)                |
-| Tool returns `{ label: null }`           | `\|\|` or `??`                      |
+| Scenario                                  | Layer that fires                       |
+| ----------------------------------------- | -------------------------------------- |
+| Tool fn throws, `on error` present        | `on error` (tool scope)                |
+| Tool fn throws, no `on error`             | `catch` (wire scope)                   |
+| Tool returns `{ label: null }`            | `\|\|` or `??`                         |
 | `catch` is a source expression, all throw | `catch` schedules and calls the source |
-| Tool returns `{ label: "Berlin" }`       | none — real value used              |
+| Tool returns `{ label: "Berlin" }`        | none — real value used                 |
 
 ### Const blocks store raw JSON strings
 
