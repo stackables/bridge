@@ -29,4 +29,4 @@ jobs:
             - name: Upload coverage to Codecov
               uses: codecov/codecov-action@v4
               with:
-                  files: packages/*/coverage/lcov.info
+                  files: packages/bridge/coverage/lcov.info,packages/bridge-core/coverage/lcov.info,packages/bridge-stdlib/coverage/lcov.info
