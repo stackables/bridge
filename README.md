@@ -1,3 +1,4 @@
+[![codecov](https://codecov.io/gh/stackables/bridge/graph/badge.svg?token=47dHG2sfNe)](https://codecov.io/gh/stackables/bridge)
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
 [![extension](https://img.shields.io/badge/VS_Code-Full_Support-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 
