@@ -495,7 +495,6 @@ export class ExecutionTree {
     let value: any;
     if (dep.kind === "context") {
       // Walk the full parent chain for context
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
       let cursor: ExecutionTree | undefined = this;
       while (cursor && value === undefined) {
         value = cursor.context;
@@ -508,7 +507,6 @@ export class ExecutionTree {
         type: "Const",
         field: "const",
       });
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
       let cursor: ExecutionTree | undefined = this;
       while (cursor && value === undefined) {
         value = cursor.state[constKey];
@@ -831,7 +829,6 @@ export class ExecutionTree {
     const key = trunkKey(ref);
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
     let cursor: ExecutionTree | undefined = this;
     while (cursor && value === undefined) {
       value = cursor.state[key];
