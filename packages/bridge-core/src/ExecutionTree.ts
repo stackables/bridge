@@ -241,6 +241,12 @@ export class ExecutionTree {
   private pipeHandleMap:
     | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
     | undefined;
+  /**
+   * Maps trunk keys to `@version` strings from handle bindings.
+   * Populated in the constructor so `schedule()` can prefer versioned
+   * tool lookups (e.g. `std.str.toLowerCase@999.1`) over the default.
+   */
+  private handleVersionMap: Map<string, string> = new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -267,6 +273,33 @@ export class ExecutionTree {
       this.pipeHandleMap = new Map(
         this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
       );
+    }
+    // Build handle→version map from bridge handle bindings
+    if (this.bridge) {
+      const instanceCounters = new Map<string, number>();
+      for (const h of this.bridge.handles) {
+        if (h.kind !== "tool") continue;
+        const name = h.name;
+        const lastDot = name.lastIndexOf(".");
+        let module: string, field: string, counterKey: string, type: string;
+        if (lastDot !== -1) {
+          module = name.substring(0, lastDot);
+          field = name.substring(lastDot + 1);
+          counterKey = `${module}:${field}`;
+          type = this.trunk.type;
+        } else {
+          module = SELF_MODULE;
+          field = name;
+          counterKey = `Tools:${name}`;
+          type = "Tools";
+        }
+        const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
+        instanceCounters.set(counterKey, instance);
+        if (h.version) {
+          const key = trunkKey({ module, type, field, instance });
+          this.handleVersionMap.set(key, h.version);
+        }
+      }
     }
     if (context) {
       this.state[
@@ -610,8 +643,22 @@ export class ExecutionTree {
         }
       }
 
-      // Direct tool function lookup by name (simple or dotted)
-      const directFn = this.lookupToolFn(toolName);
+      // Direct tool function lookup by name (simple or dotted).
+      // When the handle carries a @version tag, try the versioned key first
+      // (e.g. "std.str.toLowerCase@999.1") so user-injected overrides win.
+      // For pipe forks, fall back to the baseTrunk's version since forks
+      // use synthetic instance numbers (100000+).
+      const handleVersion =
+        this.handleVersionMap.get(trunkKey(target)) ??
+        (baseTrunk
+          ? this.handleVersionMap.get(trunkKey(baseTrunk))
+          : undefined);
+      let directFn = handleVersion
+        ? this.lookupToolFn(`${toolName}@${handleVersion}`)
+        : undefined;
+      if (!directFn) {
+        directFn = this.lookupToolFn(toolName);
+      }
       if (directFn) {
         return this.callTool(toolName, toolName, directFn, input);
       }

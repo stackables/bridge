@@ -3,7 +3,7 @@ import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 import type { Instruction, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { std, STD_VERSION } from "@stackables/bridge-stdlib";
-import { checkStdVersion } from "./version-check.ts";
+import { checkStdVersion, checkHandleVersions } from "./version-check.ts";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge instructions (from `parseBridgeDiagnostics`). */
@@ -78,12 +78,12 @@ export async function executeBridge<T = unknown>(
   // Verify the installed std satisfies the bridge's declared version
   checkStdVersion(instructions, STD_VERSION);
 
-  const tree = new ExecutionTree(
-    trunk,
-    instructions,
-    { std, ...(options.tools ?? {}) },
-    context,
-  );
+  const allTools: ToolMap = { std, ...(options.tools ?? {}) };
+
+  // Verify all @version-tagged handles can be satisfied
+  checkHandleVersions(instructions, allTools, STD_VERSION);
+
+  const tree = new ExecutionTree(trunk, instructions, allTools, context);
 
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;

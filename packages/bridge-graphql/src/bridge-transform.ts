@@ -9,6 +9,7 @@ import {
   ExecutionTree,
   TraceCollector,
   checkStdVersion,
+  checkHandleVersions,
   type Logger,
   type ToolTrace,
   type TraceLevel,
@@ -98,6 +99,16 @@ export function bridgeTransform(
             // Verify the installed std satisfies the bridge's declared version
             checkStdVersion(activeInstructions, STD_VERSION);
 
+            // std is always included; user tools merge on top (shallow)
+            // internal tools are injected automatically by ExecutionTree
+            const allTools: ToolMap = {
+              std,
+              ...(userTools ?? {}),
+            };
+
+            // Verify all @version-tagged handles can be satisfied
+            checkHandleVersions(activeInstructions, allTools, STD_VERSION);
+
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,
             // allowing hand-coded resolvers to coexist with bridge-powered ones.
@@ -114,13 +125,6 @@ export function bridgeTransform(
             const bridgeContext = contextMapper
               ? contextMapper(context)
               : (context ?? {});
-
-            // std is always included; user tools merge on top (shallow)
-            // internal tools are injected automatically by ExecutionTree
-            const allTools: ToolMap = {
-              std,
-              ...(userTools ?? {}),
-            };
 
             source = new ExecutionTree(
               trunk,

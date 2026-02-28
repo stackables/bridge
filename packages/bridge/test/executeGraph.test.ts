@@ -152,7 +152,14 @@ bridge Query.geocode {
   }
 }`;
     const instructions = parseBridge(versionedBridge);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    // Provide the versioned tool key to satisfy @2.1, plus the base tool
+    const versionedTools = {
+      ...tools,
+      "hereapi.geocode@2.1": tools["hereapi.geocode"],
+    };
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: versionedTools,
+    });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(

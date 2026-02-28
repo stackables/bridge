@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
-import { checkStdVersion, getBridgeVersion } from "../src/index.ts";
+import {
+  checkStdVersion,
+  checkHandleVersions,
+  collectVersionedHandles,
+  getBridgeVersion,
+} from "../src/index.ts";
+import { BridgeLanguageService } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -828,6 +834,245 @@ bridge Query.test {
           {},
         ),
       /requires standard library ≥ 1\.7/,
+    );
+  });
+});
+
+// ── Versioned handle validation ─────────────────────────────────────────────
+
+describe("versioned handles: collectVersionedHandles", () => {
+  test("collects @version from bridge handles", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+    const versioned = collectVersionedHandles(instructions);
+    assert.equal(versioned.length, 1);
+    assert.equal(versioned[0].name, "std.str.toLowerCase");
+    assert.equal(versioned[0].version, "999.1");
+  });
+
+  test("returns empty for handles without @version", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with output as o
+  o.x <- up:o.y
+}`);
+    const versioned = collectVersionedHandles(instructions);
+    assert.equal(versioned.length, 0);
+  });
+
+  test("collects multiple versioned handles", () => {
+    const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase@2.0 as up
+  with std.str.toLowerCase@3.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+    const versioned = collectVersionedHandles(instructions);
+    assert.equal(versioned.length, 2);
+    assert.deepStrictEqual(
+      versioned.map((v) => `${v.name}@${v.version}`),
+      ["std.str.toUpperCase@2.0", "std.str.toLowerCase@3.1"],
+    );
+  });
+});
+
+describe("versioned handles: checkHandleVersions", () => {
+  const instructions = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+
+  test("throws when versioned std tool exceeds bundled std version", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+    };
+    assert.throws(
+      () => checkHandleVersions(instructions, tools, "1.5.0"),
+      /std\.str\.toLowerCase@999\.1.*requires standard library/,
+    );
+  });
+
+  test("passes when versioned tool key is explicitly provided", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+      "std.str.toLowerCase@999.1": (x: any) => x,
+    };
+    assert.doesNotThrow(() =>
+      checkHandleVersions(instructions, tools, "1.5.0"),
+    );
+  });
+
+  test("passes when std version satisfies the requested version", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+    };
+    // If std were at version 999.1.0, the check should pass
+    assert.doesNotThrow(() =>
+      checkHandleVersions(instructions, tools, "999.1.0"),
+    );
+  });
+
+  test("throws for non-std versioned tool without explicit provider", () => {
+    const instrWithCustom = parseBridge(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    assert.throws(
+      () => checkHandleVersions(instrWithCustom, {}, "1.5.0"),
+      /myApi\.getData@2\.0.*not available.*Provide/,
+    );
+  });
+
+  test("passes for non-std versioned tool with explicit provider", () => {
+    const instrWithCustom = parseBridge(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    const tools = { "myApi.getData@2.0": () => ({ value: 42 }) };
+    assert.doesNotThrow(() =>
+      checkHandleVersions(instrWithCustom, tools, "1.5.0"),
+    );
+  });
+
+  test("no versioned handles → no error", () => {
+    const instrPlain = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.doesNotThrow(() => checkHandleVersions(instrPlain, {}, "1.5.0"));
+  });
+});
+
+describe("versioned handles: executeBridge integration", () => {
+  test("fails early when @version handle cannot be satisfied", async () => {
+    await assert.rejects(
+      () =>
+        run(
+          `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+          "Query.test",
+          { x: "HELLO" },
+        ),
+      /std\.str\.toLowerCase@999\.1/,
+    );
+  });
+
+  test("uses versioned tool when explicitly injected", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        // Provide a custom toLowerCase@999.1 that appends a marker
+        "std.str.toLowerCase@999.1": (input: { in: string }) => {
+          return input.in?.toLowerCase() + "_v999";
+        },
+      },
+    );
+    assert.equal(data.lower, "hello_v999");
+  });
+
+  test("unversioned handle uses bundled std, versioned uses injected", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with input as i
+  with output as o
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
+}`,
+      "Query.test",
+      { text: "Hello" },
+      {
+        "std.str.toLowerCase@999.1": (input: { in: string }) => {
+          return input.in?.toLowerCase() + "_custom";
+        },
+      },
+    );
+    assert.equal(data.upper, "HELLO"); // bundled std
+    assert.equal(data.lower, "hello_custom"); // injected versioned
+  });
+});
+
+// ── Language service diagnostics for @version ───────────────────────────────
+
+describe("versioned handles: language service diagnostics", () => {
+  test("warns when @version exceeds bundled std version", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) => d.message.includes("999.1"));
+    assert.ok(versionDiag, "expected a diagnostic for @999.1");
+    assert.equal(versionDiag!.severity, "warning");
+    assert.ok(versionDiag!.message.includes("exceeds bundled std"));
+    assert.ok(
+      versionDiag!.message.includes("Provide this tool version at runtime"),
+    );
+  });
+
+  test("no warning when @version is within bundled std range", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@1.3 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) => d.message.includes("1.3"));
+    assert.equal(versionDiag, undefined, "no version warning expected");
+  });
+
+  test("no warning for non-std versioned handles", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) =>
+      d.message.includes("exceeds bundled"),
+    );
+    assert.equal(
+      versionDiag,
+      undefined,
+      "non-std tools should not trigger std version warning",
     );
   });
 });

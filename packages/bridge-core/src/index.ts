@@ -17,7 +17,12 @@ export type {
 
 // ── Version check ───────────────────────────────────────────────────────────
 
-export { checkStdVersion, getBridgeVersion } from "./version-check.ts";
+export {
+  checkStdVersion,
+  checkHandleVersions,
+  collectVersionedHandles,
+  getBridgeVersion,
+} from "./version-check.ts";
 
 // ── Execution tree (advanced) ───────────────────────────────────────────────
 

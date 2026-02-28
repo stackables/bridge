@@ -84,33 +84,95 @@ The version is recorded as metadata on the tool handle and is available to the h
 
 ## How version resolution works
 
-The Bridge engine stores the version tag as metadata on each tool binding. At runtime, the host application can use this information to:
+The Bridge engine validates versioned tool handles at startup — **before** any execution begins. If a required version cannot be satisfied, the engine throws immediately with an actionable error message.
 
-1. **Select the correct tool implementation** based on the requested version.
-2. **Validate compatibility** before execution starts.
-3. **Log and audit** which tool versions were used in each request.
+### Resolution rules
 
-The version tag does not change how the engine resolves tool names — it provides an **annotation** that tooling and infrastructure can act on.
+For each handle with `@version`:
 
-### Example: version-aware tool registry
+1. **Versioned key lookup** — the engine checks for a flat key `name@version` in the tools map (e.g., `"std.str.toLowerCase@999.1"`). If found, it uses that function.
+2. **Standard library check** (for `std.*` tools) — if no versioned key exists, the engine compares the requested version against the bundled `STD_VERSION`. If the std satisfies the version (same major, equal-or-higher minor), the bundled tool is used.
+3. **Error** — if neither is satisfied, the engine throws before execution starts.
+
+### Providing versioned tools
+
+Use a **flat key** with the `@` version suffix in your tools map:
 
 ```typescript
 import { bridgeTransform, parseBridge } from "@stackables/bridge";
 
-// Build a version-aware tool map
-const tools = {
-  geocoder: versionedTool({
-    "1.0": geocoderV1,
-    "2.1": geocoderV2,
-  }),
-};
-
 const schema = bridgeTransform(
   createSchema({ typeDefs }),
   parseBridge(bridgeText),
-  { tools },
+  {
+    tools: {
+      // Satisfy std.str.toLowerCase@999.1 from the bridge file
+      "std.str.toLowerCase@999.1": (opts: { in: string }) =>
+        opts.in?.toLowerCase(),
+
+      // Custom versioned tool
+      "myApi.getData@2.0": async (input) => {
+        return fetch(`https://api-v2.example.com/data?q=${input.query}`).then(
+          (r) => r.json(),
+        );
+      },
+    },
+  },
 );
 ```
+
+This lets you run bridge files that require tool versions **beyond** what the bundled std provides, or provide completely custom tool implementations at a specific version.
+
+### Side-by-side versions
+
+Different handles can reference the same tool at different versions. The engine resolves each handle independently:
+
+```bridge
+version 1.5
+
+bridge Query.format {
+  with std.str.toUpperCase as up          # uses bundled std (1.5)
+  with std.str.toLowerCase@999.1 as lo    # uses injected version
+  with input as i
+  with output as o
+
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
+}
+```
+
+```typescript
+// Server-side: inject only the versioned tool
+const schema = bridgeTransform(schema, instructions, {
+  tools: {
+    "std.str.toLowerCase@999.1": customLowerCase,
+  },
+});
+```
+
+The unversioned `toUpperCase` uses the bundled standard library; the versioned `toLowerCase@999.1` uses the explicitly provided function.
+
+### Error messages
+
+When a versioned handle cannot be satisfied:
+
+```
+Tool "std.str.toLowerCase@999.1" requires standard library ≥ 999.1,
+but the installed @stackables/bridge-stdlib is 1.5.0.
+Either update the stdlib or provide the tool as
+"std.str.toLowerCase@999.1" in the tools map.
+```
+
+For non-std tools:
+
+```
+Tool "myApi.getData@2.0" is not available.
+Provide it as "myApi.getData@2.0" in the tools map.
+```
+
+### IDE warnings
+
+The language service (VS Code extension, playground) emits a **warning** when a `@version` tag on a `std.*` tool exceeds the bundled standard library version. This tells you the tool must be provided at runtime.
 
 ## The `version` header
 
