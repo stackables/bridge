@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bridge runtime engine — execute pre-compiled bridge instructions",
   "main": "./build/index.js",
   "type": "module",
