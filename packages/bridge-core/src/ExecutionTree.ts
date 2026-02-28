@@ -346,7 +346,35 @@ export class ExecutionTree {
       if (typeof current === "function") return current;
       // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
       const flat = (this.toolFns as any)?.[name];
-      return typeof flat === "function" ? flat : undefined;
+      if (typeof flat === "function") return flat;
+
+      // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
+      // For "std.str.toLowerCase@999.1", check:
+      //   toolFns["std.str@999.1"]?.toLowerCase
+      //   toolFns["std@999.1"]?.str?.toLowerCase
+      const atIdx = name.lastIndexOf("@");
+      if (atIdx > 0) {
+        const baseName = name.substring(0, atIdx);
+        const version = name.substring(atIdx + 1);
+        const nameParts = baseName.split(".");
+        for (let i = nameParts.length - 1; i >= 1; i--) {
+          const nsKey = nameParts.slice(0, i).join(".") + "@" + version;
+          const remainder = nameParts.slice(i);
+          let ns: any = (this.toolFns as any)?.[nsKey];
+          if (ns != null && typeof ns === "object") {
+            for (const part of remainder) {
+              if (ns == null || typeof ns !== "object") {
+                ns = undefined;
+                break;
+              }
+              ns = ns[part];
+            }
+            if (typeof ns === "function") return ns;
+          }
+        }
+      }
+
+      return undefined;
     }
     // Try root level first
     const fn = (this.toolFns as any)?.[name];

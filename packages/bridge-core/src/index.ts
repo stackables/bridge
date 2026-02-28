@@ -22,6 +22,8 @@ export {
   checkHandleVersions,
   collectVersionedHandles,
   getBridgeVersion,
+  hasVersionedToolFn,
+  resolveStd,
 } from "./version-check.ts";
 
 // ── Execution tree (advanced) ───────────────────────────────────────────────

@@ -11,13 +11,17 @@ export {
   parseBridgeChevrotain as parseBridge,
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
+  PARSER_VERSION,
 } from "./parser/index.ts";
 export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
 export { BridgeLexer, allTokens } from "./parser/index.ts";
 
 // ── Serializer ──────────────────────────────────────────────────────────────
 
-export { parseBridge as parseBridgeFormat, serializeBridge } from "./bridge-format.ts";
+export {
+  parseBridge as parseBridgeFormat,
+  serializeBridge,
+} from "./bridge-format.ts";
 
 // ── Language service ────────────────────────────────────────────────────────
 

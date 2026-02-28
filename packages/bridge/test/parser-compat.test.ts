@@ -6,7 +6,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
+import {
+  parseBridgeChevrotain as parseBridge,
+  PARSER_VERSION,
+} from "../src/index.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..", "..");
@@ -613,7 +616,7 @@ bridge Query.test {
     assert.ok(result.length > 0);
   });
 
-  it("version 2.0 is rejected (different major)", () => {
+  it("version 2.0 is rejected (above max supported major)", () => {
     assert.throws(
       () =>
         parseBridge(`version 2.0
@@ -625,7 +628,7 @@ bridge Query.test {
     );
   });
 
-  it("version 0.9 is rejected (different major)", () => {
+  it("version 0.9 is rejected (below min supported major)", () => {
     assert.throws(
       () =>
         parseBridge(`version 0.9
@@ -661,5 +664,29 @@ bridge Query.test {
     if (vDecl && vDecl.kind === "version") {
       assert.equal(vDecl.version, "1.7");
     }
+  });
+
+  it("PARSER_VERSION exports current version and supported range", () => {
+    assert.equal(typeof PARSER_VERSION.current, "string");
+    assert.equal(typeof PARSER_VERSION.minMajor, "number");
+    assert.equal(typeof PARSER_VERSION.maxMajor, "number");
+    assert.ok(PARSER_VERSION.minMajor <= PARSER_VERSION.maxMajor);
+    assert.equal(PARSER_VERSION.current, "1.5");
+    assert.equal(PARSER_VERSION.minMajor, 1);
+    assert.equal(PARSER_VERSION.maxMajor, 1);
+  });
+
+  it("error message shows range when min !== max major", () => {
+    // This test documents the error format; when min=max the message says "1.x"
+    // When they differ it would say "1.x – 2.x" — we verify current single-major case
+    assert.throws(
+      () =>
+        parseBridge(`version 99.0
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /This parser supports version 1\.x/,
+    );
   });
 });

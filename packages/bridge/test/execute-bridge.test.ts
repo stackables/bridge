@@ -7,6 +7,8 @@ import {
   checkHandleVersions,
   collectVersionedHandles,
   getBridgeVersion,
+  hasVersionedToolFn,
+  resolveStd,
 } from "../src/index.ts";
 import { BridgeLanguageService } from "../src/index.ts";
 
@@ -794,10 +796,10 @@ bridge Query.test {
     assert.doesNotThrow(() => checkStdVersion(instructions17, "1.9.0"));
   });
 
-  test("bridge 1.7 + std 2.0.0 → ERROR (different major)", () => {
+  test("bridge 1.7 + std 2.0.0 → ERROR (different major, suggests tools map)", () => {
     assert.throws(
       () => checkStdVersion(instructions17, "2.0.0"),
-      /different major version/,
+      /requires a 1\.x standard library.*tools map/,
     );
   });
 
@@ -835,6 +837,221 @@ bridge Query.test {
         ),
       /requires standard library ≥ 1\.7/,
     );
+  });
+});
+
+// ── Std resolution via versioned tools keys ─────────────────────────────────
+
+describe("resolveStd: from versioned tools map keys", () => {
+  const instructions15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  const bundledStd = { str: { toUpperCase: () => {} } };
+
+  test("returns bundled std when compatible", () => {
+    const result = resolveStd(instructions15, bundledStd, "1.5.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "1.5.0");
+  });
+
+  test("returns bundled std when minor is higher", () => {
+    const result = resolveStd(instructions15, bundledStd, "1.7.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "1.7.0");
+  });
+
+  test("finds std@1.5 namespace from tools on major mismatch", () => {
+    const oldStd = { str: { toUpperCase: () => "OLD" } };
+    const result = resolveStd(instructions15, bundledStd, "2.0.0", {
+      "std@1.5": oldStd,
+    });
+    assert.equal(result.namespace, oldStd);
+    assert.equal(result.version, "1.5.0");
+  });
+
+  test("skips std@ keys with incompatible version", () => {
+    const oldStd = { str: { toUpperCase: () => "OLD" } };
+    assert.throws(
+      () =>
+        resolveStd(instructions15, bundledStd, "2.0.0", {
+          "std@1.3": oldStd, // too old — bridge needs 1.5
+        }),
+      /requires a 1\.x standard library/,
+    );
+  });
+
+  test("throws actionable error when no compatible std found", () => {
+    assert.throws(
+      () => resolveStd(instructions15, bundledStd, "2.0.0", {}),
+      (err: Error) => {
+        assert.ok(err.message.includes("1.x standard library"));
+        assert.ok(err.message.includes('"std@1.5"'));
+        assert.ok(err.message.includes("tools map"));
+        return true;
+      },
+    );
+  });
+
+  test("returns bundled for instructions without version header", () => {
+    const result = resolveStd([], bundledStd, "2.0.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "2.0.0");
+  });
+});
+
+describe("checkStdVersion: error guidance", () => {
+  const instructions15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  test("error mentions tools map on major mismatch", () => {
+    assert.throws(
+      () => checkStdVersion(instructions15, "2.0.0"),
+      (err: Error) => {
+        assert.ok(err.message.includes("1.x standard library"));
+        assert.ok(err.message.includes("tools map"));
+        return true;
+      },
+    );
+  });
+
+  test("error mentions the correct major the bridge needs", () => {
+    const instructions20 = [
+      { kind: "version" as const, version: "2.0" },
+      {
+        kind: "bridge" as const,
+        type: "Query",
+        field: "test",
+        module: "self",
+        handles: [],
+        wires: [],
+      },
+    ];
+    assert.throws(
+      () => checkStdVersion(instructions20, "1.5.0"),
+      /requires a 2\.x standard library/,
+    );
+  });
+});
+
+describe("versioned namespace keys: executeBridge integration", () => {
+  // Simulate a user-provided std from a different version
+  const fakeStdV1 = {
+    str: {
+      toUpperCase: (input: { in: string }) => input.in?.toUpperCase(),
+      toLowerCase: (input: { in: string }) => input.in?.toLowerCase(),
+    },
+  };
+
+  test("versioned std namespace key resolves via handle version tag", async () => {
+    // The handle uses @1.5, so the engine looks up "std.str.toUpperCase@1.5"
+    // which finds "std@1.5" namespace key and traverses into it.
+    const customStd = {
+      str: {
+        toUpperCase: (input: { in: string }) =>
+          input.in?.toUpperCase() + "_CUSTOM_STD",
+      },
+    };
+
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase@1.5 as up
+  with output as o
+  o.result <- up:o.text
+}`,
+      "Query.test",
+      { text: "hello" },
+      { "std@1.5": customStd },
+    );
+    assert.equal(data.result, "HELLO_CUSTOM_STD");
+  });
+
+  test("versioned sub-namespace key satisfies handle", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        "std.str@999.1": {
+          toLowerCase: (input: { in: string }) =>
+            input.in?.toLowerCase() + "_NS",
+        },
+      },
+    );
+    assert.equal(data.lower, "hello_NS");
+  });
+
+  test("no versioned std key falls back to bundled std", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with output as o
+  o.result <- up:o.text
+}`,
+      "Query.test",
+      { text: "hello" },
+    );
+    assert.equal(data.result, "HELLO");
+  });
+
+  test("flat versioned key still works alongside namespace keys", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        "std.str.toLowerCase@999.1": (input: { in: string }) =>
+          input.in?.toLowerCase() + "_FLAT",
+      },
+    );
+    assert.equal(data.lower, "hello_FLAT");
+  });
+});
+
+describe("hasVersionedToolFn: versioned namespace resolution", () => {
+  test("finds flat versioned key", () => {
+    const tools = {
+      "std.str.toLowerCase@999.1": () => {},
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("finds versioned sub-namespace key", () => {
+    const tools = {
+      "std.str@999.1": { toLowerCase: () => {} },
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("finds versioned root namespace key", () => {
+    const tools = {
+      "std@999.1": { str: { toLowerCase: () => {} } },
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("returns false when no versioned key matches", () => {
+    const tools = {
+      std: { str: { toLowerCase: () => {} } },
+    };
+    assert.ok(!hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
   });
 });
 

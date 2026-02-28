@@ -1201,7 +1201,20 @@ const parserInstance = new BridgeParser();
 const diagParserInstance = new BridgeParser({ recovery: true });
 
 const BRIDGE_VERSION = "1.5";
-const BRIDGE_MAJOR = 1;
+/** Minimum major version the parser can handle (inclusive). */
+const BRIDGE_MIN_MAJOR = 1;
+/** Maximum major version the parser can handle (inclusive). */
+const BRIDGE_MAX_MAJOR = 1;
+
+/** Exported parser version metadata for runtime use. */
+export const PARSER_VERSION = {
+  /** Current bridge language version */
+  current: BRIDGE_VERSION,
+  /** Minimum supported major version (inclusive) */
+  minMajor: BRIDGE_MIN_MAJOR,
+  /** Maximum supported major version (inclusive) */
+  maxMajor: BRIDGE_MAX_MAJOR,
+} as const;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public API
@@ -2665,13 +2678,18 @@ function toBridgeAst(
       `Missing version number. Bridge files must begin with: version ${BRIDGE_VERSION}`,
     );
   }
-  // Accept any version with the same major number (e.g. 1.5, 1.7, 1.12).
-  // Breaking syntax changes bump the major → a 2.x file won't parse here.
+  // Accept any version whose major falls within the supported range.
+  // When the parser supports multiple majors (e.g. 1.x through 2.x),
+  // bridge files from any of them are valid syntax.
   const vParts = versionNum.split(".");
   const vMajor = parseInt(vParts[0], 10);
-  if (isNaN(vMajor) || vMajor !== BRIDGE_MAJOR) {
+  const supportedRange =
+    BRIDGE_MIN_MAJOR === BRIDGE_MAX_MAJOR
+      ? `${BRIDGE_MIN_MAJOR}.x`
+      : `${BRIDGE_MIN_MAJOR}.x – ${BRIDGE_MAX_MAJOR}.x`;
+  if (isNaN(vMajor) || vMajor < BRIDGE_MIN_MAJOR || vMajor > BRIDGE_MAX_MAJOR) {
     throw new Error(
-      `Unsupported bridge major version "${versionNum}". This parser supports version ${BRIDGE_MAJOR}.x`,
+      `Unsupported bridge major version "${versionNum}". This parser supports version ${supportedRange}`,
     );
   }
 

@@ -8,13 +8,16 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
-  checkStdVersion,
+  resolveStd,
   checkHandleVersions,
   type Logger,
   type ToolTrace,
   type TraceLevel,
 } from "@stackables/bridge-core";
-import { std, STD_VERSION } from "@stackables/bridge-stdlib";
+import {
+  std as bundledStd,
+  STD_VERSION as BUNDLED_STD_VERSION,
+} from "@stackables/bridge-stdlib";
 import type { Instruction, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 
@@ -29,10 +32,18 @@ const defaultLogger: Logger = {
 };
 
 export type BridgeOptions = {
-  /** Tool functions available to the engine.
-   *  Supports namespaced nesting: `{ myNamespace: { myTool } }`.
-   *  The built-in `std` namespace and `httpCall` are always included;
-   *  user tools are merged on top (shallow). */
+  /**
+   * Tool functions available to the engine.
+   * Supports namespaced nesting: `{ myNamespace: { myTool } }`.
+   * The built-in `std` namespace is always included; user tools are
+   * merged on top (shallow).
+   *
+   * To provide a specific version of std (e.g. when bridge files
+   * target an older major), use a versioned namespace key:
+   * ```ts
+   * tools: { "std@1.5": oldStdNamespace }
+   * ```
+   */
   tools?: ToolMap;
   /** Optional function to reshape/restrict the GQL context before it reaches bridge files.
    *  By default the full context is exposed via `with context`. */
@@ -61,7 +72,7 @@ export function bridgeTransform(
   instructions: InstructionSource,
   options?: BridgeOptions,
 ): GraphQLSchema {
-  const userTools = options?.tools;
+  const userTools = options?.tools ?? {};
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
@@ -96,18 +107,24 @@ export function bridgeTransform(
                 ? instructions(context)
                 : instructions;
 
-            // Verify the installed std satisfies the bridge's declared version
-            checkStdVersion(activeInstructions, STD_VERSION);
+            // Resolve which std to use: bundled, or a versioned namespace from tools
+            const { namespace: activeStd, version: activeStdVersion } =
+              resolveStd(
+                activeInstructions,
+                bundledStd,
+                BUNDLED_STD_VERSION,
+                userTools,
+              );
 
             // std is always included; user tools merge on top (shallow)
             // internal tools are injected automatically by ExecutionTree
             const allTools: ToolMap = {
-              std,
-              ...(userTools ?? {}),
+              std: activeStd,
+              ...userTools,
             };
 
             // Verify all @version-tagged handles can be satisfied
-            checkHandleVersions(activeInstructions, allTools, STD_VERSION);
+            checkHandleVersions(activeInstructions, allTools, activeStdVersion);
 
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,
