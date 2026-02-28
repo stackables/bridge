@@ -2,18 +2,6 @@
 [![npm](https://img.shields.io/npm/v/@stackables/bridge?label=@stackables/bridge&logo=npm)](https://www.npmjs.com/package/@stackables/bridge)
 [![extension](https://img.shields.io/badge/VS_Code-Full_Support-blue)](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight)
 
-> **Developer Preview**
-> The Bridge v1.x is a developer preview.
->
-> - Stability: The .bridge language and TypeScript API is largely stable.
-> - Versioning: v2.0.0 is imminent, with a slightly more flexible package structure.
->
-> [See our roadmap](https://github.com/stackables/bridge/milestones) \
-> [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
->
-> Feedback: We are actively looking for use cases. Please share yours in our GitHub Discussions.
-
-
 # The Bridge
 
 **A declarative dataflow language and execution engine.**
@@ -21,6 +9,10 @@
 The Bridge replaces imperative orchestration code with static `.bridge` files. Instead of writing complex `async/await` logic, manual `Promise.all` wrappers, and custom data mappers, you simply define **what** data you need and **where** it comes from.
 
 The Bridge engine parses your wiring diagram, builds a dependency graph, and executes it - automatically handling parallelization, fallbacks, and data reshaping.
+
+- [See our roadmap](https://github.com/stackables/bridge/milestones) 
+- [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
+
 
 ### How it looks
 
