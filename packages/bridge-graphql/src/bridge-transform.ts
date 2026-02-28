@@ -4,6 +4,8 @@ import {
   GraphQLNonNull,
   type GraphQLSchema,
   defaultFieldResolver,
+  getNamedType,
+  isScalarType,
 } from "graphql";
 import {
   ExecutionTree,
@@ -88,6 +90,11 @@ export function bridgeTransform(
       if (fieldConfig.type instanceof GraphQLList) {
         array = true;
       }
+
+      // Detect scalar return types (e.g. JSON, JSONObject) — GraphQL won't
+      // call sub-field resolvers for scalars, so the engine must eagerly
+      // materialise the full output object instead of returning itself.
+      const scalar = isScalarType(getNamedType(fieldConfig.type));
 
       const trunk = { module: SELF_MODULE, type: typeName, field: fieldName };
       const { resolve = defaultFieldResolver } = fieldConfig;
@@ -185,7 +192,15 @@ export function bridgeTransform(
           }
 
           if (source instanceof ExecutionTree) {
-            const result = source.response(info.path, array);
+            const result = await source.response(info.path, array);
+
+            // Scalar return types (JSON, JSONObject, etc.) won't trigger
+            // sub-field resolvers, so if response() deferred resolution by
+            // returning the tree itself, eagerly materialise the output.
+            if (result instanceof ExecutionTree && scalar) {
+              return result.collectOutput();
+            }
+
             // At the leaf level (not root), race data pull with critical
             // force promises so errors propagate into GraphQL `errors[]`
             // while still allowing parallel execution.

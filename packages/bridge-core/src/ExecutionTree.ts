@@ -1183,6 +1183,94 @@ export class ExecutionTree {
   }
 
   /**
+   * Materialise all output wires into a plain JS object.
+   *
+   * Used by the GraphQL adapter when a bridge field returns a scalar type
+   * (e.g. `JSON`, `JSONObject`). In that case GraphQL won't call sub-field
+   * resolvers, so we need to eagerly resolve every output wire and assemble
+   * the result ourselves — the same logic `run()` uses for object output.
+   */
+  async collectOutput(): Promise<unknown> {
+    const bridge = this.bridge;
+    if (!bridge) return undefined;
+
+    const { type, field } = this.trunk;
+
+    // Root wire (`o <- src`) — whole-object passthrough
+    const hasRootWire = bridge.wires.some(
+      (w) =>
+        "from" in w &&
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field &&
+        w.to.path.length === 0,
+    );
+    if (hasRootWire) {
+      return this.pullOutputField([]);
+    }
+
+    // Object output — collect unique top-level field names
+    const outputFields = new Set<string>();
+    for (const wire of bridge.wires) {
+      if (
+        wire.to.module === SELF_MODULE &&
+        wire.to.type === type &&
+        wire.to.field === field &&
+        wire.to.path.length > 0
+      ) {
+        outputFields.add(wire.to.path[0]!);
+      }
+    }
+
+    if (outputFields.size === 0) return undefined;
+
+    const result: Record<string, unknown> = {};
+
+    const resolveField = async (prefix: string[]): Promise<unknown> => {
+      const exactWires = bridge.wires.filter(
+        (w) =>
+          w.to.module === SELF_MODULE &&
+          w.to.type === type &&
+          w.to.field === field &&
+          pathEquals(w.to.path, prefix),
+      );
+      if (exactWires.length > 0) {
+        return this.resolveWires(exactWires);
+      }
+
+      const subFields = new Set<string>();
+      for (const wire of bridge.wires) {
+        const p = wire.to.path;
+        if (
+          wire.to.module === SELF_MODULE &&
+          wire.to.type === type &&
+          wire.to.field === field &&
+          p.length > prefix.length &&
+          prefix.every((seg, i) => p[i] === seg)
+        ) {
+          subFields.add(p[prefix.length]!);
+        }
+      }
+      if (subFields.size === 0) return undefined;
+
+      const obj: Record<string, unknown> = {};
+      await Promise.all(
+        [...subFields].map(async (sub) => {
+          obj[sub] = await resolveField([...prefix, sub]);
+        }),
+      );
+      return obj;
+    };
+
+    await Promise.all(
+      [...outputFields].map(async (name) => {
+        result[name] = await resolveField([name]);
+      }),
+    );
+    return result;
+  }
+
+  /**
    * Execute the bridge end-to-end without GraphQL.
    *
    * Injects `input` as the trunk arguments, runs forced wires, then pulls
