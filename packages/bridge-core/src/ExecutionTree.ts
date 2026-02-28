@@ -1196,6 +1196,35 @@ export class ExecutionTree {
 
     const { type, field } = this.trunk;
 
+    // Shadow tree (array element) — resolve element-level output fields.
+    // For scalar arrays ([JSON!]) GraphQL won't call sub-field resolvers,
+    // so we eagerly materialise each element here.
+    if (this.parent) {
+      const outputFields = new Set<string>();
+      for (const wire of bridge.wires) {
+        if (
+          wire.to.module === SELF_MODULE &&
+          wire.to.type === type &&
+          wire.to.field === field &&
+          wire.to.path.length > 0
+        ) {
+          outputFields.add(wire.to.path[0]!);
+        }
+      }
+      if (outputFields.size > 0) {
+        const result: Record<string, unknown> = {};
+        await Promise.all(
+          [...outputFields].map(async (name) => {
+            result[name] = await this.pullOutputField([name]);
+          }),
+        );
+        return result;
+      }
+      // Passthrough: return stored element data directly
+      const elementKey = trunkKey({ ...this.trunk, element: true });
+      return this.state[elementKey];
+    }
+
     // Root wire (`o <- src`) — whole-object passthrough
     const hasRootWire = bridge.wires.some(
       (w) =>

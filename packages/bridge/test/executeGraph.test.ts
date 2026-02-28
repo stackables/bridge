@@ -275,4 +275,45 @@ bridge Query.info {
       greeting: "World",
     });
   });
+
+  test("[JSON!] array of scalars returns materialised objects", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSON
+      type Query {
+        items: [JSON!]!
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.items {
+  with myApi as api
+  with output as o
+
+  o <- api.results[] as item {
+    .name <- item.title
+    .score <- item.value
+  }
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions, {
+      tools: {
+        myApi: async () => ({
+          results: [
+            { title: "Alpha", value: 10 },
+            { title: "Beta", value: 20 },
+          ],
+        }),
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ items }`),
+    });
+
+    assert.deepStrictEqual(result.data.items, [
+      { name: "Alpha", score: 10 },
+      { name: "Beta", score: 20 },
+    ]);
+  });
 });

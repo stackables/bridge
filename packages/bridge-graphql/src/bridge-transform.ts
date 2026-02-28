@@ -197,8 +197,15 @@ export function bridgeTransform(
             // Scalar return types (JSON, JSONObject, etc.) won't trigger
             // sub-field resolvers, so if response() deferred resolution by
             // returning the tree itself, eagerly materialise the output.
-            if (result instanceof ExecutionTree && scalar) {
-              return result.collectOutput();
+            if (scalar) {
+              if (result instanceof ExecutionTree) {
+                return result.collectOutput();
+              }
+              if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
+                return Promise.all(
+                  result.map((shadow: ExecutionTree) => shadow.collectOutput()),
+                );
+              }
             }
 
             // At the leaf level (not root), race data pull with critical
