@@ -256,6 +256,8 @@ export class ExecutionTree {
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
   private toolFns?: ToolMap;
+  /** Shadow-tree nesting depth (0 for root). */
+  private depth: number;
 
   constructor(
     public trunk: Trunk,
@@ -264,6 +266,12 @@ export class ExecutionTree {
     private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
+    this.depth = parent ? parent.depth + 1 : 0;
+    if (this.depth > 30) {
+      throw new BridgePanicError(
+        `Maximum execution depth exceeded (${this.depth}) at ${trunkKey(trunk)}. Check for infinite recursion or circular array mappings.`,
+      );
+    }
     this.toolFns = { internal, ...(toolFns ?? {}) };
     const instructions = document.instructions;
     this.bridge = instructions.find(
@@ -555,7 +563,7 @@ export class ExecutionTree {
     return promise;
   }
 
-  schedule(target: Trunk): any {
+  schedule(target: Trunk, pullChain?: Set<string>): any {
     // Delegate to parent (shadow trees don't schedule directly) unless
     // the target fork has bridge wires sourced from element data,
     // or a __local binding whose source chain touches element data.
@@ -590,7 +598,7 @@ export class ExecutionTree {
           );
         });
       if (!hasElementSource && !hasTransitiveElementSource) {
-        return this.parent.schedule(target);
+        return this.parent.schedule(target, pullChain);
       }
     }
 
@@ -641,7 +649,7 @@ export class ExecutionTree {
       const groupEntries = Array.from(wireGroups.entries());
       const resolved = await Promise.all(
         groupEntries.map(async ([, group]): Promise<[string[], any]> => {
-          const value = await this.resolveWires(group);
+          const value = await this.resolveWires(group, pullChain);
           return [group[0].to.path, value];
         }),
       );
@@ -825,8 +833,21 @@ export class ExecutionTree {
     return this.tracer?.traces ?? [];
   }
 
-  private async pullSingle(ref: NodeRef): Promise<any> {
+  private async pullSingle(
+    ref: NodeRef,
+    pullChain: Set<string> = new Set(),
+  ): Promise<any> {
     const key = trunkKey(ref);
+
+    // ── Cycle detection ─────────────────────────────────────────────
+    // If this exact key is already in our active pull chain, it is a
+    // circular dependency that would deadlock (await-on-self).
+    if (pullChain.has(key)) {
+      throw new BridgePanicError(
+        `Circular dependency detected: "${key}" depends on itself`,
+      );
+    }
+
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
     let cursor: ExecutionTree | undefined = this;
@@ -836,6 +857,8 @@ export class ExecutionTree {
     }
 
     if (value === undefined) {
+      const nextChain = new Set(pullChain).add(key);
+
       // ── Lazy define field resolution ────────────────────────────────
       // For define trunks (__define_in_* / __define_out_*) with a specific
       // field path, resolve ONLY the wire(s) targeting that field instead
@@ -848,11 +871,11 @@ export class ExecutionTree {
             (w) => sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
           ) ?? [];
         if (fieldWires.length > 0) {
-          return this.resolveWires(fieldWires);
+          return this.resolveWires(fieldWires, nextChain);
         }
       }
 
-      this.state[key] = this.schedule(ref);
+      this.state[key] = this.schedule(ref, nextChain);
       value = this.state[key];
     }
 
@@ -1027,7 +1050,10 @@ export class ExecutionTree {
    * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
    * to return or continue to the next wire.
    */
-  private async resolveWires(wires: Wire[]): Promise<any> {
+  private async resolveWires(
+    wires: Wire[],
+    pullChain?: Set<string>,
+  ): Promise<any> {
     let lastError: any;
 
     for (const w of wires) {
@@ -1039,15 +1065,15 @@ export class ExecutionTree {
         let resolvedValue: any;
 
         if ("cond" in w) {
-          const condValue = await this.pullSingle(w.cond);
+          const condValue = await this.pullSingle(w.cond, pullChain);
           if (condValue) {
             if (w.thenRef !== undefined)
-              resolvedValue = await this.pullSingle(w.thenRef);
+              resolvedValue = await this.pullSingle(w.thenRef, pullChain);
             else if (w.thenValue !== undefined)
               resolvedValue = coerceConstant(w.thenValue);
           } else {
             if (w.elseRef !== undefined)
-              resolvedValue = await this.pullSingle(w.elseRef);
+              resolvedValue = await this.pullSingle(w.elseRef, pullChain);
             else if (w.elseValue !== undefined)
               resolvedValue = coerceConstant(w.elseValue);
           }
@@ -1060,20 +1086,20 @@ export class ExecutionTree {
             rightSafe,
           } = w.condAnd;
           const leftVal = isSafe
-            ? await this.pullSingle(leftRef).catch((e: any) => {
+            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
                 if (isFatalError(e)) throw e;
                 return undefined;
               })
-            : await this.pullSingle(leftRef);
+            : await this.pullSingle(leftRef, pullChain);
           if (!leftVal) {
             resolvedValue = false;
           } else if (rightRef !== undefined) {
             const rightVal = rightSafe
-              ? await this.pullSingle(rightRef).catch((e: any) => {
+              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
                   if (isFatalError(e)) throw e;
                   return undefined;
                 })
-              : await this.pullSingle(rightRef);
+              : await this.pullSingle(rightRef, pullChain);
             resolvedValue = Boolean(rightVal);
           } else if (rightValue !== undefined) {
             resolvedValue = Boolean(coerceConstant(rightValue));
@@ -1089,20 +1115,20 @@ export class ExecutionTree {
             rightSafe,
           } = w.condOr;
           const leftVal = isSafe
-            ? await this.pullSingle(leftRef).catch((e: any) => {
+            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
                 if (isFatalError(e)) throw e;
                 return undefined;
               })
-            : await this.pullSingle(leftRef);
+            : await this.pullSingle(leftRef, pullChain);
           if (leftVal) {
             resolvedValue = true;
           } else if (rightRef !== undefined) {
             const rightVal = rightSafe
-              ? await this.pullSingle(rightRef).catch((e: any) => {
+              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
                   if (isFatalError(e)) throw e;
                   return undefined;
                 })
-              : await this.pullSingle(rightRef);
+              : await this.pullSingle(rightRef, pullChain);
             resolvedValue = Boolean(rightVal);
           } else if (rightValue !== undefined) {
             resolvedValue = Boolean(coerceConstant(rightValue));
@@ -1112,13 +1138,13 @@ export class ExecutionTree {
         } else if ("from" in w) {
           if (w.safe) {
             try {
-              resolvedValue = await this.pullSingle(w.from);
+              resolvedValue = await this.pullSingle(w.from, pullChain);
             } catch (err: any) {
               if (isFatalError(err)) throw err;
               resolvedValue = undefined;
             }
           } else {
-            resolvedValue = await this.pullSingle(w.from);
+            resolvedValue = await this.pullSingle(w.from, pullChain);
           }
         } else {
           continue;
@@ -1129,7 +1155,7 @@ export class ExecutionTree {
           for (const ref of w.falsyFallbackRefs) {
             // Assign the fallback value regardless of whether it is truthy or falsy.
             // e.g. `false || 0` will correctly update resolvedValue to `0`.
-            resolvedValue = await this.pullSingle(ref);
+            resolvedValue = await this.pullSingle(ref, pullChain);
 
             // If it is truthy, we are done! Short-circuit the || chain.
             if (resolvedValue) break;
@@ -1149,7 +1175,10 @@ export class ExecutionTree {
           if (w.nullishControl) {
             resolvedValue = applyControlFlow(w.nullishControl);
           } else if (w.nullishFallbackRef) {
-            resolvedValue = await this.pullSingle(w.nullishFallbackRef);
+            resolvedValue = await this.pullSingle(
+              w.nullishFallbackRef,
+              pullChain,
+            );
           } else if (w.nullishFallback != null) {
             resolvedValue = coerceConstant(w.nullishFallback);
           }
@@ -1161,7 +1190,8 @@ export class ExecutionTree {
         // --- Layer 3: Catch ---
         if (isFatalError(err)) throw err;
         if (w.catchControl) return applyControlFlow(w.catchControl);
-        if (w.catchFallbackRef) return this.pullSingle(w.catchFallbackRef);
+        if (w.catchFallbackRef)
+          return this.pullSingle(w.catchFallbackRef, pullChain);
         if (w.catchFallback != null) return coerceConstant(w.catchFallback);
         lastError = err;
       }
