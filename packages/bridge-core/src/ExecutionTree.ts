@@ -3,8 +3,8 @@ import { parsePath } from "./utils.ts";
 import { internal } from "./tools/index.ts";
 import type {
   Bridge,
+  BridgeDocument,
   ControlFlowInstruction,
-  Instruction,
   NodeRef,
   ToolCallFn,
   ToolContext,
@@ -241,6 +241,12 @@ export class ExecutionTree {
   private pipeHandleMap:
     | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
     | undefined;
+  /**
+   * Maps trunk keys to `@version` strings from handle bindings.
+   * Populated in the constructor so `schedule()` can prefer versioned
+   * tool lookups (e.g. `std.str.toLowerCase@999.1`) over the default.
+   */
+  private handleVersionMap: Map<string, string> = new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -253,12 +259,13 @@ export class ExecutionTree {
 
   constructor(
     public trunk: Trunk,
-    private instructions: Instruction[],
+    private document: BridgeDocument,
     toolFns?: ToolMap,
     private context?: Record<string, any>,
     private parent?: ExecutionTree,
   ) {
     this.toolFns = { internal, ...(toolFns ?? {}) };
+    const instructions = document.instructions;
     this.bridge = instructions.find(
       (i): i is Bridge =>
         i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
@@ -267,6 +274,33 @@ export class ExecutionTree {
       this.pipeHandleMap = new Map(
         this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
       );
+    }
+    // Build handle→version map from bridge handle bindings
+    if (this.bridge) {
+      const instanceCounters = new Map<string, number>();
+      for (const h of this.bridge.handles) {
+        if (h.kind !== "tool") continue;
+        const name = h.name;
+        const lastDot = name.lastIndexOf(".");
+        let module: string, field: string, counterKey: string, type: string;
+        if (lastDot !== -1) {
+          module = name.substring(0, lastDot);
+          field = name.substring(lastDot + 1);
+          counterKey = `${module}:${field}`;
+          type = this.trunk.type;
+        } else {
+          module = SELF_MODULE;
+          field = name;
+          counterKey = `Tools:${name}`;
+          type = "Tools";
+        }
+        const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
+        instanceCounters.set(counterKey, instance);
+        if (h.version) {
+          const key = trunkKey({ module, type, field, instance });
+          this.handleVersionMap.set(key, h.version);
+        }
+      }
     }
     if (context) {
       this.state[
@@ -313,7 +347,35 @@ export class ExecutionTree {
       if (typeof current === "function") return current;
       // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
       const flat = (this.toolFns as any)?.[name];
-      return typeof flat === "function" ? flat : undefined;
+      if (typeof flat === "function") return flat;
+
+      // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
+      // For "std.str.toLowerCase@999.1", check:
+      //   toolFns["std.str@999.1"]?.toLowerCase
+      //   toolFns["std@999.1"]?.str?.toLowerCase
+      const atIdx = name.lastIndexOf("@");
+      if (atIdx > 0) {
+        const baseName = name.substring(0, atIdx);
+        const version = name.substring(atIdx + 1);
+        const nameParts = baseName.split(".");
+        for (let i = nameParts.length - 1; i >= 1; i--) {
+          const nsKey = nameParts.slice(0, i).join(".") + "@" + version;
+          const remainder = nameParts.slice(i);
+          let ns: any = (this.toolFns as any)?.[nsKey];
+          if (ns != null && typeof ns === "object") {
+            for (const part of remainder) {
+              if (ns == null || typeof ns !== "object") {
+                ns = undefined;
+                break;
+              }
+              ns = ns[part];
+            }
+            if (typeof ns === "function") return ns;
+          }
+        }
+      }
+
+      return undefined;
     }
     // Try root level first
     const fn = (this.toolFns as any)?.[name];
@@ -331,7 +393,7 @@ export class ExecutionTree {
     if (this.toolDefCache.has(name))
       return this.toolDefCache.get(name) ?? undefined;
 
-    const toolDefs = this.instructions.filter(
+    const toolDefs = this.document.instructions.filter(
       (i): i is ToolDef => i.kind === "tool",
     );
     const base = toolDefs.find((t) => t.name === name);
@@ -433,7 +495,6 @@ export class ExecutionTree {
     let value: any;
     if (dep.kind === "context") {
       // Walk the full parent chain for context
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
       let cursor: ExecutionTree | undefined = this;
       while (cursor && value === undefined) {
         value = cursor.context;
@@ -446,7 +507,6 @@ export class ExecutionTree {
         type: "Const",
         field: "const",
       });
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
       let cursor: ExecutionTree | undefined = this;
       while (cursor && value === undefined) {
         value = cursor.state[constKey];
@@ -610,8 +670,22 @@ export class ExecutionTree {
         }
       }
 
-      // Direct tool function lookup by name (simple or dotted)
-      const directFn = this.lookupToolFn(toolName);
+      // Direct tool function lookup by name (simple or dotted).
+      // When the handle carries a @version tag, try the versioned key first
+      // (e.g. "std.str.toLowerCase@999.1") so user-injected overrides win.
+      // For pipe forks, fall back to the baseTrunk's version since forks
+      // use synthetic instance numbers (100000+).
+      const handleVersion =
+        this.handleVersionMap.get(trunkKey(target)) ??
+        (baseTrunk
+          ? this.handleVersionMap.get(trunkKey(baseTrunk))
+          : undefined);
+      let directFn = handleVersion
+        ? this.lookupToolFn(`${toolName}@${handleVersion}`)
+        : undefined;
+      if (!directFn) {
+        directFn = this.lookupToolFn(toolName);
+      }
       if (directFn) {
         return this.callTool(toolName, toolName, directFn, input);
       }
@@ -735,7 +809,7 @@ export class ExecutionTree {
   shadow(): ExecutionTree {
     const child = new ExecutionTree(
       this.trunk,
-      this.instructions,
+      this.document,
       this.toolFns,
       undefined,
       this,
@@ -755,7 +829,6 @@ export class ExecutionTree {
     const key = trunkKey(ref);
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
     let cursor: ExecutionTree | undefined = this;
     while (cursor && value === undefined) {
       value = cursor.state[key];

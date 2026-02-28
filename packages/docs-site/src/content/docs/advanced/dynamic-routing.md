@@ -5,7 +5,7 @@ description: Dynamic Routing & Context-Aware Topologies
 
 By default, `bridgeTransform` takes a parsed `.bridge` file and attaches it to your schema statically. But for enterprise gateways, multi-tenant SaaS, and strict compliance environments, a static graph isn't enough.
 
-The Bridge supports **Context-Aware Topology Switching**. Instead of passing a static array of instructions, you can pass a router function: `(context: any) => Instruction[]`.
+The Bridge supports **Context-Aware Topology Switching**. Instead of passing a static `BridgeDocument`, you can pass a router function: `(context: any) => BridgeDocument`.
 
 This function is evaluated **per-request**, allowing you to hot-swap the entire physical wiring of your GraphQL API based on the user's identity, region, or billing tier—without writing a single `if/else` statement in your business logic.
 
@@ -62,4 +62,4 @@ const schema = bridgeTransform(baseSchema, (context) => {
 
 ### Security Note
 
-Because `.bridge` files are parsed into serializable ASTs (`Instruction[]`), the router function is incredibly fast. Evaluating the context and returning an in-memory AST array adds virtually zero latency to your request pipeline, making it ideal for high-throughput edge gateways.
+Because `.bridge` files are parsed into serializable ASTs (`BridgeDocument`), the router function is incredibly fast. Evaluating the context and returning an in-memory document adds virtually zero latency to your request pipeline, making it ideal for high-throughput edge gateways.

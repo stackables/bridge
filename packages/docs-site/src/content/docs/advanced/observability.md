@@ -80,7 +80,7 @@ Pass any logger that implements the four-method `Logger` interface:
 import { bridgeTransform } from "@stackables/bridge";
 import type { Logger } from "@stackables/bridge";
 
-const schema = bridgeTransform(baseSchema, instructions, {
+const schema = bridgeTransform(baseSchema, document, {
   tools,
   logger: console, // console works out of the box
   // logger: pinoInstance,   // pino, winston, bunyan — any compatible logger
@@ -119,7 +119,7 @@ Pass `trace` to also populate the GraphQL response `extensions.traces` array
 ```ts
 import { bridgeTransform, useBridgeTracing } from "@stackables/bridge";
 
-const schema = bridgeTransform(baseSchema, instructions, {
+const schema = bridgeTransform(baseSchema, document, {
   tools,
   trace: "full", // records tool, fn, input, output, timing
   // trace: "basic", // records tool, fn, timing, error (no input/output)
@@ -235,7 +235,7 @@ new NodeSDK({
 }).start();
 
 // 2. Configure Bridge with logger + trace
-const schema = bridgeTransform(baseSchema, instructions, {
+const schema = bridgeTransform(baseSchema, document, {
   tools,
   logger: pino(), // structured log output
   trace: "basic", // lightweight per-request traces in extensions
@@ -264,7 +264,7 @@ const traces = getBridgeTraces(context);
 The test helper `createGateway` supports the `trace` option:
 
 ```ts
-const gateway = createGateway(typeDefs, instructions, {
+const gateway = createGateway(typeDefs, document, {
   tools: { geocoder: mockGeocoder },
   trace: "full",
 });

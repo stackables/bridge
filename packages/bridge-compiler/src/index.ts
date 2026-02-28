@@ -1,7 +1,7 @@
 /**
  * @stackables/bridge-compiler — Bridge DSL parser, serializer, and language service.
  *
- * Turns `.bridge` source text into `Instruction[]` (JSON AST) and provides
+ * Turns `.bridge` source text into `BridgeDocument` (JSON AST) and provides
  * IDE intelligence (diagnostics, completions, hover).
  */
 
@@ -11,13 +11,17 @@ export {
   parseBridgeChevrotain as parseBridge,
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
+  PARSER_VERSION,
 } from "./parser/index.ts";
 export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
 export { BridgeLexer, allTokens } from "./parser/index.ts";
 
 // ── Serializer ──────────────────────────────────────────────────────────────
 
-export { parseBridge as parseBridgeFormat, serializeBridge } from "./bridge-format.ts";
+export {
+  parseBridge as parseBridgeFormat,
+  serializeBridge,
+} from "./bridge-format.ts";
 
 // ── Language service ────────────────────────────────────────────────────────
 

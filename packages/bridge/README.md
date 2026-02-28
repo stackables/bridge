@@ -1,6 +1,5 @@
 [![github](https://img.shields.io/badge/github-stackables/bridge-blue?logo=github)](https://github.com/stackables/bridge)
 
-
 # The Bridge
 
 **Declarative dataflow for GraphQL.**
@@ -9,7 +8,6 @@ Wire data between APIs, tools, and fields using `.bridge` files—no resolvers, 
 ```bash
 npm install @stackables/bridge
 ```
-
 
 ## The Workflow
 
@@ -28,7 +26,6 @@ type Location {
 type Query {
   location(city: String!): Location
 }
-
 ```
 
 ### 2. Wire the Bridge
@@ -68,7 +65,7 @@ const typeDefs = /* load your schema.graphql */;
 const bridgeFile = /* load your logic.bridge */;
 
 const schema = bridgeTransform(
-  createSchema({ typeDefs }), 
+  createSchema({ typeDefs }),
   parseBridge(bridgeFile)
 );
 
@@ -95,6 +92,18 @@ Exit code is `1` when any errors are present, `0` when everything is clean.
 
 ---
 
-## The Language
+## Packages
 
-https://github.com/stackables/bridge
+`@stackables/bridge` is the all-in-one — it re-exports everything so you can get started fast. But you don't always need the full stack. If you're optimizing for bundle size (say, deploying to Cloudflare Workers), pick only the packages you need:
+
+| Package                                                                                    | Role                     | When to reach for it                                                        |
+| ------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------- |
+| [`@stackables/bridge-core`](https://www.npmjs.com/package/@stackables/bridge-core)         | **The Engine**           | Edge workers, serverless — run pre-compiled instructions without the parser |
+| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Parser**           | Build-time compilation of `.bridge` files, or parse on the fly at startup   |
+| [`@stackables/bridge-graphql`](https://www.npmjs.com/package/@stackables/bridge-graphql)   | **The Adapter**          | Wire bridge instructions into an Apollo or Yoga GraphQL schema              |
+| [`@stackables/bridge-stdlib`](https://www.npmjs.com/package/@stackables/bridge-stdlib)     | **The Standard Library** | Customize or extend httpCall, string/array tools, audit, assert             |
+| [`@stackables/bridge-types`](https://www.npmjs.com/package/@stackables/bridge-types)       | **Shared Types**         | Writing a custom tool library or framework integration                      |
+
+See the [Package Selection guide](https://bridge.sdk42.com/advanced/packages/) for common deployment patterns (JIT vs AOT).
+
+**VS Code extension:** search for [**"The Bridge Language"**](https://marketplace.visualstudio.com/items?itemName=stackables.bridge-syntax-highlight) in the Extensions panel for syntax highlighting, diagnostics, and hover.

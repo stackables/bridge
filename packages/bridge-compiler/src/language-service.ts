@@ -19,7 +19,8 @@ import type {
   HandleBinding,
   ToolDep,
 } from "@stackables/bridge-core";
-import { std } from "@stackables/bridge-stdlib";
+import { collectVersionedHandles } from "@stackables/bridge-core";
+import { std, STD_VERSION } from "@stackables/bridge-stdlib";
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export class BridgeLanguageService {
     }
 
     const result = parseBridgeDiagnostics(text);
-    this.instructions = result.instructions;
+    this.instructions = result.document.instructions;
     this.startLines = result.startLines;
     this.parserDiagnostics = result.diagnostics;
   }
@@ -133,6 +134,42 @@ export class BridgeLanguageService {
               end: { line: i, character: m.index + ref.length },
             },
           });
+        }
+      }
+    }
+
+    // Check @version tags on tool handles against the bundled std version.
+    // Versions exceeding the bundled std emit a warning: the tool must be
+    // provided at runtime via the tools map.
+    const versioned = collectVersionedHandles(this.instructions);
+    if (versioned.length > 0) {
+      const stdParts = STD_VERSION.split(".").map(Number);
+      const [stdMajor = 0, stdMinor = 0] = stdParts;
+
+      for (const { name, version } of versioned) {
+        if (!name.startsWith("std.")) continue;
+        const vParts = version.split(".").map(Number);
+        const [vMajor = 0, vMinor = 0] = vParts;
+        if (vMajor === stdMajor && stdMinor >= vMinor) continue;
+
+        // Find the line that contains this version tag so we can report it
+        const versionTag = `@${version}`;
+        for (let i = 0; i < this.lines.length; i++) {
+          const col = this.lines[i].indexOf(versionTag);
+          if (col === -1) continue;
+          // Make sure it's adjacent to the tool name
+          if (!this.lines[i].includes(name + versionTag)) continue;
+          diags.push({
+            message:
+              `"${name}@${version}" exceeds bundled std ${STD_VERSION}. ` +
+              `Provide this tool version at runtime via the tools map.`,
+            severity: "warning",
+            range: {
+              start: { line: i, character: col },
+              end: { line: i, character: col + versionTag.length },
+            },
+          });
+          break;
         }
       }
     }
@@ -275,8 +312,10 @@ function getWordAt(line: string, character: number): string {
 
 function handleBindingMarkdown(h: HandleBinding): string {
   switch (h.kind) {
-    case "tool":
-      return `**Tool handle** \`${h.handle}\`\n\nSource: \`${h.name}\``;
+    case "tool": {
+      const ver = h.version ? ` @${h.version}` : "";
+      return `**Tool handle** \`${h.handle}\`\n\nSource: \`${h.name}${ver}\``;
+    }
     case "input":
       return `**Input handle** \`${h.handle}\`\n\nGraphQL field arguments`;
     case "output":
@@ -296,7 +335,9 @@ function toolDepMarkdown(d: ToolDep): string {
       return `**Context dep** \`${d.handle}\`\n\nGraphQL execution context`;
     case "const":
       return `**Const dep** \`${d.handle}\`\n\nNamed constants declared in this file`;
-    case "tool":
-      return `**Tool dep** \`${d.handle}\`\n\nTool: \`${d.tool}\``;
+    case "tool": {
+      const ver = d.version ? ` @${d.version}` : "";
+      return `**Tool dep** \`${d.handle}\`\n\nTool: \`${d.tool}${ver}\``;
+    }
   }
 }

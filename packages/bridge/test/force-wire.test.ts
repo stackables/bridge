@@ -2,7 +2,10 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import type { Bridge } from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
@@ -11,7 +14,7 @@ import { createGateway } from "./_gateway.ts";
 
 describe("parseBridge: force <handle>", () => {
   test("regular bridge has no forces", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -21,13 +24,13 @@ bridge Query.demo {
 t.action <- i.name
 o.result <- t.output
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.equal(bridge.forces, undefined);
   });
 
   test("force statement creates a forces entry", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.audit {
   with logger.log as lg
@@ -36,7 +39,7 @@ bridge Mutation.audit {
 lg.action <- i.event
 force lg
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces, "should have forces");
     assert.equal(bridge.forces!.length, 1);
@@ -47,7 +50,7 @@ force lg
   });
 
   test("force and regular wires coexist", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with mainApi as m
@@ -60,7 +63,7 @@ audit.action <- i.query
 force audit
 o.result <- m.data
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -78,7 +81,7 @@ o.result <- m.data
   });
 
   test("multiple force statements", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -90,7 +93,7 @@ mt.name <- i.event
 force lg
 force mt
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);
@@ -115,7 +118,7 @@ force unknown
   });
 
   test("force on simple (non-dotted) tool handle", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myTool as t
@@ -126,7 +129,7 @@ t.in <- i.name
 force t
 o.result <- t.out
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -138,7 +141,7 @@ o.result <- t.out
 
   test("force without any wires to the handle", () => {
     // The whole point of force — handle has no output wires, just triggers execution
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with sideEffect as se
@@ -149,7 +152,7 @@ se.action = "fire"
 force se
 o.ok = "true"
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces![0].handle, "se");
@@ -161,7 +164,7 @@ o.ok = "true"
   });
 
   test("force catch null sets catchError flag", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.fire {
   with analytics as ping
@@ -172,7 +175,7 @@ ping.event <- i.event
 force ping catch null
 o.ok = "true"
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 1);
@@ -181,7 +184,7 @@ o.ok = "true"
   });
 
   test("mixed critical and fire-and-forget forces", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Mutation.multi {
   with logger.log as lg
@@ -193,7 +196,7 @@ mt.name <- i.event
 force lg
 force mt catch null
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     assert.ok(bridge.forces);
     assert.equal(bridge.forces!.length, 2);
@@ -355,7 +358,7 @@ o.title <- m.title
 }`;
 
     const tools: Record<string, any> = {
-      mainApi: async (input: any) => {
+      mainApi: async (_input: any) => {
         return { title: "Hello World" };
       },
       "audit.log": async (input: any) => {
@@ -412,7 +415,7 @@ o.id <- u.id
 }`;
 
     const tools: Record<string, any> = {
-      "userApi.create": async (input: any) => ({ id: "usr_123" }),
+      "userApi.create": async (_input: any) => ({ id: "usr_123" }),
       "audit.log": async (input: any) => {
         auditInput = input;
         return { ok: true };
@@ -455,12 +458,12 @@ o.title <- m.title
 }`;
 
     const tools: Record<string, any> = {
-      mainApi: async (input: any) => {
+      mainApi: async (_input: any) => {
         mainStart = performance.now() - t0;
         await new Promise((r) => setTimeout(r, 50));
         return { title: "result" };
       },
-      "audit.log": async (input: any) => {
+      "audit.log": async (_input: any) => {
         auditStart = performance.now() - t0;
         await new Promise((r) => setTimeout(r, 50));
         return { ok: true };
@@ -511,7 +514,7 @@ o.ok = "true"
 }`;
 
     const tools: Record<string, any> = {
-      sideEffect: async (input: any) => {
+      sideEffect: async (_input: any) => {
         sideEffectCalled = true;
         // Returns nothing — 204 No Content scenario
         return null;

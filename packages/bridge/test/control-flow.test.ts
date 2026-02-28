@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
@@ -15,10 +18,10 @@ function run(
   signal?: AbortSignal,
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
-  return executeBridge({ instructions, operation, input, tools, signal });
+  return executeBridge({ document, operation, input, tools, signal });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -27,13 +30,13 @@ function run(
 
 describe("parseBridge: control flow keywords", () => {
   test("throw on || gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name || throw "name is required"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -46,13 +49,13 @@ bridge Query.test {
   });
 
   test("panic on ?? gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name ?? panic "fatal: name cannot be null"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -65,7 +68,7 @@ bridge Query.test {
   });
 
   test("continue on ?? gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -74,17 +77,19 @@ bridge Query.test {
     .name <- item.name ?? continue
   }
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
-        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
     assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
   });
 
   test("break on ?? gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
@@ -93,24 +98,26 @@ bridge Query.test {
     .name <- item.name ?? break
   }
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
-        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
     assert.deepStrictEqual(elemWire.nullishControl, { kind: "break" });
   });
 
   test("throw on catch gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
   with output as o
   o.name <- a.name catch throw "api failed"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -123,14 +130,14 @@ bridge Query.test {
   });
 
   test("panic on catch gate", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with api as a
   with input as i
   with output as o
   o.name <- a.name catch panic "unrecoverable"
 }`);
-    const b = instructions[0] as Bridge;
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -156,12 +163,14 @@ bridge Query.test {
   with output as o
   o.name <- i.name || throw "name is required"
 }`;
-    const instructions = parseBridge(src);
-    const out = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const out = serializeBridge(doc);
     assert.ok(out.includes('|| throw "name is required"'));
     // Parse again and compare AST
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -181,11 +190,13 @@ bridge Query.test {
   with output as o
   o.name <- i.name ?? panic "fatal"
 }`;
-    const instructions = parseBridge(src);
-    const out = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const out = serializeBridge(doc);
     assert.ok(out.includes('?? panic "fatal"'));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -208,14 +219,18 @@ bridge Query.test {
     .name <- item.name ?? continue
   }
 }`;
-    const instructions = parseBridge(src);
-    const out = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const out = serializeBridge(doc);
     assert.ok(out.includes("?? continue"));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const elemWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
-        "from" in w && w.from.element === true && w.to.path.join(".") === "items.name",
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
     assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
@@ -230,11 +245,13 @@ bridge Query.test {
   with output as o
   o.name <- a.name catch break
 }`;
-    const instructions = parseBridge(src);
-    const out = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const out = serializeBridge(doc);
     assert.ok(out.includes("catch break"));
     const roundtripped = parseBridge(out);
-    const b = roundtripped[0] as Bridge;
+    const b = roundtripped.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const pullWire = b.wires.find(
       (w): w is Extract<Wire, { from: any }> =>
         "from" in w && w.to.path.join(".") === "name",
@@ -401,7 +418,9 @@ bridge Query.test {
         ],
       }),
     };
-    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    const { data } = (await run(src, "Query.test", {}, tools)) as {
+      data: any[];
+    };
     assert.equal(data.length, 2);
     assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
   });
@@ -425,7 +444,9 @@ bridge Query.test {
         ],
       }),
     };
-    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    const { data } = (await run(src, "Query.test", {}, tools)) as {
+      data: any[];
+    };
     assert.equal(data.length, 2);
     assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
   });
@@ -445,7 +466,9 @@ bridge Query.test {
     const tools = {
       api: async () => ({ items: null }),
     };
-    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    const { data } = (await run(src, "Query.test", {}, tools)) as {
+      data: any[];
+    };
     assert.deepStrictEqual(data, []);
   });
 
@@ -459,9 +482,13 @@ bridge Query.test {
   } catch continue
 }`;
     const tools = {
-      api: async () => { throw new Error("service unavailable"); },
+      api: async () => {
+        throw new Error("service unavailable");
+      },
     };
-    const { data } = await run(src, "Query.test", {}, tools) as { data: any[] };
+    const { data } = (await run(src, "Query.test", {}, tools)) as {
+      data: any[];
+    };
     assert.deepStrictEqual(data, []);
   });
 });

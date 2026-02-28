@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
-import type { Instruction } from "../src/index.ts";
+import type { BridgeDocument } from "../src/index.ts";
 
 function run(
   bridgeText: string,
@@ -10,8 +10,8 @@ function run(
   input: Record<string, unknown> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as Instruction[];
-  return executeBridge({ instructions, operation, input });
+  const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
+  return executeBridge({ document, operation, input });
 }
 
 describe("string interpolation || fallback priority", () => {

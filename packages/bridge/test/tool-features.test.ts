@@ -2,7 +2,10 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Missing tool error ──────────────────────────────────────────────────────
@@ -381,15 +384,31 @@ o.loud <- undeclared:i.text
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     // The declared handle must still appear in the with block
-    assert.ok(serialized.includes("with toUpper as tu"), "handle declaration must appear in header");
+    assert.ok(
+      serialized.includes("with toUpper as tu"),
+      "handle declaration must appear in header",
+    );
     // The body should use the pipe operator (not two explicit wires)
-    assert.ok(serialized.includes("tu:"), "serialized output should use pipe operator");
-    assert.ok(!serialized.includes("tu.in"), "expanded in-wire should not appear");
-    assert.ok(!serialized.includes("tu.out"), "expanded out-wire should not appear");
+    assert.ok(
+      serialized.includes("tu:"),
+      "serialized output should use pipe operator",
+    );
+    assert.ok(
+      !serialized.includes("tu.in"),
+      "expanded in-wire should not appear",
+    );
+    assert.ok(
+      !serialized.includes("tu.out"),
+      "expanded out-wire should not appear",
+    );
     // Parse → serialize → parse should be idempotent
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(reserialized, serialized, "parseBridge(serializeBridge(x)) should be idempotent");
+    assert.equal(
+      reserialized,
+      serialized,
+      "parseBridge(serializeBridge(x)) should be idempotent",
+    );
   });
 });
 
@@ -457,7 +476,7 @@ o.priceAny <- convertToEur:i.amount
     const result: any = await executor({
       document: parse(`{ priceEur(amount: 500) }`),
     });
-    assert.equal(result.data.priceEur, 5);       // 500 / 100
+    assert.equal(result.data.priceEur, 5); // 500 / 100
   });
 
   test("currency override from input takes precedence over tool default", async () => {
@@ -465,14 +484,17 @@ o.priceAny <- convertToEur:i.amount
     const result: any = await executor({
       document: parse(`{ priceAny(amount: 450, currency: "GBP") }`),
     });
-    assert.equal(result.data.priceAny, 5);       // 450 / 90
+    assert.equal(result.data.priceAny, 5); // 450 / 90
   });
 
   test("with <name> shorthand round-trips through serializer", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     // Short form must survive the round-trip
-    assert.ok(serialized.includes("  with convertToEur\n"), "short with form should be preserved");
+    assert.ok(
+      serialized.includes("  with convertToEur\n"),
+      "short with form should be preserved",
+    );
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
     assert.equal(reserialized, serialized, "should be idempotent");
@@ -528,8 +550,8 @@ o.b <- d:i.b
     const result: any = await executor({
       document: parse(`{ doubled(a: 3, b: 7) { a b } }`),
     });
-    assert.equal(result.data.doubled.a, 6);   // 3 * 2
-    assert.equal(result.data.doubled.b, 14);  // 7 * 2
+    assert.equal(result.data.doubled.a, 6); // 3 * 2
+    assert.equal(result.data.doubled.b, 14); // 7 * 2
   });
 
   test("pipe forking serializes and round-trips correctly", () => {
@@ -557,7 +579,8 @@ describe("pipe named input field", () => {
   `;
 
   // Divider tool: { dividend: number, divisor: number } → number
-  const divider = (input: Record<string, any>) => input.dividend / input.divisor;
+  const divider = (input: Record<string, any>) =>
+    input.dividend / input.divisor;
 
   const bridgeText = `version 1.5
 tool divide from divider
@@ -586,7 +609,7 @@ dv.divisor <- i.rate
     const result: any = await executor({
       document: parse(`{ converted(amount: 450, rate: 90) }`),
     });
-    assert.equal(result.data.converted, 5);   // 450 / 90
+    assert.equal(result.data.converted, 5); // 450 / 90
   });
 
   test("named input field round-trips through serializer", () => {
@@ -634,14 +657,18 @@ o.answer <- a.value
 
   test("second identical call returns cached response (fetch called once)", async () => {
     let fetchCount = 0;
-    const mockFetch = async (url: string) => {
+    const mockFetch = async (_url: string) => {
       fetchCount++;
       return { json: async () => ({ value: "hit-" + fetchCount }) } as Response;
     };
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      tools: { httpCall: (await import("../src/index.ts")).createHttpCall(mockFetch as any) },
+      tools: {
+        httpCall: (await import("../src/index.ts")).createHttpCall(
+          mockFetch as any,
+        ),
+      },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const doc = parse(`{ lookup(q: "hello") { answer } }`);
@@ -664,12 +691,20 @@ o.answer <- a.value
 
     const instructions = parseBridge(bridgeText);
     const gateway = createGateway(typeDefs, instructions, {
-      tools: { httpCall: (await import("../src/index.ts")).createHttpCall(mockFetch as any) },
+      tools: {
+        httpCall: (await import("../src/index.ts")).createHttpCall(
+          mockFetch as any,
+        ),
+      },
     });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
-    const r1: any = await executor({ document: parse(`{ lookup(q: "A") { answer } }`) });
-    const r2: any = await executor({ document: parse(`{ lookup(q: "B") { answer } }`) });
+    const r1: any = await executor({
+      document: parse(`{ lookup(q: "A") { answer } }`),
+    });
+    const r2: any = await executor({
+      document: parse(`{ lookup(q: "B") { answer } }`),
+    });
 
     assert.equal(r1.data.lookup.answer, "A");
     assert.equal(r2.data.lookup.answer, "B");
@@ -679,7 +714,10 @@ o.answer <- a.value
   test("cache param round-trips through serializer", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("cache = 60"), "cache param should be in serialized output");
+    assert.ok(
+      serialized.includes("cache = 60"),
+      "cache param should be in serialized output",
+    );
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
     assert.equal(reserialized, serialized, "should be idempotent");

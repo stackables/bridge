@@ -1,12 +1,16 @@
 import { ExecutionTree, TraceCollector } from "./ExecutionTree.ts";
 import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
-import type { Instruction, ToolMap } from "./types.ts";
+import type { BridgeDocument, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { std } from "@stackables/bridge-stdlib";
+import {
+  std as bundledStd,
+  STD_VERSION as BUNDLED_STD_VERSION,
+} from "@stackables/bridge-stdlib";
+import { resolveStd, checkHandleVersions } from "./version-check.ts";
 
 export type ExecuteBridgeOptions = {
-  /** Parsed bridge instructions (from `parseBridgeDiagnostics`). */
-  instructions: Instruction[];
+  /** Parsed bridge document (from `parseBridge` or `parseBridgeDiagnostics`). */
+  document: BridgeDocument;
   /**
    * Which bridge to execute, as `"Type.field"`.
    * Mirrors the `bridge Type.field { ... }` declaration.
@@ -15,7 +19,19 @@ export type ExecuteBridgeOptions = {
   operation: string;
   /** Input arguments — equivalent to GraphQL field arguments. */
   input?: Record<string, unknown>;
-  /** Additional tools to merge with the built-in `std` namespace. */
+  /**
+   * Tool functions available to the engine.
+   *
+   * Supports namespaced nesting: `{ myNamespace: { myTool } }`.
+   * The built-in `std` namespace is always included; user tools are
+   * merged on top (shallow).
+   *
+   * To provide a specific version of std (e.g. when the bridge file
+   * targets an older major), use a versioned namespace key:
+   * ```ts
+   * tools: { "std@1.5": oldStdNamespace }
+   * ```
+   */
   tools?: ToolMap;
   /** Context available via `with context as ctx` inside the bridge. */
   context?: Record<string, unknown>;
@@ -47,12 +63,12 @@ export type ExecuteBridgeResult<T = unknown> = {
  *
  * @example
  * ```ts
- * import { parseBridgeDiagnostics, executeBridge } from "@stackables/bridge";
+ * import { parseBridge, executeBridge } from "@stackables/bridge";
  * import { readFileSync } from "node:fs";
  *
- * const { instructions } = parseBridgeDiagnostics(readFileSync("my.bridge", "utf8"));
+ * const document = parseBridge(readFileSync("my.bridge", "utf8"));
  * const { data } = await executeBridge({
- *   instructions,
+ *   document,
  *   operation: "Query.myField",
  *   input: { city: "Berlin" },
  * });
@@ -62,7 +78,7 @@ export type ExecuteBridgeResult<T = unknown> = {
 export async function executeBridge<T = unknown>(
   options: ExecuteBridgeOptions,
 ): Promise<ExecuteBridgeResult<T>> {
-  const { instructions, operation, input = {}, context = {} } = options;
+  const { document: doc, operation, input = {}, context = {} } = options;
 
   const parts = operation.split(".");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -74,12 +90,22 @@ export async function executeBridge<T = unknown>(
   const [type, field] = parts as [string, string];
   const trunk = { module: SELF_MODULE, type, field };
 
-  const tree = new ExecutionTree(
-    trunk,
-    instructions,
-    { std, ...(options.tools ?? {}) },
-    context,
+  const userTools = options.tools ?? {};
+
+  // Resolve which std to use: bundled, or a versioned namespace from tools
+  const { namespace: activeStd, version: activeStdVersion } = resolveStd(
+    doc.version,
+    bundledStd,
+    BUNDLED_STD_VERSION,
+    userTools,
   );
+
+  const allTools: ToolMap = { std: activeStd, ...userTools };
+
+  // Verify all @version-tagged handles can be satisfied
+  checkHandleVersions(doc.instructions, allTools, activeStdVersion);
+
+  const tree = new ExecutionTree(trunk, doc, allTools, context);
 
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;

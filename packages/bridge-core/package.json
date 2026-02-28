@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
+    "lint:types": "tsc -p tsconfig.check.json",
     "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {

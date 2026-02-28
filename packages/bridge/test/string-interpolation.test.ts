@@ -15,10 +15,10 @@ function run(
   tools: Record<string, any> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
-  return executeBridge({ instructions, operation, input, tools });
+  return executeBridge({ document, operation, input, tools });
 }
 
 // ── String interpolation execution tests ────────────────────────────────────
@@ -112,7 +112,7 @@ bridge Query.test {
   o.url <- "/users/{api.name}/profile"
 }`;
     const tools = {
-      userApi: async (p: any) => ({ name: "john-doe" }),
+      userApi: async (_p: any) => ({ name: "john-doe" }),
     };
     const { data } = await run(bridge, "Query.test", { userId: "1" }, tools);
     assert.deepEqual(data, { url: "/users/john-doe/profile" });

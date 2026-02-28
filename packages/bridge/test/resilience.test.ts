@@ -15,69 +15,76 @@ import { createGateway } from "./_gateway.ts";
 
 describe("parseBridge: const blocks", () => {
   test("single const with object value", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 const fallbackGeo = { "lat": 0, "lon": 0 }`);
-    assert.equal(instructions.length, 1);
-    const c = instructions[0] as ConstDef;
+    assert.equal(doc.instructions.length, 1);
+    const c = doc.instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(c.kind, "const");
     assert.equal(c.name, "fallbackGeo");
     assert.deepStrictEqual(JSON.parse(c.value), { lat: 0, lon: 0 });
   });
 
   test("single const with string value", () => {
-    const [c] = parseBridge(`version 1.5
-const currency = "EUR"`) as ConstDef[];
+    const c = parseBridge(`version 1.5
+const currency = "EUR"`).instructions.find(
+      (i): i is ConstDef => i.kind === "const",
+    )!;
     assert.equal(c.name, "currency");
     assert.equal(JSON.parse(c.value), "EUR");
   });
 
   test("single const with number value", () => {
-    const [c] = parseBridge(`version 1.5
-const limit = 10`) as ConstDef[];
+    const c = parseBridge(`version 1.5
+const limit = 10`).instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(c.name, "limit");
     assert.equal(JSON.parse(c.value), 10);
   });
 
   test("single const with null", () => {
-    const [c] = parseBridge(`version 1.5
-const empty = null`) as ConstDef[];
+    const c = parseBridge(`version 1.5
+const empty = null`).instructions.find(
+      (i): i is ConstDef => i.kind === "const",
+    )!;
     assert.equal(JSON.parse(c.value), null);
   });
 
   test("multiple const declarations in one block", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 const fallbackGeo = { "lat": 0, "lon": 0 }
 const defaultCurrency = "EUR"
 const maxRetries = 3
 `);
-    assert.equal(instructions.length, 3);
-    assert.equal((instructions[0] as ConstDef).name, "fallbackGeo");
-    assert.equal((instructions[1] as ConstDef).name, "defaultCurrency");
-    assert.equal((instructions[2] as ConstDef).name, "maxRetries");
+    assert.equal(doc.instructions.length, 3);
+    const consts = doc.instructions.filter(
+      (i): i is ConstDef => i.kind === "const",
+    );
+    assert.equal(consts[0].name, "fallbackGeo");
+    assert.equal(consts[1].name, "defaultCurrency");
+    assert.equal(consts[2].name, "maxRetries");
   });
 
   test("multi-line JSON object", () => {
-    const [c] = parseBridge(`version 1.5
+    const c = parseBridge(`version 1.5
 const geo = {
   "lat": 0,
   "lon": 0
-}`) as ConstDef[];
+}`).instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.deepStrictEqual(JSON.parse(c.value), { lat: 0, lon: 0 });
   });
 
   test("multi-line JSON array", () => {
-    const [c] = parseBridge(`version 1.5
+    const c = parseBridge(`version 1.5
 const items = [
   "a",
   "b",
   "c"
-]`) as ConstDef[];
+]`).instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.deepStrictEqual(JSON.parse(c.value), ["a", "b", "c"]);
   });
 
   test("const coexists with tool and bridge blocks", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 const fallback = { "lat": 0 }
 
@@ -95,9 +102,9 @@ bridge Query.demo {
 o.result <- a.data
 
 }`);
-    const consts = instructions.filter((i) => i.kind === "const");
-    const tools = instructions.filter((i) => i.kind === "tool");
-    const bridges = instructions.filter((i) => i.kind === "bridge");
+    const consts = doc.instructions.filter((i) => i.kind === "const");
+    const tools = doc.instructions.filter((i) => i.kind === "tool");
+    const bridges = doc.instructions.filter((i) => i.kind === "bridge");
     assert.equal(consts.length, 1);
     assert.equal(tools.length, 1);
     assert.equal(bridges.length, 1);
@@ -127,10 +134,10 @@ bridge Query.demo {
 o.result <- i.q
 
 }`;
-    const instructions = parseBridge(input);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(input);
+    const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assert.deepStrictEqual(reparsed, doc);
   });
 });
 
@@ -163,8 +170,8 @@ o.maxItems <- c.defaults.maxItems
 
 }`;
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -182,13 +189,13 @@ o.maxItems <- c.defaults.maxItems
 
 describe("parseBridge: tool on error", () => {
   test("on error = <json> is parsed as onError wire with value", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   on error = { "lat": 0, "lon": 0 }
 
 }`);
-    const tool = instructions[0] as ToolDef;
+    const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError, "should have an onError wire");
     assert.ok("value" in onError!, "should have a value");
@@ -198,14 +205,14 @@ tool myApi from httpCall {
   });
 
   test("on error <- source is parsed as onError wire with source", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   with context
   on error <- context.fallbacks.geo
 
 }`);
-    const tool = instructions[0] as ToolDef;
+    const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError, "should have an onError wire");
     assert.ok("source" in onError!, "should have a source");
@@ -215,7 +222,7 @@ tool myApi from httpCall {
   });
 
   test("on error multi-line JSON", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 tool myApi from httpCall {
   on error = {
@@ -224,7 +231,7 @@ tool myApi from httpCall {
   }
 }
 `);
-    const tool = instructions[0] as ToolDef;
+    const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
@@ -233,7 +240,7 @@ tool myApi from httpCall {
   });
 
   test("child tool inherits parent on error", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 tool base from httpCall {
   on error = { "fallback": true }
@@ -245,7 +252,7 @@ tool base.child from base {
 }`);
     // The engine resolves extends chains at runtime, so we just verify
     // the parent has the on error wire
-    const base = instructions.find(
+    const base = doc.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "base",
     )!;
     assert.ok(base.wires.some((w) => w.kind === "onError"));
@@ -259,11 +266,8 @@ tool myApi from httpCall {
   on error = {"lat":0,"lon":0}
 
 }`;
-    const instructions = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(instructions)),
-      instructions,
-    );
+    const doc = parseBridge(input);
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("on error <- source roundtrips", () => {
@@ -273,11 +277,8 @@ tool myApi from httpCall {
   on error <- context.fallbacks.geo
 
 }`;
-    const instructions = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(instructions)),
-      instructions,
-    );
+    const doc = parseBridge(input);
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 });
 
@@ -316,8 +317,8 @@ o.lon <- api.lon
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -353,8 +354,8 @@ o.lon <- api.lon
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {
       tools,
       context: { fallbacks: { geo: { lat: 52.52, lon: 13.4 } } },
     });
@@ -390,8 +391,8 @@ o.lon <- api.lon
       httpCall: async () => ({ lat: 52.52, lon: 13.4 }),
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -431,8 +432,8 @@ o.lon <- api.lon
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -450,7 +451,7 @@ o.lon <- api.lon
 
 describe("parseBridge: wire fallback (catch)", () => {
   test("catch adds catchFallback to pull wire", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as a
@@ -460,7 +461,7 @@ bridge Query.demo {
 a.q <- i.q
 o.lat <- a.lat catch 0
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     const fbWire = bridge.wires.find(
       (w) => "from" in w && w.catchFallback != null,
@@ -472,7 +473,7 @@ o.lat <- a.lat catch 0
   });
 
   test("catch with JSON object catchFallback", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as a
@@ -481,7 +482,7 @@ bridge Query.demo {
 
 o.result <- a.data catch {"default":true}
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     const fbWire = bridge.wires.find(
       (w) => "from" in w && w.catchFallback != null,
@@ -493,7 +494,7 @@ o.result <- a.data catch {"default":true}
   });
 
   test("catch with string catchFallback", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as a
@@ -502,7 +503,7 @@ bridge Query.demo {
 
 o.name <- a.name catch "unknown"
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     const fbWire = bridge.wires.find(
       (w) => "from" in w && w.catchFallback != null,
@@ -514,7 +515,7 @@ o.name <- a.name catch "unknown"
   });
 
   test("catch with null catchFallback", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as a
@@ -523,7 +524,7 @@ bridge Query.demo {
 
 o.name <- a.name catch null
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     const fbWire = bridge.wires.find(
       (w) => "from" in w && w.catchFallback != null,
@@ -535,7 +536,7 @@ o.name <- a.name catch null
   });
 
   test("catch on pipe chain attaches to output wire", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with transform as t
@@ -544,7 +545,7 @@ bridge Query.demo {
 
 o.result <- t:i.text catch "fallback"
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     // The output wire (pipe=true, from fork root → target) should have the catchFallback
     const fbWire = bridge.wires.find(
@@ -557,7 +558,7 @@ o.result <- t:i.text catch "fallback"
   });
 
   test("wires without catch have no catchFallback property", () => {
-    const [bridge] = parseBridge(`version 1.5
+    const bridge = parseBridge(`version 1.5
 
 bridge Query.demo {
   with myApi as a
@@ -567,7 +568,7 @@ bridge Query.demo {
 a.q <- i.q
 o.result <- a.data
 
-}`) as Bridge[];
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
     for (const w of bridge.wires) {
       if ("from" in w) {
@@ -593,11 +594,8 @@ a.q <- i.q
 o.lat <- a.lat catch 0
 
 }`;
-    const instructions = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(instructions)),
-      instructions,
-    );
+    const doc = parseBridge(input);
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("catch on pipe chain roundtrips", () => {
@@ -610,11 +608,8 @@ bridge Query.demo {
 o.result <- t:i.text catch "fallback"
 
 }`;
-    const instructions = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(instructions)),
-      instructions,
-    );
+    const doc = parseBridge(input);
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("serialized output contains catch", () => {
@@ -665,8 +660,8 @@ o.name <- api.name catch "unknown"
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -694,8 +689,8 @@ o.name <- api.name catch "unknown"
       myApi: async () => ({ lat: 52.52, name: "Berlin" }),
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -730,8 +725,8 @@ o.name <- geo.name catch "N/A"
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -791,8 +786,8 @@ o.extra <- bad.data catch "none"
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -813,7 +808,7 @@ o.extra <- bad.data catch "none"
 
 describe("parseBridge: wire || falsy-fallback", () => {
   test("simple wire with || string literal", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.greet {
   with input as i
@@ -822,14 +817,16 @@ bridge Query.greet {
 o.name <- i.name || "World"
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, '"World"');
     assert.equal(wire.catchFallback, undefined);
   });
 
   test("wire with both || and catch", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.greet {
   with input as i
@@ -838,14 +835,16 @@ bridge Query.greet {
 o.name <- i.name || "World" catch "Error"
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, '"World"');
     assert.equal(wire.catchFallback, '"Error"');
   });
 
   test("wire with || JSON object literal", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.geo {
   with api as a
@@ -856,7 +855,9 @@ a.q <- i.q
 o.result <- a.data || {"lat":0,"lon":0}
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).from.path[0] === "data",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -864,7 +865,7 @@ o.result <- a.data || {"lat":0,"lon":0}
   });
 
   test("wire without || has no falsyFallback", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.greet {
   with input as i
@@ -873,13 +874,15 @@ bridge Query.greet {
 o.name <- i.name
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, undefined);
   });
 
   test("pipe wire with || falsy-fallback", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.format {
   with std.str.toUpperCase as up
@@ -889,7 +892,9 @@ bridge Query.format {
 o.result <- up:i.text || "N/A"
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     // Terminal pipe wire (from fork root to result) carries the falsyFallback
     const terminalWire = bridge.wires.find(
       (w) =>
@@ -965,8 +970,8 @@ bridge Query.greet {
 o.message <- i.name || "World"
 
 }`;
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // Pass null explicitly
@@ -985,8 +990,8 @@ bridge Query.greet {
 o.message <- i.name || "World"
 
 }`;
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1020,8 +1025,8 @@ o.score <- api.score || 0
       myApi: async () => ({ label: null, score: null }),
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs2, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs2, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1058,8 +1063,8 @@ o.label <- api.label || "null-default" catch "error-default"
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs2, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs2, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // falsy case (null) → || fires
@@ -1101,8 +1106,8 @@ o.textPart <- i.textBody
 o.textPart <- up:i.htmlBody
 
 }`;
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1124,8 +1129,8 @@ o.textPart <- i.textBody
 o.textPart <- up:i.htmlBody
 
 }`;
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // textBody is null → fall through to upperCase(htmlBody)
@@ -1147,8 +1152,8 @@ o.textPart <- i.textBody
 o.textPart <- i.htmlBody || "empty"
 
 }`;
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {});
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {});
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // Both null → || literal fires
@@ -1165,7 +1170,7 @@ o.textPart <- i.htmlBody || "empty"
 
 describe("parseBridge: || source references", () => {
   test("|| source produces one wire with falsyFallbackRefs", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
   with primary as p
@@ -1178,7 +1183,9 @@ b.q <- i.q
 o.label <- p.label || b.label
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
@@ -1191,7 +1198,7 @@ o.label <- p.label || b.label
   });
 
   test("|| source || literal — one wire with falsyFallbackRefs + falsyFallback", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
   with a as a
@@ -1204,7 +1211,9 @@ b.q <- i.q
 o.label <- a.label || b.label || "default"
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
@@ -1217,7 +1226,7 @@ o.label <- a.label || b.label || "default"
 
 describe("parseBridge: catch source/pipe references", () => {
   test("catch source.path stores a catchFallbackRef NodeRef", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
   with myApi as api
@@ -1228,7 +1237,9 @@ api.q <- i.q
 o.label <- api.label catch i.fallbackLabel
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -1242,7 +1253,7 @@ o.label <- api.label catch i.fallbackLabel
   });
 
   test("catch pipe:source stores catchFallbackRef pointing to fork root + registers fork", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
   with myApi as api
@@ -1254,7 +1265,9 @@ api.q <- i.q
 o.label <- api.label catch up:i.errorDefault
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -1269,7 +1282,7 @@ o.label <- api.label catch up:i.errorDefault
   });
 
   test("full chain: A || B || literal catch source — one wire with falsyFallbackRefs + catchFallbackRef", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
   with primary as p
@@ -1282,7 +1295,9 @@ b.q <- i.q
 o.label <- p.label || b.label || "default" catch i.errorLabel
 
 }`);
-    const bridge = instructions[0] as Bridge;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
@@ -1394,8 +1409,8 @@ o.label <- p.label || b.label
       primary: async () => ({ label: null }),
       backup: async () => ({ label: "from-backup" }),
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1433,8 +1448,8 @@ o.label <- p.label || b.label
         return { label: "from-backup" };
       },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1474,8 +1489,8 @@ o.label <- p.label || b.label || "nothing found"
       primary: async () => ({ label: null }),
       backup: async () => ({ label: null }),
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1508,8 +1523,8 @@ o.label <- api.label catch i.defaultLabel
         throw new Error("down");
       },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1545,8 +1560,8 @@ o.label <- api.label catch up:i.errorDefault
         throw new Error("down");
       },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const result: any = await executor({
@@ -1591,8 +1606,8 @@ o.label <- p.label || b.label || "nothing" catch i.defaultLabel
         return { label: null };
       },
     };
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // Both return null → || literal fires

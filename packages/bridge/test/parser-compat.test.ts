@@ -6,7 +6,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
+import {
+  parseBridgeChevrotain as parseBridge,
+  PARSER_VERSION,
+} from "../src/index.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..", "..");
@@ -14,7 +17,7 @@ const root = join(__dirname, "..", "..", "..");
 function compat(label: string, text: string) {
   it(label, () => {
     const result = parseBridge(text);
-    assert.ok(Array.isArray(result), "should return an array");
+    assert.ok(Array.isArray(result.instructions), "should return an array");
   });
 }
 
@@ -350,7 +353,7 @@ describe("parser — real .bridge files", () => {
     it(name, () => {
       const text = readFileSync(filePath, "utf-8");
       const result = parseBridge(text);
-      assert.ok(Array.isArray(result), "should return an array");
+      assert.ok(Array.isArray(result.instructions), "should return an array");
     });
   }
 });
@@ -537,4 +540,147 @@ bridge Query.test {
   o.email <- d.email
 }`,
   );
+
+  // ── Version tags (@version) ──────────────────────────────────────────
+
+  compat(
+    "bridge with versioned tool handle",
+    `version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`,
+  );
+
+  compat(
+    "bridge with versioned tool handle (no alias)",
+    `version 1.5
+bridge Query.test {
+  with myCorp.geocoder@1.0
+  with input as i
+  with output as o
+  o.val <- geocoder.result
+}`,
+  );
+
+  compat(
+    "bridge with versioned std tool",
+    `version 1.5
+bridge Query.test {
+  with std.str.upper@0.8 as oldUpper
+  with input as i
+  with output as o
+  o.val <- oldUpper.result
+}`,
+  );
+
+  compat(
+    "tool block with versioned dependency",
+    `version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`,
+  );
+});
+
+// ── Version declaration handling ────────────────────────────────────────────
+
+describe("parser — version declaration", () => {
+  it("version 1.5 is accepted", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.instructions.length > 0);
+  });
+
+  it("version 1.7 is accepted (future minor within same major)", () => {
+    const result = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.instructions.length > 0);
+  });
+
+  it("version 1.12 is accepted", () => {
+    const result = parseBridge(`version 1.12
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.instructions.length > 0);
+  });
+
+  it("version 2.0 is rejected (above max supported major)", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 2.0
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /major version/i,
+    );
+  });
+
+  it("version 0.9 is rejected (below min supported major)", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 0.9
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /major version/i,
+    );
+  });
+
+  it("VersionDecl instruction is emitted", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.version);
+    assert.equal(result.version, "1.5");
+  });
+
+  it("VersionDecl preserves declared version (1.7)", () => {
+    const result = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.ok(result.version);
+    assert.equal(result.version, "1.7");
+  });
+
+  it("PARSER_VERSION exports current version and supported range", () => {
+    assert.equal(typeof PARSER_VERSION.current, "string");
+    assert.equal(typeof PARSER_VERSION.minMajor, "number");
+    assert.equal(typeof PARSER_VERSION.maxMajor, "number");
+    assert.ok(PARSER_VERSION.minMajor <= PARSER_VERSION.maxMajor);
+    assert.equal(PARSER_VERSION.current, "1.5");
+    assert.equal(PARSER_VERSION.minMajor, 1);
+    assert.equal(PARSER_VERSION.maxMajor, 1);
+  });
+
+  it("error message shows range when min !== max major", () => {
+    // This test documents the error format; when min=max the message says "1.x"
+    // When they differ it would say "1.x – 2.x" — we verify current single-major case
+    assert.throws(
+      () =>
+        parseBridge(`version 99.0
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`),
+      /This parser supports version 1\.x/,
+    );
+  });
 });

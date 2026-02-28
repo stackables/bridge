@@ -31,7 +31,7 @@ out.lifeExpectancy <- ti.result
 }`;
 
 const chainedTools: Record<string, any> = {
-  "hereapi.geocode": async (params: any) => {
+  "hereapi.geocode": async (_params: any) => {
     return { lat: 52.53, lon: 13.38 };
   },
   "companyX.getLivingStandard": async (params: any) => {

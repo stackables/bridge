@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-stdlib",
-  "version": "0.0.1",
+  "version": "1.5.0",
   "description": "Bridge standard library — httpCall, string, array, audit, and assert tools",
   "main": "./build/index.js",
   "type": "module",
@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
+    "lint:types": "tsc -p tsconfig.check.json",
     "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {

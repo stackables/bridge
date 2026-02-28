@@ -159,7 +159,7 @@ export type Bridge = {
  * Every wire reference in the bridge body must trace back to one of these.
  */
 export type HandleBinding =
-  | { handle: string; kind: "tool"; name: string }
+  | { handle: string; kind: "tool"; name: string; version?: string }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }
@@ -201,7 +201,7 @@ export type ToolDef = {
  */
 export type ToolDep =
   | { kind: "context"; handle: string }
-  | { kind: "tool"; handle: string; tool: string }
+  | { kind: "tool"; handle: string; tool: string; version?: string }
   | { kind: "const"; handle: string };
 
 /**
@@ -271,8 +271,35 @@ export type ConstDef = {
   value: string;
 };
 
-/** Union of all instruction types */
+/**
+ * Version declaration — records the bridge file's declared language version.
+ *
+ * Emitted by the parser as the first instruction. Used at runtime to verify
+ * that the standard library satisfies the bridge's minimum version requirement.
+ *
+ * Example:  `version 1.5`  →  `{ kind: "version", version: "1.5" }`
+ */
+export type VersionDecl = {
+  kind: "version";
+  /** Declared version string, e.g. "1.5" */
+  version: string;
+};
+
+/** Union of all instruction types (excludes VersionDecl — version lives on BridgeDocument) */
 export type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
+
+/**
+ * Parsed bridge document — the structured output of the compiler.
+ *
+ * Wraps the instruction array with document-level metadata (version) and
+ * provides a natural home for future pre-computed optimisations.
+ */
+export interface BridgeDocument {
+  /** Declared language version (from `version X.Y` header). */
+  version?: string;
+  /** All instructions: bridge, tool, const, and define blocks. */
+  instructions: Instruction[];
+}
 
 /**
  * Define block — a reusable named subgraph (pipeline / macro).

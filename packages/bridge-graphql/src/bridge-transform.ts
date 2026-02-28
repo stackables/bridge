@@ -8,12 +8,17 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
+  resolveStd,
+  checkHandleVersions,
   type Logger,
   type ToolTrace,
   type TraceLevel,
 } from "@stackables/bridge-core";
-import { std } from "@stackables/bridge-stdlib";
-import type { Instruction, ToolMap } from "@stackables/bridge-core";
+import {
+  std as bundledStd,
+  STD_VERSION as BUNDLED_STD_VERSION,
+} from "@stackables/bridge-stdlib";
+import type { BridgeDocument, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 
 export type { Logger };
@@ -27,10 +32,18 @@ const defaultLogger: Logger = {
 };
 
 export type BridgeOptions = {
-  /** Tool functions available to the engine.
-   *  Supports namespaced nesting: `{ myNamespace: { myTool } }`.
-   *  The built-in `std` namespace and `httpCall` are always included;
-   *  user tools are merged on top (shallow). */
+  /**
+   * Tool functions available to the engine.
+   * Supports namespaced nesting: `{ myNamespace: { myTool } }`.
+   * The built-in `std` namespace is always included; user tools are
+   * merged on top (shallow).
+   *
+   * To provide a specific version of std (e.g. when bridge files
+   * target an older major), use a versioned namespace key:
+   * ```ts
+   * tools: { "std@1.5": oldStdNamespace }
+   * ```
+   */
   tools?: ToolMap;
   /** Optional function to reshape/restrict the GQL context before it reaches bridge files.
    *  By default the full context is exposed via `with context`. */
@@ -49,17 +62,17 @@ export type BridgeOptions = {
   logger?: Logger;
 };
 
-/** Instructions can be a static array or a function that selects per-request */
-export type InstructionSource =
-  | Instruction[]
-  | ((context: any) => Instruction[]);
+/** Document can be a static BridgeDocument or a function that selects per-request */
+export type DocumentSource =
+  | BridgeDocument
+  | ((context: any) => BridgeDocument);
 
 export function bridgeTransform(
   schema: GraphQLSchema,
-  instructions: InstructionSource,
+  document: DocumentSource,
   options?: BridgeOptions,
 ): GraphQLSchema {
-  const userTools = options?.tools;
+  const userTools = options?.tools ?? {};
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
@@ -89,15 +102,36 @@ export function bridgeTransform(
         ) {
           // Start execution tree at query/mutation root
           if (!source && !info.path.prev) {
-            const activeInstructions =
-              typeof instructions === "function"
-                ? instructions(context)
-                : instructions;
+            const activeDoc =
+              typeof document === "function" ? document(context) : document;
+
+            // Resolve which std to use: bundled, or a versioned namespace from tools
+            const { namespace: activeStd, version: activeStdVersion } =
+              resolveStd(
+                activeDoc.version,
+                bundledStd,
+                BUNDLED_STD_VERSION,
+                userTools,
+              );
+
+            // std is always included; user tools merge on top (shallow)
+            // internal tools are injected automatically by ExecutionTree
+            const allTools: ToolMap = {
+              std: activeStd,
+              ...userTools,
+            };
+
+            // Verify all @version-tagged handles can be satisfied
+            checkHandleVersions(
+              activeDoc.instructions,
+              allTools,
+              activeStdVersion,
+            );
 
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,
             // allowing hand-coded resolvers to coexist with bridge-powered ones.
-            const hasBridge = activeInstructions.some(
+            const hasBridge = activeDoc.instructions.some(
               (i) =>
                 i.kind === "bridge" &&
                 i.type === typeName &&
@@ -111,16 +145,9 @@ export function bridgeTransform(
               ? contextMapper(context)
               : (context ?? {});
 
-            // std is always included; user tools merge on top (shallow)
-            // internal tools are injected automatically by ExecutionTree
-            const allTools: ToolMap = {
-              std,
-              ...(userTools ?? {}),
-            };
-
             source = new ExecutionTree(
               trunk,
-              activeInstructions,
+              activeDoc,
               allTools,
               bridgeContext,
             );

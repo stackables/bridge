@@ -62,11 +62,13 @@ import {
   GreaterThan,
   LessThan,
   QuestionMark,
+  VersionTag,
   BridgeLexer,
 } from "./lexer.ts";
 
 import type {
   Bridge,
+  BridgeDocument,
   ConstDef,
   ControlFlowInstruction,
   DefineDef,
@@ -250,6 +252,9 @@ class BridgeParser extends CstParser {
         },
         ALT: () => {
           this.SUBRULE(this.dottedName, { LABEL: "toolName" });
+          this.OPTION3(() => {
+            this.CONSUME(VersionTag, { LABEL: "toolVersion" });
+          });
           this.CONSUME3(AsKw);
           this.SUBRULE3(this.nameToken, { LABEL: "toolAlias" });
         },
@@ -448,6 +453,9 @@ class BridgeParser extends CstParser {
         },
         ALT: () => {
           this.SUBRULE(this.dottedName, { LABEL: "refName" });
+          this.OPTION6(() => {
+            this.CONSUME(VersionTag, { LABEL: "refVersion" });
+          });
           this.OPTION5(() => {
             this.CONSUME5(AsKw);
             this.SUBRULE5(this.nameToken, { LABEL: "refAlias" });
@@ -1193,12 +1201,26 @@ const parserInstance = new BridgeParser();
 const diagParserInstance = new BridgeParser({ recovery: true });
 
 const BRIDGE_VERSION = "1.5";
+/** Minimum major version the parser can handle (inclusive). */
+const BRIDGE_MIN_MAJOR = 1;
+/** Maximum major version the parser can handle (inclusive). */
+const BRIDGE_MAX_MAJOR = 1;
+
+/** Exported parser version metadata for runtime use. */
+export const PARSER_VERSION = {
+  /** Current bridge language version */
+  current: BRIDGE_VERSION,
+  /** Minimum supported major version (inclusive) */
+  minMajor: BRIDGE_MIN_MAJOR,
+  /** Maximum supported major version (inclusive) */
+  maxMajor: BRIDGE_MAX_MAJOR,
+} as const;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public API
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function parseBridgeChevrotain(text: string): Instruction[] {
+export function parseBridgeChevrotain(text: string): BridgeDocument {
   return internalParse(text);
 }
 
@@ -1214,7 +1236,7 @@ export type BridgeDiagnostic = {
 };
 
 export type BridgeParseResult = {
-  instructions: Instruction[];
+  document: BridgeDocument;
   diagnostics: BridgeDiagnostic[];
   /** 1-based start line for each top-level instruction */
   startLines: Map<Instruction, number>;
@@ -1266,11 +1288,11 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
   }
 
   // 3. Visit → AST (semantic errors thrown as "Line N: ..." messages)
-  let instructions: Instruction[] = [];
+  let document: BridgeDocument = { instructions: [] };
   let startLines = new Map<Instruction, number>();
   try {
     const result = toBridgeAst(cst, []);
-    instructions = result.instructions;
+    document = { version: result.version, instructions: result.instructions };
     startLines = result.startLines;
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
@@ -1286,13 +1308,13 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
     });
   }
 
-  return { instructions, diagnostics, startLines };
+  return { document, diagnostics, startLines };
 }
 
 function internalParse(
   text: string,
   previousInstructions?: Instruction[],
-): Instruction[] {
+): BridgeDocument {
   // 1. Lex
   const lexResult = BridgeLexer.tokenize(text);
   if (lexResult.errors.length > 0) {
@@ -1309,7 +1331,8 @@ function internalParse(
   }
 
   // 3. Visit → AST
-  return toBridgeAst(cst, previousInstructions).instructions;
+  const result = toBridgeAst(cst, previousInstructions);
+  return { version: result.version, instructions: result.instructions };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2633,7 +2656,11 @@ function processElementScopeLines(
 function toBridgeAst(
   cst: CstNode,
   previousInstructions?: Instruction[],
-): { instructions: Instruction[]; startLines: Map<Instruction, number> } {
+): {
+  version: string;
+  instructions: Instruction[];
+  startLines: Map<Instruction, number>;
+} {
   const instructions: Instruction[] = [];
   const startLines = new Map<Instruction, number>();
 
@@ -2651,11 +2678,28 @@ function toBridgeAst(
   }
   const versionTok = tok(versionDecl, "ver");
   const versionNum = versionTok?.image;
-  if (versionNum !== BRIDGE_VERSION) {
+  if (!versionNum) {
     throw new Error(
-      `Unsupported bridge version "${versionNum}". This parser requires: version ${BRIDGE_VERSION}`,
+      `Missing version number. Bridge files must begin with: version ${BRIDGE_VERSION}`,
     );
   }
+  // Accept any version whose major falls within the supported range.
+  // When the parser supports multiple majors (e.g. 1.x through 2.x),
+  // bridge files from any of them are valid syntax.
+  const vParts = versionNum.split(".");
+  const vMajor = parseInt(vParts[0], 10);
+  const supportedRange =
+    BRIDGE_MIN_MAJOR === BRIDGE_MAX_MAJOR
+      ? `${BRIDGE_MIN_MAJOR}.x`
+      : `${BRIDGE_MIN_MAJOR}.x – ${BRIDGE_MAX_MAJOR}.x`;
+  if (isNaN(vMajor) || vMajor < BRIDGE_MIN_MAJOR || vMajor > BRIDGE_MAX_MAJOR) {
+    throw new Error(
+      `Unsupported bridge major version "${versionNum}". This parser supports version ${supportedRange}`,
+    );
+  }
+
+  // Store the declared version (lives on BridgeDocument, not in instructions).
+  const version = versionNum;
 
   // Process in source order (same as old parser: all blocks sequentially)
   // Chevrotain stores them by rule name, so we need to interleave by offset.
@@ -2725,7 +2769,7 @@ function toBridgeAst(
     }
   }
 
-  return { instructions, startLines };
+  return { version, instructions, startLines };
 }
 
 // ── Const ───────────────────────────────────────────────────────────────
@@ -2788,7 +2832,15 @@ function buildToolDef(
       } else if (wc.toolName) {
         const tName = extractDottedName((wc.toolName as CstNode[])[0]);
         const tAlias = extractNameToken((wc.toolAlias as CstNode[])[0]);
-        deps.push({ kind: "tool", handle: tAlias, tool: tName });
+        const tVersion = (
+          wc.toolVersion as IToken[] | undefined
+        )?.[0]?.image.slice(1);
+        deps.push({
+          kind: "tool",
+          handle: tAlias,
+          tool: tName,
+          ...(tVersion ? { version: tVersion } : {}),
+        });
       }
       continue;
     }
@@ -2883,9 +2935,11 @@ function buildBridge(
     ].join("\n");
 
     const result = internalParse(expandedText, previousInstructions);
-    const bridgeInst = result.find((i): i is Bridge => i.kind === "bridge");
+    const bridgeInst = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    );
     if (bridgeInst) bridgeInst.passthrough = passthroughName;
-    return result;
+    return result.instructions;
   }
 
   // Full bridge block
@@ -3050,6 +3104,9 @@ function buildBridgeBody(
       });
     } else if (wc.refName) {
       const name = extractDottedName((wc.refName as CstNode[])[0]);
+      const versionTag = (
+        wc.refVersion as IToken[] | undefined
+      )?.[0]?.image.slice(1);
       const lastDot = name.lastIndexOf(".");
       const defaultHandle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
       const handle = wc.refAlias
@@ -3077,7 +3134,12 @@ function buildBridgeBody(
         const key = `${modulePart}:${fieldPart}`;
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
-        handleBindings.push({ handle, kind: "tool", name });
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
         handleRes.set(handle, {
           module: modulePart,
           type: bridgeType,
@@ -3088,7 +3150,12 @@ function buildBridgeBody(
         const key = `Tools:${name}`;
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
-        handleBindings.push({ handle, kind: "tool", name });
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
         handleRes.set(handle, {
           module: SELF_MODULE,
           type: "Tools",

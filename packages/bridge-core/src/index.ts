@@ -15,6 +15,21 @@ export type {
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
 
+// ── Version check ───────────────────────────────────────────────────────────
+
+export {
+  checkStdVersion,
+  checkHandleVersions,
+  collectVersionedHandles,
+  getBridgeVersion,
+  hasVersionedToolFn,
+  resolveStd,
+} from "./version-check.ts";
+
+// ── Document utilities ──────────────────────────────────────────────────────
+
+export { mergeBridgeDocuments } from "./merge-documents.ts";
+
 // ── Execution tree (advanced) ───────────────────────────────────────────────
 
 export {
@@ -30,6 +45,7 @@ export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 export { SELF_MODULE } from "./types.ts";
 export type {
   Bridge,
+  BridgeDocument,
   CacheStore,
   ConstDef,
   ControlFlowInstruction,
@@ -43,6 +59,7 @@ export type {
   ToolDep,
   ToolMap,
   ToolWire,
+  VersionDecl,
   Wire,
 } from "./types.ts";
 

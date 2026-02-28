@@ -12,14 +12,14 @@ import { createGateway } from "./_gateway.ts";
 
 describe("expressions: parser desugaring", () => {
   test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
 
   o.cents <- i.dollars * 100
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     // No ExprWire should exist — only pull and constant wires
     assert.ok(!bridge.wires.some((w) => "expr" in w), "no ExprWire in output");
     // There should be pipe handles for the synthetic expression tool
@@ -45,14 +45,14 @@ bridge Query.convert {
       "<=": "lte",
     };
     for (const [op, fn] of Object.entries(ops)) {
-      const instructions = parseBridge(`version 1.5
+      const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.value ${op} 1
 }`);
-      const bridge = instructions.find((i) => i.kind === "bridge")!;
+      const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
       const exprHandle = bridge.pipeHandles!.find((ph) =>
         ph.handle.startsWith("__expr_"),
       );
@@ -62,14 +62,14 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 5 / 10", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.times * 5 / 10
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -83,14 +83,14 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 2 > 6", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.times * 2 > 6
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -100,14 +100,14 @@ bridge Query.test {
   });
 
   test("two source refs: i.price * i.qty", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
 
   o.total <- i.price * i.qty
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     // The .b wire should be a pipe wire from i.qty
     const bWire = bridge.wires.find(
       (w) => "from" in w && w.to.path.length === 1 && w.to.path[0] === "b",
@@ -117,7 +117,7 @@ bridge Query.calc {
   });
 
   test("expression in array mapping element", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.list {
   with pricing.list as api
   with input as i
@@ -128,7 +128,7 @@ bridge Query.list {
     .cents <- item.price * 100
   }
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandle = bridge.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -148,8 +148,8 @@ bridge Query.convert {
 
   o.cents <- i.dollars * 100
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("i.dollars * 100"),
       `should contain expression: ${serialized}`,
@@ -157,7 +157,7 @@ bridge Query.convert {
 
     // Re-parse the serialized output
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.find((i) => i.kind === "bridge")!;
+    const bridge = reparsed.instructions.find((i) => i.kind === "bridge")!;
     const exprHandle = bridge.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -173,8 +173,8 @@ bridge Query.check {
 
   o.eligible <- i.age >= 18
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("i.age >= 18"), `got: ${serialized}`);
   });
 
@@ -186,8 +186,8 @@ bridge Query.test {
 
   o.result <- i.times * 5 / 10
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("i.times * 5 / 10"), `got: ${serialized}`);
   });
 
@@ -199,8 +199,8 @@ bridge Query.calc {
 
   o.total <- i.price * i.quantity
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     assert.ok(
       serialized.includes("i.price * i.quantity"),
       `got: ${serialized}`,
@@ -238,14 +238,14 @@ const mathTypeDefs = /* GraphQL */ `
 
 describe("expressions: execution", () => {
   test("multiply: dollars to cents", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
 
   o.cents <- i.dollars * 100
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 9.99) { cents } }`),
@@ -254,14 +254,14 @@ bridge Query.convert {
   });
 
   test("divide: halve a value", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
 
   o.dollars <- i.dollars / 2
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 10) { dollars } }`),
@@ -270,14 +270,14 @@ bridge Query.convert {
   });
 
   test("multiply two source refs: price * quantity", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
 
   o.total <- i.price * i.quantity
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ calc(price: 19.99, quantity: 3) { total } }`),
@@ -286,14 +286,14 @@ bridge Query.calc {
   });
 
   test("comparison >= returns true/false", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.eligible <- i.age >= 18
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const r18: any = await executor({
@@ -308,14 +308,14 @@ bridge Query.check {
   });
 
   test("comparison > returns true/false", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.over18 <- i.age > 18
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const r18: any = await executor({
@@ -330,14 +330,14 @@ bridge Query.check {
   });
 
   test("comparison == with string returns true/false", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.isActive <- i.status == "active"
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     const rActive: any = await executor({
@@ -352,7 +352,7 @@ bridge Query.check {
   });
 
   test("expression with tool source", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
@@ -366,7 +366,7 @@ bridge Query.convert {
         price: input.id * 2,
       }),
     };
-    const gateway = createGateway(mathTypeDefs, instructions, { tools });
+    const gateway = createGateway(mathTypeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 5) { cents } }`),
@@ -376,14 +376,14 @@ bridge Query.convert {
   });
 
   test("chained expression: i.dollars * 5 / 10", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
 
   o.cents <- i.dollars * 5 / 10
 }`);
-    const gateway = createGateway(mathTypeDefs, instructions);
+    const gateway = createGateway(mathTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 100) { cents } }`),
@@ -393,7 +393,7 @@ bridge Query.convert {
   });
 
   test("expression in array mapping", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.products {
   with pricing.list as api
   with output as o
@@ -411,7 +411,7 @@ bridge Query.products {
         ],
       }),
     };
-    const gateway = createGateway(mathTypeDefs, instructions, { tools });
+    const gateway = createGateway(mathTypeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ products { name cents } }`),
@@ -427,14 +427,14 @@ bridge Query.products {
 
 describe("expressions: operator precedence", () => {
   test("i.base + i.tax * 2 — multiplication before addition", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
 
   o.total <- i.base + i.tax * 2
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -445,7 +445,7 @@ bridge Query.calc {
   });
 
   test("precedence: a + b * c executes correctly", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -460,7 +460,7 @@ bridge Query.calc {
         total: Float
       }
     `;
-    const gateway = createGateway(precTypeDefs, instructions);
+    const gateway = createGateway(precTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ calc(base: 100, tax: 10) { total } }`),
@@ -470,7 +470,7 @@ bridge Query.calc {
   });
 
   test("precedence: a * b + c * d", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
@@ -485,7 +485,7 @@ bridge Query.calc {
         total: Float
       }
     `;
-    const gateway = createGateway(precTypeDefs, instructions);
+    const gateway = createGateway(precTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ calc(price: 10, quantity: 3, base: 5) { total } }`),
@@ -495,7 +495,7 @@ bridge Query.calc {
   });
 
   test("precedence: comparison after arithmetic — i.base + i.tax * 2 > 100", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
@@ -510,7 +510,7 @@ bridge Query.check {
         eligible: Boolean
       }
     `;
-    const gateway = createGateway(precTypeDefs, instructions);
+    const gateway = createGateway(precTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
 
     // 100 + (10 * 2) = 120 > 100 → true
@@ -534,8 +534,8 @@ bridge Query.calc {
 
   o.total <- i.base + i.tax * 2
 }`;
-    const instructions = parseBridge(text);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(text);
+    const serialized = serializeBridge(doc);
     // Should round-trip the expression (order may vary due to precedence grouping)
     assert.ok(
       serialized.includes("i.base + i.tax * 2") ||
@@ -549,7 +549,7 @@ bridge Query.calc {
 
 describe("expressions: fallback integration", () => {
   test("expression with catch error fallback: i.value * 100 catch -1", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with pricing.lookup as api
   with input as i
@@ -571,7 +571,7 @@ bridge Query.convert {
         cents: Float
       }
     `;
-    const gateway = createGateway(precTypeDefs, instructions, { tools });
+    const gateway = createGateway(precTypeDefs, doc, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 5) { cents } }`),
@@ -582,7 +582,7 @@ bridge Query.convert {
 
   test("expression with || null coalesce: (i.value ?? 1) * 2", async () => {
     // This tests coalescing on the source BEFORE the expression
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.convert {
   with input as i
   with output as o
@@ -597,7 +597,7 @@ bridge Query.convert {
         cents: Float
       }
     `;
-    const gateway = createGateway(precTypeDefs, instructions);
+    const gateway = createGateway(precTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({
       document: parse(`{ convert(dollars: 5) { cents } }`),
@@ -615,14 +615,14 @@ describe("boolean logic: parser desugaring", () => {
       or: "__or",
     };
     for (const [op, fn] of Object.entries(boolOps)) {
-      const instructions = parseBridge(`version 1.5
+      const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.a ${op} i.b
 }`);
-      const bridge = instructions.find((i) => i.kind === "bridge")!;
+      const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
       const exprHandle = bridge.pipeHandles!.find((ph) =>
         ph.handle.startsWith("__expr_"),
       );
@@ -632,14 +632,14 @@ bridge Query.test {
   });
 
   test("not prefix desugars to not tool fork", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- not i.trusted
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandle = bridge.pipeHandles!.find(
       (ph) => ph.baseTrunk.field === "not",
     );
@@ -647,14 +647,14 @@ bridge Query.test {
   });
 
   test('combined: (a > 18 and b) or c == "ADMIN"', () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     // Should have multiple expression forks: >, and, ==, or
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
@@ -685,14 +685,14 @@ describe("boolean logic: end-to-end", () => {
   `;
 
   test("and expression: age > 18 and verified", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.approved <- i.age > 18 and i.verified
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r1: any = await executor({
       document: parse(
@@ -710,14 +710,14 @@ bridge Query.check {
   });
 
   test("or expression: approved or role == ADMIN", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     // age=15 verified=false role=ADMIN → false and false = false, role=="ADMIN" = true → true
     const r1: any = await executor({
@@ -729,14 +729,14 @@ bridge Query.check {
   });
 
   test("not prefix: not i.verified", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.requireMFA <- not i.verified
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r1: any = await executor({
       document: parse(
@@ -767,12 +767,12 @@ bridge Query.test {
   o.result <- i.a and i.b
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes(" and "), "serialized contains 'and'");
     // Re-parse to ensure no errors
     const reparsed = parseBridge(serialized);
-    assert.ok(reparsed.length > 0, "reparsed successfully");
+    assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 
   test("or expression round-trips", () => {
@@ -785,11 +785,11 @@ bridge Query.test {
   o.result <- i.a or i.b
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes(" or "), "serialized contains 'or'");
     const reparsed = parseBridge(serialized);
-    assert.ok(reparsed.length > 0, "reparsed successfully");
+    assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 
   test("not prefix round-trips", () => {
@@ -802,11 +802,11 @@ bridge Query.test {
   o.result <- not i.flag
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("not "), "serialized contains 'not'");
     const reparsed = parseBridge(serialized);
-    assert.ok(reparsed.length > 0, "reparsed successfully");
+    assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 });
 
@@ -814,14 +814,14 @@ bridge Query.test {
 
 describe("parenthesized expressions: parser desugaring", () => {
   test("(A and B) or C — groups correctly", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- (i.a and i.b) or i.c
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -832,14 +832,14 @@ bridge Query.test {
   });
 
   test("A or (B and C) — groups correctly", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- i.a or (i.b and i.c)
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -850,14 +850,14 @@ bridge Query.test {
   });
 
   test("not (A and B) — not wraps grouped expr", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- not (i.a and i.b)
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -867,14 +867,14 @@ bridge Query.test {
   });
 
   test("(i.price + i.discount) * i.qty — math with parens", () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with output as o
 
   o.result <- (i.price + i.discount) * i.qty
 }`);
-    const bridge = instructions.find((i) => i.kind === "bridge")!;
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const exprHandles = bridge.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
@@ -895,14 +895,14 @@ describe("parenthesized expressions: end-to-end", () => {
   `;
 
   test("A or (B and C): true or (false and false) = true", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- i.a or (i.b and i.c)
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r: any = await executor({
       document: parse(`{ check(a: true, b: false, c: false) { result } }`),
@@ -911,14 +911,14 @@ bridge Query.check {
   });
 
   test("A or (B and C): false or (true and true) = true", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- i.a or (i.b and i.c)
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r: any = await executor({
       document: parse(`{ check(a: false, b: true, c: true) { result } }`),
@@ -927,14 +927,14 @@ bridge Query.check {
   });
 
   test("(A or B) and C: (true or false) and false = false", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- (i.a or i.b) and i.c
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r: any = await executor({
       document: parse(`{ check(a: true, b: false, c: false) { result } }`),
@@ -943,14 +943,14 @@ bridge Query.check {
   });
 
   test("not (A and B): not (true and false) = true", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.check {
   with input as i
   with output as o
 
   o.result <- not (i.a and i.b)
 }`);
-    const gateway = createGateway(boolTypeDefs, instructions);
+    const gateway = createGateway(boolTypeDefs, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r: any = await executor({
       document: parse(`{ check(a: true, b: false, c: false) { result } }`),
@@ -968,14 +968,14 @@ bridge Query.check {
   `;
 
   test("(price + discount) * qty: (10 + 5) * 3 = 45", async () => {
-    const instructions = parseBridge(`version 1.5
+    const doc = parseBridge(`version 1.5
 bridge Query.calc {
   with input as i
   with output as o
 
   o.total <- (i.price + i.discount) * i.qty
 }`);
-    const gateway = createGateway(mathTypeDefs2, instructions);
+    const gateway = createGateway(mathTypeDefs2, doc);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r: any = await executor({
       document: parse(`{ calc(price: 10, discount: 5, qty: 3) { total } }`),
@@ -997,13 +997,13 @@ bridge Query.test {
   o.result <- (i.a + i.b) * i.c
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("("), "serialized contains '(' for grouping");
     assert.ok(serialized.includes(")"), "serialized contains ')' for grouping");
     // Re-parse to ensure correctness
     const reparsed = parseBridge(serialized);
-    assert.ok(reparsed.length > 0, "reparsed successfully");
+    assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 
   test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
@@ -1016,14 +1016,14 @@ bridge Query.test {
   o.result <- i.a or (i.b and i.c)
 
 }`;
-    const instructions = parseBridge(src);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
     // and already binds tighter than or, so parens are omitted in serialized form
     assert.ok(serialized.includes(" or "), "serialized contains 'or'");
     assert.ok(serialized.includes(" and "), "serialized contains 'and'");
     // Re-parse to ensure correctness
     const reparsed = parseBridge(serialized);
-    assert.ok(reparsed.length > 0, "reparsed successfully");
+    assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 });
 
@@ -1034,7 +1034,7 @@ import { executeBridge } from "../src/index.ts";
 describe("and/or short-circuit behavior", () => {
   test("and short-circuits: right side not evaluated when left is false", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1043,8 +1043,8 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag and c.ok
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { flag: false, value: "test" },
       tools: {
@@ -1064,7 +1064,7 @@ bridge Query.test {
 
   test("and evaluates right side when left is true", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1073,8 +1073,8 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag and c.ok
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { flag: true, value: "test" },
       tools: {
@@ -1094,7 +1094,7 @@ bridge Query.test {
 
   test("or short-circuits: right side not evaluated when left is true", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1103,8 +1103,8 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag or c.ok
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { flag: true, value: "test" },
       tools: {
@@ -1124,7 +1124,7 @@ bridge Query.test {
 
   test("or evaluates right side when left is false", async () => {
     let rightEvaluated = false;
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with checker as c
@@ -1133,8 +1133,8 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag or c.ok
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { flag: false, value: "test" },
       tools: {
@@ -1157,7 +1157,7 @@ bridge Query.test {
 
 describe("safe flag propagation in expressions", () => {
   test("safe flag propagated through expression: api?.value > 5 does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1166,8 +1166,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- api?.score > 5 || false
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test" },
       tools: {
@@ -1182,7 +1182,7 @@ bridge Query.test {
   });
 
   test("safe flag on not prefix: not api?.verified does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1191,8 +1191,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- not api?.verified || true
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test" },
       tools: {
@@ -1206,7 +1206,7 @@ bridge Query.test {
   });
 
   test("safe flag in condAnd: api?.active and i.flag does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1215,8 +1215,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- api?.active and i.flag
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test", flag: true },
       tools: {
@@ -1230,7 +1230,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand: i.flag and api?.active does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1239,8 +1239,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.flag and api?.active
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test", flag: true },
       tools: {
@@ -1254,7 +1254,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand of comparison: i.a > api?.score does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1263,8 +1263,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.a > api?.score || false
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test", a: 10 },
       tools: {
@@ -1278,7 +1278,7 @@ bridge Query.test {
   });
 
   test("safe flag on right operand of or: i.flag or api?.fallback does not crash", async () => {
-    const instructions = parseBridge(`version 1.5
+    const document = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
   with failingApi as api
@@ -1287,8 +1287,8 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.flag or api?.fallback
 }`);
-    const { data } = await executeBridge({
-      instructions,
+    const { data } = await executeBridge<any>({
+      document,
       operation: "Query.test",
       input: { value: "test", flag: false },
       tools: {

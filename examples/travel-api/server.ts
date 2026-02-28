@@ -27,11 +27,11 @@ const typeDefs = readFileSync(
 
 // ── 2. Parse both bridge slices at startup ───────────────────────────────
 
-const dbInstructions = parseBridge(
+const dbDocument = parseBridge(
   readFileSync(new URL("./db.bridge", import.meta.url), "utf-8"),
 );
 
-const sbbInstructions = parseBridge(
+const sbbDocument = parseBridge(
   readFileSync(new URL("./sbb.bridge", import.meta.url), "utf-8"),
 );
 
@@ -41,7 +41,7 @@ const schema = bridgeTransform(
   createSchema({ typeDefs }),
   (context) => {
     const provider = context.provider ?? "db";
-    return provider === "sbb" ? sbbInstructions : dbInstructions;
+    return provider === "sbb" ? sbbDocument : dbDocument;
   },
   { trace: true },
 );

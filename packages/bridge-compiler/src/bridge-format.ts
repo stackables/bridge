@@ -1,9 +1,9 @@
 import type {
   Bridge,
+  BridgeDocument,
   ConstDef,
   ControlFlowInstruction,
   DefineDef,
-  Instruction,
   NodeRef,
   ToolDef,
   Wire,
@@ -15,7 +15,7 @@ export { parsePath } from "@stackables/bridge-core";
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.
  */
-export function parseBridge(text: string): Instruction[] {
+export function parseBridge(text: string): BridgeDocument {
   return parseBridgeChevrotain(text);
 }
 
@@ -31,7 +31,9 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
 
 // ── Serializer ───────────────────────────────────────────────────────────────
 
-export function serializeBridge(instructions: Instruction[]): string {
+export function serializeBridge(doc: BridgeDocument): string {
+  const version = doc.version ?? BRIDGE_VERSION;
+  const { instructions } = doc;
   const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
   const tools = instructions.filter((i): i is ToolDef => i.kind === "tool");
   const consts = instructions.filter((i): i is ConstDef => i.kind === "const");
@@ -62,7 +64,7 @@ export function serializeBridge(instructions: Instruction[]): string {
     blocks.push(serializeBridgeBlock(bridge));
   }
 
-  return `version ${BRIDGE_VERSION}\n\n` + blocks.join("\n\n") + "\n";
+  return `version ${version}\n\n` + blocks.join("\n\n") + "\n";
 }
 
 /**
@@ -116,7 +118,8 @@ function serializeToolBlock(tool: ToolDef): string {
         lines.push(`  with const as ${dep.handle}`);
       }
     } else {
-      lines.push(`  with ${dep.tool} as ${dep.handle}`);
+      const depVTag = dep.version ? `@${dep.version}` : "";
+      lines.push(`  with ${dep.tool}${depVTag} as ${dep.handle}`);
     }
   }
 
@@ -250,10 +253,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const lastDot = h.name.lastIndexOf(".");
         const defaultHandle =
           lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
-        if (h.handle === defaultHandle) {
+        const vTag = h.version ? `@${h.version}` : "";
+        if (h.handle === defaultHandle && !vTag) {
           lines.push(`  with ${h.name}`);
         } else {
-          lines.push(`  with ${h.name} as ${h.handle}`);
+          lines.push(`  with ${h.name}${vTag} as ${h.handle}`);
         }
         break;
       }

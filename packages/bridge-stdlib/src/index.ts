@@ -14,6 +14,15 @@ import * as strings from "./tools/strings.ts";
 import { assert } from "./tools/assert.ts";
 
 /**
+ * Standard library version.
+ *
+ * The bridge `version X.Y` header declares the minimum compatible std version.
+ * At runtime the engine compares this constant against the bridge's declared
+ * version to verify compatibility (same major, equal-or-higher minor).
+ */
+export const STD_VERSION = "1.5.0";
+
+/**
  * Standard built-in tools — available under the `std` namespace.
  *
  * Referenced in `.bridge` files as `std.str.toUpperCase`, `std.arr.first`, etc.

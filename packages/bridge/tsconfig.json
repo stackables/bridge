@@ -8,14 +8,7 @@
     // Rewrite .ts → .js in compiled output so source can use .ts extensions
     "rewriteRelativeImportExtensions": true,
     // Enforce import type for type-only imports (required for Node native TS)
-    "verbatimModuleSyntax": true,
-    // Catches unused imports/variables at compile time (base for GitHub quality scan)
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    // All code paths in a function must return a value
-    "noImplicitReturns": true,
-    // Switch cases must not fall through
-    "noFallthroughCasesInSwitch": true
+    "verbatimModuleSyntax": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "build"]

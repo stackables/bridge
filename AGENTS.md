@@ -81,6 +81,10 @@ pnpm build       # must complete with 0 errors
 
 TypeScript is strict — `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch` are all enabled.
 
+### 6. Syntax highlighting and SDL
+
+For every language change, review and adjust the playground and vscode extension functionality. Especially syntax highlighting and autocomplete
+
 ---
 
 ## Package Architecture

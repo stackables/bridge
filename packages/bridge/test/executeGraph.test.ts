@@ -134,4 +134,43 @@ describe("executeGraph", () => {
       lon: 13.38527,
     });
   });
+
+  test("versioned handle resolves and executes normally", async () => {
+    const versionedBridge = `version 1.5
+bridge Query.geocode {
+  with hereapi.geocode@2.1 as gc
+  with input as i
+  with output as o
+
+  o.search <- i.search
+  gc.q <- i.search
+  gc.limit <- i.limit
+  o.results <- gc.items[] as item {
+    .name <- item.title
+    .lat  <- item.position.lat
+    .lon  <- item.position.lng
+  }
+}`;
+    const instructions = parseBridge(versionedBridge);
+    // Provide the versioned tool key to satisfy @2.1, plus the base tool
+    const versionedTools = {
+      ...tools,
+      "hereapi.geocode@2.1": tools["hereapi.geocode"],
+    };
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: versionedTools,
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(
+        `{ geocode(search: "Berlin", limit: 10) { search results { name lat lon } } }`,
+      ),
+    });
+    assert.equal(result.data.geocode.search, "Berlin");
+    assert.deepStrictEqual(result.data.geocode.results[0], {
+      name: "Invalidenstraße 117, 10115 Berlin, Deutschland",
+      lat: 52.53041,
+      lon: 13.38527,
+    });
+  });
 });

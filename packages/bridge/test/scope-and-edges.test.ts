@@ -57,7 +57,7 @@ o.journeys <- r.journeys[] as j {
 }`;
 
   const tools = {
-    router: async (params: { origin: string }) => ({
+    router: async (_params: { origin: string }) => ({
       journeys: [
         {
           label: "Express",
@@ -79,8 +79,8 @@ o.journeys <- r.journeys[] as j {
   };
 
   function makeExecutor() {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
     return buildHTTPExecutor({ fetch: gateway.fetch as any });
   }
 
@@ -197,8 +197,8 @@ o.routes <- r.routes[] as route {
       };
     };
 
-    const instructions = parseBridge(contextBridgeText);
-    const gateway = createGateway(contextTypeDefs, instructions, {
+    const doc = parseBridge(contextBridgeText);
+    const gateway = createGateway(contextTypeDefs, doc, {
       context: { apiKey: "secret-123" },
       tools: { httpCall },
     });
@@ -281,8 +281,8 @@ o.name <- b.name
       return { lat: 52.5, name: "Berlin" };
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {
       context: { token: "parent-token" },
       tools: { myTool },
     });
@@ -341,8 +341,8 @@ o.name <- b.name
       return { lat: 0, name: "Test" };
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {
       context: { httpMethod: "PATCH" },
       tools: { myTool },
     });
@@ -487,7 +487,7 @@ bridge Query.searchTrains {
   }
 }`;
 
-  const mockHttpCall = async (input: Record<string, any>) => ({
+  const mockHttpCall = async (_input: Record<string, any>) => ({
     journeys: [
       {
         token: "ABC",
@@ -518,16 +518,16 @@ bridge Query.searchTrains {
   });
 
   function makeExecutor() {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, {
       tools: { httpCall: mockHttpCall },
     });
     return buildHTTPExecutor({ fetch: gateway.fetch as any });
   }
 
   test("parse produces correct arrayIterators for nested arrays", () => {
-    const instructions = parseBridge(bridgeText);
-    const bridge = instructions.find((i): i is any => i.kind === "bridge");
+    const doc = parseBridge(bridgeText);
+    const bridge = doc.instructions.find((i): i is any => i.kind === "bridge");
     assert.ok(bridge, "bridge instruction must exist");
     // Root array iterator
     assert.equal(bridge.arrayIterators[""], "j");
@@ -536,12 +536,16 @@ bridge Query.searchTrains {
   });
 
   test("roundtrip: parse → serialize → parse preserves nested array structure", () => {
-    const instructions = parseBridge(bridgeText);
-    const serialized = serializeBridge(instructions);
+    const doc = parseBridge(bridgeText);
+    const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
 
-    const origBridge = instructions.find((i): i is any => i.kind === "bridge");
-    const reparsedBridge = reparsed.find((i): i is any => i.kind === "bridge");
+    const origBridge = doc.instructions.find(
+      (i): i is any => i.kind === "bridge",
+    );
+    const reparsedBridge = reparsed.instructions.find(
+      (i): i is any => i.kind === "bridge",
+    );
 
     // Same number of wires
     assert.equal(

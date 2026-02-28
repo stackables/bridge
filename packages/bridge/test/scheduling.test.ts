@@ -386,7 +386,7 @@ o.shoutedName <- tu:g.name
     const callCounts: Record<string, number> = {};
 
     const tools: Record<string, any> = {
-      "geo.lookup": async (input: any) => {
+      "geo.lookup": async (_input: any) => {
         callCounts["geo.lookup"] = (callCounts["geo.lookup"] ?? 0) + 1;
         await sleep(30);
         return { name: "Berlin" };

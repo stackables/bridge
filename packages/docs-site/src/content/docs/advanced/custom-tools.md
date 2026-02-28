@@ -13,7 +13,9 @@ You can inject your own tools into the engine. A tool is any function
 ```typescript
 import { bridgeTransform, parseBridge } from "@stackables/bridge";
 
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+const document = parseBridge(bridgeText);
+
+const schema = bridgeTransform(createSchema({ typeDefs }), document, {
   tools: {
     myCustomTool: (input) => ({ result: input.value * 2 }),
     geocoder: async (input) => await geocodeService.lookup(input.q),
@@ -27,9 +29,9 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 ```typescript
 import { executeBridge, parseBridge } from "@stackables/bridge";
 
-const instructions = parseBridge(bridgeText);
+const document = parseBridge(bridgeText);
 const { data } = await executeBridge({
-  instructions,
+  document,
   operation: "Query.myField",
   input: { city: "Berlin" },
   tools: {
@@ -45,13 +47,12 @@ To replace a built-in tool, override the `std` namespace (shallow merge):
 ```typescript
 import { bridgeTransform, std } from "@stackables/bridge";
 
-const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+const schema = bridgeTransform(createSchema({ typeDefs }), document, {
   tools: {
     std: { ...std, upperCase: myCustomUpperCase },
   },
 });
 ```
-
 
 ## Authoring Tools
 
@@ -64,7 +65,6 @@ export interface ToolContext {
   logger?: Logger;
   signal?: AbortSignal;
 }
-
 ```
 
 ### The `AbortSignal`
@@ -75,18 +75,14 @@ To ensure your custom tools don't hang or waste resources during a fatal halt, *
 
 ```typescript
 // Example TypeScript Tool Implementation
-export async function myHttpTool(
-  input: { url: string }, 
-  context: ToolContext
-) {
+export async function myHttpTool(input: { url: string }, context: ToolContext) {
   // Pass the signal down to native fetch!
   const response = await fetch(input.url, {
-    signal: context.signal 
+    signal: context.signal,
   });
-  
+
   return await response.json();
 }
-
 ```
 
 By connecting the signal, the engine can instantly abort pending network requests the exact millisecond a failure state or client disconnect is detected, bypassing all local `?.` and `catch` fallbacks.

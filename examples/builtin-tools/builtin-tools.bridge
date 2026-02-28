@@ -1,10 +1,10 @@
-version 1.5
+version 1.3
 
 # Built-in tools live under the std namespace — no tool block needed for pipe-like tools.
 
 bridge Query.format {
   with std.str.toUpperCase as up
-  with std.str.toLowerCase as lo
+  with std.str.toLowerCase@999.1 as lo
   with input as i
   with output as o
 

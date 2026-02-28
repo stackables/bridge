@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
+import {
+  checkStdVersion,
+  checkHandleVersions,
+  collectVersionedHandles,
+  getBridgeVersion,
+  hasVersionedToolFn,
+  mergeBridgeDocuments,
+  resolveStd,
+} from "../src/index.ts";
+import type { BridgeDocument } from "../src/index.ts";
+import { BridgeLanguageService } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -10,14 +21,14 @@ function run(
   operation: string,
   input: Record<string, unknown>,
   tools: Record<string, any> = {},
-) {
+): Promise<{ data: any; traces: any[] }> {
   const raw = parseBridge(bridgeText);
-  // instructions must survive serioalisation
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+  // document must survive serialisation
+  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge
   >;
   return executeBridge({
-    instructions,
+    document,
     operation,
     input,
     tools,
@@ -44,7 +55,7 @@ bridge Query.livingStandard {
 
   const tools: Record<string, any> = {
     "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
-    "companyX.getLivingStandard": async (p: any) => ({
+    "companyX.getLivingStandard": async (_p: any) => ({
       lifeExpectancy: "81.5",
     }),
     toInt: (p: { value: string }) => ({
@@ -103,7 +114,7 @@ bridge Query.getUser {
 
   test("root object wire returns entire tool output", async () => {
     const tools = {
-      userApi: async (p: any) => ({
+      userApi: async (_p: any) => ({
         user: { name: "Alice", age: 30, email: "alice@example.com" },
       }),
     };
@@ -672,7 +683,7 @@ bridge Query.echo {
 
   test("traces are empty when tracing is off", async () => {
     const { traces } = await executeBridge({
-      instructions: parseBridge(bridgeText),
+      document: parseBridge(bridgeText),
       operation: "Query.echo",
       input: { x: 5 },
       tools,
@@ -682,7 +693,7 @@ bridge Query.echo {
 
   test("traces contain tool calls when tracing is enabled", async () => {
     const { data, traces } = await executeBridge({
-      instructions: parseBridge(bridgeText),
+      document: parseBridge(bridgeText),
       operation: "Query.echo",
       input: { x: 5 },
       tools,
@@ -714,5 +725,768 @@ bridge Query.foo {
       () => run(bridgeText, "Query.bar", {}),
       /No bridge definition found/,
     );
+  });
+});
+
+// ── Version compatibility ───────────────────────────────────────────────────
+
+describe("version compatibility: getBridgeVersion", () => {
+  test("extracts version from parsed document", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.equal(getBridgeVersion(doc), "1.5");
+  });
+
+  test("extracts future version 1.7", () => {
+    const doc = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.equal(getBridgeVersion(doc), "1.7");
+  });
+
+  test("returns undefined for empty document", () => {
+    assert.equal(getBridgeVersion({ instructions: [] }), undefined);
+  });
+});
+
+describe("version compatibility: checkStdVersion", () => {
+  const doc15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  const doc17 = parseBridge(`version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  test("bridge 1.5 + std 1.5.0 → OK", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc15.version, "1.5.0"));
+  });
+
+  test("bridge 1.5 + std 1.5.7 → OK (patch doesn't matter)", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc15.version, "1.5.7"));
+  });
+
+  test("bridge 1.5 + std 1.7.0 → OK (newer minor is backward compatible)", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc15.version, "1.7.0"));
+  });
+
+  test("bridge 1.7 + std 1.5.0 → ERROR (std too old)", () => {
+    assert.throws(
+      () => checkStdVersion(doc17.version, "1.5.0"),
+      /requires standard library ≥ 1\.7.*installed.*1\.5\.0/,
+    );
+  });
+
+  test("bridge 1.7 + std 1.7.0 → OK (exact match)", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc17.version, "1.7.0"));
+  });
+
+  test("bridge 1.7 + std 1.7.3 → OK (same minor, higher patch)", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc17.version, "1.7.3"));
+  });
+
+  test("bridge 1.7 + std 1.9.0 → OK (newer minor)", () => {
+    assert.doesNotThrow(() => checkStdVersion(doc17.version, "1.9.0"));
+  });
+
+  test("bridge 1.7 + std 2.0.0 → ERROR (different major, suggests tools map)", () => {
+    assert.throws(
+      () => checkStdVersion(doc17.version, "2.0.0"),
+      /requires a 1\.x standard library.*tools map/,
+    );
+  });
+
+  test("no version → no error (graceful)", () => {
+    assert.doesNotThrow(() => checkStdVersion(undefined, "1.5.0"));
+  });
+});
+
+describe("version compatibility: executeBridge integration", () => {
+  test("version 1.5 bridge executes normally on current std", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with output as o
+  o.greeting = "hello"
+}`,
+      "Query.test",
+      {},
+    );
+    assert.deepStrictEqual(data, { greeting: "hello" });
+  });
+
+  test("version 1.7 bridge throws at execution time when std is 1.5", async () => {
+    // The current STD_VERSION is "1.5.0", so a version 1.7 bridge should fail
+    await assert.rejects(
+      () =>
+        run(
+          `version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`,
+          "Query.test",
+          {},
+        ),
+      /requires standard library ≥ 1\.7/,
+    );
+  });
+});
+
+// ── Std resolution via versioned tools keys ─────────────────────────────────
+
+describe("resolveStd: from versioned tools map keys", () => {
+  const doc15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  const bundledStd = { str: { toUpperCase: () => {} } };
+
+  test("returns bundled std when compatible", () => {
+    const result = resolveStd(doc15.version, bundledStd, "1.5.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "1.5.0");
+  });
+
+  test("returns bundled std when minor is higher", () => {
+    const result = resolveStd(doc15.version, bundledStd, "1.7.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "1.7.0");
+  });
+
+  test("finds std@1.5 namespace from tools on major mismatch", () => {
+    const oldStd = { str: { toUpperCase: () => "OLD" } };
+    const result = resolveStd(doc15.version, bundledStd, "2.0.0", {
+      "std@1.5": oldStd,
+    });
+    assert.equal(result.namespace, oldStd);
+    assert.equal(result.version, "1.5.0");
+  });
+
+  test("skips std@ keys with incompatible version", () => {
+    const oldStd = { str: { toUpperCase: () => "OLD" } };
+    assert.throws(
+      () =>
+        resolveStd(doc15.version, bundledStd, "2.0.0", {
+          "std@1.3": oldStd, // too old — bridge needs 1.5
+        }),
+      /requires a 1\.x standard library/,
+    );
+  });
+
+  test("throws actionable error when no compatible std found", () => {
+    assert.throws(
+      () => resolveStd(doc15.version, bundledStd, "2.0.0", {}),
+      (err: Error) => {
+        assert.ok(err.message.includes("1.x standard library"));
+        assert.ok(err.message.includes('"std@1.5"'));
+        assert.ok(err.message.includes("tools map"));
+        return true;
+      },
+    );
+  });
+
+  test("returns bundled for document without version header", () => {
+    const result = resolveStd(undefined, bundledStd, "2.0.0", {});
+    assert.equal(result.namespace, bundledStd);
+    assert.equal(result.version, "2.0.0");
+  });
+});
+
+describe("checkStdVersion: error guidance", () => {
+  const doc15 = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+
+  test("error mentions tools map on major mismatch", () => {
+    assert.throws(
+      () => checkStdVersion(doc15.version, "2.0.0"),
+      (err: Error) => {
+        assert.ok(err.message.includes("1.x standard library"));
+        assert.ok(err.message.includes("tools map"));
+        return true;
+      },
+    );
+  });
+
+  test("error mentions the correct major the bridge needs", () => {
+    assert.throws(
+      () => checkStdVersion("2.0", "1.5.0"),
+      /requires a 2\.x standard library/,
+    );
+  });
+});
+
+describe("versioned namespace keys: executeBridge integration", () => {
+  test("versioned std namespace key resolves via handle version tag", async () => {
+    // The handle uses @1.5, so the engine looks up "std.str.toUpperCase@1.5"
+    // which finds "std@1.5" namespace key and traverses into it.
+    const customStd = {
+      str: {
+        toUpperCase: (input: { in: string }) =>
+          input.in?.toUpperCase() + "_CUSTOM_STD",
+      },
+    };
+
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase@1.5 as up
+  with output as o
+  o.result <- up:o.text
+}`,
+      "Query.test",
+      { text: "hello" },
+      { "std@1.5": customStd },
+    );
+    assert.equal(data.result, "HELLO_CUSTOM_STD");
+  });
+
+  test("versioned sub-namespace key satisfies handle", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        "std.str@999.1": {
+          toLowerCase: (input: { in: string }) =>
+            input.in?.toLowerCase() + "_NS",
+        },
+      },
+    );
+    assert.equal(data.lower, "hello_NS");
+  });
+
+  test("no versioned std key falls back to bundled std", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with output as o
+  o.result <- up:o.text
+}`,
+      "Query.test",
+      { text: "hello" },
+    );
+    assert.equal(data.result, "HELLO");
+  });
+
+  test("flat versioned key still works alongside namespace keys", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        "std.str.toLowerCase@999.1": (input: { in: string }) =>
+          input.in?.toLowerCase() + "_FLAT",
+      },
+    );
+    assert.equal(data.lower, "hello_FLAT");
+  });
+});
+
+describe("hasVersionedToolFn: versioned namespace resolution", () => {
+  test("finds flat versioned key", () => {
+    const tools = {
+      "std.str.toLowerCase@999.1": () => {},
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("finds versioned sub-namespace key", () => {
+    const tools = {
+      "std.str@999.1": { toLowerCase: () => {} },
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("finds versioned root namespace key", () => {
+    const tools = {
+      "std@999.1": { str: { toLowerCase: () => {} } },
+    };
+    assert.ok(hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+
+  test("returns false when no versioned key matches", () => {
+    const tools = {
+      std: { str: { toLowerCase: () => {} } },
+    };
+    assert.ok(!hasVersionedToolFn(tools, "std.str.toLowerCase", "999.1"));
+  });
+});
+
+// ── Versioned handle validation ─────────────────────────────────────────────
+
+describe("versioned handles: collectVersionedHandles", () => {
+  test("collects @version from bridge handles", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+    const versioned = collectVersionedHandles(doc.instructions);
+    assert.equal(versioned.length, 1);
+    assert.equal(versioned[0].name, "std.str.toLowerCase");
+    assert.equal(versioned[0].version, "999.1");
+  });
+
+  test("returns empty for handles without @version", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with output as o
+  o.x <- up:o.y
+}`);
+    const versioned = collectVersionedHandles(doc.instructions);
+    assert.equal(versioned.length, 0);
+  });
+
+  test("collects multiple versioned handles", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase@2.0 as up
+  with std.str.toLowerCase@3.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+    const versioned = collectVersionedHandles(doc.instructions);
+    assert.equal(versioned.length, 2);
+    assert.deepStrictEqual(
+      versioned.map((v) => `${v.name}@${v.version}`),
+      ["std.str.toUpperCase@2.0", "std.str.toLowerCase@3.1"],
+    );
+  });
+});
+
+describe("versioned handles: checkHandleVersions", () => {
+  const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.upper <- up:o.lower
+  o.lower <- lo:o.upper
+}`);
+
+  test("throws when versioned std tool exceeds bundled std version", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+    };
+    assert.throws(
+      () => checkHandleVersions(doc.instructions, tools, "1.5.0"),
+      /std\.str\.toLowerCase@999\.1.*requires standard library/,
+    );
+  });
+
+  test("passes when versioned tool key is explicitly provided", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+      "std.str.toLowerCase@999.1": (x: any) => x,
+    };
+    assert.doesNotThrow(() =>
+      checkHandleVersions(doc.instructions, tools, "1.5.0"),
+    );
+  });
+
+  test("passes when std version satisfies the requested version", () => {
+    const tools = {
+      std: { str: { toUpperCase: (x: any) => x, toLowerCase: (x: any) => x } },
+    };
+    // If std were at version 999.1.0, the check should pass
+    assert.doesNotThrow(() =>
+      checkHandleVersions(doc.instructions, tools, "999.1.0"),
+    );
+  });
+
+  test("throws for non-std versioned tool without explicit provider", () => {
+    const instrWithCustom = parseBridge(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    assert.throws(
+      () => checkHandleVersions(instrWithCustom.instructions, {}, "1.5.0"),
+      /myApi\.getData@2\.0.*not available.*Provide/,
+    );
+  });
+
+  test("passes for non-std versioned tool with explicit provider", () => {
+    const instrWithCustom = parseBridge(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    const tools = { "myApi.getData@2.0": () => ({ value: 42 }) };
+    assert.doesNotThrow(() =>
+      checkHandleVersions(instrWithCustom.instructions, tools, "1.5.0"),
+    );
+  });
+
+  test("no versioned handles → no error", () => {
+    const instrPlain = parseBridge(`version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`);
+    assert.doesNotThrow(() =>
+      checkHandleVersions(instrPlain.instructions, {}, "1.5.0"),
+    );
+  });
+});
+
+describe("versioned handles: executeBridge integration", () => {
+  test("fails early when @version handle cannot be satisfied", async () => {
+    await assert.rejects(
+      () =>
+        run(
+          `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+          "Query.test",
+          { x: "HELLO" },
+        ),
+      /std\.str\.toLowerCase@999\.1/,
+    );
+  });
+
+  test("uses versioned tool when explicitly injected", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`,
+      "Query.test",
+      { x: "HELLO" },
+      {
+        // Provide a custom toLowerCase@999.1 that appends a marker
+        "std.str.toLowerCase@999.1": (input: { in: string }) => {
+          return input.in?.toLowerCase() + "_v999";
+        },
+      },
+    );
+    assert.equal(data.lower, "hello_v999");
+  });
+
+  test("unversioned handle uses bundled std, versioned uses injected", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as up
+  with std.str.toLowerCase@999.1 as lo
+  with input as i
+  with output as o
+  o.upper <- up:i.text
+  o.lower <- lo:i.text
+}`,
+      "Query.test",
+      { text: "Hello" },
+      {
+        "std.str.toLowerCase@999.1": (input: { in: string }) => {
+          return input.in?.toLowerCase() + "_custom";
+        },
+      },
+    );
+    assert.equal(data.upper, "HELLO"); // bundled std
+    assert.equal(data.lower, "hello_custom"); // injected versioned
+  });
+});
+
+// ── Language service diagnostics for @version ───────────────────────────────
+
+describe("versioned handles: language service diagnostics", () => {
+  test("warns when @version exceeds bundled std version", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@999.1 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) => d.message.includes("999.1"));
+    assert.ok(versionDiag, "expected a diagnostic for @999.1");
+    assert.equal(versionDiag!.severity, "warning");
+    assert.ok(versionDiag!.message.includes("exceeds bundled std"));
+    assert.ok(
+      versionDiag!.message.includes("Provide this tool version at runtime"),
+    );
+  });
+
+  test("no warning when @version is within bundled std range", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with std.str.toLowerCase@1.3 as lo
+  with output as o
+  o.lower <- lo:o.x
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) => d.message.includes("1.3"));
+    assert.equal(versionDiag, undefined, "no version warning expected");
+  });
+
+  test("no warning for non-std versioned handles", () => {
+    const svc = new BridgeLanguageService();
+    svc.update(`version 1.5
+bridge Query.test {
+  with myApi.getData@2.0 as api
+  with output as o
+  o.x <- api.value
+}`);
+    const diags = svc.getDiagnostics();
+    const versionDiag = diags.find((d) =>
+      d.message.includes("exceeds bundled"),
+    );
+    assert.equal(
+      versionDiag,
+      undefined,
+      "non-std tools should not trigger std version warning",
+    );
+  });
+});
+
+// ── mergeBridgeDocuments ────────────────────────────────────────────────────
+
+describe("mergeBridgeDocuments", () => {
+  test("empty input returns empty document", () => {
+    const merged = mergeBridgeDocuments();
+    assert.deepStrictEqual(merged, { instructions: [] });
+  });
+
+  test("single document is returned as-is", () => {
+    const doc: BridgeDocument = {
+      version: "1.5",
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "hello",
+          handles: [],
+          wires: [],
+        },
+      ],
+    };
+    const merged = mergeBridgeDocuments(doc);
+    assert.strictEqual(merged, doc); // identity — no copy
+  });
+
+  test("instructions are concatenated in order", () => {
+    const a: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "a",
+          handles: [],
+          wires: [],
+        },
+      ],
+    };
+    const b: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "b",
+          handles: [],
+          wires: [],
+        },
+      ],
+    };
+    const merged = mergeBridgeDocuments(a, b);
+    assert.equal(merged.instructions.length, 2);
+    assert.equal((merged.instructions[0] as any).field, "a");
+    assert.equal((merged.instructions[1] as any).field, "b");
+  });
+
+  test("version is undefined when no document declares one", () => {
+    const a: BridgeDocument = { instructions: [] };
+    const b: BridgeDocument = { instructions: [] };
+    assert.strictEqual(mergeBridgeDocuments(a, b).version, undefined);
+  });
+
+  test("version is picked from the only document that has one", () => {
+    const a: BridgeDocument = { version: "1.3", instructions: [] };
+    const b: BridgeDocument = { instructions: [] };
+    assert.strictEqual(mergeBridgeDocuments(a, b).version, "1.3");
+    assert.strictEqual(mergeBridgeDocuments(b, a).version, "1.3");
+  });
+
+  test("highest minor version wins when majors match", () => {
+    const a: BridgeDocument = { version: "1.3", instructions: [] };
+    const b: BridgeDocument = { version: "1.7", instructions: [] };
+    const c: BridgeDocument = { version: "1.5", instructions: [] };
+    assert.strictEqual(mergeBridgeDocuments(a, b, c).version, "1.7");
+  });
+
+  test("highest patch version wins when major.minor match", () => {
+    const a: BridgeDocument = { version: "1.5.1", instructions: [] };
+    const b: BridgeDocument = { version: "1.5.3", instructions: [] };
+    const c: BridgeDocument = { version: "1.5.2", instructions: [] };
+    assert.strictEqual(mergeBridgeDocuments(a, b, c).version, "1.5.3");
+  });
+
+  test("throws on different major versions", () => {
+    const a: BridgeDocument = { version: "1.5", instructions: [] };
+    const b: BridgeDocument = { version: "2.0", instructions: [] };
+    assert.throws(
+      () => mergeBridgeDocuments(a, b),
+      /different major versions.*1\.5.*2\.0/,
+    );
+  });
+
+  test("throws on duplicate bridge definition", () => {
+    const a: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "weather",
+          handles: [],
+          wires: [],
+        },
+      ],
+    };
+    const b: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "weather",
+          handles: [],
+          wires: [],
+        },
+      ],
+    };
+    assert.throws(
+      () => mergeBridgeDocuments(a, b),
+      /Merge conflict.*bridge 'Query\.weather'/,
+    );
+  });
+
+  test("throws on duplicate const definition", () => {
+    const a: BridgeDocument = {
+      instructions: [{ kind: "const", name: "API_TIMEOUT", value: "5000" }],
+    };
+    const b: BridgeDocument = {
+      instructions: [{ kind: "const", name: "API_TIMEOUT", value: "10000" }],
+    };
+    assert.throws(
+      () => mergeBridgeDocuments(a, b),
+      /Merge conflict.*const 'API_TIMEOUT'/,
+    );
+  });
+
+  test("throws on duplicate tool definition", () => {
+    const a: BridgeDocument = {
+      instructions: [
+        { kind: "tool", name: "myHttp", fn: "std.http", deps: [], wires: [] },
+      ],
+    };
+    const b: BridgeDocument = {
+      instructions: [
+        { kind: "tool", name: "myHttp", fn: "std.fetch", deps: [], wires: [] },
+      ],
+    };
+    assert.throws(
+      () => mergeBridgeDocuments(a, b),
+      /Merge conflict.*tool 'myHttp'/,
+    );
+  });
+
+  test("throws on duplicate define definition", () => {
+    const a: BridgeDocument = {
+      instructions: [
+        { kind: "define", name: "secureProfile", handles: [], wires: [] },
+      ],
+    };
+    const b: BridgeDocument = {
+      instructions: [
+        { kind: "define", name: "secureProfile", handles: [], wires: [] },
+      ],
+    };
+    assert.throws(
+      () => mergeBridgeDocuments(a, b),
+      /Merge conflict.*define 'secureProfile'/,
+    );
+  });
+
+  test("different kinds with same name do not collide", () => {
+    const a: BridgeDocument = {
+      instructions: [{ kind: "const", name: "myHttp", value: '"url"' }],
+    };
+    const b: BridgeDocument = {
+      instructions: [
+        { kind: "tool", name: "myHttp", fn: "std.http", deps: [], wires: [] },
+      ],
+    };
+    // const:myHttp vs tool:myHttp — different namespaces, no collision
+    const merged = mergeBridgeDocuments(a, b);
+    assert.equal(merged.instructions.length, 2);
+  });
+
+  test("works end-to-end with parsed documents", async () => {
+    const docA = parseBridge(`version 1.5
+bridge Query.weather {
+  with input as i
+  with output as o
+  o.city <- i.city
+}`);
+    const docB = parseBridge(`version 1.5
+bridge Query.quote {
+  with input as i
+  with output as o
+  o.text <- i.text
+}`);
+    const merged = mergeBridgeDocuments(docA, docB);
+    assert.equal(merged.version, "1.5");
+
+    const { data: weatherData } = await executeBridge<any>({
+      document: merged,
+      operation: "Query.weather",
+      input: { city: "Berlin" },
+    });
+    assert.equal(weatherData.city, "Berlin");
+
+    const { data: quoteData } = await executeBridge<any>({
+      document: merged,
+      operation: "Query.quote",
+      input: { text: "hello" },
+    });
+    assert.equal(quoteData.text, "hello");
   });
 });
