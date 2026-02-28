@@ -1043,7 +1043,7 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag and c.ok
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { flag: false, value: "test" },
@@ -1073,7 +1073,7 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag and c.ok
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { flag: true, value: "test" },
@@ -1103,7 +1103,7 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag or c.ok
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { flag: true, value: "test" },
@@ -1133,7 +1133,7 @@ bridge Query.test {
   c.in <- i.value
   o.result <- i.flag or c.ok
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { flag: false, value: "test" },
@@ -1166,7 +1166,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- api?.score > 5 || false
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test" },
@@ -1191,7 +1191,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- not api?.verified || true
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test" },
@@ -1215,7 +1215,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- api?.active and i.flag
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test", flag: true },
@@ -1239,7 +1239,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.flag and api?.active
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test", flag: true },
@@ -1263,7 +1263,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.a > api?.score || false
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test", a: 10 },
@@ -1287,7 +1287,7 @@ bridge Query.test {
   api.in <- i.value
   o.result <- i.flag or api?.fallback
 }`);
-    const { data } = await executeBridge({
+    const { data } = await executeBridge<any>({
       document,
       operation: "Query.test",
       input: { value: "test", flag: false },

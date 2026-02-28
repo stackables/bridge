@@ -2,7 +2,10 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import type { Bridge } from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
@@ -355,7 +358,7 @@ o.title <- m.title
 }`;
 
     const tools: Record<string, any> = {
-      mainApi: async (input: any) => {
+      mainApi: async (_input: any) => {
         return { title: "Hello World" };
       },
       "audit.log": async (input: any) => {
@@ -412,7 +415,7 @@ o.id <- u.id
 }`;
 
     const tools: Record<string, any> = {
-      "userApi.create": async (input: any) => ({ id: "usr_123" }),
+      "userApi.create": async (_input: any) => ({ id: "usr_123" }),
       "audit.log": async (input: any) => {
         auditInput = input;
         return { ok: true };
@@ -455,12 +458,12 @@ o.title <- m.title
 }`;
 
     const tools: Record<string, any> = {
-      mainApi: async (input: any) => {
+      mainApi: async (_input: any) => {
         mainStart = performance.now() - t0;
         await new Promise((r) => setTimeout(r, 50));
         return { title: "result" };
       },
-      "audit.log": async (input: any) => {
+      "audit.log": async (_input: any) => {
         auditStart = performance.now() - t0;
         await new Promise((r) => setTimeout(r, 50));
         return { ok: true };
@@ -511,7 +514,7 @@ o.ok = "true"
 }`;
 
     const tools: Record<string, any> = {
-      sideEffect: async (input: any) => {
+      sideEffect: async (_input: any) => {
         sideEffectCalled = true;
         // Returns nothing — 204 No Content scenario
         return null;

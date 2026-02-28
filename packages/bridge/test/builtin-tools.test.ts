@@ -513,7 +513,7 @@ bridge Query.search {
 }`;
 
     const tools: Record<string, any> = {
-      searchApi: async (input: any) => ({ title: "OK" }),
+      searchApi: async (_input: any) => ({ title: "OK" }),
       std: { ...std, audit: failAudit },
     };
 
@@ -549,7 +549,7 @@ bridge Query.search {
 }`;
 
     const tools: Record<string, any> = {
-      searchApi: async (input: any) => ({ title: "OK" }),
+      searchApi: async (_input: any) => ({ title: "OK" }),
       std: { ...std, audit: failAudit },
     };
 

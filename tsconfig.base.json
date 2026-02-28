@@ -1,6 +1,10 @@
 {
   "extends": "@tsconfig/node24/tsconfig.json",
   "compilerOptions": {
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
       "@stackables/bridge-types": [

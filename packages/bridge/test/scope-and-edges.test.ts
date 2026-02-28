@@ -57,7 +57,7 @@ o.journeys <- r.journeys[] as j {
 }`;
 
   const tools = {
-    router: async (params: { origin: string }) => ({
+    router: async (_params: { origin: string }) => ({
       journeys: [
         {
           label: "Express",
@@ -487,7 +487,7 @@ bridge Query.searchTrains {
   }
 }`;
 
-  const mockHttpCall = async (input: Record<string, any>) => ({
+  const mockHttpCall = async (_input: Record<string, any>) => ({
     journeys: [
       {
         token: "ABC",
@@ -540,8 +540,12 @@ bridge Query.searchTrains {
     const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
 
-    const origBridge = doc.instructions.find((i): i is any => i.kind === "bridge");
-    const reparsedBridge = reparsed.instructions.find((i): i is any => i.kind === "bridge");
+    const origBridge = doc.instructions.find(
+      (i): i is any => i.kind === "bridge",
+    );
+    const reparsedBridge = reparsed.instructions.find(
+      (i): i is any => i.kind === "bridge",
+    );
 
     // Same number of wires
     assert.equal(

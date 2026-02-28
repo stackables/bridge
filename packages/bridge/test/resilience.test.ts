@@ -17,7 +17,7 @@ describe("parseBridge: const blocks", () => {
   test("single const with object value", () => {
     const doc = parseBridge(`version 1.5
 const fallbackGeo = { "lat": 0, "lon": 0 }`);
-    assert.equal(doc.instructions.filter((i) => i.kind !== "version").length, 1);
+    assert.equal(doc.instructions.length, 1);
     const c = doc.instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(c.kind, "const");
     assert.equal(c.name, "fallbackGeo");
@@ -26,7 +26,9 @@ const fallbackGeo = { "lat": 0, "lon": 0 }`);
 
   test("single const with string value", () => {
     const c = parseBridge(`version 1.5
-const currency = "EUR"`).instructions.find((i): i is ConstDef => i.kind === "const")!;
+const currency = "EUR"`).instructions.find(
+      (i): i is ConstDef => i.kind === "const",
+    )!;
     assert.equal(c.name, "currency");
     assert.equal(JSON.parse(c.value), "EUR");
   });
@@ -40,7 +42,9 @@ const limit = 10`).instructions.find((i): i is ConstDef => i.kind === "const")!;
 
   test("single const with null", () => {
     const c = parseBridge(`version 1.5
-const empty = null`).instructions.find((i): i is ConstDef => i.kind === "const")!;
+const empty = null`).instructions.find(
+      (i): i is ConstDef => i.kind === "const",
+    )!;
     assert.equal(JSON.parse(c.value), null);
   });
 
@@ -51,7 +55,7 @@ const fallbackGeo = { "lat": 0, "lon": 0 }
 const defaultCurrency = "EUR"
 const maxRetries = 3
 `);
-    assert.equal(doc.instructions.filter((i) => i.kind !== "version").length, 3);
+    assert.equal(doc.instructions.length, 3);
     const consts = doc.instructions.filter(
       (i): i is ConstDef => i.kind === "const",
     );
@@ -263,10 +267,7 @@ tool myApi from httpCall {
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(doc)),
-      doc,
-    );
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("on error <- source roundtrips", () => {
@@ -277,10 +278,7 @@ tool myApi from httpCall {
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(doc)),
-      doc,
-    );
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 });
 
@@ -597,10 +595,7 @@ o.lat <- a.lat catch 0
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(doc)),
-      doc,
-    );
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("catch on pipe chain roundtrips", () => {
@@ -614,10 +609,7 @@ o.result <- t:i.text catch "fallback"
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(
-      parseBridge(serializeBridge(doc)),
-      doc,
-    );
+    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("serialized output contains catch", () => {
@@ -825,7 +817,9 @@ bridge Query.greet {
 o.name <- i.name || "World"
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, '"World"');
     assert.equal(wire.catchFallback, undefined);
@@ -841,7 +835,9 @@ bridge Query.greet {
 o.name <- i.name || "World" catch "Error"
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, '"World"');
     assert.equal(wire.catchFallback, '"Error"');
@@ -859,7 +855,9 @@ a.q <- i.q
 o.result <- a.data || {"lat":0,"lon":0}
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).from.path[0] === "data",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -876,7 +874,9 @@ bridge Query.greet {
 o.name <- i.name
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
     assert.equal(wire.falsyFallback, undefined);
   });
@@ -892,7 +892,9 @@ bridge Query.format {
 o.result <- up:i.text || "N/A"
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     // Terminal pipe wire (from fork root to result) carries the falsyFallback
     const terminalWire = bridge.wires.find(
       (w) =>
@@ -1181,7 +1183,9 @@ b.q <- i.q
 o.label <- p.label || b.label
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
@@ -1207,7 +1211,9 @@ b.q <- i.q
 o.label <- a.label || b.label || "default"
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
@@ -1231,7 +1237,9 @@ api.q <- i.q
 o.label <- api.label catch i.fallbackLabel
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -1257,7 +1265,9 @@ api.q <- i.q
 o.label <- api.label catch up:i.errorDefault
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const wire = bridge.wires.find(
       (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>;
@@ -1285,7 +1295,9 @@ b.q <- i.q
 o.label <- p.label || b.label || "default" catch i.errorLabel
 
 }`);
-    const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
     const labelWires = bridge.wires.filter(
       (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];

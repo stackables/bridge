@@ -112,7 +112,7 @@ bridge Query.test {
   o.url <- "/users/{api.name}/profile"
 }`;
     const tools = {
-      userApi: async (p: any) => ({ name: "john-doe" }),
+      userApi: async (_p: any) => ({ name: "john-doe" }),
     };
     const { data } = await run(bridge, "Query.test", { userId: "1" }, tools);
     assert.deepEqual(data, { url: "/users/john-doe/profile" });

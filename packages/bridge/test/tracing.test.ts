@@ -283,8 +283,8 @@ o.label <- g.label
     );
 
     assert.equal(traces.length, 1);
-    assert.equal(traces[0].input.q, "Berlin");
-    assert.equal(traces[0].input.limit, 5);
+    assert.equal(traces[0]!.input!.q, "Berlin");
+    assert.equal(traces[0]!.input!.limit, 5);
   });
 });
 
@@ -321,12 +321,12 @@ o.label <- g.label
 
     assert.equal(data.lookup.label, "resolved-Berlin");
     assert.equal(traces.length, 1);
-    assert.equal(traces[0].tool, "geocoder");
-    assert.equal(traces[0].fn, "httpCall");
+    assert.equal(traces[0]!.tool, "geocoder");
+    assert.equal(traces[0]!.fn, "httpCall");
     // Input should include tool-def wires (baseUrl, method, path) merged
     // with bridge wires (q)
-    assert.equal(traces[0].input.q, "Berlin");
-    assert.equal(traces[0].input.baseUrl, "https://api.example.com");
+    assert.equal(traces[0]!.input!.q, "Berlin");
+    assert.equal(traces[0]!.input!.baseUrl, "https://api.example.com");
   });
 });
 
@@ -592,7 +592,7 @@ bridge Query.getWeather {
     // No cityName input → upper:null → falls through to f.display_name
     // → geo is called (to get display_name via geocode fallback).
     // weather is NEVER called — no output field depends on it.
-    const { executor, callLog } = createWeatherGateway();
+    const { executor } = createWeatherGateway();
 
     const result: any = await executor({
       document: parse(`{ getWeather { city } }`),
@@ -619,7 +619,7 @@ bridge Query.getWeather {
   });
 
   test('{ getWeather(cityName: "Berlin") { city } } no geo needed', async () => {
-    const { executor, callLog } = createWeatherGateway();
+    const { executor } = createWeatherGateway();
 
     const result: any = await executor({
       document: parse(`{ getWeather(cityName: "Berlin") { city } }`),
@@ -677,7 +677,7 @@ bridge Query.getWeather {
   test("{ getWeather { city currentTemp } } weather called only when needed", async () => {
     // When currentTemp IS requested, the define's currentTemp wire fires,
     // which pulls from the weather tool.
-    const { executor, callLog } = createWeatherGateway();
+    const { executor } = createWeatherGateway();
 
     const result: any = await executor({
       document: parse(

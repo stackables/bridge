@@ -579,7 +579,7 @@ function run(
   operation: string,
   input: Record<string, unknown>,
   tools: Record<string, any> = {},
-) {
+): Promise<{ data: any; traces: any[] }> {
   const raw = parseBridge(bridgeText);
   const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
     typeof parseBridge

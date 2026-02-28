@@ -8,6 +8,9 @@ import {
 import type { Bridge, Instruction, ToolDef, Wire } from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
 
+/** Pull wire — the Wire variant that has a `from` field */
+type PullWire = Extract<Wire, { from: unknown }>;
+
 // ── parsePath ───────────────────────────────────────────────────────────────
 
 describe("parsePath", () => {
@@ -55,10 +58,7 @@ o.search <- i.search
 gc.q <- i.search
 
 }`);
-    assert.equal(
-      result.instructions.filter((i) => i.kind !== "version").length,
-      1,
-    );
+    assert.equal(result.instructions.length, 1);
     const bridge = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
@@ -118,10 +118,7 @@ ti.value <- a.raw
 o.output <- ti.result
 
 }`);
-    assert.equal(
-      result.instructions.filter((i) => i.kind !== "version").length,
-      1,
-    );
+    assert.equal(result.instructions.length, 1);
 
     const bridge = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
@@ -174,7 +171,7 @@ o.topPick.city    <- z.properties[0].location.city
     const bridge = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.deepStrictEqual(bridge.wires[0].from, {
+    assert.deepStrictEqual((bridge.wires[0] as PullWire).from, {
       module: "zillow",
       type: "Query",
       field: "find",
@@ -187,7 +184,7 @@ o.topPick.city    <- z.properties[0].location.city
       field: "search",
       path: ["topPick", "address"],
     });
-    assert.deepStrictEqual(bridge.wires[1].from.path, [
+    assert.deepStrictEqual((bridge.wires[1] as PullWire).from.path, [
       "properties",
       "0",
       "location",
@@ -283,7 +280,7 @@ o.messageId <- sg.headers.x-message-id
       instance: 1,
       path: ["content"],
     });
-    assert.deepStrictEqual(bridge.wires[1].from.path, [
+    assert.deepStrictEqual((bridge.wires[1] as PullWire).from.path, [
       "headers",
       "x-message-id",
     ]);
@@ -332,7 +329,7 @@ z.lat <- i.lat
     )!;
     assert.equal(bridge.handles.length, 3);
     assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
-    assert.deepStrictEqual(bridge.wires[0].from, {
+    assert.deepStrictEqual((bridge.wires[0] as PullWire).from, {
       module: SELF_MODULE,
       type: "Context",
       field: "context",
@@ -773,10 +770,7 @@ describe("parser robustness", () => {
     const result = parseBridge(
       "version 1.5\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
     );
-    assert.equal(
-      result.instructions.filter((i) => i.kind !== "version").length,
-      1,
-    );
+    assert.equal(result.instructions.length, 1);
     assert.equal(
       result.instructions.find((i) => i.kind === "bridge")!.kind,
       "bridge",
@@ -787,10 +781,7 @@ describe("parser robustness", () => {
     const result = parseBridge(
       "version 1.5\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
     );
-    assert.equal(
-      result.instructions.filter((i) => i.kind !== "version").length,
-      1,
-    );
+    assert.equal(result.instructions.length, 1);
   });
 
   test("keywords are case-insensitive", () => {
@@ -838,10 +829,7 @@ bridge Query.geocode {
 gc.q <- i.search
 
 }`);
-    assert.equal(
-      result.instructions.filter((i) => i.kind !== "version").length,
-      3,
-    );
+    assert.equal(result.instructions.length, 3);
   });
 
   test("duplicate handle throws with line number", () => {
@@ -944,7 +932,7 @@ bridge Query.greet {
 }`).instructions.find((inst) => inst.kind === "bridge") as Bridge;
     const wire = bridge.wires.find(
       (w) => "from" in w && !("value" in w),
-    ) as Wire;
+    ) as PullWire;
     assert.equal(wire.to.path.join("."), "name");
     assert.equal(wire.from.path.join("."), "username");
   });

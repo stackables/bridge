@@ -4,12 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import type {
-  Bridge,
-  BridgeDocument,
-  Instruction,
-  Wire,
-} from "../src/index.ts";
+import type { Bridge, BridgeDocument, Wire } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ function run(
   operation: string,
   input: Record<string, unknown>,
   tools: Record<string, any> = {},
-) {
+): Promise<{ data: any; traces: any[] }> {
   const raw = parseBridge(bridgeText);
   // document must survive serialisation
   const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
@@ -55,7 +55,7 @@ bridge Query.livingStandard {
 
   const tools: Record<string, any> = {
     "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
-    "companyX.getLivingStandard": async (p: any) => ({
+    "companyX.getLivingStandard": async (_p: any) => ({
       lifeExpectancy: "81.5",
     }),
     toInt: (p: { value: string }) => ({
@@ -114,7 +114,7 @@ bridge Query.getUser {
 
   test("root object wire returns entire tool output", async () => {
     const tools = {
-      userApi: async (p: any) => ({
+      userApi: async (_p: any) => ({
         user: { name: "Alice", age: 30, email: "alice@example.com" },
       }),
     };
@@ -931,14 +931,6 @@ bridge Query.test {
 });
 
 describe("versioned namespace keys: executeBridge integration", () => {
-  // Simulate a user-provided std from a different version
-  const fakeStdV1 = {
-    str: {
-      toUpperCase: (input: { in: string }) => input.in?.toUpperCase(),
-      toLowerCase: (input: { in: string }) => input.in?.toLowerCase(),
-    },
-  };
-
   test("versioned std namespace key resolves via handle version tag", async () => {
     // The handle uses @1.5, so the engine looks up "std.str.toUpperCase@1.5"
     // which finds "std@1.5" namespace key and traverses into it.
@@ -1483,14 +1475,14 @@ bridge Query.quote {
     const merged = mergeBridgeDocuments(docA, docB);
     assert.equal(merged.version, "1.5");
 
-    const { data: weatherData } = await executeBridge({
+    const { data: weatherData } = await executeBridge<any>({
       document: merged,
       operation: "Query.weather",
       input: { city: "Berlin" },
     });
     assert.equal(weatherData.city, "Berlin");
 
-    const { data: quoteData } = await executeBridge({
+    const { data: quoteData } = await executeBridge<any>({
       document: merged,
       operation: "Query.quote",
       input: { text: "hello" },
