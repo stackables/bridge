@@ -58,12 +58,10 @@ bridge Query.getWeather {
   with output as o
   with std.arr.first as geocodeFirstResult
   with std.str.toUpperCase as upper
-  with std.assert as assert
 
   # Geocode node gets its input from user input directly
   #    format is hardcoded constant
-  # TODO: Assert throw ... but does not prevent from geocode running
-  gecodeNode.q <- assert:i.cityName # Only used if lat/lon not provided
+  gecodeNode.q <- i.cityName || throw "cityName is required"
   gecodeNode.format = "json"
 
   # We need input as array to return the first element
