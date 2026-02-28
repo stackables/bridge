@@ -524,6 +524,86 @@ o.propertyComments <- pt.result
     assert.ok(output.includes("sg.content <- i.body"));
     assert.ok(output.includes("o.messageId <- sg.headers.x-message-id"));
   });
+
+  test("define block roundtrip", () => {
+    // Standalone define block (no bridge usage — bridge define handle
+    // serialization is tracked separately)
+    const input = `version 1.5
+define myTransform {
+  with input as i
+  with output as o
+
+  o.name <- i.rawName
+  o.count = 42
+
+}`;
+    const instructions = parseBridge(input);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("alias inside array mapping serializes correctly", () => {
+    // The alias-in-array serializer is idempotent (stable after first
+    // serialize/re-parse) even though iteration order may differ from input
+    const input = `version 1.5
+bridge Query.catalog {
+  with api as a
+  with output as o
+
+o.items <- a.data[] as item {
+  alias item.title as nm
+  .label <- nm
+  .price <- item.cost
+}
+
+}`;
+    const instructions = parseBridge(input);
+    const ser1 = serializeBridge(instructions);
+    // Validate the alias statement is present in serialized output
+    assert.ok(ser1.includes("alias item.title as nm"));
+    // Validate idempotency: re-serialize produces identical output
+    const ser2 = serializeBridge(parseBridge(ser1));
+    assert.equal(ser1, ser2);
+  });
+
+  test("top-level alias roundtrip", () => {
+    const input = `version 1.5
+bridge Query.test {
+  with myApi as api
+  with input as i
+  with output as o
+
+api.q <- i.search
+alias api.result.data as d
+
+o.name <- d.name
+o.email <- d.email
+
+}`;
+    const instructions = parseBridge(input);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("logic expression (and/or) roundtrip", () => {
+    const input = `version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+o.approved <- i.age > 18 and i.verified or i.admin
+
+}`;
+    const instructions = parseBridge(input);
+    assert.deepStrictEqual(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
 });
 
 // ── Tool blocks ─────────────────────────────────────────────────────────────
