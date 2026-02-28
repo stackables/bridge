@@ -1,5 +1,12 @@
 # @stackables/bridge-graphql
 
+## 1.0.1
+
+### Patch Changes
+
+- Updated dependencies [56d17e3]
+  - @stackables/bridge-core@1.0.1
+
 ## 1.0.0
 
 ### Major Changes
