@@ -6,3 +6,4 @@ dist
 .playwright-mcp
 .wrangler
 .DS_Store
+coverage

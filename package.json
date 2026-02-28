@@ -10,7 +10,8 @@
     "lint:eslint": "eslint .",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
-    "ci:publish": "pnpm publish -r"
+    "ci:publish": "pnpm publish -r",
+    "test:coverage": "pnpm -r test:coverage"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
