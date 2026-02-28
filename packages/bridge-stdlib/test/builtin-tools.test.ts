@@ -49,7 +49,81 @@ describe("lowerCase tool", () => {
   });
 });
 
+describe("trim tool", () => {
+  test("removes leading and trailing whitespace", () => {
+    assert.equal(std.str.trim({ in: "  hello  " }), "hello");
+  });
+
+  test("handles empty string", () => {
+    assert.equal(std.str.trim({ in: "" }), "");
+  });
+
+  test("handles string with no whitespace", () => {
+    assert.equal(std.str.trim({ in: "hello" }), "hello");
+  });
+
+  test("handles tabs and newlines", () => {
+    assert.equal(std.str.trim({ in: "\t hello\n " }), "hello");
+  });
+});
+
+describe("length tool", () => {
+  test("returns string length", () => {
+    assert.equal(std.str.length({ in: "hello" }), 5);
+  });
+
+  test("returns 0 for empty string", () => {
+    assert.equal(std.str.length({ in: "" }), 0);
+  });
+
+  test("counts spaces", () => {
+    assert.equal(std.str.length({ in: "a b c" }), 5);
+  });
+});
+
 // ── Array tools ─────────────────────────────────────────────────────────────
+
+describe("filter tool", () => {
+  const data = [
+    { id: 1, name: "Alice", role: "admin" },
+    { id: 2, name: "Bob", role: "user" },
+    { id: 3, name: "Charlie", role: "user" },
+  ];
+
+  test("filters by single criterion", () => {
+    const result = std.arr.filter({ in: data, role: "user" });
+    assert.deepEqual(result, [
+      { id: 2, name: "Bob", role: "user" },
+      { id: 3, name: "Charlie", role: "user" },
+    ]);
+  });
+
+  test("filters by multiple criteria", () => {
+    const result = std.arr.filter({ in: data, role: "user", name: "Charlie" });
+    assert.deepEqual(result, [
+      { id: 3, name: "Charlie", role: "user" },
+    ]);
+  });
+
+  test("returns empty array when no match", () => {
+    const result = std.arr.filter({ in: data, name: "Dave" });
+    assert.deepEqual(result, []);
+  });
+
+  test("returns all items when criteria match all", () => {
+    const allUsers = [
+      { id: 1, active: true },
+      { id: 2, active: true },
+    ];
+    const result = std.arr.filter({ in: allUsers, active: true });
+    assert.deepEqual(result, allUsers);
+  });
+
+  test("handles empty array", () => {
+    const result = std.arr.filter({ in: [], role: "admin" });
+    assert.deepEqual(result, []);
+  });
+});
 
 describe("findObject tool", () => {
   const data = [
@@ -145,13 +219,12 @@ describe("std bundle", () => {
   test("std namespace contains transform tools", () => {
     assert.ok(std.audit, "audit present");
     assert.ok(std.httpCall, "httpCall present");
-    assert.ok(std.assert, "assert present");
     assert.ok(std.str.toUpperCase, "upperCase present");
     assert.ok(std.str.toLowerCase, "lowerCase present");
     assert.ok(std.arr.find, "findObject present");
     assert.ok(std.arr.first, "pickFirst present");
     assert.ok(std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(std).length, 5);
+    assert.equal(Object.keys(std).length, 4);
   });
 
   test("httpCall is callable with std. prefix", () => {

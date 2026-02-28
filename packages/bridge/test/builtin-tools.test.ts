@@ -146,6 +146,60 @@ o.custom <- rev:i.text
   });
 });
 
+// ── End-to-end: filterArray through bridge ──────────────────────────────────
+
+describe("filterArray through bridge", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      admins: [User]
+    }
+    type User {
+      id: Int
+      name: String
+    }
+  `;
+
+  const bridgeText = `version 1.5
+bridge Query.admins {
+  with getUsers as db
+  with std.arr.filter as filter
+  with output as o
+
+filter.in <- db.users
+filter.role = "admin"
+o <- filter[] as u {
+  .id <- u.id
+  .name <- u.name
+}
+
+}`;
+
+  test("filters array by criteria through bridge", async () => {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: {
+        getUsers: async () => ({
+          users: [
+            { id: 1, name: "Alice", role: "admin" },
+            { id: 2, name: "Bob", role: "editor" },
+            { id: 3, name: "Charlie", role: "admin" },
+          ],
+        }),
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ admins { id name } }`),
+    });
+
+    assert.deepEqual(result.data.admins, [
+      { id: 1, name: "Alice" },
+      { id: 3, name: "Charlie" },
+    ]);
+  });
+});
+
 // ── End-to-end: findObject through bridge ───────────────────────────────────
 
 describe("findObject through bridge", () => {
@@ -234,6 +288,76 @@ o.value <- up:i.text
     });
 
     assert.equal(result.data.shout.value, "WHISPER");
+  });
+});
+
+// ── trim through bridge ─────────────────────────────────────────────────────
+
+describe("trim through bridge", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      clean(text: String!): Result
+    }
+    type Result {
+      value: String
+    }
+  `;
+
+  const bridgeText = `version 1.5
+bridge Query.clean {
+  with std.str.trim as trim
+  with input as i
+  with output as o
+
+o.value <- trim:i.text
+
+}`;
+
+  test("trims whitespace via pipe", async () => {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ clean(text: "  hello  ") { value } }`),
+    });
+
+    assert.equal(result.data.clean.value, "hello");
+  });
+});
+
+// ── length through bridge ───────────────────────────────────────────────────
+
+describe("length through bridge", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      measure(text: String!): Result
+    }
+    type Result {
+      value: Int
+    }
+  `;
+
+  const bridgeText = `version 1.5
+bridge Query.measure {
+  with std.str.length as len
+  with input as i
+  with output as o
+
+o.value <- len:i.text
+
+}`;
+
+  test("returns string length via pipe", async () => {
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ measure(text: "hello") { value } }`),
+    });
+
+    assert.equal(result.data.measure.value, 5);
   });
 });
 
