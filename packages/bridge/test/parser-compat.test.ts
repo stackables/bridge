@@ -537,4 +537,48 @@ bridge Query.test {
   o.email <- d.email
 }`,
   );
+
+  // ── Version tags (@version) ──────────────────────────────────────────
+
+  compat(
+    "bridge with versioned tool handle",
+    `version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`,
+  );
+
+  compat(
+    "bridge with versioned tool handle (no alias)",
+    `version 1.5
+bridge Query.test {
+  with myCorp.geocoder@1.0
+  with input as i
+  with output as o
+  o.val <- geocoder.result
+}`,
+  );
+
+  compat(
+    "bridge with versioned std tool",
+    `version 1.5
+bridge Query.test {
+  with std.str.upper@0.8 as oldUpper
+  with input as i
+  with output as o
+  o.val <- oldUpper.result
+}`,
+  );
+
+  compat(
+    "tool block with versioned dependency",
+    `version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`,
+  );
 });

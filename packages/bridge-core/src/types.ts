@@ -159,7 +159,7 @@ export type Bridge = {
  * Every wire reference in the bridge body must trace back to one of these.
  */
 export type HandleBinding =
-  | { handle: string; kind: "tool"; name: string }
+  | { handle: string; kind: "tool"; name: string; version?: string }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }
@@ -201,7 +201,7 @@ export type ToolDef = {
  */
 export type ToolDep =
   | { kind: "context"; handle: string }
-  | { kind: "tool"; handle: string; tool: string }
+  | { kind: "tool"; handle: string; tool: string; version?: string }
   | { kind: "const"; handle: string };
 
 /**

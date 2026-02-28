@@ -62,6 +62,7 @@ import {
   GreaterThan,
   LessThan,
   QuestionMark,
+  VersionTag,
   BridgeLexer,
 } from "./lexer.ts";
 
@@ -250,6 +251,9 @@ class BridgeParser extends CstParser {
         },
         ALT: () => {
           this.SUBRULE(this.dottedName, { LABEL: "toolName" });
+          this.OPTION3(() => {
+            this.CONSUME(VersionTag, { LABEL: "toolVersion" });
+          });
           this.CONSUME3(AsKw);
           this.SUBRULE3(this.nameToken, { LABEL: "toolAlias" });
         },
@@ -448,6 +452,9 @@ class BridgeParser extends CstParser {
         },
         ALT: () => {
           this.SUBRULE(this.dottedName, { LABEL: "refName" });
+          this.OPTION6(() => {
+            this.CONSUME(VersionTag, { LABEL: "refVersion" });
+          });
           this.OPTION5(() => {
             this.CONSUME5(AsKw);
             this.SUBRULE5(this.nameToken, { LABEL: "refAlias" });
@@ -2788,7 +2795,15 @@ function buildToolDef(
       } else if (wc.toolName) {
         const tName = extractDottedName((wc.toolName as CstNode[])[0]);
         const tAlias = extractNameToken((wc.toolAlias as CstNode[])[0]);
-        deps.push({ kind: "tool", handle: tAlias, tool: tName });
+        const tVersion = (
+          wc.toolVersion as IToken[] | undefined
+        )?.[0]?.image.slice(1);
+        deps.push({
+          kind: "tool",
+          handle: tAlias,
+          tool: tName,
+          ...(tVersion ? { version: tVersion } : {}),
+        });
       }
       continue;
     }
@@ -3050,6 +3065,9 @@ function buildBridgeBody(
       });
     } else if (wc.refName) {
       const name = extractDottedName((wc.refName as CstNode[])[0]);
+      const versionTag = (
+        wc.refVersion as IToken[] | undefined
+      )?.[0]?.image.slice(1);
       const lastDot = name.lastIndexOf(".");
       const defaultHandle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
       const handle = wc.refAlias
@@ -3077,7 +3095,12 @@ function buildBridgeBody(
         const key = `${modulePart}:${fieldPart}`;
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
-        handleBindings.push({ handle, kind: "tool", name });
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
         handleRes.set(handle, {
           module: modulePart,
           type: bridgeType,
@@ -3088,7 +3111,12 @@ function buildBridgeBody(
         const key = `Tools:${name}`;
         const instance = (instanceCounters.get(key) ?? 0) + 1;
         instanceCounters.set(key, instance);
-        handleBindings.push({ handle, kind: "tool", name });
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
         handleRes.set(handle, {
           module: SELF_MODULE,
           type: "Tools",

@@ -1005,3 +1005,114 @@ o.result <- api.value
     assert.equal(result.filter((i) => i.kind === "bridge").length, 1);
   });
 });
+
+// ── Version tags (@version) ─────────────────────────────────────────────────
+
+describe("version tags: parser produces version on HandleBinding", () => {
+  test("bridge handle with @version stores version string", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const toolHandle = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(toolHandle);
+    assert.equal(toolHandle.kind, "tool");
+    if (toolHandle.kind === "tool") {
+      assert.equal(toolHandle.name, "myCorp.utils");
+      assert.equal(toolHandle.version, "2.1");
+    }
+  });
+
+  test("bridge handle without @version has no version field", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with myCorp.utils as utils
+  with output as o
+  o.val <- utils.result
+}`);
+    const bridge = result.find((i): i is Bridge => i.kind === "bridge")!;
+    const toolHandle = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(toolHandle);
+    if (toolHandle.kind === "tool") {
+      assert.equal(toolHandle.version, undefined);
+    }
+  });
+
+  test("tool dep with @version stores version string", () => {
+    const result = parseBridge(`version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`);
+    const toolDef = result.find((i): i is ToolDef => i.kind === "tool")!;
+    const dep = toolDef.deps.find(
+      (d) => d.kind === "tool" && d.handle === "pay",
+    );
+    assert.ok(dep);
+    if (dep?.kind === "tool") {
+      assert.equal(dep.tool, "stripe");
+      assert.equal(dep.version, "2.0");
+    }
+  });
+});
+
+describe("version tags: round-trip serialization", () => {
+  test("bridge handle @version survives parse → serialize → parse", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.includes("myCorp.utils@2.1 as utils"),
+      `got: ${serialized}`,
+    );
+    // Re-parse and verify
+    const reparsed = parseBridge(serialized);
+    const bridge = reparsed.find((i): i is Bridge => i.kind === "bridge")!;
+    const h = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(h);
+    if (h?.kind === "tool") assert.equal(h.version, "2.1");
+  });
+
+  test("tool dep @version survives round-trip", () => {
+    const src = `version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("stripe@2.0 as pay"), `got: ${serialized}`);
+  });
+
+  test("unversioned handle stays unversioned in round-trip", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with myCorp.utils
+  with output as o
+  o.val <- utils.result
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("with myCorp.utils\n"), `got: ${serialized}`);
+    assert.ok(
+      !serialized.includes("@"),
+      `should have no @ sign: ${serialized}`,
+    );
+  });
+});

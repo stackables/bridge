@@ -116,7 +116,8 @@ function serializeToolBlock(tool: ToolDef): string {
         lines.push(`  with const as ${dep.handle}`);
       }
     } else {
-      lines.push(`  with ${dep.tool} as ${dep.handle}`);
+      const depVTag = dep.version ? `@${dep.version}` : "";
+      lines.push(`  with ${dep.tool}${depVTag} as ${dep.handle}`);
     }
   }
 
@@ -250,10 +251,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const lastDot = h.name.lastIndexOf(".");
         const defaultHandle =
           lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
-        if (h.handle === defaultHandle) {
+        const vTag = h.version ? `@${h.version}` : "";
+        if (h.handle === defaultHandle && !vTag) {
           lines.push(`  with ${h.name}`);
         } else {
-          lines.push(`  with ${h.name} as ${h.handle}`);
+          lines.push(`  with ${h.name}${vTag} as ${h.handle}`);
         }
         break;
       }
