@@ -77,11 +77,14 @@ The Bridge separates your mapping logic (`.bridge` files) from your execution en
      readFileSync("should_i_go_outside.bridge", "utf8"),
    );
 
-   const { data } = await executeBridge({
-     document,
-     operation: "Query.should_i_go_outside",
-     input: { cityName: "San Francisco" },
+   const { data, traces } = await executeBridge({
+    document,
+    operation: "Query.should_i_go_outside",
+    input: { cityName: "San Francisco" },
+    trace: true,
+    logger: console,
    });
+
 
    console.log(data);
    // { decision: true, why: { temperature: 28 } }

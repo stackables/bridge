@@ -197,6 +197,59 @@ bridge Query.geocode {
   });
 });
 
+// ── Nested object from scope blocks (o.field { .sub <- ... }) ───────────────
+
+describe("executeBridge: nested object via scope block", () => {
+  test("o.field { .sub <- ... } produces nested object", async () => {
+    const bridgeText = `version 1.5
+bridge Query.weather {
+  with weatherApi as w
+  with input as i
+  with output as o
+
+  w.city <- i.city
+
+  o.decision <- w.temperature > 20 || false catch false
+  o.why {
+    .temperature <- w.temperature ?? 0.0
+    .city <- i.city
+  }
+}`;
+    const { data } = await run(
+      bridgeText,
+      "Query.weather",
+      { city: "Berlin" },
+      { weatherApi: async () => ({ temperature: 25, feelsLike: 23 }) },
+    );
+    assert.deepEqual(data, {
+      decision: true,
+      why: { temperature: 25, city: "Berlin" },
+    });
+  });
+
+  test("nested scope block with ?? default fills null response", async () => {
+    const bridgeText = `version 1.5
+bridge Query.forecast {
+  with api as a
+  with output as o
+
+  o.summary {
+    .temp <- a.temp ?? 0
+    .wind <- a.wind ?? 0
+  }
+}`;
+    const { data } = await run(
+      bridgeText,
+      "Query.forecast",
+      {},
+      {
+        api: async () => ({ temp: null, wind: null }),
+      },
+    );
+    assert.deepEqual(data, { summary: { temp: 0, wind: 0 } });
+  });
+});
+
 // ── Nested arrays (o <- items[] as x { .sub <- x.things[] as y { ... } }) ──
 
 describe("executeBridge: nested arrays", () => {
