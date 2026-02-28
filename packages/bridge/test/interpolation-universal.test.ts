@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
 
 function run(
   bridgeText: string,
@@ -61,10 +61,7 @@ bridge Query.test {
         { id: "2", name: "Gadget", customLabel: "Custom" },
       ],
     });
-    assert.deepEqual(data, [
-      { label: "Widget (#1)" },
-      { label: "Custom" },
-    ]);
+    assert.deepEqual(data, [{ label: "Widget (#1)" }, { label: "Custom" }]);
   });
 });
 

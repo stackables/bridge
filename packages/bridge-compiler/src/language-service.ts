@@ -14,8 +14,12 @@
  */
 import { parseBridgeDiagnostics } from "./parser/index.ts";
 import type { BridgeDiagnostic } from "./parser/index.ts";
-import type { Instruction, HandleBinding, ToolDep } from "./types.ts";
-import { builtinToolNames, std } from "./tools/index.ts";
+import type {
+  Instruction,
+  HandleBinding,
+  ToolDep,
+} from "@stackables/bridge-core";
+import { std } from "@stackables/bridge-stdlib";
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -38,6 +42,10 @@ export type BridgeHover = {
 };
 
 // ── Internal lookup tables (built once at module load) ─────────────────────
+
+const builtinToolNames: readonly string[] = [
+  ...Object.keys(std).map((k) => `std.${k}`),
+];
 
 const builtinToolNameSet = new Set(builtinToolNames);
 

@@ -2,7 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightCatppuccin from "@catppuccin/starlight";
-import bridgeGrammar from "../bridge-syntax-highlight/syntaxes/bridge.tmLanguage.json" assert { type: "json" };
+import bridgeGrammar from "../bridge-syntax-highlight/syntaxes/bridge.tmLanguage.json" with { type: "json" };
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
@@ -20,6 +20,18 @@ export default defineConfig({
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("../playground/src", import.meta.url)),
+        "@stackables/bridge-core": fileURLToPath(
+          new URL("../bridge-core/src/index.ts", import.meta.url),
+        ),
+        "@stackables/bridge-stdlib": fileURLToPath(
+          new URL("../bridge-stdlib/src/index.ts", import.meta.url),
+        ),
+        "@stackables/bridge-compiler": fileURLToPath(
+          new URL("../bridge-compiler/src/index.ts", import.meta.url),
+        ),
+        "@stackables/bridge-graphql": fileURLToPath(
+          new URL("../bridge-graphql/src/index.ts", import.meta.url),
+        ),
         "@stackables/bridge": fileURLToPath(
           new URL("../bridge/src/index.ts", import.meta.url),
         ),

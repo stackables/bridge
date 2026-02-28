@@ -2,59 +2,11 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { multiply, divide, add, subtract, eq, neq, gt, gte, lt, lte } from "../src/tools/internal.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
-
-// ── Unit tests for math/comparison tools ────────────────────────────────────
-
-describe("math tools", () => {
-  test("multiply", () => {
-    assert.equal(multiply({ a: 3, b: 4 }), 12);
-    assert.equal(multiply({ a: 9.99, b: 100 }), 999);
-  });
-  test("divide", () => {
-    assert.equal(divide({ a: 10, b: 2 }), 5);
-    assert.equal(divide({ a: 100, b: 3 }), 100 / 3);
-  });
-  test("add", () => {
-    assert.equal(add({ a: 3, b: 4 }), 7);
-    assert.equal(add({ a: -1, b: 1 }), 0);
-  });
-  test("subtract", () => {
-    assert.equal(subtract({ a: 10, b: 3 }), 7);
-  });
-});
-
-describe("comparison tools return boolean", () => {
-  test("eq", () => {
-    assert.equal(eq({ a: 1, b: 1 }), true);
-    assert.equal(eq({ a: 1, b: 2 }), false);
-    assert.equal(eq({ a: "x", b: "x" }), true);
-    assert.equal(eq({ a: "x", b: "y" }), false);
-  });
-  test("neq", () => {
-    assert.equal(neq({ a: 1, b: 2 }), true);
-    assert.equal(neq({ a: 1, b: 1 }), false);
-  });
-  test("gt", () => {
-    assert.equal(gt({ a: 5, b: 3 }), true);
-    assert.equal(gt({ a: 3, b: 5 }), false);
-    assert.equal(gt({ a: 3, b: 3 }), false);
-  });
-  test("gte", () => {
-    assert.equal(gte({ a: 3, b: 3 }), true);
-    assert.equal(gte({ a: 2, b: 3 }), false);
-  });
-  test("lt", () => {
-    assert.equal(lt({ a: 2, b: 3 }), true);
-    assert.equal(lt({ a: 3, b: 2 }), false);
-  });
-  test("lte", () => {
-    assert.equal(lte({ a: 3, b: 3 }), true);
-    assert.equal(lte({ a: 4, b: 3 }), false);
-  });
-});
 
 // ── Parser desugaring tests ─────────────────────────────────────────────────
 
@@ -72,15 +24,25 @@ bridge Query.convert {
     assert.ok(!bridge.wires.some((w) => "expr" in w), "no ExprWire in output");
     // There should be pipe handles for the synthetic expression tool
     assert.ok(bridge.pipeHandles!.length > 0, "has pipe handles");
-    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandle, "has __expr_ pipe handle");
     assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
 
   test("all operators desugar to correct tool names", () => {
     const ops: Record<string, string> = {
-      "*": "multiply", "/": "divide", "+": "add", "-": "subtract",
-      "==": "eq", "!=": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+      "*": "multiply",
+      "/": "divide",
+      "+": "add",
+      "-": "subtract",
+      "==": "eq",
+      "!=": "neq",
+      ">": "gt",
+      ">=": "gte",
+      "<": "lt",
+      "<=": "lte",
     };
     for (const [op, fn] of Object.entries(ops)) {
       const instructions = parseBridge(`version 1.5
@@ -91,7 +53,9 @@ bridge Query.test {
   o.result <- i.value ${op} 1
 }`);
       const bridge = instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+      const exprHandle = bridge.pipeHandles!.find((ph) =>
+        ph.handle.startsWith("__expr_"),
+      );
       assert.ok(exprHandle, `${op} should create a pipe handle`);
       assert.equal(exprHandle.baseTrunk.field, fn, `${op} → ${fn}`);
     }
@@ -106,8 +70,14 @@ bridge Query.test {
   o.result <- i.times * 5 / 10
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
-    assert.equal(exprHandles.length, 2, "two synthetic tools for chained expression");
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
+    assert.equal(
+      exprHandles.length,
+      2,
+      "two synthetic tools for chained expression",
+    );
     assert.equal(exprHandles[0].baseTrunk.field, "multiply");
     assert.equal(exprHandles[1].baseTrunk.field, "divide");
   });
@@ -121,7 +91,9 @@ bridge Query.test {
   o.result <- i.times * 2 > 6
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.equal(exprHandles.length, 2);
     assert.equal(exprHandles[0].baseTrunk.field, "multiply");
     assert.equal(exprHandles[1].baseTrunk.field, "gt");
@@ -157,7 +129,9 @@ bridge Query.list {
   }
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandle, "should have expression pipe handle");
     assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
@@ -176,12 +150,17 @@ bridge Query.convert {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("i.dollars * 100"), `should contain expression: ${serialized}`);
+    assert.ok(
+      serialized.includes("i.dollars * 100"),
+      `should contain expression: ${serialized}`,
+    );
 
     // Re-parse the serialized output
     const reparsed = parseBridge(serialized);
     const bridge = reparsed.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandle = bridge.pipeHandles!.find((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandle, "re-parsed should contain synthetic tool");
     assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
@@ -222,7 +201,10 @@ bridge Query.calc {
 }`;
     const instructions = parseBridge(text);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("i.price * i.quantity"), `got: ${serialized}`);
+    assert.ok(
+      serialized.includes("i.price * i.quantity"),
+      `got: ${serialized}`,
+    );
   });
 });
 
@@ -453,7 +435,9 @@ bridge Query.calc {
   o.total <- i.base + i.tax * 2
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     // multiply should be emitted FIRST (higher precedence)
     assert.equal(exprHandles.length, 2, "two synthetic forks");
     assert.equal(exprHandles[0].baseTrunk.field, "multiply", "multiply first");
@@ -469,8 +453,12 @@ bridge Query.calc {
   o.total <- i.base + i.tax * 2
 }`);
     const precTypeDefs = /* GraphQL */ `
-      type Query { calc(base: Float!, tax: Float!): PrecResult }
-      type PrecResult { total: Float }
+      type Query {
+        calc(base: Float!, tax: Float!): PrecResult
+      }
+      type PrecResult {
+        total: Float
+      }
     `;
     const gateway = createGateway(precTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -490,8 +478,12 @@ bridge Query.calc {
   o.total <- i.price * i.quantity + i.base * 2
 }`);
     const precTypeDefs = /* GraphQL */ `
-      type Query { calc(price: Float!, quantity: Int!, base: Float!): PrecResult }
-      type PrecResult { total: Float }
+      type Query {
+        calc(price: Float!, quantity: Int!, base: Float!): PrecResult
+      }
+      type PrecResult {
+        total: Float
+      }
     `;
     const gateway = createGateway(precTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -511,8 +503,12 @@ bridge Query.check {
   o.eligible <- i.base + i.tax * 2 > 100
 }`);
     const precTypeDefs = /* GraphQL */ `
-      type Query { check(base: Float!, tax: Float!): CheckResult }
-      type CheckResult { eligible: Boolean }
+      type Query {
+        check(base: Float!, tax: Float!): CheckResult
+      }
+      type CheckResult {
+        eligible: Boolean
+      }
     `;
     const gateway = createGateway(precTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -542,7 +538,8 @@ bridge Query.calc {
     const serialized = serializeBridge(instructions);
     // Should round-trip the expression (order may vary due to precedence grouping)
     assert.ok(
-      serialized.includes("i.base + i.tax * 2") || serialized.includes("i.tax * 2"),
+      serialized.includes("i.base + i.tax * 2") ||
+        serialized.includes("i.tax * 2"),
       `got: ${serialized}`,
     );
   });
@@ -562,11 +559,17 @@ bridge Query.convert {
   o.cents <- api.price * 100 catch -1
 }`);
     const tools = {
-      "pricing.lookup": async () => { throw new Error("service unavailable"); },
+      "pricing.lookup": async () => {
+        throw new Error("service unavailable");
+      },
     };
     const precTypeDefs = /* GraphQL */ `
-      type Query { convert(dollars: Float!): ConvertResult }
-      type ConvertResult { cents: Float }
+      type Query {
+        convert(dollars: Float!): ConvertResult
+      }
+      type ConvertResult {
+        cents: Float
+      }
     `;
     const gateway = createGateway(precTypeDefs, instructions, { tools });
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -587,8 +590,12 @@ bridge Query.convert {
   o.cents <- i.dollars * 100
 }`);
     const precTypeDefs = /* GraphQL */ `
-      type Query { convert(dollars: Float!): ConvertResult }
-      type ConvertResult { cents: Float }
+      type Query {
+        convert(dollars: Float!): ConvertResult
+      }
+      type ConvertResult {
+        cents: Float
+      }
     `;
     const gateway = createGateway(precTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
@@ -599,72 +606,13 @@ bridge Query.convert {
   });
 });
 
-// ── Non-number handling tests ──────────────────────────────────────────────
-
-describe("expressions: non-number handling", () => {
-  test("undefined input coerces to NaN via Number()", () => {
-    // Number(undefined) = NaN, so undefined * 100 = NaN
-    assert.ok(Number.isNaN(multiply({ a: undefined as any, b: 100 })));
-    assert.ok(Number.isNaN(add({ a: undefined as any, b: 5 })));
-  });
-
-  test("null input coerces to 0 via Number()", () => {
-    // Number(null) = 0
-    assert.equal(multiply({ a: null as any, b: 100 }), 0);
-    assert.equal(add({ a: null as any, b: 5 }), 5);
-  });
-
-  test("string number coerces correctly", () => {
-    assert.equal(multiply({ a: "10" as any, b: "5" as any }), 50);
-    assert.equal(add({ a: "3" as any, b: "4" as any }), 7);
-  });
-
-  test("non-numeric string produces NaN", () => {
-    assert.ok(Number.isNaN(multiply({ a: "hello" as any, b: 100 })));
-  });
-
-  test("comparison with NaN returns false", () => {
-    assert.equal(gt({ a: NaN, b: 5 }), false);
-    assert.equal(eq({ a: NaN, b: NaN }), false);
-  });
-});
-
-// ── Boolean logic tools ─────────────────────────────────────────────────────
-
-import { and, or, not } from "../src/tools/internal.ts";
-
-describe("boolean logic tools", () => {
-  test("and", () => {
-    assert.equal(and({ a: true, b: true }), true);
-    assert.equal(and({ a: true, b: false }), false);
-    assert.equal(and({ a: false, b: true }), false);
-    assert.equal(and({ a: 1, b: "yes" }), true);
-    assert.equal(and({ a: 0, b: true }), false);
-  });
-  test("or", () => {
-    assert.equal(or({ a: true, b: false }), true);
-    assert.equal(or({ a: false, b: true }), true);
-    assert.equal(or({ a: false, b: false }), false);
-    assert.equal(or({ a: 0, b: "" }), false);
-    assert.equal(or({ a: 0, b: 1 }), true);
-  });
-  test("not", () => {
-    assert.equal(not({ a: true }), false);
-    assert.equal(not({ a: false }), true);
-    assert.equal(not({ a: 0 }), true);
-    assert.equal(not({ a: 1 }), false);
-    assert.equal(not({ a: "" }), true);
-    assert.equal(not({ a: null }), true);
-  });
-});
-
 // ── Boolean logic: parser desugaring ──────────────────────────────────────────
 
 describe("boolean logic: parser desugaring", () => {
   test("and / or desugar to condAnd/condOr wires", () => {
     const boolOps: Record<string, string> = {
-      "and": "__and",
-      "or": "__or",
+      and: "__and",
+      or: "__or",
     };
     for (const [op, fn] of Object.entries(boolOps)) {
       const instructions = parseBridge(`version 1.5
@@ -675,7 +623,9 @@ bridge Query.test {
   o.result <- i.a ${op} i.b
 }`);
       const bridge = instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = bridge.pipeHandles!.find((ph) => ph.handle.startsWith("__expr_"));
+      const exprHandle = bridge.pipeHandles!.find((ph) =>
+        ph.handle.startsWith("__expr_"),
+      );
       assert.ok(exprHandle, `${op}: has __expr_ pipe handle`);
       assert.equal(exprHandle.baseTrunk.field, fn, `${op}: maps to ${fn}`);
     }
@@ -690,13 +640,13 @@ bridge Query.test {
   o.result <- not i.trusted
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find((ph) =>
-      ph.baseTrunk.field === "not"
+    const exprHandle = bridge.pipeHandles!.find(
+      (ph) => ph.baseTrunk.field === "not",
     );
     assert.ok(exprHandle, "has not pipe handle");
   });
 
-  test("combined: (a > 18 and b) or c == \"ADMIN\"", () => {
+  test('combined: (a > 18 and b) or c == "ADMIN"', () => {
     const instructions = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
@@ -706,8 +656,13 @@ bridge Query.test {
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
     // Should have multiple expression forks: >, and, ==, or
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
-    assert.ok(exprHandles.length >= 4, `has >= 4 expr handles, got ${exprHandles.length}`);
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
+    assert.ok(
+      exprHandles.length >= 4,
+      `has >= 4 expr handles, got ${exprHandles.length}`,
+    );
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("gt"), "has gt");
     assert.ok(fields.includes("__and"), "has __and");
@@ -720,8 +675,13 @@ bridge Query.test {
 
 describe("boolean logic: end-to-end", () => {
   const boolTypeDefs = /* GraphQL */ `
-    type Query { check(age: Int!, verified: Boolean!, role: String!): CheckResult }
-    type CheckResult { approved: Boolean, requireMFA: Boolean }
+    type Query {
+      check(age: Int!, verified: Boolean!, role: String!): CheckResult
+    }
+    type CheckResult {
+      approved: Boolean
+      requireMFA: Boolean
+    }
   `;
 
   test("and expression: age > 18 and verified", async () => {
@@ -735,12 +695,16 @@ bridge Query.check {
     const gateway = createGateway(boolTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r1: any = await executor({
-      document: parse(`{ check(age: 25, verified: true, role: "USER") { approved } }`),
+      document: parse(
+        `{ check(age: 25, verified: true, role: "USER") { approved } }`,
+      ),
     });
     assert.equal(r1.data.check.approved, true);
 
     const r2: any = await executor({
-      document: parse(`{ check(age: 15, verified: true, role: "USER") { approved } }`),
+      document: parse(
+        `{ check(age: 15, verified: true, role: "USER") { approved } }`,
+      ),
     });
     assert.equal(r2.data.check.approved, false);
   });
@@ -757,7 +721,9 @@ bridge Query.check {
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     // age=15 verified=false role=ADMIN → false and false = false, role=="ADMIN" = true → true
     const r1: any = await executor({
-      document: parse(`{ check(age: 15, verified: false, role: "ADMIN") { approved } }`),
+      document: parse(
+        `{ check(age: 15, verified: false, role: "ADMIN") { approved } }`,
+      ),
     });
     assert.equal(r1.data.check.approved, true);
   });
@@ -773,12 +739,16 @@ bridge Query.check {
     const gateway = createGateway(boolTypeDefs, instructions);
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const r1: any = await executor({
-      document: parse(`{ check(age: 25, verified: true, role: "USER") { requireMFA } }`),
+      document: parse(
+        `{ check(age: 25, verified: true, role: "USER") { requireMFA } }`,
+      ),
     });
     assert.equal(r1.data.check.requireMFA, false);
 
     const r2: any = await executor({
-      document: parse(`{ check(age: 25, verified: false, role: "USER") { requireMFA } }`),
+      document: parse(
+        `{ check(age: 25, verified: false, role: "USER") { requireMFA } }`,
+      ),
     });
     assert.equal(r2.data.check.requireMFA, true);
   });
@@ -852,7 +822,9 @@ bridge Query.test {
   o.result <- (i.a and i.b) or i.c
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("__and"), "has __and");
@@ -868,7 +840,9 @@ bridge Query.test {
   o.result <- i.a or (i.b and i.c)
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("__and"), "has __and");
@@ -884,7 +858,9 @@ bridge Query.test {
   o.result <- not (i.a and i.b)
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("__and"), "has __and");
     assert.ok(fields.includes("not"), "has not");
@@ -899,7 +875,9 @@ bridge Query.test {
   o.result <- (i.price + i.discount) * i.qty
 }`);
     const bridge = instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) => ph.handle.startsWith("__expr_"));
+    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+      ph.handle.startsWith("__expr_"),
+    );
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
     assert.ok(fields.includes("add"), "has add (from parens)");
     assert.ok(fields.includes("multiply"), "has multiply");
@@ -908,8 +886,12 @@ bridge Query.test {
 
 describe("parenthesized expressions: end-to-end", () => {
   const boolTypeDefs = /* GraphQL */ `
-    type Query { check(a: Boolean!, b: Boolean!, c: Boolean!): CheckResult }
-    type CheckResult { result: Boolean }
+    type Query {
+      check(a: Boolean!, b: Boolean!, c: Boolean!): CheckResult
+    }
+    type CheckResult {
+      result: Boolean
+    }
   `;
 
   test("A or (B and C): true or (false and false) = true", async () => {
@@ -977,8 +959,12 @@ bridge Query.check {
   });
 
   const mathTypeDefs2 = /* GraphQL */ `
-    type Query { calc(price: Int!, discount: Int!, qty: Int!): CalcResult }
-    type CalcResult { total: Int }
+    type Query {
+      calc(price: Int!, discount: Int!, qty: Int!): CalcResult
+    }
+    type CalcResult {
+      total: Int
+    }
   `;
 
   test("(price + discount) * qty: (10 + 5) * 3 = 45", async () => {
@@ -1043,7 +1029,7 @@ bridge Query.test {
 
 // ── Short-circuit tests ───────────────────────────────────────────────────────
 
-import { executeBridge } from "../src/execute-bridge.ts";
+import { executeBridge } from "../src/index.ts";
 
 describe("and/or short-circuit behavior", () => {
   test("and short-circuits: right side not evaluated when left is false", async () => {
@@ -1069,7 +1055,11 @@ bridge Query.test {
       },
     });
     assert.equal(data.result, false);
-    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is false");
+    assert.equal(
+      rightEvaluated,
+      false,
+      "right side should NOT be evaluated when left is false",
+    );
   });
 
   test("and evaluates right side when left is true", async () => {
@@ -1095,7 +1085,11 @@ bridge Query.test {
       },
     });
     assert.equal(data.result, true);
-    assert.equal(rightEvaluated, true, "right side should be evaluated when left is true");
+    assert.equal(
+      rightEvaluated,
+      true,
+      "right side should be evaluated when left is true",
+    );
   });
 
   test("or short-circuits: right side not evaluated when left is true", async () => {
@@ -1121,7 +1115,11 @@ bridge Query.test {
       },
     });
     assert.equal(data.result, true);
-    assert.equal(rightEvaluated, false, "right side should NOT be evaluated when left is true");
+    assert.equal(
+      rightEvaluated,
+      false,
+      "right side should NOT be evaluated when left is true",
+    );
   });
 
   test("or evaluates right side when left is false", async () => {
@@ -1147,7 +1145,11 @@ bridge Query.test {
       },
     });
     assert.equal(data.result, false);
-    assert.equal(rightEvaluated, true, "right side should be evaluated when left is false");
+    assert.equal(
+      rightEvaluated,
+      true,
+      "right side should be evaluated when left is false",
+    );
   });
 });
 

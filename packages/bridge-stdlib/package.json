@@ -1,0 +1,40 @@
+{
+  "name": "@stackables/bridge-stdlib",
+  "version": "0.0.0",
+  "description": "Bridge standard library — httpCall, string, array, audit, and assert tools",
+  "main": "./build/index.js",
+  "type": "module",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "import": "./build/index.js",
+      "types": "./build/index.d.ts"
+    }
+  },
+  "files": [
+    "build",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stackables/bridge.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@stackables/bridge-types": "workspace:*",
+    "lru-cache": "^11.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.2",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -16,7 +16,7 @@ import type {
 } from "@stackables/bridge";
 import {
   bridgeTransform,
-  builtinTools,
+  std,
   getBridgeTraces,
   createHttpCall,
 } from "@stackables/bridge";
@@ -175,8 +175,7 @@ export async function runBridge(
   try {
     transformedSchema = bridgeTransform(schema, instructions, {
       tools: {
-        ...builtinTools,
-        std: { ...builtinTools.std, httpCall: playgroundHttpCall },
+        std: { ...std, httpCall: playgroundHttpCall },
       },
       trace: "full",
       logger: collectingLogger,

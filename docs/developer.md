@@ -344,4 +344,4 @@ Everything is ESM (`"type": "module"`). Import paths inside `src/` must use the 
 
 ## Release Process
 
-Releases use `semantic-release` with conventional commits. Merging to `main` with a `feat:` or `fix:` commit triggers an automated release via GitHub Actions. Breaking changes need a `BREAKING CHANGE:` footer in the commit message to bump the major version.
+See changesets

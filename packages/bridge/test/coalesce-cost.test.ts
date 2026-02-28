@@ -2,7 +2,7 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -450,8 +450,8 @@ o.score <- b.score
 
 // ── ?. Safe execution modifier ────────────────────────────────────────────
 
-import { executeBridge } from "../src/execute-bridge.ts";
-import { serializeBridge } from "../src/bridge-format.ts";
+import { executeBridge } from "../src/index.ts";
+import { serializeBridge } from "../src/index.ts";
 
 function run(
   bridgeText: string,

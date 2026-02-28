@@ -40,6 +40,7 @@ export type Wire =
       to: NodeRef;
       pipe?: true;
       safe?: true;
+      falsyFallbackRefs?: NodeRef[];
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
@@ -57,6 +58,7 @@ export type Wire =
       elseRef?: NodeRef;
       elseValue?: string;
       to: NodeRef;
+      falsyFallbackRefs?: NodeRef[];
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
@@ -68,8 +70,15 @@ export type Wire =
     }
   | {
       /** Short-circuit logical AND: evaluate left first, only evaluate right if left is truthy */
-      condAnd: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
+      condAnd: {
+        leftRef: NodeRef;
+        rightRef?: NodeRef;
+        rightValue?: string;
+        safe?: true;
+        rightSafe?: true;
+      };
       to: NodeRef;
+      falsyFallbackRefs?: NodeRef[];
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
@@ -81,8 +90,15 @@ export type Wire =
     }
   | {
       /** Short-circuit logical OR: evaluate left first, only evaluate right if left is falsy */
-      condOr: { leftRef: NodeRef; rightRef?: NodeRef; rightValue?: string; safe?: true; rightSafe?: true };
+      condOr: {
+        leftRef: NodeRef;
+        rightRef?: NodeRef;
+        rightValue?: string;
+        safe?: true;
+        rightSafe?: true;
+      };
       to: NodeRef;
+      falsyFallbackRefs?: NodeRef[];
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
@@ -212,20 +228,14 @@ export type ToolWire =
  * Provides access to engine services (logger, etc.) without polluting the
  * input object.  Tools that don't need it simply ignore the second arg.
  */
-export type ToolContext = {
-  /** Structured logger — same instance configured via `BridgeOptions.logger`.
-   *  Defaults to silent no-ops when no logger is configured. */
-  logger: {
-    debug?: (...args: any[]) => void;
-    info?: (...args: any[]) => void;
-    warn?: (...args: any[]) => void;
-    error?: (...args: any[]) => void;
-  };
-  /** External abort signal — allows the caller to cancel execution mid-flight.
-   *  When aborted, the engine short-circuits before starting new tool calls
-   *  and propagates the signal to tool implementations via this context field. */
-  signal?: AbortSignal;
-};
+// Re-exported from @stackables/bridge-types to break circular dependency
+// with bridge-stdlib while maintaining backward-compatible imports.
+export type {
+  ToolContext,
+  ToolCallFn,
+  ToolMap,
+  CacheStore,
+} from "@stackables/bridge-types";
 
 /**
  * Explicit control flow instruction — used on the right side of fallback
@@ -241,33 +251,6 @@ export type ControlFlowInstruction =
   | { kind: "panic"; message: string }
   | { kind: "continue" }
   | { kind: "break" };
-
-/**
- * Tool call function — the signature for registered tool functions.
- *
- * Receives a fully-built nested input object and an optional `ToolContext`
- * providing access to the engine's logger and other services.
- *
- * Example (httpCall):
- *   input = { baseUrl: "https://...", method: "GET", path: "/geocode",
- *             headers: { apiKey: "..." }, q: "Berlin" }
- */
-export type ToolCallFn = (
-  input: Record<string, any>,
-  context?: ToolContext,
-) => Promise<Record<string, any>>;
-
-/**
- * Recursive tool map — supports namespaced tools via nesting.
- *
- * Example:
- *   { std: { upperCase, lowerCase }, httpCall: createHttpCall(), myCompany: { myTool } }
- *
- * Lookup is dot-separated: "std.str.toUpperCase" → tools.std.str.toUpperCase
- */
-export type ToolMap = {
-  [key: string]: ToolCallFn | ((...args: any[]) => any) | ToolMap;
-};
 
 /**
  * Named constant definition — a reusable value defined in the bridge file.
@@ -319,19 +302,4 @@ export type DefineDef = {
   arrayIterators?: Record<string, string>;
   /** Pipe fork registry (same as Bridge) */
   pipeHandles?: Bridge["pipeHandles"];
-};
-
-/**
- * Pluggable cache store for httpCall.
- *
- * Default: in-memory Map with TTL eviction.
- * Override: pass any key-value store (Redis, Memcached, etc.) to `createHttpCall`.
- *
- * ```ts
- * const httpCall = createHttpCall(fetch, myRedisStore);
- * ```
- */
-export type CacheStore = {
-  get(key: string): Promise<any | undefined> | any | undefined;
-  set(key: string, value: any, ttlSeconds: number): Promise<void> | void;
 };

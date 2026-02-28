@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
-    parseBridge,
-    parsePath,
-    serializeBridge,
-} from "../src/bridge-format.ts";
-import type { Bridge, Instruction, ToolDef, Wire } from "../src/types.ts";
-import { SELF_MODULE } from "../src/types.ts";
+  parseBridgeFormat as parseBridge,
+  parsePath,
+  serializeBridge,
+} from "../src/index.ts";
+import type { Bridge, Instruction, ToolDef, Wire } from "../src/index.ts";
+import { SELF_MODULE } from "../src/index.ts";
 
 // ── parsePath ───────────────────────────────────────────────────────────────
 
@@ -737,7 +737,9 @@ gc.q <- i.search
     const output = serializeBridge(parseBridge(input));
     assert.ok(output.includes("tool hereapi from httpCall"));
     assert.ok(output.includes("tool hereapi.geocode from hereapi"));
-    assert.ok(output.includes("baseUrl = \"https://geocode.search.hereapi.com/v1\""));
+    assert.ok(
+      output.includes('baseUrl = "https://geocode.search.hereapi.com/v1"'),
+    );
     assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
   });
 });

@@ -1,0 +1,7 @@
+{
+  "ignores": [
+    "@tsconfig/node22",
+    "typescript",
+    "vscode"
+  ]
+}

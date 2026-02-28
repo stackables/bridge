@@ -2,15 +2,16 @@
   "name": "bridge-monorepo",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@10.30.2+sha512.36cdc707e7b7940a988c9c1ecf88d084f8514b5c3f085f53a2e244c2921d3b2545bc20dd4ebe1fc245feec463bb298aecea7a63ed1f7680b877dc6379d8d0cb4",
+  "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
   "scripts": {
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "e2e": "pnpm -r e2e",
-    "release": "pnpm -r --workspace-concurrency=1 --if-present run release"
+    "depcheck": "pnpm -r exec pnpm dlx depcheck",
+    "ci:publish": "pnpm publish -r"
   },
   "devDependencies": {
-    "semantic-release": "^25.0.3",
-    "semantic-release-monorepo": "^8.0.2"
+    "@changesets/cli": "^2.29.8",
+    "@tsconfig/node24": "^24.0.4"
   }
 }

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
-import type { Instruction } from "../src/types.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
+import type { Instruction } from "../src/index.ts";
 
 function run(
   bridgeText: string,

@@ -2,182 +2,9 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/bridge-format.ts";
-import { builtinTools } from "../src/tools/index.ts";
-import { audit } from "../src/tools/audit.ts";
-import { std } from "../src/tools/index.ts";
+import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { std } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
-
-// ── Unit tests for individual tools ─────────────────────────────────────────
-
-describe("upperCase tool", () => {
-  test("converts string to uppercase", () => {
-    assert.equal(std.str.toUpperCase({ in: "hello" }), "HELLO");
-  });
-
-  test("handles empty string", () => {
-    assert.equal(std.str.toUpperCase({ in: "" }), "");
-  });
-
-  test("handles already uppercase", () => {
-    assert.equal(std.str.toUpperCase({ in: "HELLO" }), "HELLO");
-  });
-
-  test("handles mixed case with numbers", () => {
-    assert.equal(std.str.toUpperCase({ in: "abc123def" }), "ABC123DEF");
-  });
-});
-
-describe("lowerCase tool", () => {
-  test("converts string to lowercase", () => {
-    assert.equal(std.str.toLowerCase({ in: "HELLO" }), "hello");
-  });
-
-  test("handles empty string", () => {
-    assert.equal(std.str.toLowerCase({ in: "" }), "");
-  });
-
-  test("handles already lowercase", () => {
-    assert.equal(std.str.toLowerCase({ in: "hello" }), "hello");
-  });
-
-  test("handles mixed case with symbols", () => {
-    assert.equal(
-      std.str.toLowerCase({ in: "Hello-World_123" }),
-      "hello-world_123",
-    );
-  });
-});
-
-describe("findObject tool", () => {
-  const data = [
-    { id: 1, name: "Alice", role: "admin" },
-    { id: 2, name: "Bob", role: "user" },
-    { id: 3, name: "Charlie", role: "user" },
-  ];
-
-  test("finds by single criterion", () => {
-    const result = std.arr.find({ in: data, name: "Bob" });
-    assert.deepEqual(result, { id: 2, name: "Bob", role: "user" });
-  });
-
-  test("finds by multiple criteria", () => {
-    const result = std.arr.find({ in: data, role: "user", name: "Charlie" });
-    assert.deepEqual(result, { id: 3, name: "Charlie", role: "user" });
-  });
-
-  test("returns undefined when no match", () => {
-    const result = std.arr.find({ in: data, name: "Dave" });
-    assert.equal(result, undefined);
-  });
-
-  test("returns first match when multiple match", () => {
-    const result = std.arr.find({ in: data, role: "user" });
-    assert.deepEqual(result, { id: 2, name: "Bob", role: "user" });
-  });
-
-  test("handles empty array", () => {
-    const result = std.arr.find({ in: [], name: "Alice" });
-    assert.equal(result, undefined);
-  });
-});
-
-describe("pickFirst tool", () => {
-  test("returns first element", () => {
-    assert.equal(std.arr.first({ in: [10, 20, 30] }), 10);
-  });
-
-  test("returns undefined for empty array", () => {
-    assert.equal(std.arr.first({ in: [] }), undefined);
-  });
-
-  test("returns single element", () => {
-    assert.deepEqual(std.arr.first({ in: [{ id: 1 }] }), { id: 1 });
-  });
-
-  test("strict mode: passes with exactly one element", () => {
-    assert.equal(std.arr.first({ in: [42], strict: true }), 42);
-  });
-
-  test("strict mode: throws on empty array", () => {
-    assert.throws(() => std.arr.first({ in: [], strict: true }), /non-empty/);
-  });
-
-  test("strict mode: throws on multiple elements", () => {
-    assert.throws(
-      () => std.arr.first({ in: [1, 2], strict: true }),
-      /exactly one/,
-    );
-  });
-
-  test("strict as string 'true' works", () => {
-    assert.equal(std.arr.first({ in: [7], strict: "true" }), 7);
-  });
-});
-
-describe("toArray tool", () => {
-  test("wraps single value in array", () => {
-    assert.deepEqual(std.arr.toArray({ in: 42 }), [42]);
-  });
-
-  test("wraps object in array", () => {
-    assert.deepEqual(std.arr.toArray({ in: { a: 1 } }), [{ a: 1 }]);
-  });
-
-  test("wraps string in array", () => {
-    assert.deepEqual(std.arr.toArray({ in: "hello" }), ["hello"]);
-  });
-
-  test("returns array as-is if already array", () => {
-    assert.deepEqual(std.arr.toArray({ in: [1, 2, 3] }), [1, 2, 3]);
-  });
-
-  test("wraps null in array", () => {
-    assert.deepEqual(std.arr.toArray({ in: null }), [null]);
-  });
-});
-
-// ── builtinTools bundle ─────────────────────────────────────────────────────
-
-describe("builtinTools bundle", () => {
-  test("has two top-level keys: std and internal", () => {
-    assert.deepEqual(Object.keys(builtinTools).sort(), ["internal", "std"]);
-  });
-
-  test("std namespace contains transform tools", () => {
-    assert.ok(builtinTools.std.audit, "audit present");
-    assert.ok(builtinTools.std.httpCall, "httpCall present");
-    assert.ok(builtinTools.std.assert, "assert present");
-    assert.ok(builtinTools.std.str.toUpperCase, "upperCase present");
-    assert.ok(builtinTools.std.str.toLowerCase, "lowerCase present");
-    assert.ok(builtinTools.std.arr.find, "findObject present");
-    assert.ok(builtinTools.std.arr.first, "pickFirst present");
-    assert.ok(builtinTools.std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(builtinTools.std).length, 5);
-  });
-
-  test("internal namespace contains math/comparison/logic tools", () => {
-    assert.ok(builtinTools.internal.multiply, "multiply present");
-    assert.ok(builtinTools.internal.divide, "divide present");
-    assert.ok(builtinTools.internal.add, "add present");
-    assert.ok(builtinTools.internal.subtract, "subtract present");
-    assert.ok(builtinTools.internal.eq, "eq present");
-    assert.ok(builtinTools.internal.neq, "neq present");
-    assert.ok(builtinTools.internal.gt, "gt present");
-    assert.ok(builtinTools.internal.gte, "gte present");
-    assert.ok(builtinTools.internal.lt, "lt present");
-    assert.ok(builtinTools.internal.lte, "lte present");
-    assert.ok(builtinTools.internal.not, "not present");
-    assert.ok(builtinTools.internal.and, "and present");
-    assert.ok(builtinTools.internal.or, "or present");
-    assert.ok(builtinTools.internal.concat, "concat present");
-    assert.equal(Object.keys(builtinTools.internal).length, 14);
-  });
-
-  test("httpCall is callable with and without std. prefix", () => {
-    assert.equal(typeof builtinTools.std.httpCall, "function");
-  });
-});
 
 // ── Default tools behaviour in bridgeTransform ──────────────────────────────
 
@@ -611,67 +438,6 @@ o.lower <- lo:i.text
   });
 });
 
-// ── audit tool ──────────────────────────────────────────────────────────────
-
-describe("audit tool", () => {
-  test("uses ToolContext logger when provided", () => {
-    const logged: any[] = [];
-    const logger = { info: (...args: any[]) => logged.push(args) };
-
-    const input = { action: "login", userId: "u42" };
-    const result = audit(input, { logger });
-
-    assert.deepEqual(
-      result,
-      input,
-      "returns input as-is (including level default)",
-    );
-    assert.equal(logged.length, 1, "logged exactly once");
-    // structured: data first, message last
-    assert.deepEqual(logged[0][0], { action: "login", userId: "u42" });
-    assert.equal(logged[0][1], "[bridge:audit]");
-  });
-
-  test("no-op when no ToolContext logger", () => {
-    assert.equal(typeof audit, "function");
-    // No logger → noop, should not throw
-    assert.deepEqual(audit({ x: 1 }), { x: 1 });
-  });
-
-  test("level input selects logger method", () => {
-    const warns: any[] = [];
-    const infos: any[] = [];
-    const logger = {
-      info: (...a: any[]) => infos.push(a),
-      warn: (...a: any[]) => warns.push(a),
-    };
-
-    audit({ action: "risky", level: "warn" }, { logger });
-
-    assert.equal(infos.length, 0, "info not called");
-    assert.equal(warns.length, 1, "warn called");
-    assert.deepEqual(warns[0][0], { action: "risky" });
-    assert.equal(warns[0][1], "[bridge:audit]");
-  });
-
-  test("ToolContext logger receives all wired inputs", () => {
-    const entries: any[] = [];
-    const logger = { info: (...a: any[]) => entries.push(a) };
-
-    audit(
-      { action: "order", userId: "u1", amount: 99.5, item: "widget" },
-      { logger },
-    );
-
-    assert.equal(entries.length, 1);
-    const payload = entries[0][0];
-    assert.equal(payload.action, "order");
-    assert.equal(payload.userId, "u1");
-    assert.equal(payload.amount, 99.5);
-    assert.equal(payload.item, "widget");
-  });
-});
-
 // ── audit + force e2e ───────────────────────────────────────────────────────
 
 describe("audit tool with force (e2e)", () => {
@@ -748,8 +514,7 @@ bridge Query.search {
 
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
-      std: { ...builtinTools.std, audit: failAudit },
-      internal: builtinTools.internal,
+      std: { ...std, audit: failAudit },
     };
 
     const instructions = parseBridge(bridgeText);
@@ -785,8 +550,7 @@ bridge Query.search {
 
     const tools: Record<string, any> = {
       searchApi: async (input: any) => ({ title: "OK" }),
-      std: { ...builtinTools.std, audit: failAudit },
-      internal: builtinTools.internal,
+      std: { ...std, audit: failAudit },
     };
 
     const instructions = parseBridge(bridgeText);

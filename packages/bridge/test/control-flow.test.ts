@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
-import { BridgeAbortError, BridgePanicError } from "../src/ExecutionTree.ts";
-import type { Bridge, Wire } from "../src/types.ts";
+import { parseBridgeFormat as parseBridge, serializeBridge } from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
+import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
+import type { Bridge, Wire } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,32 +1,45 @@
 name: Release
+
 on:
   push:
     branches:
       - main
 
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
 permissions:
-  contents: write # to be able to publish a GitHub release
-  issues: write # to be able to comment on released issues
-  pull-requests: write # to be able to comment on released pull requests
-  id-token: write # to enable use of OIDC for trusted publishing and npm provenance
+  id-token: write
+  contents: write
+
+env:
+  CI: true
 
 jobs:
-  release:
-    name: Release
+  version:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Setup Node.js
+      - name: Checkout code repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup node.js
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
-      - uses: pnpm/action-setup@v4
+          cache: "pnpm"
+
       - name: Install dependencies
         run: pnpm install
-      - name: Release
+
+      - name: Create and publish versions
+        uses: changesets/action@v1
+        with:
+          commit: "chore: update versions"
+          title: "chore: update versions"
+          publish: pnpm ci:publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm run release
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

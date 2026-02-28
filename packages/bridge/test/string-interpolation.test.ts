@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge, serializeBridge } from "../src/bridge-format.ts";
-import { executeBridge } from "../src/execute-bridge.ts";
-import { concat } from "../src/tools/internal.ts";
+import {
+  parseBridgeFormat as parseBridge,
+  serializeBridge,
+} from "../src/index.ts";
+import { executeBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -13,33 +15,11 @@ function run(
   tools: Record<string, any> = {},
 ) {
   const raw = parseBridge(bridgeText);
-  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<typeof parseBridge>;
+  const instructions = JSON.parse(JSON.stringify(raw)) as ReturnType<
+    typeof parseBridge
+  >;
   return executeBridge({ instructions, operation, input, tools });
 }
-
-// ── concat tool unit tests ──────────────────────────────────────────────────
-
-describe("internal.concat tool", () => {
-  test("joins string parts", () => {
-    assert.deepEqual(concat({ parts: ["Hello", ", ", "World!"] }), { value: "Hello, World!" });
-  });
-
-  test("coerces numbers to strings", () => {
-    assert.deepEqual(concat({ parts: ["Count: ", 42] }), { value: "Count: 42" });
-  });
-
-  test("coerces null and undefined to empty strings", () => {
-    assert.deepEqual(concat({ parts: ["a", null, "b", undefined, "c"] }), { value: "abc" });
-  });
-
-  test("coerces booleans", () => {
-    assert.deepEqual(concat({ parts: ["is: ", true] }), { value: "is: true" });
-  });
-
-  test("empty parts produces empty string", () => {
-    assert.deepEqual(concat({ parts: [] }), { value: "" });
-  });
-});
 
 // ── String interpolation execution tests ────────────────────────────────────
 
@@ -76,7 +56,10 @@ bridge Query.test {
 
   o.name <- "{i.first} {i.last}"
 }`;
-    const { data } = await run(bridge, "Query.test", { first: "John", last: "Doe" });
+    const { data } = await run(bridge, "Query.test", {
+      first: "John",
+      last: "Doe",
+    });
     assert.deepEqual(data, { name: "John Doe" });
   });
 
