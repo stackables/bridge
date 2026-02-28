@@ -37,6 +37,7 @@ export {
   TraceCollector,
   BridgeAbortError,
   BridgePanicError,
+  MAX_EXECUTION_DEPTH,
 } from "./ExecutionTree.ts";
 export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
 

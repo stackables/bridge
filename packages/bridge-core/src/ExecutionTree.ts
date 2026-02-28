@@ -35,6 +35,9 @@ const CONTINUE_SYM = Symbol.for("BRIDGE_CONTINUE");
 /** Sentinel for `break` — halt array iteration */
 const BREAK_SYM = Symbol.for("BRIDGE_BREAK");
 
+/** Maximum shadow-tree nesting depth before a BridgePanicError is thrown. */
+export const MAX_EXECUTION_DEPTH = 30;
+
 const otelTracer = trace.getTracer("@stackables/bridge");
 
 const otelMeter = metrics.getMeter("@stackables/bridge");
@@ -267,7 +270,7 @@ export class ExecutionTree {
     private parent?: ExecutionTree,
   ) {
     this.depth = parent ? parent.depth + 1 : 0;
-    if (this.depth > 30) {
+    if (this.depth > MAX_EXECUTION_DEPTH) {
       throw new BridgePanicError(
         `Maximum execution depth exceeded (${this.depth}) at ${trunkKey(trunk)}. Check for infinite recursion or circular array mappings.`,
       );

@@ -5,6 +5,7 @@ import {
   parseBridgeFormat as parseBridge,
   ExecutionTree,
   BridgePanicError,
+  MAX_EXECUTION_DEPTH,
 } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ bridge Query.items {
     assert.deepStrictEqual(result.data, [{ name: "a" }, { name: "b" }]);
   });
 
-  test("shadow() beyond depth 30 throws BridgePanicError", () => {
+  test("shadow() beyond MAX_EXECUTION_DEPTH throws BridgePanicError", () => {
     const doc = parseBridge(`version 1.5
 bridge Query.test {
   with input as i
@@ -55,12 +56,12 @@ bridge Query.test {
     const trunk = { module: "__self__", type: "Query", field: "test" };
     let tree = new ExecutionTree(trunk, document);
 
-    // Chain shadow trees to depth 30 — should succeed
-    for (let i = 0; i < 30; i++) {
+    // Chain shadow trees to MAX_EXECUTION_DEPTH — should succeed
+    for (let i = 0; i < MAX_EXECUTION_DEPTH; i++) {
       tree = tree.shadow();
     }
 
-    // The 31st shadow (depth 31) must throw
+    // One more shadow must throw
     assert.throws(
       () => tree.shadow(),
       (err: any) => {
