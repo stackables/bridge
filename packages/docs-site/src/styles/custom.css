@@ -1,0 +1,16 @@
+/* Widen the default content column (Starlight default: 45rem / 720px) */
+/* :root {
+  --sl-content-width: 55rem;
+} */
+
+/* Force all Markdown tables to span the full available width.
+   Starlight sets display:block on <table> for horizontal scroll;
+   we need thead/tbody to inherit the full width. */
+.sl-markdown-content table {
+  width: 100%;
+}
+.sl-markdown-content table thead,
+.sl-markdown-content table tbody {
+  display: table;
+  width: 100%;
+}

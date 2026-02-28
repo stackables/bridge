@@ -42,7 +42,7 @@ bridge Query.should_i_go_outside {
 
   # 2. Wire inputs to tools
   geo.city <- i.cityName
-  
+
   # 3. Chain tools together (Engine auto-resolves dependencies)
   weather.lat <- geo.lat
   weather.lon <- geo.lon
@@ -58,27 +58,24 @@ bridge Query.should_i_go_outside {
 
 ```
 
-
 ### Why a language instead of code?
 
-* **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
-* **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
-* **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
-* **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
-* **Portable Execution:** The engine is hyper-lightweight and framework-agnostic. Run it in a Node backend, an Edge Worker (Cloudflare/Vercel), or directly in the browser.
+- **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
+- **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
+- **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
+- **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
+- **Portable Execution:** The engine is hyper-lightweight and framework-agnostic. Run it in a Node backend, an Edge Worker (Cloudflare/Vercel), or directly in the browser.
 
 ### Primary Use Cases
 
 Because The Bridge strictly controls how data flows from inputs to tools to outputs, it is the perfect engine for architectures that require strict boundaries and clean mappings.
 
 1. **[The "No-Code" BFF (Backend-for-Frontend)](/guides/bff/)**
-Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
+   Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
 2. **[The Egress Gateway](/guides/egress/)**
-Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
+   Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
 3. **[The Rule Engine / Policy Evaluator](/guides/rule-engine/)**
-Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
-
-
+   Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
 
 ## Read Next
 
@@ -88,6 +85,10 @@ Encapsulate complex conditional business logic and data enrichment into a single
   </Card>
   <Card title="Playground" icon="rocket">
     Learn by example in our web based [interactive playground](/playground).
+  </Card>
+  <Card title="Standard Library" icon="list-format">
+    Browse all [built-in tools](/tools/versions/) — HTTP client, string & array
+    helpers, audit logging, and more.
   </Card>
   <Card title="2 Runtimes" icon="seti:graphql">
     You can run your `bridge` files

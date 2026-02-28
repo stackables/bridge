@@ -1,0 +1,66 @@
+---
+title: Version History
+description: All built-in tools available under the std namespace — at a glance.
+sidebar:
+  order: 1
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Bridge ships with a standard library of built-in tools under the `std` namespace. These are always available — no installation or registration required.
+
+## Language Version 1.5
+
+### HTTP
+
+| Tool           | Description                                                           |
+| -------------- | --------------------------------------------------------------------- |
+| `std.httpCall` | REST API client — builds and executes HTTP requests from wired fields |
+
+### Strings (`std.str`)
+
+All string tools accept a single `.in` parameter, making them ideal for [pipe chains](/reference/40-using-tools-pipes/).
+
+| Tool                  | Description                      |
+| --------------------- | -------------------------------- |
+| `std.str.toUpperCase` | Converts to UPPER CASE           |
+| `std.str.toLowerCase` | Converts to lower case           |
+| `std.str.trim`        | Strips whitespace from both ends |
+| `std.str.length`      | Character count                  |
+
+[Full reference & examples →](/tools/string-tools/)
+
+### Arrays (`std.arr`)
+
+| Tool              | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `std.arr.filter`  | Keep items matching all given key-value criteria        |
+| `std.arr.find`    | First item matching all given key-value criteria        |
+| `std.arr.first`   | First element (`arr[0]`), with optional strict mode     |
+| `std.arr.toArray` | Wraps a single value in an array (no-op if already one) |
+
+[Full reference & examples →](/tools/array-tools/)
+
+### Observability
+
+| Tool        | Description                                                                         |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `std.audit` | Structured logging — logs all wired fields via the engine logger. Use with `force`. |
+
+## Built-in Operators
+
+In addition to the `std` tools, the language has built-in operators that the engine handles natively — no tool import needed:
+
+| Syntax                                      | Description                                           |
+| ------------------------------------------- | ----------------------------------------------------- |
+| `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | Arithmetic                                            |
+| `a > b`, `a >= b`, `a < b`, `a <= b`        | Comparison                                            |
+| `a == b`, `a != b`                          | Equality                                              |
+| `a and b`, `a or b`, `not a`                | Boolean logic                                         |
+| `a \|\| b`                                  | Falsy fallback (use first truthy value)               |
+| `a ?? b`                                    | Nullish fallback (use first non-null/undefined value) |
+| `a catch b`                                 | Error fallback (use `b` if `a` throws)                |
+| `cond ? a : b`                              | Ternary                                               |
+| `"{a.name} lives in {a.city}"`              | String interpolation                                  |
+
+See the [Expressions & Formatting](/reference/60-expressions-formatting/) reference for details.

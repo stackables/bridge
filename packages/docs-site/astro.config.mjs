@@ -41,6 +41,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "The Bridge",
+      customCss: ["./src/styles/custom.css"],
       logo: {
         src: "./src/assets/logo.svg",
       },
