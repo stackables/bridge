@@ -726,6 +726,23 @@ bridge Query.foo {
       /No bridge definition found/,
     );
   });
+
+  test("bridge with no output wires throws descriptive error", async () => {
+    const bridgeText = `version 1.5
+bridge Query.ping {
+  with myTool as m
+  with input as i
+  with output as o
+
+m.q <- i.q
+
+}`;
+    await assert.rejects(
+      () =>
+        run(bridgeText, "Query.ping", { q: "x" }, { myTool: async () => ({}) }),
+      /no output wires/,
+    );
+  });
 });
 
 // ── Version compatibility ───────────────────────────────────────────────────

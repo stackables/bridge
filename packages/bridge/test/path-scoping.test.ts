@@ -722,3 +722,31 @@ bridge Query.test {
     ]);
   });
 });
+
+// ── Null intermediate path access ────────────────────────────────────────────
+
+describe("path traversal: null intermediate segment", () => {
+  test("throws TypeError when intermediate path segment is null", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with myTool as t
+  with output as o
+
+o.result <- t.user.profile.name
+
+}`;
+    const raw = parseBridge(bridgeText);
+    const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.test",
+          input: {},
+          tools: { myTool: async () => ({ user: { profile: null } }) },
+        }),
+      /Cannot read properties of null \(reading 'name'\)/,
+    );
+  });
+});

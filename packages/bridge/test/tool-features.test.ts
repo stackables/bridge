@@ -315,6 +315,68 @@ o.value <- m.payload
   });
 });
 
+// ── Tool-to-tool dependency: on error fallback ───────────────────────────────
+
+describe("tool-to-tool dependency: on error fallback", () => {
+  const typeDefs = /* GraphQL */ `
+    type Query {
+      fetch: FetchResult
+    }
+    type FetchResult {
+      status: String
+    }
+  `;
+
+  const bridgeText = `version 1.5
+tool flakyAuth from mockFn {
+  on error = {"token": "fallback-token"}
+}
+tool mainApi from mockFn {
+  with flakyAuth as auth
+  .authToken <- auth.token
+}
+
+bridge Query.fetch {
+  with mainApi as m
+  with output as o
+
+o.status <- m.result
+
+}`;
+
+  test("on error JSON value used when dep tool throws", async () => {
+    const calls: string[] = [];
+    const mockFn = async (input: Record<string, any>) => {
+      if (!input.authToken) {
+        calls.push("flakyAuth-throw");
+        throw new Error("Auth service unreachable");
+      }
+      calls.push(`mainApi:${input.authToken}`);
+      return { result: `token=${input.authToken}` };
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { mockFn },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ fetch { status } }`),
+    });
+
+    assert.ok(
+      calls.includes("flakyAuth-throw"),
+      "flakyAuth should have thrown",
+    );
+    assert.ok(
+      calls.some((c) => c.startsWith("mainApi:")),
+      "mainApi should have been called",
+    );
+    assert.equal(result.data.fetch.status, "token=fallback-token");
+  });
+});
+
 // ── Pipe operator (end-to-end) ───────────────────────────────────────────────
 //
 // `result <- toolName:source` is shorthand for:

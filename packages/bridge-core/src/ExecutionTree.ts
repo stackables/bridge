@@ -921,64 +921,6 @@ export class ExecutionTree {
     return result;
   }
 
-  async pull(refs: NodeRef[]): Promise<any> {
-    if (refs.length === 1) return this.pullSingle(refs[0]);
-
-    // Strict left-to-right sequential evaluation with short-circuit.
-    // We respect the exact fallback priority authored by the developer.
-    const errors: unknown[] = [];
-
-    for (const ref of refs) {
-      try {
-        const value = await this.pullSingle(ref);
-        if (value != null) return value; // Short-circuit: found data
-      } catch (err) {
-        errors.push(err);
-      }
-    }
-
-    // All resolved to null/undefined, or all threw
-    if (errors.length === refs.length) {
-      throw new AggregateError(errors, "All sources failed");
-    }
-    return undefined;
-  }
-
-  /**
-   * Safe execution pull: wraps individual safe-flagged pulls in try/catch.
-   * Wires with `safe: true` swallow errors and return undefined.
-   * Non-safe wires propagate errors normally.
-   */
-  async pullSafe(pulls: Extract<Wire, { from: NodeRef }>[]): Promise<any> {
-    if (pulls.length === 1) {
-      const w = pulls[0];
-      if (w.safe) {
-        try {
-          return await this.pullSingle(w.from);
-        } catch {
-          return undefined;
-        }
-      }
-      return this.pullSingle(w.from);
-    }
-
-    const errors: unknown[] = [];
-    for (const w of pulls) {
-      try {
-        const value = w.safe
-          ? await this.pullSingle(w.from).catch(() => undefined)
-          : await this.pullSingle(w.from);
-        if (value != null) return value;
-      } catch (err) {
-        errors.push(err);
-      }
-    }
-    if (errors.length === pulls.length) {
-      throw new AggregateError(errors, "All sources failed");
-    }
-    return undefined;
-  }
-
   push(args: Record<string, any>) {
     this.state[trunkKey(this.trunk)] = args;
   }

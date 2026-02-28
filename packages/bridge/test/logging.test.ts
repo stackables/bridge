@@ -35,7 +35,10 @@ o.label <- g.label
 
 }`;
 
-function createLogCapture(): Logger & { debugMessages: string[]; errorMessages: string[] } {
+function createLogCapture(): Logger & {
+  debugMessages: string[];
+  errorMessages: string[];
+} {
   const debugMessages: string[] = [];
   const errorMessages: string[] = [];
   return {
@@ -61,7 +64,9 @@ describe("logging: basics", () => {
     await executor({ document: parse(`{ lookup(q: "Berlin") { label } }`) });
 
     assert.ok(
-      logger.debugMessages.some((m) => m.includes("geocoder") && m.includes("completed")),
+      logger.debugMessages.some(
+        (m) => m.includes("geocoder") && m.includes("completed"),
+      ),
       `expected a debug message for geocoder completion, got: ${JSON.stringify(logger.debugMessages)}`,
     );
     assert.equal(logger.errorMessages.length, 0, "no errors on success");
@@ -83,7 +88,9 @@ describe("logging: basics", () => {
     await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
 
     assert.ok(
-      logger.errorMessages.some((m) => m.includes("geocoder") && m.includes("API down")),
+      logger.errorMessages.some(
+        (m) => m.includes("geocoder") && m.includes("API down"),
+      ),
       `expected an error message mentioning geocoder and "API down", got: ${JSON.stringify(logger.errorMessages)}`,
     );
   });
@@ -97,7 +104,46 @@ describe("logging: basics", () => {
     });
     const yoga = createYoga({ schema, graphqlEndpoint: "*" });
     const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
-    const result: any = await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
     assert.equal(result.data.lookup.label, "X");
+  });
+
+  test("logger.warn is called when accessing a named field on an array result", async () => {
+    // Bridge accesses .firstName on items[] (an array) without using array mapping.
+    // This should trigger the array-access warning path.
+    const arrayBridge = `version 1.5
+bridge Query.lookup {
+  with listTool as l
+  with input as i
+  with output as o
+
+l.q <- i.q
+o.label <- l.items.firstName
+
+}`;
+    const instructions = parseBridge(arrayBridge);
+    const warnMessages: string[] = [];
+    const logger = {
+      ...createLogCapture(),
+      warn: (...args: any[]) => warnMessages.push(args.join(" ")),
+    };
+    const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
+      tools: {
+        listTool: async () => ({
+          items: [{ firstName: "Alice" }, { firstName: "Bob" }],
+        }),
+      },
+      logger,
+    });
+    const yoga = createYoga({ schema, graphqlEndpoint: "*" });
+    const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
+    await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
+
+    assert.ok(
+      warnMessages.some((m) => m.includes("firstName") && m.includes("array")),
+      `expected a warn message about array field access, got: ${JSON.stringify(warnMessages)}`,
+    );
   });
 });

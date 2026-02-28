@@ -169,6 +169,8 @@ export type HandleBinding =
 /** Internal module identifier for the bridge's own trunk (input args + output fields) */
 export const SELF_MODULE = "_";
 
+/* c8 ignore start — pure TypeScript type declarations: no executable lines */
+
 /**
  * Tool definition — a declared tool with wires, dependencies, and optional inheritance.
  *
@@ -330,3 +332,4 @@ export type DefineDef = {
   /** Pipe fork registry (same as Bridge) */
   pipeHandles?: Bridge["pipeHandles"];
 };
+/* c8 ignore stop */
