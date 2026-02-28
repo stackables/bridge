@@ -8,7 +8,7 @@
     "build": "pnpm -r build",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
-    "release": "pnpm -r --workspace-concurrency=1 --if-present run release"
+    "ci:publish": "pnpm publish -r"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
