@@ -149,25 +149,32 @@ Exposed `toolFns`, `toolDefCache`, `toolDepCache`, `context`, `parent`,
 
 ---
 
-### Phase 4 — Extract materializer
+### Phase 4 — Extract materializer ✅
 
 Move shadow output assembly into `materializeShadows.ts`:
 
+- `MaterializerHost` interface (narrow view into bridge metadata)
+- `MaterializableShadow` interface (duck type for shadow trees)
 - `planShadowOutput()`
 - `materializeShadows()`
 
-**Status:** Not started
+`ExecutionTree` delegates via a single one-line wrapper.
+
+**Status:** Done
 
 ---
 
-### Phase 5 — Extract scheduler + callTool
+### Phase 5 — Extract scheduler
 
-Move scheduling and tool invocation into `scheduleTools.ts`:
+Move scheduling into `scheduleTools.ts`:
 
 - `schedule()`
 - `scheduleFinish()`
 - `scheduleToolDef()`
-- `callTool()`
+
+`callTool` stays in `ExecutionTree` — it's a standalone instrumentation
+wrapper already public for `ToolLookupContext`, and extracting it would
+create unnecessary indirection without narrowing the dependency surface.
 
 **Status:** Not started
 
@@ -180,3 +187,4 @@ Move scheduling and tool invocation into `scheduleTools.ts`:
 | 2026-03-01 | Phase 1 | Extracted tree-types.ts (101 L), tree-utils.ts (135 L), tracing.ts (130 L). ExecutionTree.ts 1997→1768 lines. 621 unit + all e2e pass.                                                 |
 | 2026-03-01 | Phase 2 | Added TreeContext interface to tree-types.ts. Extracted resolveWires.ts (206 L). ExecutionTree 1768→1599 lines. pullSingle now public (satisfies TreeContext). 621 unit + 35 e2e pass. |
 | 2026-03-01 | Phase 3 | Extracted toolLookup.ts (310 L) with ToolLookupContext interface. ExecutionTree 1599→1448 lines. callTool now public. 621 unit + 35 e2e pass.                                          |
+| 2026-03-01 | Phase 4 | Extracted materializeShadows.ts (247 L) with MaterializerHost/MaterializableShadow interfaces. ExecutionTree 1446→1265 lines. 621 unit + 35 e2e pass.                                  |
