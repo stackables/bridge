@@ -1,5 +1,60 @@
 # @stackables/bridge-core
 
+## 1.0.4
+
+### Patch Changes
+
+- ab248d7: Readability refactoring of the execution engine (no behaviour change):
+
+  - Switched engine-internal caches on `NodeRef` and the pull-wire variant of `Wire` to symbol-keyed storage (for example, `TRUNK_KEY_CACHE` and `SIMPLE_PULL_CACHE`), eliminating `(as any)` casts that previously looked like unsafe mutations of AST nodes
+  - Extracted `createShadowArray()` — removes 3 identical `BREAK_SYM`/`CONTINUE_SYM`/`shadow()` loops in `pullOutputField`, `response`, and the define-field path
+  - Extracted `planShadowOutput()` — separates the wire-classification (planner) phase of `materializeShadows` from the execution loop, so each method has a single clear responsibility
+  - Extracted `evaluateWireSource()` — moves the 80-line `cond`/`condAnd`/`condOr`/`from` dispatch block out of `resolveWiresAsync`; the main loop now reads as four sequential layers: evaluate → falsy gate → nullish gate → catch
+  - Extracted `pullSafe()` — de-duplicates the safe-navigation `.catch()` guard shared by `condAnd` and `condOr` evaluation
+
+- ab248d7: Refactor Phase 1: Extract utility helpers from ExecutionTree.ts into focused modules
+
+  - `tree-types.ts` — Error classes, sentinels, type aliases (`MaybePromise`, `Trunk`, `Logger`, `Path`), and lightweight helpers (`isPromise`, `isFatalError`, `applyControlFlow`)
+  - `tree-utils.ts` — Pure utility functions (`trunkKey`, `sameTrunk`, `pathEquals`, `coerceConstant`, `setNested`, `getSimplePullRef`, `roundMs`)
+  - `tracing.ts` — OpenTelemetry instrumentation (`TraceCollector`, `ToolTrace`, `TraceLevel`, `otelTracer`, metric counters/histograms)
+
+  ExecutionTree re-exports all symbols so the public API is unchanged.
+
+- ab248d7: Refactor Phase 2: Define TreeContext interface and extract wire resolution
+
+  - Added `TreeContext` interface to `tree-types.ts` — narrow contract for extracted modules
+  - Created `resolveWires.ts` — wire resolution logic (`resolveWires`, `resolveWiresAsync`, `evaluateWireSource`, `pullSafe`) as free functions taking `TreeContext`
+  - `ExecutionTree` now implements `TreeContext`; `pullSingle` is public to satisfy the interface
+
+  Zero behaviour change — all unit and e2e tests pass unchanged.
+
+- ab248d7: Refactor Phase 3: Extract tool lookup into `toolLookup.ts`
+
+  - Created `toolLookup.ts` (310 lines) with `ToolLookupContext` interface and free functions: `lookupToolFn`, `resolveToolDefByName`, `resolveToolWires`, `resolveToolSource`, `resolveToolDep`
+  - `ExecutionTree` delegates via one-line wrapper methods; `callTool` made public to satisfy the context interface
+  - Exposed `toolFns`, `toolDefCache`, `toolDepCache`, `context`, `parent`, and `instructions` getter for extracted modules
+  - ExecutionTree reduced from 1599 → 1448 lines
+
+  Zero behaviour change — all 621 unit tests and 35 e2e tests pass unchanged.
+
+- ab248d7: Refactor Phase 4: Extract materializer into `materializeShadows.ts`
+
+  - Created `materializeShadows.ts` (247 lines) with `MaterializerHost` and `MaterializableShadow` interfaces plus free functions: `planShadowOutput`, `materializeShadows`
+  - `ExecutionTree` delegates via a single one-line `materializeShadows` wrapper
+  - ExecutionTree reduced from 1446 → 1265 lines
+
+  Zero behaviour change — all 621 unit tests and 35 e2e tests pass unchanged.
+
+- ab248d7: Refactor Phase 5: Extract scheduler into `scheduleTools.ts`
+
+  - Created `scheduleTools.ts` (324 lines) with `SchedulerContext` interface plus free functions: `schedule`, `scheduleFinish`, `scheduleToolDef`
+  - `ExecutionTree` delegates via a single one-line `schedule` wrapper
+  - Removed 5 private delegation methods (`getToolName`, `lookupToolFn`, `resolveToolDefByName`, `resolveToolWires`, `resolveToolSource`) — scheduler calls `toolLookup.ts` functions directly
+  - Made `pipeHandleMap`, `handleVersionMap`, `resolveWires` public to satisfy `SchedulerContext`
+  - ExecutionTree reduced from 1265 → 1018 lines
+
+  Zero behaviour change — all 621 unit tests and 35 e2e tests pass unchanged.
+
 ## 1.0.3
 
 ### Patch Changes
