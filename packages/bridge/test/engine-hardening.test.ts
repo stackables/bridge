@@ -377,4 +377,35 @@ bridge Query.test {
     });
     assert.deepStrictEqual(data, { result: "ok" });
   });
+
+  test("low maxDepth causes BridgePanicError on deep nesting", async () => {
+    // Array mapping creates shadow trees via shadow(), incrementing depth.
+    // With maxDepth: 0, the shadow for the array element (depth 1) exceeds the limit.
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o <- i.items[] as el {
+    .val <- el.v
+  }
+}`;
+    const doc = parseBridge(bridgeText);
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document: doc,
+          operation: "Query.test",
+          input: { items: [{ v: 1 }] },
+          maxDepth: 0,
+        }),
+      (err: any) => {
+        assert.ok(
+          err.message.includes("Maximum execution depth exceeded"),
+          `Expected depth error, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
 });

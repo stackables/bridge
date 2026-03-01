@@ -61,14 +61,18 @@ function raceTimeout<T>(
   ms: number,
   toolName: string,
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
       () => reject(new BridgeTimeoutError(toolName, ms)),
       ms,
     );
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  });
 }
 
 export class ExecutionTree implements TreeContext {
