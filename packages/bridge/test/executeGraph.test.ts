@@ -174,3 +174,146 @@ bridge Query.geocode {
     });
   });
 });
+
+describe("executeGraph: scalar return types (JSONObject / JSON)", () => {
+  test("JSONObject field returns materialised object, not ExecutionTree", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSONObject
+      type Query {
+        greet(name: String!): JSONObject
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.greet {
+  with std.str.toUpperCase as uc
+  with std.str.toLowerCase as lc
+  with input as i
+  with output as o
+
+  o.message <- i.name
+  o.upper <- uc:i.name
+  o.lower <- lc:i.name
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ greet(name: "Hello Bridge") }`),
+    });
+
+    assert.deepStrictEqual(result.data.greet, {
+      message: "Hello Bridge",
+      upper: "HELLO BRIDGE",
+      lower: "hello bridge",
+    });
+  });
+
+  test("JSON scalar with passthrough root wire returns resolved value", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSON
+      type Query {
+        fetchData(id: String!): JSON
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.fetchData {
+  with myApi as api
+  with input as i
+  with output as o
+
+  api.id <- i.id
+  o <- api
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions, {
+      tools: {
+        myApi: async (params: { id: string }) => ({
+          id: params.id,
+          value: 42,
+        }),
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ fetchData(id: "abc") }`),
+    });
+
+    assert.deepStrictEqual(result.data.fetchData, {
+      id: "abc",
+      value: 42,
+    });
+  });
+
+  test("JSONObject! (non-null wrapped scalar) returns materialised object", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSONObject
+      type Query {
+        info(name: String!): JSONObject!
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.info {
+  with input as i
+  with output as o
+
+  o.greeting <- i.name
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions);
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ info(name: "World") }`),
+    });
+
+    assert.deepStrictEqual(result.data.info, {
+      greeting: "World",
+    });
+  });
+
+  test("[JSON!] array of scalars returns materialised objects", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSON
+      type Query {
+        items: [JSON!]!
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.items {
+  with myApi as api
+  with output as o
+
+  o <- api.results[] as item {
+    .name <- item.title
+    .score <- item.value
+  }
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions, {
+      tools: {
+        myApi: async () => ({
+          results: [
+            { title: "Alpha", value: 10 },
+            { title: "Beta", value: 20 },
+          ],
+        }),
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ items }`),
+    });
+
+    assert.deepStrictEqual(result.data.items, [
+      { name: "Alpha", score: 10 },
+      { name: "Beta", score: 20 },
+    ]);
+  });
+});
