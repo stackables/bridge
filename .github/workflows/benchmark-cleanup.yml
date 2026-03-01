@@ -1,0 +1,23 @@
+name: Benchmark Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  archive_pr_branch:
+    name: Archive closed PR branch with Bencher
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bencherdev/bencher@main
+      - name: Archive closed PR branch with Bencher
+        run: |
+          bencher archive \
+            --project the-bridge \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch "$GITHUB_HEAD_REF"
