@@ -644,7 +644,7 @@ export class ExecutionTree {
     return promise;
   }
 
-  schedule(target: Trunk, pullChain?: Set<string>): any {
+  schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any> {
     // Delegate to parent (shadow trees don't schedule directly) unless
     // the target fork has bridge wires sourced from element data,
     // or a __local binding whose source chain touches element data.
@@ -683,125 +683,188 @@ export class ExecutionTree {
       }
     }
 
-    return (async () => {
-      // If this target is a pipe fork, also apply bridge wires from its base
-      // handle (non-pipe wires, e.g. `c.currency <- i.currency`) as defaults
-      // before the fork-specific pipe wires.
-      const targetKey = trunkKey(target);
-      const pipeFork = this.pipeHandleMap?.get(targetKey);
-      const baseTrunk = pipeFork?.baseTrunk;
+    // ── Sync work: collect and group bridge wires ─────────────────
+    // If this target is a pipe fork, also apply bridge wires from its base
+    // handle (non-pipe wires, e.g. `c.currency <- i.currency`) as defaults
+    // before the fork-specific pipe wires.
+    const targetKey = trunkKey(target);
+    const pipeFork = this.pipeHandleMap?.get(targetKey);
+    const baseTrunk = pipeFork?.baseTrunk;
 
-      const baseWires = baseTrunk
-        ? (this.bridge?.wires.filter(
-            (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
-          ) ?? [])
-        : [];
-      // Fork-specific wires (pipe wires targeting the fork's own instance)
-      const forkWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-      // Merge: base provides defaults, fork overrides
-      const bridgeWires = [...baseWires, ...forkWires];
+    const baseWires = baseTrunk
+      ? (this.bridge?.wires.filter(
+          (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
+        ) ?? [])
+      : [];
+    // Fork-specific wires (pipe wires targeting the fork's own instance)
+    const forkWires =
+      this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+    // Merge: base provides defaults, fork overrides
+    const bridgeWires = [...baseWires, ...forkWires];
 
-      // Look up ToolDef for this target
-      const toolName = this.getToolName(target);
-      const toolDef = this.resolveToolDefByName(toolName);
+    // Look up ToolDef for this target
+    const toolName = this.getToolName(target);
+    const toolDef = this.resolveToolDefByName(toolName);
 
-      // Build input object: tool wires first (base), then bridge wires (override)
-      const input: Record<string, any> = {};
-
-      if (toolDef) {
-        await this.resolveToolWires(toolDef, input);
+    // Group wires by target path so that || (null-fallback) and ??
+    // (error-fallback) semantics are honoured via resolveWires().
+    const wireGroups = new Map<string, Wire[]>();
+    for (const w of bridgeWires) {
+      const key = w.to.path.join(".");
+      let group = wireGroups.get(key);
+      if (!group) {
+        group = [];
+        wireGroups.set(key, group);
       }
+      group.push(w);
+    }
 
-      // Resolve bridge wires and apply on top.
-      // Group wires by target path so that || (null-fallback) and ??
-      // (error-fallback) semantics are honoured via resolveWires().
-      const wireGroups = new Map<string, Wire[]>();
-      for (const w of bridgeWires) {
-        const key = w.to.path.join(".");
-        let group = wireGroups.get(key);
-        if (!group) {
-          group = [];
-          wireGroups.set(key, group);
-        }
-        group.push(w);
-      }
+    // ── Async path: tool definition requires resolveToolWires + callTool ──
+    if (toolDef) {
+      return this.scheduleToolDef(toolName, toolDef, wireGroups, pullChain);
+    }
 
-      const groupEntries = Array.from(wireGroups.entries());
-      const resolved = await Promise.all(
-        groupEntries.map(async ([, group]): Promise<[string[], any]> => {
-          const value = await this.resolveWires(group, pullChain);
-          return [group[0].to.path, value];
-        }),
+    // ── Sync-capable path: no tool definition ──
+    // For __local bindings, __define_ pass-throughs, pipe forks backed by
+    // sync tools, and logic nodes — resolve bridge wires and return
+    // synchronously when all sources are already in state.
+    // See docs/performance.md (#12).
+    const groupEntries = Array.from(wireGroups.entries());
+    const nGroups = groupEntries.length;
+    const values: MaybePromise<any>[] = new Array(nGroups);
+    let hasAsync = false;
+    for (let i = 0; i < nGroups; i++) {
+      const v = this.resolveWires(groupEntries[i]![1], pullChain);
+      values[i] = v;
+      if (!hasAsync && isPromise(v)) hasAsync = true;
+    }
+
+    if (!hasAsync) {
+      return this.scheduleFinish(
+        target,
+        toolName,
+        groupEntries,
+        values as any[],
+        baseTrunk,
       );
+    }
+    return Promise.all(values).then((resolved) =>
+      this.scheduleFinish(target, toolName, groupEntries, resolved, baseTrunk),
+    );
+  }
+
+  /**
+   * Assemble input from resolved wire values and either invoke a direct tool
+   * function or return the data for pass-through targets (local/define/logic).
+   * Returns synchronously when the tool function (if any) returns sync.
+   * See docs/performance.md (#12).
+   */
+  private scheduleFinish(
+    target: Trunk,
+    toolName: string,
+    groupEntries: [string, Wire[]][],
+    resolvedValues: any[],
+    baseTrunk: Trunk | undefined,
+  ): MaybePromise<any> {
+    const input: Record<string, any> = {};
+    const resolved: [string[], any][] = [];
+    for (let i = 0; i < groupEntries.length; i++) {
+      const path = groupEntries[i]![1][0]!.to.path;
+      const value = resolvedValues[i];
+      resolved.push([path, value]);
+      if (path.length === 0 && value != null && typeof value === "object") {
+        Object.assign(input, value);
+      } else {
+        setNested(input, path, value);
+      }
+    }
+
+    // Direct tool function lookup by name (simple or dotted).
+    // When the handle carries a @version tag, try the versioned key first
+    // (e.g. "std.str.toLowerCase@999.1") so user-injected overrides win.
+    // For pipe forks, fall back to the baseTrunk's version since forks
+    // use synthetic instance numbers (100000+).
+    const handleVersion =
+      this.handleVersionMap.get(trunkKey(target)) ??
+      (baseTrunk ? this.handleVersionMap.get(trunkKey(baseTrunk)) : undefined);
+    let directFn = handleVersion
+      ? this.lookupToolFn(`${toolName}@${handleVersion}`)
+      : undefined;
+    if (!directFn) {
+      directFn = this.lookupToolFn(toolName);
+    }
+    if (directFn) {
+      return this.callTool(toolName, toolName, directFn, input);
+    }
+
+    // Define pass-through: synthetic trunks created by define inlining
+    // act as data containers — bridge wires set their values, no tool needed.
+    if (target.module.startsWith("__define_")) {
+      return input;
+    }
+
+    // Local binding or logic node: the wire resolves the source and stores
+    // the result — no tool call needed.  For path=[] wires the resolved
+    // value may be a primitive (boolean from condAnd/condOr, string from
+    // a pipe tool like upperCase), so return the resolved value directly.
+    if (
+      target.module === "__local" ||
+      target.field === "__and" ||
+      target.field === "__or"
+    ) {
       for (const [path, value] of resolved) {
-        if (path.length === 0 && value != null && typeof value === "object") {
-          Object.assign(input, value);
-        } else {
-          setNested(input, path, value);
-        }
+        if (path.length === 0) return value;
       }
+      return input;
+    }
 
-      // Call ToolDef-backed tool function
-      if (toolDef) {
-        const fn = this.lookupToolFn(toolDef.fn!);
-        if (!fn)
-          throw new Error(`Tool function "${toolDef.fn}" not registered`);
+    throw new Error(`No tool found for "${toolName}"`);
+  }
 
-        // on error: wrap the tool call with fallback from onError wire
-        const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-        try {
-          return await this.callTool(toolName, toolDef.fn!, fn, input);
-        } catch (err) {
-          if (!onErrorWire) throw err;
-          if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-          return this.resolveToolSource(onErrorWire.source, toolDef);
-        }
+  /**
+   * Full async schedule path for targets backed by a ToolDef.
+   * Resolves tool wires, bridge wires, and invokes the tool function
+   * with error recovery support.
+   */
+  private async scheduleToolDef(
+    toolName: string,
+    toolDef: ToolDef,
+    wireGroups: Map<string, Wire[]>,
+    pullChain: Set<string> | undefined,
+  ): Promise<any> {
+    // Build input object: tool wires first (base), then bridge wires (override)
+    const input: Record<string, any> = {};
+    await this.resolveToolWires(toolDef, input);
+
+    // Resolve bridge wires and apply on top
+    const groupEntries = Array.from(wireGroups.entries());
+    const resolved = await Promise.all(
+      groupEntries.map(async ([, group]): Promise<[string[], any]> => {
+        const value = await this.resolveWires(group, pullChain);
+        return [group[0].to.path, value];
+      }),
+    );
+    for (const [path, value] of resolved) {
+      if (path.length === 0 && value != null && typeof value === "object") {
+        Object.assign(input, value);
+      } else {
+        setNested(input, path, value);
       }
+    }
 
-      // Direct tool function lookup by name (simple or dotted).
-      // When the handle carries a @version tag, try the versioned key first
-      // (e.g. "std.str.toLowerCase@999.1") so user-injected overrides win.
-      // For pipe forks, fall back to the baseTrunk's version since forks
-      // use synthetic instance numbers (100000+).
-      const handleVersion =
-        this.handleVersionMap.get(trunkKey(target)) ??
-        (baseTrunk
-          ? this.handleVersionMap.get(trunkKey(baseTrunk))
-          : undefined);
-      let directFn = handleVersion
-        ? this.lookupToolFn(`${toolName}@${handleVersion}`)
-        : undefined;
-      if (!directFn) {
-        directFn = this.lookupToolFn(toolName);
-      }
-      if (directFn) {
-        return this.callTool(toolName, toolName, directFn, input);
-      }
+    // Call ToolDef-backed tool function
+    const fn = this.lookupToolFn(toolDef.fn!);
+    if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
 
-      // Define pass-through: synthetic trunks created by define inlining
-      // act as data containers — bridge wires set their values, no tool needed.
-      if (target.module.startsWith("__define_")) {
-        return input;
-      }
-
-      // Local binding or logic node: the wire resolves the source and stores
-      // the result — no tool call needed.  For path=[] wires the resolved
-      // value may be a primitive (boolean from condAnd/condOr, string from
-      // a pipe tool like upperCase), so return the resolved value directly.
-      if (
-        target.module === "__local" ||
-        target.field === "__and" ||
-        target.field === "__or"
-      ) {
-        for (const [path, value] of resolved) {
-          if (path.length === 0) return value;
-        }
-        return input;
-      }
-
-      throw new Error(`No tool found for "${toolName}"`);
-    })();
+    // on error: wrap the tool call with fallback from onError wire
+    const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+    try {
+      return await this.callTool(toolName, toolDef.fn!, fn, input);
+    } catch (err) {
+      if (!onErrorWire) throw err;
+      if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
+      return this.resolveToolSource(onErrorWire.source, toolDef);
+    }
   }
 
   /**
@@ -809,12 +872,12 @@ export class ExecutionTree {
    * tracing is enabled) a ToolTrace entry.  All three tool-call sites in the
    * engine delegate here so instrumentation lives in exactly one place.
    */
-  private async callTool(
+  private callTool(
     toolName: string,
     fnName: string,
     fnImpl: (...args: any[]) => any,
     input: Record<string, any>,
-  ): Promise<any> {
+  ): MaybePromise<any> {
     // Short-circuit before starting if externally aborted
     if (this.signal?.aborted) {
       throw new BridgeAbortError();
@@ -1027,7 +1090,7 @@ export class ExecutionTree {
       }
 
       this.state[key] = this.schedule(ref, nextChain);
-      value = this.state[key]; // always a Promise (schedule is async)
+      value = this.state[key]; // sync value or Promise (see #12)
     }
 
     // Sync fast path: value is already resolved (not a pending Promise).
