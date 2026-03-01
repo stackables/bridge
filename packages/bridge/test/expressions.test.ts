@@ -1323,7 +1323,7 @@ bridge Query.test {
       operation: "Query.test",
       input: { x: 1 },
       tools: {
-        api: (p: any) => ({ score: 10, active: true }),
+        api: (_p: any) => ({ score: 10, active: true }),
       },
     });
     assert.equal(data.result, true);
@@ -1344,7 +1344,7 @@ bridge Query.test {
       operation: "Query.test",
       input: { x: 1 },
       tools: {
-        api: (p: any) => ({ score: 10, active: true }),
+        api: (_p: any) => ({ score: 10, active: true }),
       },
     });
     assert.equal(data.result, true);
@@ -1365,7 +1365,7 @@ bridge Query.test {
       operation: "Query.test",
       input: { x: 1 },
       tools: {
-        api: (p: any) => ({ score: 10, active: true }),
+        api: (_p: any) => ({ score: 10, active: true }),
       },
     });
     assert.equal(data.result, false);
