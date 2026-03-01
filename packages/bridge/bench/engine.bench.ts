@@ -183,8 +183,16 @@ ${outputs}
 // ── Bench setup ──────────────────────────────────────────────────────────────
 
 const bench = new Bench({
-  warmupIterations: 5,
-  time: 2000,
+  // 1. Warmup: Force V8 to compile the hottest paths into machine code
+  // before the actual measurement begins.
+  warmupTime: 1000,
+  warmupIterations: 10,
+
+  // 2. Duration: 3 seconds is the sweet spot.
+  // It provides enough samples (hundreds of thousands of ops) to smooth out
+  // random OS background tasks and average out Garbage Collection pauses,
+  // but it's short enough to prevent thermal throttling on your M4 Air.
+  time: 3000,
 });
 
 // --- Parsing ---
