@@ -35,6 +35,7 @@ import {
   pathEquals,
   UNSAFE_KEYS,
   roundMs,
+  TRUNK_KEY_CACHE,
 } from "./tree-utils.ts";
 
 import {
@@ -394,9 +395,11 @@ export class ExecutionTree implements TreeContext {
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
   ): MaybePromise<any> {
-    // Cache trunkKey on the NodeRef to avoid repeated string allocation
-    // for the same AST node.  See docs/performance.md (#11).
-    const key = (ref._key ??= trunkKey(ref));
+    // Cache trunkKey on the NodeRef via a Symbol key to avoid repeated
+    // string allocation.  Symbol keys don't affect V8 hidden classes,
+    // so this won't degrade parser allocation-site throughput.
+    // See docs/performance.md (#11).
+    const key: string = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
 
     // ── Cycle detection ─────────────────────────────────────────────
     if (pullChain.has(key)) {

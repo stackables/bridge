@@ -93,17 +93,35 @@ export function setNested(obj: any, path: string[], value: any): void {
   }
 }
 
+// ── Symbol-keyed engine caches ──────────────────────────────────────────────
+//
+// Cached values are stored on AST objects using Symbol keys instead of
+// string keys.  V8 stores Symbol-keyed properties in a separate backing
+// store that does not participate in the hidden-class (Shape) system.
+// This means the execution engine can safely cache computed values on
+// parser-produced objects without triggering shape transitions that would
+// degrade the parser's allocation-site throughput.
+// See docs/performance.md (#11).
+
+/** Symbol key for the cached `trunkKey()` result on NodeRef objects. */
+export const TRUNK_KEY_CACHE = Symbol.for("bridge.trunkKey");
+
+/** Symbol key for the cached simple-pull ref on Wire objects. */
+export const SIMPLE_PULL_CACHE = Symbol.for("bridge.simplePull");
+
 // ── Wire helpers ────────────────────────────────────────────────────────────
 
 /**
  * Returns the `from` NodeRef when a wire qualifies for the simple-pull fast
  * path (single `from` wire, no safe/falsy/nullish/catch modifiers).  Returns
- * `null` otherwise.  The result is cached on the wire object so subsequent
- * calls are a single property read.  See docs/performance.md (#11).
+ * `null` otherwise.  The result is cached on the wire via a Symbol key so
+ * subsequent calls are a single property read without affecting V8 shapes.
+ * See docs/performance.md (#11).
  */
 export function getSimplePullRef(w: Wire): NodeRef | null {
   if ("from" in w) {
-    if (w._simplePullRef !== undefined) return w._simplePullRef;
+    const cached = (w as any)[SIMPLE_PULL_CACHE];
+    if (cached !== undefined) return cached;
     const ref =
       !w.safe &&
       !w.falsyFallbackRefs?.length &&
@@ -117,7 +135,7 @@ export function getSimplePullRef(w: Wire): NodeRef | null {
       w.catchFallback == null
         ? w.from
         : null;
-    w._simplePullRef = ref;
+    (w as any)[SIMPLE_PULL_CACHE] = ref;
     return ref;
   }
   return null;
