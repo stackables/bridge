@@ -211,7 +211,7 @@ export type ToolDep =
  * or an error fallback.
  *
  * Examples:
- *   baseUrl = "https://api.sendgrid.com/v3"         → constant
+ *   baseUrl = "https://example.com/"         → constant
  *   method = POST                                     → constant (unquoted)
  *   headers.Authorization <- ctx.sendgrid.token      → pull from context
  *   headers.Authorization <- auth.access_token       → pull from tool dep
