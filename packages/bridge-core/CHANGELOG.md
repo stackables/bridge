@@ -1,5 +1,14 @@
 # @stackables/bridge-core
 
+## 1.0.3
+
+### Patch Changes
+
+- 8e4ce59: Unintended tsconfig change broke package exports.
+- Updated dependencies [8e4ce59]
+  - @stackables/bridge-stdlib@1.5.1
+  - @stackables/bridge-types@1.0.1
+
 ## 1.0.2
 
 ### Patch Changes

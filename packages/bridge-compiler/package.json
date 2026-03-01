@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-compiler",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Bridge DSL parser, serializer, and language service",
   "main": "./build/index.js",
   "type": "module",

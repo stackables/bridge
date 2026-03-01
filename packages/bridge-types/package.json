@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-types",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared type definitions for the Bridge ecosystem",
   "main": "./build/index.js",
   "type": "module",
