@@ -147,6 +147,33 @@ function isPromise(value: unknown): value is Promise<unknown> {
   return typeof (value as any)?.then === "function";
 }
 
+/**
+ * Returns the `from` NodeRef when a wire qualifies for the simple-pull fast
+ * path (single `from` wire, no safe/falsy/nullish/catch modifiers).  Returns
+ * `null` otherwise.  The result is cached on the wire object so subsequent
+ * calls are a single property read.  See docs/performance.md (#11).
+ */
+function getSimplePullRef(w: Wire): NodeRef | null {
+  let ref: NodeRef | null | undefined = (w as any).__simplePullRef;
+  if (ref !== undefined) return ref;
+  ref =
+    "from" in w &&
+    !w.safe &&
+    !w.falsyFallbackRefs?.length &&
+    w.falsyControl == null &&
+    w.falsyFallback == null &&
+    w.nullishControl == null &&
+    !w.nullishFallbackRef &&
+    w.nullishFallback == null &&
+    !w.catchControl &&
+    !w.catchFallbackRef &&
+    w.catchFallback == null
+      ? w.from
+      : null;
+  (w as any).__simplePullRef = ref;
+  return ref;
+}
+
 /** Execute a control flow instruction, returning a sentinel or throwing. */
 function applyControlFlow(ctrl: ControlFlowInstruction): symbol {
   if (ctrl.kind === "throw") throw new Error(ctrl.message);
@@ -258,6 +285,8 @@ function coerceConstant(raw: string): unknown {
   } catch {
     result = raw;
   }
+  // Hard cap to prevent unbounded growth over long-lived processes.
+  if (constantCache.size > 10_000) constantCache.clear();
   constantCache.set(raw, result);
   return result;
 }
@@ -958,7 +987,9 @@ export class ExecutionTree {
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
   ): MaybePromise<any> {
-    const key = trunkKey(ref);
+    // Cache trunkKey on the NodeRef to avoid repeated string allocation
+    // for the same AST node.  See docs/performance.md (#11).
+    const key = ((ref as any).__key ??= trunkKey(ref)) as string;
 
     // ── Cycle detection ─────────────────────────────────────────────
     if (pullChain.has(key)) {
@@ -1099,21 +1130,8 @@ export class ExecutionTree {
     if (wires.length === 1) {
       const w = wires[0]!;
       if ("value" in w) return coerceConstant(w.value);
-      if (
-        "from" in w &&
-        !w.safe &&
-        !w.falsyFallbackRefs?.length &&
-        w.falsyControl == null &&
-        w.falsyFallback == null &&
-        w.nullishControl == null &&
-        !w.nullishFallbackRef &&
-        w.nullishFallback == null &&
-        !w.catchControl &&
-        !w.catchFallbackRef &&
-        w.catchFallback == null
-      ) {
-        return this.pullSingle(w.from, pullChain);
-      }
+      const ref = getSimplePullRef(w);
+      if (ref) return this.pullSingle(ref, pullChain);
     }
     return this.resolveWiresAsync(wires, pullChain);
   }
@@ -1630,13 +1648,19 @@ export class ExecutionTree {
       const directFieldArray = [...directFields];
       const nFields = directFieldArray.length;
       const nItems = items.length;
+      // Pre-compute pathKeys and wire groups — only depend on j, not i.
+      // See docs/performance.md (#11).
+      const preGroups: Wire[][] = new Array(nFields);
+      for (let j = 0; j < nFields; j++) {
+        const pathKey = [...pathPrefix, directFieldArray[j]!].join("\0");
+        preGroups[j] = wireGroupsByPath.get(pathKey)!;
+      }
       const rawValues: MaybePromise<unknown>[] = new Array(nItems * nFields);
       let hasAsync = false;
       for (let i = 0; i < nItems; i++) {
         const shadow = items[i]!;
         for (let j = 0; j < nFields; j++) {
-          const pathKey = [...pathPrefix, directFieldArray[j]!].join("\0");
-          const v = shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!);
+          const v = shadow.resolvePreGrouped(preGroups[j]!);
           rawValues[i * nFields + j] = v;
           if (!hasAsync && isPromise(v)) hasAsync = true;
         }
