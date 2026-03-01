@@ -251,7 +251,6 @@ End-user documentation lives in `packages/docs-site/src/content/docs/`. Consult 
 | ------------------- | ---------------------------------------------------------------------- |
 | `docs/developer.md` | Architecture deep-dive: parser pipeline, execution engine, serializer  |
 | `docs/llm-notes.md` | Detailed internal notes: types, APIs, design decisions, test structure |
-| `docs/roadmap/*.md` | Future feature planning documents                                      |
 
 ---
 

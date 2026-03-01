@@ -40,6 +40,24 @@ export const MAX_EXECUTION_DEPTH = 30;
 
 const otelTracer = trace.getTracer("@stackables/bridge");
 
+/**
+ * Lazily detect whether the OpenTelemetry tracer is a real (recording)
+ * tracer or the default no-op.  Probed once on first tool call; result
+ * is cached for the lifetime of the process.
+ *
+ * If the SDK has not been registered by the time the first tool runs,
+ * all subsequent calls will skip OTel instrumentation.
+ */
+let _otelActive: boolean | undefined;
+function isOtelActive(): boolean {
+  if (_otelActive === undefined) {
+    const probe = otelTracer.startSpan("_bridge_probe_");
+    _otelActive = probe.isRecording();
+    probe.end();
+  }
+  return _otelActive;
+}
+
 const otelMeter = metrics.getMeter("@stackables/bridge");
 const toolCallCounter = otelMeter.createCounter("bridge.tool.calls", {
   description: "Total number of tool invocations",
@@ -97,9 +115,13 @@ function sameTrunk(a: Trunk, b: Trunk): boolean {
   );
 }
 
-/** Strict path equality */
+/** Strict path equality — manual loop avoids `.every()` closure allocation.  See docs/performance.md (#7). */
 function pathEquals(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 /** Check whether an error is a fatal halt (abort or panic) that must bypass all error boundaries. */
@@ -207,13 +229,24 @@ export class TraceCollector {
  *   "true" → true, "false" → false, "null" → null, "42" → 42
  * Plain strings that aren't valid JSON (like "hello", "/search") fall
  * through and are returned as-is.
+ *
+ * Results are cached in a module-level Map because the same constant
+ * strings appear repeatedly across shadow trees.  Only safe for
+ * immutable values (primitives); callers must not mutate the returned
+ * value.  See docs/performance.md (#6).
  */
+const constantCache = new Map<string, unknown>();
 function coerceConstant(raw: string): unknown {
+  const cached = constantCache.get(raw);
+  if (cached !== undefined) return cached;
+  let result: unknown;
   try {
-    return JSON.parse(raw);
+    result = JSON.parse(raw);
   } catch {
-    return raw;
+    result = raw;
   }
+  constantCache.set(raw, result);
+  return result;
 }
 
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -261,6 +294,8 @@ export class ExecutionTree {
   private toolFns?: ToolMap;
   /** Shadow-tree nesting depth (0 for root). */
   private depth: number;
+  /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
+  private elementTrunkKey: string;
 
   constructor(
     public trunk: Trunk,
@@ -275,6 +310,7 @@ export class ExecutionTree {
         `Maximum execution depth exceeded (${this.depth}) at ${trunkKey(trunk)}. Check for infinite recursion or circular array mappings.`,
       );
     }
+    this.elementTrunkKey = `${trunk.module}:${trunk.type}:${trunk.field}:*`;
     this.toolFns = { internal, ...(toolFns ?? {}) };
     const instructions = document.instructions;
     this.bridge = instructions.find(
@@ -747,6 +783,17 @@ export class ExecutionTree {
       logger: logger ?? {},
       signal: this.signal,
     };
+
+    // ── Fast path: no instrumentation configured ──────────────────
+    // When there is no internal tracer, no logger, and OpenTelemetry
+    // has its default no-op provider, skip all instrumentation to
+    // avoid closure allocation, template-string building, and no-op
+    // metric calls.  See docs/performance.md (#5).
+    if (!tracer && !logger && !isOtelActive()) {
+      return fnImpl(input, toolContext);
+    }
+
+    // ── Instrumented path ─────────────────────────────────────────
     const traceStart = tracer?.now();
     const metricAttrs = {
       "bridge.tool.name": toolName,
@@ -818,13 +865,28 @@ export class ExecutionTree {
   }
 
   shadow(): ExecutionTree {
-    const child = new ExecutionTree(
-      this.trunk,
-      this.document,
-      this.toolFns,
-      undefined,
-      this,
-    );
+    // Lightweight: bypass the constructor to avoid redundant work that
+    // re-derives data identical to the parent (bridge lookup, pipeHandleMap,
+    // handleVersionMap, constObj, toolFns spread).  See docs/performance.md (#2).
+    const child = Object.create(ExecutionTree.prototype) as ExecutionTree;
+    child.trunk = this.trunk;
+    child.document = this.document;
+    child.parent = this;
+    child.depth = this.depth + 1;
+    if (child.depth > MAX_EXECUTION_DEPTH) {
+      throw new BridgePanicError(
+        `Maximum execution depth exceeded (${child.depth}) at ${trunkKey(this.trunk)}. Check for infinite recursion or circular array mappings.`,
+      );
+    }
+    child.state = {};
+    child.toolDepCache = new Map();
+    child.toolDefCache = new Map();
+    // Share read-only pre-computed data from parent
+    child.bridge = this.bridge;
+    child.pipeHandleMap = this.pipeHandleMap;
+    child.handleVersionMap = this.handleVersionMap;
+    child.toolFns = this.toolFns;
+    child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
     child.logger = this.logger;
     child.signal = this.signal;
@@ -1176,7 +1238,7 @@ export class ExecutionTree {
       if (item === BREAK_SYM) break;
       if (item === CONTINUE_SYM) continue;
       const s = this.shadow();
-      s.state[trunkKey({ ...this.trunk, element: true })] = item;
+      s.state[this.elementTrunkKey] = item;
       finalShadowTrees.push(s);
     }
     return finalShadowTrees;
@@ -1221,8 +1283,7 @@ export class ExecutionTree {
         return result;
       }
       // Passthrough: return stored element data directly
-      const elementKey = trunkKey({ ...this.trunk, element: true });
-      return this.state[elementKey];
+      return this.state[this.elementTrunkKey];
     }
 
     // Root wire (`o <- src`) — whole-object passthrough
@@ -1615,7 +1676,7 @@ export class ExecutionTree {
         if (item === BREAK_SYM) break;
         if (item === CONTINUE_SYM) continue;
         const s = this.shadow();
-        s.state[trunkKey({ ...this.trunk, element: true })] = item;
+        s.state[this.elementTrunkKey] = item;
         shadowTrees.push(s);
       }
       return shadowTrees;
@@ -1638,7 +1699,7 @@ export class ExecutionTree {
           if (item === BREAK_SYM) break;
           if (item === CONTINUE_SYM) continue;
           const s = this.shadow();
-          s.state[trunkKey({ ...this.trunk, element: true })] = item;
+          s.state[this.elementTrunkKey] = item;
           shadowTrees.push(s);
         }
         return shadowTrees;
@@ -1650,8 +1711,7 @@ export class ExecutionTree {
     // where the bridge maps an inner array (e.g. `.stops <- j.stops`) but
     // doesn't explicitly wire each scalar field on the element type.
     if (this.parent) {
-      const elementKey = trunkKey({ ...this.trunk, element: true });
-      const elementData = this.state[elementKey];
+      const elementData = this.state[this.elementTrunkKey];
       if (
         elementData != null &&
         typeof elementData === "object" &&
@@ -1665,7 +1725,7 @@ export class ExecutionTree {
             // resolve their own fields via this same fallback path.
             return value.map((item: any) => {
               const s = this.shadow();
-              s.state[elementKey] = item;
+              s.state[this.elementTrunkKey] = item;
               return s;
             });
           }
