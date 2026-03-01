@@ -130,17 +130,22 @@ private resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any> 
 
 ---
 
-### Phase 3 — Extract tool lookup
+### Phase 3 — Extract tool lookup ✅
 
 Move tool resolution into `toolLookup.ts`:
 
+- `ToolLookupContext` interface (narrow contract for tool resolution)
 - `lookupToolFn()`
 - `resolveToolDefByName()` + cache
 - `resolveToolWires()`
 - `resolveToolSource()`
 - `resolveToolDep()`
 
-**Status:** Not started
+`ExecutionTree` implements `ToolLookupContext` alongside `TreeContext`.
+Exposed `toolFns`, `toolDefCache`, `toolDepCache`, `context`, `parent`,
+`instructions` getter, and `callTool` (public) to satisfy the interface.
+
+**Status:** Done
 
 ---
 
@@ -174,3 +179,4 @@ Move scheduling and tool invocation into `scheduleTools.ts`:
 | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-03-01 | Phase 1 | Extracted tree-types.ts (101 L), tree-utils.ts (135 L), tracing.ts (130 L). ExecutionTree.ts 1997→1768 lines. 621 unit + all e2e pass.                                                 |
 | 2026-03-01 | Phase 2 | Added TreeContext interface to tree-types.ts. Extracted resolveWires.ts (206 L). ExecutionTree 1768→1599 lines. pullSingle now public (satisfies TreeContext). 621 unit + 35 e2e pass. |
+| 2026-03-01 | Phase 3 | Extracted toolLookup.ts (310 L) with ToolLookupContext interface. ExecutionTree 1599→1448 lines. callTool now public. 621 unit + 35 e2e pass.                                          |

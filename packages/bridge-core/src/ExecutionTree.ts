@@ -1,8 +1,8 @@
-import { parsePath } from "./utils.ts";
 import { internal } from "./tools/index.ts";
 import type {
   Bridge,
   BridgeDocument,
+  Instruction,
   NodeRef,
   ToolCallFn,
   ToolContext,
@@ -77,7 +77,6 @@ import {
   trunkKey,
   sameTrunk,
   pathEquals,
-  coerceConstant,
   setNested,
   UNSAFE_KEYS,
   roundMs,
@@ -96,11 +95,27 @@ import type { ToolTrace } from "./tracing.ts";
 
 import { resolveWires as _resolveWires } from "./resolveWires.ts";
 
+import {
+  lookupToolFn as _lookupToolFn,
+  resolveToolDefByName as _resolveToolDefByName,
+  resolveToolWires as _resolveToolWires,
+  resolveToolSource as _resolveToolSource,
+} from "./toolLookup.ts";
+export type { ToolLookupContext } from "./toolLookup.ts";
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
-  private toolDepCache: Map<string, Promise<any>> = new Map();
-  private toolDefCache: Map<string, ToolDef | null> = new Map();
+  /**
+   * Cache for resolved tool dependency promises.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolDepCache: Map<string, Promise<any>> = new Map();
+  /**
+   * Cache for resolved ToolDef objects (null = not found).
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolDefCache: Map<string, ToolDef | null> = new Map();
   private pipeHandleMap:
     | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
     | undefined;
@@ -118,7 +133,11 @@ export class ExecutionTree implements TreeContext {
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
-  private toolFns?: ToolMap;
+  /**
+   * Registered tool function map.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolFns?: ToolMap;
   /** Shadow-tree nesting depth (0 for root). */
   private depth: number;
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
@@ -128,8 +147,16 @@ export class ExecutionTree implements TreeContext {
     public trunk: Trunk,
     private document: BridgeDocument,
     toolFns?: ToolMap,
-    private context?: Record<string, any>,
-    private parent?: ExecutionTree,
+    /**
+     * User-supplied context object.
+     * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+     */
+    public context?: Record<string, any>,
+    /**
+     * Parent tree (shadow-tree nesting).
+     * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+     */
+    public parent?: ExecutionTree,
   ) {
     this.depth = parent ? parent.depth + 1 : 0;
     if (this.depth > MAX_EXECUTION_DEPTH) {
@@ -195,238 +222,43 @@ export class ExecutionTree implements TreeContext {
     }
   }
 
+  /**
+   * Accessor for the document's instruction list.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  get instructions(): readonly Instruction[] {
+    return this.document.instructions;
+  }
+
   /** Derive tool name from a trunk */
   private getToolName(target: Trunk): string {
     if (target.module === SELF_MODULE) return target.field;
     return `${target.module}.${target.field}`;
   }
 
-  /** Deep-lookup a tool function by dotted name (e.g. "std.str.toUpperCase").
-   *  Falls back to a flat key lookup for backward compat (e.g. "hereapi.geocode" as literal key). */
+  /** Deep-lookup a tool function by dotted name — delegates to `toolLookup.ts`. */
   private lookupToolFn(
     name: string,
   ): ToolCallFn | ((...args: any[]) => any) | undefined {
-    if (name.includes(".")) {
-      // Try namespace traversal first
-      const parts = name.split(".");
-      let current: any = this.toolFns;
-      for (const part of parts) {
-        if (UNSAFE_KEYS.has(part)) return undefined;
-        if (current == null || typeof current !== "object") {
-          current = undefined;
-          break;
-        }
-        current = current[part];
-      }
-      if (typeof current === "function") return current;
-      // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
-      const flat = (this.toolFns as any)?.[name];
-      if (typeof flat === "function") return flat;
-
-      // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
-      // For "std.str.toLowerCase@999.1", check:
-      //   toolFns["std.str@999.1"]?.toLowerCase
-      //   toolFns["std@999.1"]?.str?.toLowerCase
-      const atIdx = name.lastIndexOf("@");
-      if (atIdx > 0) {
-        const baseName = name.substring(0, atIdx);
-        const version = name.substring(atIdx + 1);
-        const nameParts = baseName.split(".");
-        for (let i = nameParts.length - 1; i >= 1; i--) {
-          const nsKey = nameParts.slice(0, i).join(".") + "@" + version;
-          const remainder = nameParts.slice(i);
-          let ns: any = (this.toolFns as any)?.[nsKey];
-          if (ns != null && typeof ns === "object") {
-            for (const part of remainder) {
-              if (ns == null || typeof ns !== "object") {
-                ns = undefined;
-                break;
-              }
-              ns = ns[part];
-            }
-            if (typeof ns === "function") return ns;
-          }
-        }
-      }
-
-      return undefined;
-    }
-    // Try root level first
-    const fn = (this.toolFns as any)?.[name];
-    if (typeof fn === "function") return fn;
-    // Fall back to std namespace (builtins are callable without std. prefix)
-    const stdFn = (this.toolFns as any)?.std?.[name];
-    if (typeof stdFn === "function") return stdFn;
-    // Fall back to internal namespace (engine-internal tools: math ops, concat, etc.)
-    const internalFn = (this.toolFns as any)?.internal?.[name];
-    return typeof internalFn === "function" ? internalFn : undefined;
+    return _lookupToolFn(this, name);
   }
 
-  /** Resolve a ToolDef by name, merging the extends chain (cached) */
+  /** Resolve a ToolDef by name — delegates to `toolLookup.ts`. */
   private resolveToolDefByName(name: string): ToolDef | undefined {
-    if (this.toolDefCache.has(name))
-      return this.toolDefCache.get(name) ?? undefined;
-
-    const toolDefs = this.document.instructions.filter(
-      (i): i is ToolDef => i.kind === "tool",
-    );
-    const base = toolDefs.find((t) => t.name === name);
-    if (!base) {
-      this.toolDefCache.set(name, null);
-      return undefined;
-    }
-
-    // Build extends chain: root → ... → leaf
-    const chain: ToolDef[] = [base];
-    let current = base;
-    while (current.extends) {
-      const parent = toolDefs.find((t) => t.name === current.extends);
-      if (!parent)
-        throw new Error(
-          `Tool "${current.name}" extends unknown tool "${current.extends}"`,
-        );
-      chain.unshift(parent);
-      current = parent;
-    }
-
-    // Merge: root provides base, each child overrides
-    const merged: ToolDef = {
-      kind: "tool",
-      name,
-      fn: chain[0].fn, // fn from root ancestor
-      deps: [],
-      wires: [],
-    };
-
-    for (const def of chain) {
-      // Merge deps (dedupe by handle)
-      for (const dep of def.deps) {
-        if (!merged.deps.some((d) => d.handle === dep.handle)) {
-          merged.deps.push(dep);
-        }
-      }
-      // Merge wires (child overrides parent by target; onError replaces onError)
-      for (const wire of def.wires) {
-        if (wire.kind === "onError") {
-          const idx = merged.wires.findIndex((w) => w.kind === "onError");
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
-        } else {
-          const idx = merged.wires.findIndex(
-            (w) => "target" in w && w.target === wire.target,
-          );
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
-        }
-      }
-    }
-
-    this.toolDefCache.set(name, merged);
-    return merged;
+    return _resolveToolDefByName(this, name);
   }
 
-  /** Resolve a tool definition's wires into a nested input object */
-  private async resolveToolWires(
+  /** Resolve a tool definition's wires — delegates to `toolLookup.ts`. */
+  private resolveToolWires(
     toolDef: ToolDef,
     input: Record<string, any>,
   ): Promise<void> {
-    // Constants applied synchronously
-    for (const wire of toolDef.wires) {
-      if (wire.kind === "constant") {
-        setNested(input, parsePath(wire.target), coerceConstant(wire.value));
-      }
-    }
-
-    // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
-    const pullWires = toolDef.wires.filter((w) => w.kind === "pull");
-    if (pullWires.length > 0) {
-      const resolved = await Promise.all(
-        pullWires.map(async (wire) => ({
-          target: wire.target,
-          value: await this.resolveToolSource(wire.source, toolDef),
-        })),
-      );
-      for (const { target, value } of resolved) {
-        setNested(input, parsePath(target), value);
-      }
-    }
+    return _resolveToolWires(this, toolDef, input);
   }
 
-  /** Resolve a source reference from a tool wire against its dependencies */
-  private async resolveToolSource(
-    source: string,
-    toolDef: ToolDef,
-  ): Promise<any> {
-    const dotIdx = source.indexOf(".");
-    const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
-    const restPath =
-      dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
-
-    const dep = toolDef.deps.find((d) => d.handle === handle);
-    if (!dep)
-      throw new Error(`Unknown source "${handle}" in tool "${toolDef.name}"`);
-
-    let value: any;
-    if (dep.kind === "context") {
-      // Walk the full parent chain for context
-      let cursor: ExecutionTree | undefined = this;
-      while (cursor && value === undefined) {
-        value = cursor.context;
-        cursor = cursor.parent;
-      }
-    } else if (dep.kind === "const") {
-      // Walk the full parent chain for const state
-      const constKey = trunkKey({
-        module: SELF_MODULE,
-        type: "Const",
-        field: "const",
-      });
-      let cursor: ExecutionTree | undefined = this;
-      while (cursor && value === undefined) {
-        value = cursor.state[constKey];
-        cursor = cursor.parent;
-      }
-    } else if (dep.kind === "tool") {
-      value = await this.resolveToolDep(dep.tool);
-    }
-
-    for (const segment of restPath) {
-      value = value?.[segment];
-    }
-    return value;
-  }
-
-  /** Call a tool dependency (cached per request) */
-  private resolveToolDep(toolName: string): Promise<any> {
-    // Check parent first (shadow trees delegate)
-    if (this.parent) return this.parent.resolveToolDep(toolName);
-
-    if (this.toolDepCache.has(toolName))
-      return this.toolDepCache.get(toolName)!;
-
-    const promise = (async () => {
-      const toolDef = this.resolveToolDefByName(toolName);
-      if (!toolDef) throw new Error(`Tool dependency "${toolName}" not found`);
-
-      const input: Record<string, any> = {};
-      await this.resolveToolWires(toolDef, input);
-
-      const fn = this.lookupToolFn(toolDef.fn!);
-      if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
-
-      // on error: wrap the tool call with fallback from onError wire
-      const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-      try {
-        return await this.callTool(toolName, toolDef.fn!, fn, input);
-      } catch (err) {
-        if (!onErrorWire) throw err;
-        if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-        return this.resolveToolSource(onErrorWire.source, toolDef);
-      }
-    })();
-
-    this.toolDepCache.set(toolName, promise);
-    return promise;
+  /** Resolve a source reference from a tool wire — delegates to `toolLookup.ts`. */
+  private resolveToolSource(source: string, toolDef: ToolDef): Promise<any> {
+    return _resolveToolSource(this, source, toolDef);
   }
 
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any> {
@@ -654,10 +486,12 @@ export class ExecutionTree implements TreeContext {
 
   /**
    * Invoke a tool function, recording both an OpenTelemetry span and (when
-   * tracing is enabled) a ToolTrace entry.  All three tool-call sites in the
+   * tracing is enabled) a ToolTrace entry.  All tool-call sites in the
    * engine delegate here so instrumentation lives in exactly one place.
+   *
+   * Public to satisfy `ToolLookupContext` — called by `toolLookup.ts`.
    */
-  private callTool(
+  callTool(
     toolName: string,
     fnName: string,
     fnImpl: (...args: any[]) => any,
