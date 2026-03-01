@@ -6,7 +6,7 @@
  * See docs/execution-tree-refactor.md
  */
 
-import type { ControlFlowInstruction } from "./types.ts";
+import type { ControlFlowInstruction, NodeRef } from "./types.ts";
 
 // ── Error classes ───────────────────────────────────────────────────────────
 
@@ -75,6 +75,18 @@ export interface Path {
 }
 
 // ── Helper functions ────────────────────────────────────────────────────────
+
+/**
+ * Narrow interface that extracted modules use to call back into the
+ * execution tree.  Keeps extracted functions honest about their
+ * dependencies and makes mock-based unit testing straightforward.
+ *
+ * `ExecutionTree` implements this interface.
+ */
+export interface TreeContext {
+  /** Resolve a single NodeRef, returning sync when already in state. */
+  pullSingle(ref: NodeRef, pullChain?: Set<string>): MaybePromise<any>;
+}
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */
 export function isPromise(value: unknown): value is Promise<unknown> {

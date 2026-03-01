@@ -25,7 +25,13 @@ export {
   isFatalError,
   applyControlFlow,
 } from "./tree-types.ts";
-export type { Logger, MaybePromise, Trunk, Path } from "./tree-types.ts";
+export type {
+  Logger,
+  MaybePromise,
+  Trunk,
+  Path,
+  TreeContext,
+} from "./tree-types.ts";
 
 export {
   trunkKey,
@@ -58,10 +64,14 @@ import {
   CONTINUE_SYM,
   BREAK_SYM,
   isPromise,
-  isFatalError,
-  applyControlFlow,
 } from "./tree-types.ts";
-import type { MaybePromise, Trunk, Path, Logger } from "./tree-types.ts";
+import type {
+  MaybePromise,
+  Trunk,
+  Path,
+  Logger,
+  TreeContext,
+} from "./tree-types.ts";
 
 import {
   trunkKey,
@@ -70,7 +80,6 @@ import {
   coerceConstant,
   setNested,
   UNSAFE_KEYS,
-  getSimplePullRef,
   roundMs,
 } from "./tree-utils.ts";
 
@@ -85,7 +94,9 @@ import {
 } from "./tracing.ts";
 import type { ToolTrace } from "./tracing.ts";
 
-export class ExecutionTree {
+import { resolveWires as _resolveWires } from "./resolveWires.ts";
+
+export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
   private toolDepCache: Map<string, Promise<any>> = new Map();
@@ -835,8 +846,11 @@ export class ExecutionTree {
    * Pull a single value.  Returns synchronously when already in state;
    * returns a Promise only when the value is a pending tool call.
    * See docs/performance.md (#10).
+   *
+   * Public to satisfy `TreeContext` — extracted modules call this via
+   * the interface.
    */
-  private pullSingle(
+  pullSingle(
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
   ): MaybePromise<any> {
@@ -949,186 +963,15 @@ export class ExecutionTree {
   }
 
   /**
-   * Resolve a set of matched wires.
-   *
-   * Architecture: two distinct resolution axes —
-   *
-   *  **Falsy Gate** (`||`, within a wire): `falsyFallbackRefs` + `falsyFallback`
-   *    → truthy check — falsy values (0, "", false) trigger fallback chain.
-   *
-   *  **Overdefinition** (across wires): multiple wires target the same path
-   *    → nullish check — only null/undefined falls through to the next wire.
-   *
-   * Per-wire layers:
-   *   Layer 1  — Execution (pullSingle + safe modifier)
-   *   Layer 2a — Falsy Gate   (falsyFallbackRefs → falsyFallback / falsyControl)
-   *   Layer 2b — Nullish Gate  (nullishFallbackRef / nullishFallback / nullishControl)
-   *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
-   *
-   * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
-   * to return or continue to the next wire.
-   */
-  /**
-   * Resolve wires, returning synchronously when the hot path allows it.
-   *
-   * Fast path: single `from` wire with no fallback/catch modifiers, which is
-   * the common case for element field wires like `.id <- it.id`.  Delegates to
-   * `resolveWiresAsync` for anything more complex.
-   * See docs/performance.md (#10).
+   * Resolve a set of matched wires — delegates to the extracted
+   * `resolveWires` module.  See `resolveWires.ts` for the full
+   * architecture comment (modifier layers, overdefinition, etc.).
    */
   private resolveWires(
     wires: Wire[],
     pullChain?: Set<string>,
   ): MaybePromise<any> {
-    if (wires.length === 1) {
-      const w = wires[0]!;
-      if ("value" in w) return coerceConstant(w.value);
-      const ref = getSimplePullRef(w);
-      if (ref) return this.pullSingle(ref, pullChain);
-    }
-    return this.resolveWiresAsync(wires, pullChain);
-  }
-
-  /**
-   * Pull a ref with optional safe-navigation: catches non-fatal errors and
-   * returns `undefined` instead.  Shared by condAnd / condOr evaluation.
-   */
-  private pullSafe(
-    ref: NodeRef,
-    safe: boolean | undefined,
-    pullChain?: Set<string>,
-  ): Promise<any> {
-    if (safe) {
-      return Promise.resolve(this.pullSingle(ref, pullChain)).catch(
-        (e: any) => {
-          if (isFatalError(e)) throw e;
-          return undefined;
-        },
-      );
-    }
-    return Promise.resolve(this.pullSingle(ref, pullChain));
-  }
-
-  /**
-   * Evaluate the primary value of a wire (Layer 1) — the `from`, `cond`,
-   * `condAnd`, or `condOr` portion, before any fallback gates are applied.
-   *
-   * Returns the raw resolved value (or `undefined` if the wire variant is
-   * unrecognised).  Extracted from `resolveWiresAsync` so that the main
-   * loop only has to concern itself with the modifier layers.
-   */
-  private async evaluateWireSource(
-    w: Wire,
-    pullChain?: Set<string>,
-  ): Promise<any> {
-    if ("cond" in w) {
-      const condValue = await this.pullSingle(w.cond, pullChain);
-      if (condValue) {
-        if (w.thenRef !== undefined)
-          return this.pullSingle(w.thenRef, pullChain);
-        if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
-      } else {
-        if (w.elseRef !== undefined)
-          return this.pullSingle(w.elseRef, pullChain);
-        if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
-      }
-      return undefined;
-    }
-
-    if ("condAnd" in w) {
-      const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
-      const leftVal = await this.pullSafe(leftRef, safe, pullChain);
-      if (!leftVal) return false;
-      if (rightRef !== undefined)
-        return Boolean(await this.pullSafe(rightRef, rightSafe, pullChain));
-      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-      return Boolean(leftVal);
-    }
-
-    if ("condOr" in w) {
-      const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
-      const leftVal = await this.pullSafe(leftRef, safe, pullChain);
-      if (leftVal) return true;
-      if (rightRef !== undefined)
-        return Boolean(await this.pullSafe(rightRef, rightSafe, pullChain));
-      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-      return Boolean(leftVal);
-    }
-
-    if ("from" in w) {
-      if (w.safe) {
-        try {
-          return await this.pullSingle(w.from, pullChain);
-        } catch (err: any) {
-          if (isFatalError(err)) throw err;
-          return undefined;
-        }
-      }
-      return this.pullSingle(w.from, pullChain);
-    }
-
-    return undefined;
-  }
-
-  private async resolveWiresAsync(
-    wires: Wire[],
-    pullChain?: Set<string>,
-  ): Promise<any> {
-    let lastError: any;
-
-    for (const w of wires) {
-      // Constant wire — always wins, no modifiers
-      if ("value" in w) return coerceConstant(w.value);
-
-      try {
-        // --- Layer 1: Execution ---
-        let resolvedValue = await this.evaluateWireSource(w, pullChain);
-
-        // --- Layer 2a: Falsy Gate (||) ---
-        if (!resolvedValue && w.falsyFallbackRefs?.length) {
-          for (const ref of w.falsyFallbackRefs) {
-            resolvedValue = await this.pullSingle(ref, pullChain);
-            if (resolvedValue) break;
-          }
-        }
-
-        if (!resolvedValue) {
-          if (w.falsyControl) {
-            resolvedValue = applyControlFlow(w.falsyControl);
-          } else if (w.falsyFallback != null) {
-            resolvedValue = coerceConstant(w.falsyFallback);
-          }
-        }
-
-        // --- Layer 2b: Nullish Gate (??) ---
-        if (resolvedValue == null) {
-          if (w.nullishControl) {
-            resolvedValue = applyControlFlow(w.nullishControl);
-          } else if (w.nullishFallbackRef) {
-            resolvedValue = await this.pullSingle(
-              w.nullishFallbackRef,
-              pullChain,
-            );
-          } else if (w.nullishFallback != null) {
-            resolvedValue = coerceConstant(w.nullishFallback);
-          }
-        }
-
-        // --- Overdefinition Boundary ---
-        if (resolvedValue != null) return resolvedValue;
-      } catch (err: any) {
-        // --- Layer 3: Catch ---
-        if (isFatalError(err)) throw err;
-        if (w.catchControl) return applyControlFlow(w.catchControl);
-        if (w.catchFallbackRef)
-          return this.pullSingle(w.catchFallbackRef, pullChain);
-        if (w.catchFallback != null) return coerceConstant(w.catchFallback);
-        lastError = err;
-      }
-    }
-
-    if (lastError) throw lastError;
-    return undefined;
+    return _resolveWires(this, wires, pullChain);
   }
 
   /**

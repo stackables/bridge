@@ -97,24 +97,28 @@ Move **zero-class-dependency** helpers out of `ExecutionTree.ts`:
 
 ---
 
-### Phase 2 — Extract wire resolution
+### Phase 2 — Define `TreeContext` interface + Extract wire resolution
 
-Move wire evaluation into `resolveWires.ts`:
+Define the narrow `TreeContext` interface that extracted modules depend on.
+This enables mock-based unit testing of individual modules and establishes
+the pattern for all subsequent phases.
 
-- `resolveWires()` (fast path + delegation)
-- `resolveWiresAsync()` (full loop with modifier layers)
-- `evaluateWireSource()` (Layer 1)
-- `pullSafe()` (safe-navigation wrapper)
-
-Define a narrow `WireResolver` interface that these functions need:
+**New: `TreeContext` in `tree-types.ts`**
 
 ```ts
-interface WireResolverContext {
+export interface TreeContext {
   pullSingle(ref: NodeRef, pullChain?: Set<string>): MaybePromise<any>;
 }
 ```
 
-`ExecutionTree` implements `WireResolverContext` and keeps a one-line:
+Move wire evaluation into `resolveWires.ts` — functions take `TreeContext`:
+
+- `resolveWires(ctx, wires, pullChain)` (fast path + delegation)
+- `resolveWiresAsync(ctx, wires, pullChain)` (full loop with modifier layers)
+- `evaluateWireSource(ctx, w, pullChain)` (Layer 1)
+- `pullSafe(ctx, ref, safe, pullChain)` (safe-navigation wrapper)
+
+`ExecutionTree` implements `TreeContext` and keeps a one-line:
 
 ```ts
 private resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any> {
@@ -122,7 +126,7 @@ private resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any> 
 }
 ```
 
-**Status:** Not started
+**Status:** Done
 
 ---
 
@@ -164,17 +168,9 @@ Move scheduling and tool invocation into `scheduleTools.ts`:
 
 ---
 
-### Phase 6 — Define `TreeContext` interface
-
-Once Phases 2–5 are done, formalise the narrow interface that extracted modules depend on.
-This enables mock-based unit testing of individual modules.
-
-**Status:** Not started
-
----
-
 ## Progress log
 
-| Date       | Phase   | Notes                                                                                                                                  |
-| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-03-01 | Phase 1 | Extracted tree-types.ts (101 L), tree-utils.ts (135 L), tracing.ts (130 L). ExecutionTree.ts 1997→1768 lines. 621 unit + all e2e pass. |
+| Date       | Phase   | Notes                                                                                                                                                                                  |
+| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-03-01 | Phase 1 | Extracted tree-types.ts (101 L), tree-utils.ts (135 L), tracing.ts (130 L). ExecutionTree.ts 1997→1768 lines. 621 unit + all e2e pass.                                                 |
+| 2026-03-01 | Phase 2 | Added TreeContext interface to tree-types.ts. Extracted resolveWires.ts (206 L). ExecutionTree 1768→1599 lines. pullSingle now public (satisfies TreeContext). 621 unit + 35 e2e pass. |
