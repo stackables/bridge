@@ -1620,12 +1620,12 @@ export class ExecutionTree {
                     )
                   : children;
               } else {
-                // #8: use pre-grouped wires instead of re-filtering
+                // #8: wireGroupsByPath is built in the same branch that populates
+                // directFields, so the group is always present — no fallback needed.
                 const pathKey = fullPath.join("\0");
-                const wireGroup = wireGroupsByPath.get(pathKey);
-                obj[name] = wireGroup
-                  ? await shadow.resolvePreGrouped(wireGroup)
-                  : await shadow.pullOutputField(fullPath);
+                obj[name] = await shadow.resolvePreGrouped(
+                  wireGroupsByPath.get(pathKey)!,
+                );
               }
             })(),
           );
