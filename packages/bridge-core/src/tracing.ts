@@ -210,12 +210,15 @@ export class TraceCollector {
       startedAt: base.startedAt,
     };
     if (base.input) {
-      t.input = boundedClone(
+      const clonedInput = boundedClone(
         base.input,
         this.maxArrayItems,
         this.maxStringLength,
         this.cloneDepth,
-      ) as Record<string, any>;
+      );
+      if (clonedInput && typeof clonedInput === "object") {
+        t.input = clonedInput as Record<string, any>;
+      }
     }
     if (base.error) t.error = base.error;
     else if (base.output !== undefined) t.output = base.output;

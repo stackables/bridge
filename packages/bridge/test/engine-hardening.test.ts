@@ -7,9 +7,8 @@ import {
   BridgeAbortError,
   boundedClone,
   TraceCollector,
-  coerceConstant,
-  setNested,
 } from "../src/index.ts";
+import { coerceConstant, setNested } from "../../bridge-core/src/tree-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Step 1: Tool timeout

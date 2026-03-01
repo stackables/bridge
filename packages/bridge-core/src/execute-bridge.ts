@@ -122,8 +122,12 @@ export async function executeBridge<T = unknown>(
 
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;
-  if (options.toolTimeoutMs !== undefined) tree.toolTimeoutMs = options.toolTimeoutMs;
-  if (options.maxDepth !== undefined) tree.maxDepth = options.maxDepth;
+  if (options.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+    tree.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
+  }
+  if (options.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+    tree.maxDepth = Math.floor(options.maxDepth);
+  }
 
   const traceLevel = options.trace ?? "off";
   if (traceLevel !== "off") {

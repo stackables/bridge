@@ -256,11 +256,19 @@ export class ExecutionTree implements TreeContext {
     // avoid closure allocation, template-string building, and no-op
     // metric calls.  See docs/performance.md (#5).
     if (!tracer && !logger && !isOtelActive()) {
-      const result = fnImpl(input, toolContext);
-      if (timeoutMs > 0 && isPromise(result)) {
-        return raceTimeout(result, timeoutMs, toolName);
+      try {
+        const result = fnImpl(input, toolContext);
+        if (timeoutMs > 0 && isPromise(result)) {
+          return raceTimeout(result, timeoutMs, toolName);
+        }
+        return result;
+      } catch (err) {
+        // Normalize platform AbortError to BridgeAbortError
+        if (this.signal?.aborted && err instanceof DOMException && err.name === "AbortError") {
+          throw new BridgeAbortError();
+        }
+        throw err;
       }
-      return result;
     }
 
     // ── Instrumented path ─────────────────────────────────────────
@@ -330,6 +338,10 @@ export class ExecutionTree implements TreeContext {
             fnName,
             (err as Error).message,
           );
+          // Normalize platform AbortError to BridgeAbortError
+          if (this.signal?.aborted && err instanceof DOMException && err.name === "AbortError") {
+            throw new BridgeAbortError();
+          }
           throw err;
         } finally {
           span.end();

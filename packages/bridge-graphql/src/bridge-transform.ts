@@ -171,8 +171,12 @@ export function bridgeTransform(
             );
 
             source.logger = logger;
-            if (options?.toolTimeoutMs !== undefined) source.toolTimeoutMs = options.toolTimeoutMs;
-            if (options?.maxDepth !== undefined) source.maxDepth = options.maxDepth;
+            if (options?.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+              source.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
+            }
+            if (options?.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+              source.maxDepth = Math.floor(options.maxDepth);
+            }
 
             if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);
