@@ -117,6 +117,7 @@ function sameTrunk(a: Trunk, b: Trunk): boolean {
 
 /** Strict path equality — manual loop avoids `.every()` closure allocation.  See docs/performance.md (#7). */
 function pathEquals(a: string[], b: string[]): boolean {
+  if (!a || !b) return a === b;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false;
