@@ -1301,3 +1301,97 @@ bridge Query.test {
     assert.equal(data.result, false);
   });
 });
+
+// ── Sync tool fast path for condAnd / condOr ────────────────────────────────
+// pullSafe must return MaybePromise (not always Promise.resolve) so that
+// synchronous pulls skip microtask scheduling.  These tests use synchronous
+// (non-async) tool functions to exercise that path.
+
+describe("condAnd / condOr with synchronous tools", () => {
+  test("and expression with sync tools resolves correctly", async () => {
+    const document = parseBridge(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  api.x <- i.x
+  o.result <- api.score > 5 and api.active
+}`);
+    const { data } = await executeBridge<any>({
+      document,
+      operation: "Query.test",
+      input: { x: 1 },
+      tools: {
+        api: (p: any) => ({ score: 10, active: true }),
+      },
+    });
+    assert.equal(data.result, true);
+  });
+
+  test("or expression with sync tools resolves correctly", async () => {
+    const document = parseBridge(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  api.x <- i.x
+  o.result <- api.score > 100 or api.active
+}`);
+    const { data } = await executeBridge<any>({
+      document,
+      operation: "Query.test",
+      input: { x: 1 },
+      tools: {
+        api: (p: any) => ({ score: 10, active: true }),
+      },
+    });
+    assert.equal(data.result, true);
+  });
+
+  test("and short-circuits: false and sync-tool is false", async () => {
+    const document = parseBridge(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  api.x <- i.x
+  o.result <- api.score > 100 and api.active
+}`);
+    const { data } = await executeBridge<any>({
+      document,
+      operation: "Query.test",
+      input: { x: 1 },
+      tools: {
+        api: (p: any) => ({ score: 10, active: true }),
+      },
+    });
+    assert.equal(data.result, false);
+  });
+
+  test("safe navigation with sync tool: api?.missing and true", async () => {
+    const document = parseBridge(`version 1.5
+bridge Query.test {
+  with failApi as api
+  with input as i
+  with output as o
+
+  api.x <- i.x
+  o.result <- api?.score > 5 or false
+}`);
+    const { data } = await executeBridge<any>({
+      document,
+      operation: "Query.test",
+      input: { x: 1 },
+      tools: {
+        failApi: () => {
+          throw new Error("sync failure");
+        },
+      },
+    });
+    // Safe swallows the error; left is undefined (falsy), right is false
+    assert.equal(data.result, false);
+  });
+});
