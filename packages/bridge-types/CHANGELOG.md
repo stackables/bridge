@@ -1,5 +1,11 @@
 # @stackables/bridge-types
 
+## 1.0.1
+
+### Patch Changes
+
+- 8e4ce59: Unintended tsconfig change broke package exports.
+
 ## 1.0.0
 
 ### Major Changes
