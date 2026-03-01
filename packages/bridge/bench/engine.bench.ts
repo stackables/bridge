@@ -21,15 +21,6 @@ function doc(bridgeText: string) {
   return JSON.parse(JSON.stringify(raw)) as ReturnType<typeof parseBridge>;
 }
 
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown>,
-  tools: Record<string, any> = {},
-) {
-  return executeBridge({ document: doc(bridgeText), operation, input, tools });
-}
-
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 // Simple chain: input → tool → output (no arrays)
