@@ -134,6 +134,19 @@ function isFatalError(err: any): boolean {
   );
 }
 
+/**
+ * A value that may already be resolved (synchronous) or still pending (asynchronous).
+ * Using this instead of always returning `Promise<T>` lets callers skip
+ * microtask scheduling when the value is immediately available.
+ * See docs/performance.md (#10).
+ */
+type MaybePromise<T> = T | Promise<T>;
+
+/** Returns `true` when `value` is a thenable (Promise or Promise-like). */
+function isPromise(value: unknown): value is Promise<unknown> {
+  return typeof (value as any)?.then === "function";
+}
+
 /** Execute a control flow instruction, returning a sentinel or throwing. */
 function applyControlFlow(ctrl: ControlFlowInstruction): symbol {
   if (ctrl.kind === "throw") throw new Error(ctrl.message);
@@ -898,15 +911,56 @@ export class ExecutionTree {
     return this.tracer?.traces ?? [];
   }
 
-  private async pullSingle(
+  /**
+   * Traverse `ref.path` on an already-resolved value, respecting null guards.
+   * Extracted from `pullSingle` so the sync and async paths can share logic.
+   */
+  private applyPath(resolved: any, ref: NodeRef): any {
+    if (!ref.path.length) return resolved;
+
+    let result: any = resolved;
+
+    // Root-level null check
+    if (result == null) {
+      if (ref.rootSafe) return undefined;
+      throw new TypeError(
+        `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
+      );
+    }
+
+    for (let i = 0; i < ref.path.length; i++) {
+      const segment = ref.path[i]!;
+      if (UNSAFE_KEYS.has(segment))
+        throw new Error(`Unsafe property traversal: ${segment}`);
+      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
+        this.logger?.warn?.(
+          `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
+        );
+      }
+      result = result[segment];
+      if (result == null && i < ref.path.length - 1) {
+        const nextSafe = ref.pathSafe?.[i + 1] ?? false;
+        if (nextSafe) return undefined;
+        throw new TypeError(
+          `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
+        );
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Pull a single value.  Returns synchronously when already in state;
+   * returns a Promise only when the value is a pending tool call.
+   * See docs/performance.md (#10).
+   */
+  private pullSingle(
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
-  ): Promise<any> {
+  ): MaybePromise<any> {
     const key = trunkKey(ref);
 
     // ── Cycle detection ─────────────────────────────────────────────
-    // If this exact key is already in our active pull chain, it is a
-    // circular dependency that would deadlock (await-on-self).
     if (pullChain.has(key)) {
       throw new BridgePanicError(
         `Circular dependency detected: "${key}" depends on itself`,
@@ -936,51 +990,24 @@ export class ExecutionTree {
             (w) => sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
           ) ?? [];
         if (fieldWires.length > 0) {
+          // resolveWires already delivers the value at ref.path — no applyPath.
           return this.resolveWires(fieldWires, nextChain);
         }
       }
 
       this.state[key] = this.schedule(ref, nextChain);
-      value = this.state[key];
+      value = this.state[key]; // always a Promise (schedule is async)
     }
 
-    // Always await in case the stored value is a Promise (e.g. from schedule()).
-    const resolved = await Promise.resolve(value);
-
-    if (!ref.path.length) {
-      return resolved;
+    // Sync fast path: value is already resolved (not a pending Promise).
+    if (!isPromise(value)) {
+      return this.applyPath(value, ref);
     }
 
-    let result: any = resolved;
-
-    // Root-level null check: if root data is null/undefined
-    if (result == null && ref.path.length > 0) {
-      if (ref.rootSafe) return undefined;
-      throw new TypeError(
-        `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
-      );
-    }
-
-    for (let i = 0; i < ref.path.length; i++) {
-      const segment = ref.path[i];
-      if (UNSAFE_KEYS.has(segment))
-        throw new Error(`Unsafe property traversal: ${segment}`);
-      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
-        this.logger?.warn?.(
-          `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
-        );
-      }
-      result = result[segment];
-      // Check for null/undefined AFTER access, before next segment
-      if (result == null && i < ref.path.length - 1) {
-        const nextSafe = ref.pathSafe?.[i + 1] ?? false;
-        if (nextSafe) return undefined;
-        throw new TypeError(
-          `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
-        );
-      }
-    }
-    return result;
+    // Async: chain path traversal onto the pending promise.
+    return (value as Promise<any>).then((resolved: any) =>
+      this.applyPath(resolved, ref),
+    );
   }
 
   push(args: Record<string, any>) {
@@ -1057,7 +1084,41 @@ export class ExecutionTree {
    * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
    * to return or continue to the next wire.
    */
-  private async resolveWires(
+  /**
+   * Resolve wires, returning synchronously when the hot path allows it.
+   *
+   * Fast path: single `from` wire with no fallback/catch modifiers, which is
+   * the common case for element field wires like `.id <- it.id`.  Delegates to
+   * `resolveWiresAsync` for anything more complex.
+   * See docs/performance.md (#10).
+   */
+  private resolveWires(
+    wires: Wire[],
+    pullChain?: Set<string>,
+  ): MaybePromise<any> {
+    if (wires.length === 1) {
+      const w = wires[0]!;
+      if ("value" in w) return coerceConstant(w.value);
+      if (
+        "from" in w &&
+        !w.safe &&
+        !w.falsyFallbackRefs?.length &&
+        w.falsyControl == null &&
+        w.falsyFallback == null &&
+        w.nullishControl == null &&
+        !w.nullishFallbackRef &&
+        w.nullishFallback == null &&
+        !w.catchControl &&
+        !w.catchFallbackRef &&
+        w.catchFallback == null
+      ) {
+        return this.pullSingle(w.from, pullChain);
+      }
+    }
+    return this.resolveWiresAsync(wires, pullChain);
+  }
+
+  private async resolveWiresAsync(
     wires: Wire[],
     pullChain?: Set<string>,
   ): Promise<any> {
@@ -1247,9 +1308,10 @@ export class ExecutionTree {
   /**
    * Resolve pre-grouped wires on this shadow tree without re-filtering.
    * Called by the parent's `materializeShadows` to skip per-element wire
-   * filtering.  See docs/performance.md (#8).
+   * filtering.  Returns synchronously when the wire resolves sync (hot path).
+   * See docs/performance.md (#8, #10).
    */
-  resolvePreGrouped(wires: Wire[]): Promise<unknown> {
+  resolvePreGrouped(wires: Wire[]): MaybePromise<unknown> {
     return this.resolveWires(wires);
   }
 
@@ -1559,21 +1621,29 @@ export class ExecutionTree {
       }
     }
 
-    // #9: Fast path — no nested arrays, only direct fields.
-    // Flatten all (shadow × field) resolutions into a single Promise.all instead
-    // of Promise.all(N × Promise.all(F)) to reduce microtask scheduling overhead.
-    // See docs/performance.md (#8, #9).
+    // #9/#10: Fast path — no nested arrays, only direct fields.
+    // Collect all (shadow × field) resolutions.  When every value is already in
+    // state (the hot case for element passthrough), resolvePreGrouped returns
+    // synchronously and we skip Promise.all entirely.
+    // See docs/performance.md (#9, #10).
     if (deepPaths.size === 0) {
       const directFieldArray = [...directFields];
       const nFields = directFieldArray.length;
-      const flatValues = await Promise.all(
-        items.flatMap((shadow) =>
-          directFieldArray.map((name) => {
-            const pathKey = [...pathPrefix, name].join("\0");
-            return shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!);
-          }),
-        ),
-      );
+      const nItems = items.length;
+      const rawValues: MaybePromise<unknown>[] = new Array(nItems * nFields);
+      let hasAsync = false;
+      for (let i = 0; i < nItems; i++) {
+        const shadow = items[i]!;
+        for (let j = 0; j < nFields; j++) {
+          const pathKey = [...pathPrefix, directFieldArray[j]!].join("\0");
+          const v = shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!);
+          rawValues[i * nFields + j] = v;
+          if (!hasAsync && isPromise(v)) hasAsync = true;
+        }
+      }
+      const flatValues: unknown[] = hasAsync
+        ? await Promise.all(rawValues)
+        : (rawValues as unknown[]);
 
       const finalResults: unknown[] = [];
       for (let i = 0; i < items.length; i++) {
