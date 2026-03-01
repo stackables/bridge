@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
-// Read pnpm workspace to find packages
+// Discover packages by scanning the ./packages directory
 const packageDirs = [];
 
 // Find all publishable package.json files (those with a "name" starting with @stackables/)
