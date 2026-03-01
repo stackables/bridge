@@ -13,8 +13,8 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 | 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)   |
 | 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression) |
 | 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)  |
-| 8   | Pre-group element wires            |            | Planned                      |
-| 9   | Batch element materialisation      |            | Planned                      |
+| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)             |
+| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)    |
 | 10  | Sync fast path for resolved values |            | Planned                      |
 
 ## Baseline (main, March 2026)
@@ -35,14 +35,14 @@ document are from this machine — compare only against the same hardware.
 | exec: short-circuit                | ~751K   | 0.001    |
 | exec: simple chain (1 tool)        | ~417K   | 0.002    |
 | exec: chained 3-tool fan-out       | ~152K   | 0.007    |
-| exec: flat array 10                | ~48K    | 0.021    |
-| exec: flat array 100               | ~5.1K   | 0.196    |
-| exec: flat array 1000              | ~270    | 3.70     |
-| exec: nested array 5×5             | ~15.8K  | 0.063    |
-| exec: nested array 10×10           | ~4.3K   | 0.233    |
-| exec: nested array 20×10           | ~2.1K   | 0.476    |
-| exec: array + tool-per-element 10  | ~22K    | 0.045    |
-| exec: array + tool-per-element 100 | ~2.2K   | 0.455    |
+| exec: flat array 10                | ~69K    | 0.015    |
+| exec: flat array 100               | ~8.0K   | 0.128    |
+| exec: flat array 1000              | ~627    | 1.62     |
+| exec: nested array 5×5             | ~21K    | 0.049    |
+| exec: nested array 10×10           | ~6.1K   | 0.166    |
+| exec: nested array 20×10           | ~3.0K   | 0.339    |
+| exec: array + tool-per-element 10  | ~25K    | 0.041    |
+| exec: array + tool-per-element 100 | ~2.6K   | 0.387    |
 
 This table is the current perf level. It is updated after a successful optimisation is committed.
 
@@ -309,28 +309,71 @@ already negligible. Kept for consistency and micro-optimisation hygiene.
 
 ### 8. Pre-group element wires
 
-**Result:** Planned (+10–15% expected on array benchmarks).
+**Date:** March 2026
+**Result:** ✅ Combined with #9 (eliminates per-element wire filtering).
 
-Every `pullOutputField` call does
+Every `pullOutputField` call did
 `bridge.wires.filter(w => sameTrunk(...) && pathEquals(...))` — for a
-1000-element array with 3 output fields, that's 5 wires × 3 fields ×
-1000 elements = **15,000 comparisons**.
+1000-element array with 3 output fields that's 5 wires × 3 fields ×
+1000 elements = **15,000 comparisons per execution**.
 
-Pre-group element wires by path **once in `materializeShadows`** and
-pass the groups to each shadow, instead of re-filtering per element.
-
-Unlike #1 and #3 (which used string-keyed Maps and lost to allocation
-overhead), this builds a small structure once per array, not per element.
+Added a `wireGroupsByPath: Map<string, Wire[]>` built once per
+`materializeShadows` call, keyed by `\0`-joined path. Added a thin
+`resolvePreGrouped(wires)` method to `ExecutionTree` that lets
+`materializeShadows` call `resolveWires` on a shadow with pre-grouped
+wires rather than passing a path to re-filter. The map key uses `\0` as
+a separator since field names are identifiers and can't contain it.
 
 ### 9. Batch element materialisation
 
-**Result:** Planned (+20–30% expected on array benchmarks).
+**Date:** March 2026
+**Result:** ✅ +44–130% on flat array benchmarks, +14–43% on all array benchmarks.
 
-Instead of `Promise.all(1000 × Promise.all(3 fields))`, pre-compute the
-output field set once (same 3 fields for every element), then produce
-results in a tighter loop. When all element wires are simple passthrough
-pulls (`.x <- it.x`) with no fallbacks, tools, or expressions, the
-inner loop could be entirely synchronous.
+| Benchmark                          | Before | After | Change    |
+| ---------------------------------- | ------ | ----- | --------- |
+| exec: passthrough                  | 610K   | 610K  | ~0%       |
+| exec: short-circuit                | 751K   | 745K  | ~0%       |
+| exec: simple chain                 | 417K   | 418K  | ~0%       |
+| exec: chained 3-tool fan-out       | 152K   | 156K  | ~0%       |
+| exec: flat array 10                | 48K    | 69K   | **+44%**  |
+| exec: flat array 100               | 5.1K   | 8.0K  | **+57%**  |
+| exec: flat array 1000              | 270    | 627   | **+132%** |
+| exec: nested array 5×5             | 15.8K  | 21K   | **+33%**  |
+| exec: nested array 10×10           | 4.3K   | 6.1K  | **+42%**  |
+| exec: nested array 20×10           | 2.1K   | 3.0K  | **+43%**  |
+| exec: array + tool-per-element 10  | 22K    | 25K   | **+14%**  |
+| exec: array + tool-per-element 100 | 2.2K   | 2.6K  | **+18%**  |
+
+Instead of `Promise.all(N × Promise.all(F fields))`, the common case
+(no nested arrays in the output — `deepPaths.size === 0`) now uses a
+single flat `Promise.all` over all `N × F` resolutions:
+
+```ts
+// Before: Promise.all(1000 × Promise.all(3 fields))
+// After:  Promise.all(3000 flat resolutions)
+const flatValues = await Promise.all(
+  items.flatMap((shadow) =>
+    directFieldArray.map((name) =>
+      shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!),
+    ),
+  ),
+);
+```
+
+This collapses 1001 nested `Promise.all` calls into one, cutting
+significant microtask scheduling overhead. Combined with #8
+(pre-grouped wires), each resolution also skips the `bridge.wires.filter`
+call entirely.
+
+Nested arrays (where `deepPaths.size > 0`) take a slow path that uses
+#8 pre-grouped wires for direct fields but keeps the existing
+`Promise.all(tasks)` structure. Inner nested levels — which have no
+`deepPaths` of their own — also benefit from the fast path, which
+explains the +33–43% gains on nested benchmarks.
+
+**Why non-tools aren't affected:** Benchmarks without array iteration
+(passthrough, simple chain, chained fan-out) don't call `materializeShadows`
+at all, so they see no change.
 
 ### 10. Sync fast path for resolved values
 

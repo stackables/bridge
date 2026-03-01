@@ -1245,6 +1245,15 @@ export class ExecutionTree {
   }
 
   /**
+   * Resolve pre-grouped wires on this shadow tree without re-filtering.
+   * Called by the parent's `materializeShadows` to skip per-element wire
+   * filtering.  See docs/performance.md (#8).
+   */
+  resolvePreGrouped(wires: Wire[]): Promise<unknown> {
+    return this.resolveWires(wires);
+  }
+
+  /**
    * Materialise all output wires into a plain JS object.
    *
    * Used by the GraphQL adapter when a bridge field returns a scalar type
@@ -1515,6 +1524,9 @@ export class ExecutionTree {
 
     const directFields = new Set<string>();
     const deepPaths = new Map<string, string[][]>();
+    // #8: Pre-group wires by exact path — eliminates per-element re-filtering.
+    // Key: wire.to.path joined by \0 (null char is safe — field names are identifiers).
+    const wireGroupsByPath = new Map<string, Wire[]>();
 
     for (const wire of wires) {
       const p = wire.to.path;
@@ -1530,6 +1542,13 @@ export class ExecutionTree {
       const name = p[pathPrefix.length]!;
       if (p.length === pathPrefix.length + 1) {
         directFields.add(name);
+        const pathKey = p.join("\0");
+        let group = wireGroupsByPath.get(pathKey);
+        if (!group) {
+          group = [];
+          wireGroupsByPath.set(pathKey, group);
+        }
+        group.push(wire);
       } else {
         let arr = deepPaths.get(name);
         if (!arr) {
@@ -1540,6 +1559,48 @@ export class ExecutionTree {
       }
     }
 
+    // #9: Fast path — no nested arrays, only direct fields.
+    // Flatten all (shadow × field) resolutions into a single Promise.all instead
+    // of Promise.all(N × Promise.all(F)) to reduce microtask scheduling overhead.
+    // See docs/performance.md (#8, #9).
+    if (deepPaths.size === 0) {
+      const directFieldArray = [...directFields];
+      const nFields = directFieldArray.length;
+      const flatValues = await Promise.all(
+        items.flatMap((shadow) =>
+          directFieldArray.map((name) => {
+            const pathKey = [...pathPrefix, name].join("\0");
+            return shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!);
+          }),
+        ),
+      );
+
+      const finalResults: unknown[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const obj: Record<string, unknown> = {};
+        let doBreak = false;
+        let doSkip = false;
+        for (let j = 0; j < nFields; j++) {
+          const v = flatValues[i * nFields + j];
+          if (v === BREAK_SYM) {
+            doBreak = true;
+            break;
+          }
+          if (v === CONTINUE_SYM) {
+            doSkip = true;
+            break;
+          }
+          obj[directFieldArray[j]!] = v;
+        }
+        if (doBreak) break;
+        if (doSkip) continue;
+        finalResults.push(obj);
+      }
+      return finalResults;
+    }
+
+    // Slow path: deep paths (nested arrays) present.
+    // Uses pre-grouped wires for direct fields (#8), original logic for the rest.
     const rawResults = await Promise.all(
       items.map(async (shadow) => {
         const obj: Record<string, unknown> = {};
@@ -1559,7 +1620,12 @@ export class ExecutionTree {
                     )
                   : children;
               } else {
-                obj[name] = await shadow.pullOutputField(fullPath);
+                // #8: use pre-grouped wires instead of re-filtering
+                const pathKey = fullPath.join("\0");
+                const wireGroup = wireGroupsByPath.get(pathKey);
+                obj[name] = wireGroup
+                  ? await shadow.resolvePreGrouped(wireGroup)
+                  : await shadow.pullOutputField(fullPath);
               }
             })(),
           );
