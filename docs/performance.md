@@ -17,6 +17,7 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 | 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)              |
 | 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)  |
 | 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays) |
+| 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)     |
 
 ## Baseline (main, March 2026)
 
@@ -32,18 +33,18 @@ document are from this machine — compare only against the same hardware.
 | ---------------------------------- | ------- | -------- |
 | parse: simple bridge               | ~43K    | 0.023    |
 | parse: large bridge (20×5)         | ~2.5K   | 0.40     |
-| exec: passthrough (no tools)       | ~846K   | 0.001    |
-| exec: short-circuit                | ~811K   | 0.001    |
-| exec: simple chain (1 tool)        | ~486K   | 0.002    |
-| exec: chained 3-tool fan-out       | ~194K   | 0.005    |
-| exec: flat array 10                | ~170K   | 0.006    |
-| exec: flat array 100               | ~28.3K  | 0.035    |
-| exec: flat array 1000              | ~3,064  | 0.325    |
-| exec: nested array 5×5             | ~46.7K  | 0.021    |
+| exec: passthrough (no tools)       | ~830K   | 0.001    |
+| exec: short-circuit                | ~801K   | 0.001    |
+| exec: simple chain (1 tool)        | ~558K   | 0.002    |
+| exec: chained 3-tool fan-out       | ~216K   | 0.005    |
+| exec: flat array 10                | ~175K   | 0.006    |
+| exec: flat array 100               | ~28.2K  | 0.036    |
+| exec: flat array 1000              | ~2,980  | 0.335    |
+| exec: nested array 5×5             | ~47.7K  | 0.021    |
 | exec: nested array 10×10           | ~17.5K  | 0.057    |
-| exec: nested array 20×10           | ~8.8K   | 0.114    |
-| exec: array + tool-per-element 10  | ~30.9K  | 0.032    |
-| exec: array + tool-per-element 100 | ~3.43K  | 0.286    |
+| exec: nested array 20×10           | ~9.0K   | 0.110    |
+| exec: array + tool-per-element 10  | ~36.5K  | 0.028    |
+| exec: array + tool-per-element 100 | ~3.98K  | 0.253    |
 
 This table is the current perf level. It is updated after a successful optimisation is committed.
 
@@ -499,3 +500,65 @@ property checks from the hottest loops:
    entries. When exceeded the Map is cleared rather than growing
    unboundedly. No performance impact; pure safety hygiene for
    long-lived processes.
+
+### 12. De-async schedule() & callTool()
+
+**Date:** March 2026
+**Result:** ✅ +11–18% on tool-calling benchmarks, ~0% on pure array benchmarks.
+
+| Benchmark                          | Before | After | Change   |
+| ---------------------------------- | ------ | ----- | -------- |
+| exec: passthrough                  | 846K   | 830K  | ~0%      |
+| exec: short-circuit                | 811K   | 801K  | ~0%      |
+| exec: simple chain                 | 486K   | 558K  | **+15%** |
+| exec: chained 3-tool fan-out       | 194K   | 216K  | **+11%** |
+| exec: flat array 10                | 170K   | 175K  | ~0%      |
+| exec: flat array 100               | 28.3K  | 28.2K | ~0%      |
+| exec: flat array 1000              | 3,064  | 2,980 | ~0%      |
+| exec: nested array 5×5             | 46.7K  | 47.7K | ~0%      |
+| exec: nested array 10×10           | 17.5K  | 17.5K | ~0%      |
+| exec: nested array 20×10           | 8.8K   | 9.0K  | ~0%      |
+| exec: array + tool-per-element 10  | 30.9K  | 36.5K | **+18%** |
+| exec: array + tool-per-element 100 | 3.43K  | 3.98K | **+16%** |
+
+`schedule()` previously wrapped its entire body in `(async () => { ... })()`,
+always creating a Promise — even for `__local` bindings, `__define_` pass-throughs,
+and `__and`/`__or` logic nodes that need no tool call and whose wires resolve
+synchronously. Similarly, `callTool` was declared `async`, forcing a Promise
+wrapper even when the tool function (e.g. internal math/string ops) returns
+synchronously.
+
+**Changes made:**
+
+1. **`schedule` returns `MaybePromise<any>`** — Wire collection, grouping,
+   and `resolveToolDefByName` remain synchronous at the top. For targets
+   with a `toolDef`, the new `scheduleToolDef` async helper handles the
+   full async path. For targets without a `toolDef` (locals, defines,
+   logic nodes, pipe forks with sync tools), bridge wires are resolved
+   via `resolveWires` (which already returns `MaybePromise`). If all
+   wires resolve sync, `scheduleFinish` assembles the result and returns
+   synchronously.
+
+2. **`callTool` de-asynced** — Removed the `async` keyword. The
+   no-instrumentation fast path (`return fnImpl(input, toolContext)`) now
+   returns whatever `fnImpl` returns directly — sync for internal tools
+   (math, string ops, concat, etc.), Promise for async tools (httpCall).
+   The instrumented path returns a Promise via `otelTracer.startActiveSpan`.
+
+3. **`scheduleFinish` helper** — Extracted the input-assembly + direct-fn-lookup
+   - pass-through logic into a private method that returns `MaybePromise<any>`.
+     For `__local`/`__define_`/logic targets with no direct function, this
+     returns synchronously. For pipe forks backed by sync internal tools,
+     `callTool` returns sync too, so the entire call chain stays sync.
+
+**Why pure array benchmarks are unchanged:** Flat/nested array benchmarks
+use element passthrough wires (`.id <- it.id`) with no per-element tool
+calls. Their inner loop never calls `schedule` or `callTool` — it
+resolves wires directly via `resolvePreGrouped` → `resolveWires` →
+`pullSingle`, which were already sync-capable from #10.
+
+**Why tool-calling benchmarks improve (+11–18%):** `simple chain` and
+`chained 3-tool fan-out` each schedule 1–3 internal tool calls. Now that
+`schedule` skips the async IIFE and `callTool` skips the `async` wrapper,
+each tool call eliminates 2 microtask hops. `tool-per-element` benefits
+the most: 10–100 tool calls per execution, each now fully synchronous.
