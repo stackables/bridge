@@ -88,9 +88,18 @@ export function boundedClone(
   depth = 5,
 ): unknown {
   // Clamp parameters to sane ranges to prevent RangeError from new Array()
-  const safeArrayItems = Math.max(0, Math.floor(maxArrayItems) || 100);
-  const safeStringLength = Math.max(0, Math.floor(maxStringLength) || 1024);
-  const safeDepth = Math.max(0, Math.floor(depth) || 5);
+  const safeArrayItems = Math.max(
+    0,
+    Number.isFinite(maxArrayItems) ? Math.floor(maxArrayItems) : 100,
+  );
+  const safeStringLength = Math.max(
+    0,
+    Number.isFinite(maxStringLength) ? Math.floor(maxStringLength) : 1024,
+  );
+  const safeDepth = Math.max(
+    0,
+    Number.isFinite(depth) ? Math.floor(depth) : 5,
+  );
   return _boundedClone(value, safeArrayItems, safeStringLength, safeDepth, 0);
 }
 

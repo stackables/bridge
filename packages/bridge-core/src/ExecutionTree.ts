@@ -373,7 +373,9 @@ export class ExecutionTree implements TreeContext {
     const shadows: ExecutionTree[] = [];
     for (const item of items) {
       // Abort discipline — yield immediately if client disconnected
-      this.signal?.throwIfAborted();
+      if (this.signal?.aborted) {
+        throw new BridgeAbortError();
+      }
       if (item === BREAK_SYM) break;
       if (item === CONTINUE_SYM) continue;
       const s = this.shadow();
