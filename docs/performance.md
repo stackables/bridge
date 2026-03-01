@@ -4,15 +4,18 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 
 ## Summary
 
-| #   | Optimisation                    | Date       | Result                       |
-| --- | ------------------------------- | ---------- | ---------------------------- |
-| 1   | WeakMap-cached DocumentIndex    | March 2026 | ✗ Failed (–4–11%)            |
-| 2   | Lightweight shadow construction | March 2026 | ✅ Done (+5–7%)              |
-| 3   | Wire index by trunk key         | March 2026 | ✗ Failed (–10–23%)           |
-| 4   | Cached element trunk key        | March 2026 | ✅ Done (~0%, code cleanup)  |
-| 5   | Skip OTel when idle             | March 2026 | ✅ Done (+7–9% tool-heavy)   |
-| 6   | Constant cache                  | March 2026 | ✅ Done (~0%, no regression) |
-| 7   | pathEquals loop                 | March 2026 | ✅ Done (~0%, code cleanup)  |
+| #   | Optimisation                       | Date       | Result                       |
+| --- | ---------------------------------- | ---------- | ---------------------------- |
+| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)            |
+| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)              |
+| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)           |
+| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)  |
+| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)   |
+| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression) |
+| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)  |
+| 8   | Pre-group element wires            |            | Planned                      |
+| 9   | Batch element materialisation      |            | Planned                      |
+| 10  | Sync fast path for resolved values |            | Planned                      |
 
 ## Baseline (main, March 2026)
 
@@ -301,3 +304,49 @@ code does not mutate constant values, so this is safe today.
 Replaced `.every()` callback with a manual for-loop. No measurable
 impact — paths are typically 1–2 segments, so the closure overhead was
 already negligible. Kept for consistency and micro-optimisation hygiene.
+
+### 8. Pre-group element wires
+
+**Result:** Planned (+10–15% expected on array benchmarks).
+
+Every `pullOutputField` call does
+`bridge.wires.filter(w => sameTrunk(...) && pathEquals(...))` — for a
+1000-element array with 3 output fields, that's 5 wires × 3 fields ×
+1000 elements = **15,000 comparisons**.
+
+Pre-group element wires by path **once in `materializeShadows`** and
+pass the groups to each shadow, instead of re-filtering per element.
+
+Unlike #1 and #3 (which used string-keyed Maps and lost to allocation
+overhead), this builds a small structure once per array, not per element.
+
+### 9. Batch element materialisation
+
+**Result:** Planned (+20–30% expected on array benchmarks).
+
+Instead of `Promise.all(1000 × Promise.all(3 fields))`, pre-compute the
+output field set once (same 3 fields for every element), then produce
+results in a tighter loop. When all element wires are simple passthrough
+pulls (`.x <- it.x`) with no fallbacks, tools, or expressions, the
+inner loop could be entirely synchronous.
+
+### 10. Sync fast path for resolved values
+
+**Result:** Planned (2–3× expected on array benchmarks).
+
+`pullSingle()` always returns `Promise<any>`, but for element wires like
+`.id <- it.id` the value is always synchronously available in
+`this.state[key]`. The code does `await Promise.resolve(value)` even
+when the value is not a Promise.
+
+For the flat-array-1000 benchmark, this produces **6–7 microtask hops
+per element** × 1000 = 6000–7000 microtask queue entries, costing
+~2.8–3.5ms of the total 3.7ms. Eliminating unnecessary `await` on
+already-resolved values would cut the majority of this overhead.
+
+**Approach:** Either split into `pullSingleSync` / `pullSingleAsync`, or
+use a "maybe-async" pattern that checks `typeof value?.then === 'function'`
+before awaiting.
+
+**Risk:** Significant refactor touching `pullSingle`, `resolveWires`,
+and the entire pull chain. Must preserve correctness for all wire types.

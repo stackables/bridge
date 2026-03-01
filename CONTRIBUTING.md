@@ -57,13 +57,13 @@ The build outputs to `packages/bridge/build/` and is what gets published to npm.
 
 This project uses strict TypeScript. The tsconfig enforces:
 
-| Flag | Why |
-|---|---|
-| `strict` | All standard strict checks (noImplicitAny, strictNullChecks, etc.) |
-| `noUnusedLocals` | Unused imports and variables are compile errors |
-| `noUnusedParameters` | Unused function parameters are compile errors |
-| `noImplicitReturns` | Every code path must return |
-| `noFallthroughCasesInSwitch` | Switch cases must not silently fall through |
+| Flag                         | Why                                                                |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `strict`                     | All standard strict checks (noImplicitAny, strictNullChecks, etc.) |
+| `noUnusedLocals`             | Unused imports and variables are compile errors                    |
+| `noUnusedParameters`         | Unused function parameters are compile errors                      |
+| `noImplicitReturns`          | Every code path must return                                        |
+| `noFallthroughCasesInSwitch` | Switch cases must not silently fall through                        |
 
 ---
 
@@ -77,7 +77,7 @@ packages/
     build/            — Compiled output (committed; not for editing)
   bridge-syntax-highlight/   — VS Code extension for .bridge files
 examples/             — Runnable examples (weather-api, builtin-tools, composed-gateway)
-docs/                 — Language guide, roadmap, developer notes
+docs/                 — Language guide, developer notes
 ```
 
 For a detailed walkthrough of the internals, see [docs/developer.md](docs/developer.md).
@@ -95,6 +95,7 @@ The parser is in `packages/bridge/src/parser/`. It uses [Chevrotain](https://che
 3. **CST → AST** transformation is also in `parser.ts` (the `toBridgeAst` visitor, ~line 820)
 
 If you add a new keyword or syntax:
+
 - Add a token in `lexer.ts` with `longer_alt: Identifier` so it doesn't steal valid identifiers
 - Add the grammar rule to `BridgeParser`
 - Add the visitor logic in `toBridgeAst`
@@ -107,7 +108,9 @@ Tools live in `packages/bridge/src/tools/`. Each tool is a TypeScript file that 
 
 ```typescript
 // src/tools/my-tool.ts
-export function myTool(input: Record<string, any>): Promise<Record<string, any>> {
+export function myTool(
+  input: Record<string, any>,
+): Promise<Record<string, any>> {
   // ...
 }
 ```
@@ -130,20 +133,20 @@ If you change execution semantics, add a test in `test/executeGraph.test.ts` or 
 
 ## Test Files Overview
 
-| File | What it covers |
-|---|---|
-| `parser-compat.test.ts` | Parse → serialize round-trips (snapshot-style) |
-| `bridge-format.test.ts` | Bridge text formatting |
-| `executeGraph.test.ts` | End-to-end execution with a real GraphQL schema |
-| `tool-features.test.ts` | Tool inheritance, wires, onError |
-| `builtin-tools.test.ts` | std namespace tools |
-| `resilience.test.ts` | Error fallback, null coalescing |
-| `scheduling.test.ts` | Concurrency and deduplication of tool calls |
-| `tracing.test.ts` | Trace output shape |
-| `logging.test.ts` | Logger integration |
-| `http-executor.test.ts` | httpCall tool |
-| `chained.test.ts` | Pipe operator chains |
-| `scope-and-edges.test.ts` | Handle scoping, define blocks |
+| File                      | What it covers                                  |
+| ------------------------- | ----------------------------------------------- |
+| `parser-compat.test.ts`   | Parse → serialize round-trips (snapshot-style)  |
+| `bridge-format.test.ts`   | Bridge text formatting                          |
+| `executeGraph.test.ts`    | End-to-end execution with a real GraphQL schema |
+| `tool-features.test.ts`   | Tool inheritance, wires, onError                |
+| `builtin-tools.test.ts`   | std namespace tools                             |
+| `resilience.test.ts`      | Error fallback, null coalescing                 |
+| `scheduling.test.ts`      | Concurrency and deduplication of tool calls     |
+| `tracing.test.ts`         | Trace output shape                              |
+| `logging.test.ts`         | Logger integration                              |
+| `http-executor.test.ts`   | httpCall tool                                   |
+| `chained.test.ts`         | Pipe operator chains                            |
+| `scope-and-edges.test.ts` | Handle scoping, define blocks                   |
 
 ---
 
