@@ -69,3 +69,4 @@ export type {
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 export { parsePath } from "./utils.ts";
+export { coerceConstant, setNested } from "./tree-utils.ts";
