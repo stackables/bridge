@@ -1,5 +1,7 @@
-import { ExecutionTree, TraceCollector } from "./ExecutionTree.ts";
-import type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
+import { ExecutionTree } from "./ExecutionTree.ts";
+import { TraceCollector } from "./tracing.ts";
+import type { Logger } from "./tree-types.ts";
+import type { ToolTrace, TraceLevel } from "./tracing.ts";
 import type { BridgeDocument, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import {

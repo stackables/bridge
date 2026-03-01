@@ -11,50 +11,7 @@ import type {
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 
-// ── Re-exported from extracted modules ──────────────────────────────────────
-// Public API surface stays on this file so `index.ts` doesn't need changes.
-
-export {
-  BridgePanicError,
-  BridgeAbortError,
-  MAX_EXECUTION_DEPTH,
-  CONTINUE_SYM,
-  BREAK_SYM,
-  isPromise,
-  isFatalError,
-  applyControlFlow,
-} from "./tree-types.ts";
-export type {
-  Logger,
-  MaybePromise,
-  Trunk,
-  Path,
-  TreeContext,
-} from "./tree-types.ts";
-
-export {
-  trunkKey,
-  sameTrunk,
-  pathEquals,
-  coerceConstant,
-  setNested,
-  UNSAFE_KEYS,
-  getSimplePullRef,
-  roundMs,
-} from "./tree-utils.ts";
-
-export {
-  TraceCollector,
-  otelTracer,
-  isOtelActive,
-  toolCallCounter,
-  toolDurationHistogram,
-  toolErrorCounter,
-  SpanStatusCodeEnum,
-} from "./tracing.ts";
-export type { TraceLevel, ToolTrace } from "./tracing.ts";
-
-// ── Local imports from extracted modules (used inside this file) ────────────
+// ── Imports from extracted modules ─────────────────────────────────────────
 
 import {
   BridgePanicError,
@@ -93,16 +50,8 @@ import type { ToolTrace } from "./tracing.ts";
 
 import { resolveWires as _resolveWires } from "./resolveWires.ts";
 
-export type { ToolLookupContext } from "./toolLookup.ts";
-
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
-export type {
-  MaterializerHost,
-  MaterializableShadow,
-} from "./materializeShadows.ts";
-
 import { schedule as _schedule } from "./scheduleTools.ts";
-export type { SchedulerContext } from "./scheduleTools.ts";
 
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
