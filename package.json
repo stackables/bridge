@@ -8,6 +8,7 @@
     "build": "pnpm -r build",
     "lint:types": "pnpm -r --filter './packages/*' lint:types",
     "lint:eslint": "eslint .",
+    "check:exports": "node scripts/check-exports.mjs",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
     "ci:publish": "pnpm publish -r --filter '@stackables/*'",
