@@ -22,6 +22,8 @@ export type NodeRef = {
   rootSafe?: boolean;
   /** Per-segment safety flags (same length as `path`); true = `?.` before that segment */
   pathSafe?: boolean[];
+  /** @internal Engine cache — pre-computed `trunkKey()` string.  See docs/performance.md (#11). */
+  _key?: string;
 };
 
 /**
@@ -49,6 +51,8 @@ export type Wire =
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
+      /** @internal Engine cache — `from` ref when wire qualifies for simple-pull fast path, `null` otherwise.  See docs/performance.md (#11). */
+      _simplePullRef?: NodeRef | null;
     }
   | { value: string; to: NodeRef }
   | {

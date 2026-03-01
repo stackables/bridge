@@ -155,24 +155,25 @@ function isPromise(value: unknown): value is Promise<unknown> {
  * calls are a single property read.  See docs/performance.md (#11).
  */
 function getSimplePullRef(w: Wire): NodeRef | null {
-  let ref: NodeRef | null | undefined = (w as any).__simplePullRef;
-  if (ref !== undefined) return ref;
-  ref =
-    "from" in w &&
-    !w.safe &&
-    !w.falsyFallbackRefs?.length &&
-    w.falsyControl == null &&
-    w.falsyFallback == null &&
-    w.nullishControl == null &&
-    !w.nullishFallbackRef &&
-    w.nullishFallback == null &&
-    !w.catchControl &&
-    !w.catchFallbackRef &&
-    w.catchFallback == null
-      ? w.from
-      : null;
-  (w as any).__simplePullRef = ref;
-  return ref;
+  if ("from" in w) {
+    if (w._simplePullRef !== undefined) return w._simplePullRef;
+    const ref =
+      !w.safe &&
+      !w.falsyFallbackRefs?.length &&
+      w.falsyControl == null &&
+      w.falsyFallback == null &&
+      w.nullishControl == null &&
+      !w.nullishFallbackRef &&
+      w.nullishFallback == null &&
+      !w.catchControl &&
+      !w.catchFallbackRef &&
+      w.catchFallback == null
+        ? w.from
+        : null;
+    w._simplePullRef = ref;
+    return ref;
+  }
+  return null;
 }
 
 /** Execute a control flow instruction, returning a sentinel or throwing. */
@@ -999,6 +1000,22 @@ export class ExecutionTree {
     return child;
   }
 
+  /**
+   * Wrap raw array items into shadow trees, honouring `break` / `continue`
+   * sentinels.  Shared by `pullOutputField`, `response`, and `run`.
+   */
+  private createShadowArray(items: any[]): ExecutionTree[] {
+    const shadows: ExecutionTree[] = [];
+    for (const item of items) {
+      if (item === BREAK_SYM) break;
+      if (item === CONTINUE_SYM) continue;
+      const s = this.shadow();
+      s.state[this.elementTrunkKey] = item;
+      shadows.push(s);
+    }
+    return shadows;
+  }
+
   /** Returns collected traces (empty array when tracing is disabled). */
   getTraces(): ToolTrace[] {
     return this.tracer?.traces ?? [];
@@ -1053,7 +1070,7 @@ export class ExecutionTree {
   ): MaybePromise<any> {
     // Cache trunkKey on the NodeRef to avoid repeated string allocation
     // for the same AST node.  See docs/performance.md (#11).
-    const key = ((ref as any).__key ??= trunkKey(ref)) as string;
+    const key = (ref._key ??= trunkKey(ref));
 
     // ── Cycle detection ─────────────────────────────────────────────
     if (pullChain.has(key)) {
@@ -1200,6 +1217,87 @@ export class ExecutionTree {
     return this.resolveWiresAsync(wires, pullChain);
   }
 
+  /**
+   * Pull a ref with optional safe-navigation: catches non-fatal errors and
+   * returns `undefined` instead.  Shared by condAnd / condOr evaluation.
+   */
+  private pullSafe(
+    ref: NodeRef,
+    safe: boolean | undefined,
+    pullChain?: Set<string>,
+  ): Promise<any> {
+    if (safe) {
+      return Promise.resolve(this.pullSingle(ref, pullChain)).catch(
+        (e: any) => {
+          if (isFatalError(e)) throw e;
+          return undefined;
+        },
+      );
+    }
+    return Promise.resolve(this.pullSingle(ref, pullChain));
+  }
+
+  /**
+   * Evaluate the primary value of a wire (Layer 1) — the `from`, `cond`,
+   * `condAnd`, or `condOr` portion, before any fallback gates are applied.
+   *
+   * Returns the raw resolved value (or `undefined` if the wire variant is
+   * unrecognised).  Extracted from `resolveWiresAsync` so that the main
+   * loop only has to concern itself with the modifier layers.
+   */
+  private async evaluateWireSource(
+    w: Wire,
+    pullChain?: Set<string>,
+  ): Promise<any> {
+    if ("cond" in w) {
+      const condValue = await this.pullSingle(w.cond, pullChain);
+      if (condValue) {
+        if (w.thenRef !== undefined)
+          return this.pullSingle(w.thenRef, pullChain);
+        if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
+      } else {
+        if (w.elseRef !== undefined)
+          return this.pullSingle(w.elseRef, pullChain);
+        if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
+      }
+      return undefined;
+    }
+
+    if ("condAnd" in w) {
+      const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
+      const leftVal = await this.pullSafe(leftRef, safe, pullChain);
+      if (!leftVal) return false;
+      if (rightRef !== undefined)
+        return Boolean(await this.pullSafe(rightRef, rightSafe, pullChain));
+      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
+      return Boolean(leftVal);
+    }
+
+    if ("condOr" in w) {
+      const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
+      const leftVal = await this.pullSafe(leftRef, safe, pullChain);
+      if (leftVal) return true;
+      if (rightRef !== undefined)
+        return Boolean(await this.pullSafe(rightRef, rightSafe, pullChain));
+      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
+      return Boolean(leftVal);
+    }
+
+    if ("from" in w) {
+      if (w.safe) {
+        try {
+          return await this.pullSingle(w.from, pullChain);
+        } catch (err: any) {
+          if (isFatalError(err)) throw err;
+          return undefined;
+        }
+      }
+      return this.pullSingle(w.from, pullChain);
+    }
+
+    return undefined;
+  }
+
   private async resolveWiresAsync(
     wires: Wire[],
     pullChain?: Set<string>,
@@ -1212,102 +1310,12 @@ export class ExecutionTree {
 
       try {
         // --- Layer 1: Execution ---
-        let resolvedValue: any;
-
-        if ("cond" in w) {
-          const condValue = await this.pullSingle(w.cond, pullChain);
-          if (condValue) {
-            if (w.thenRef !== undefined)
-              resolvedValue = await this.pullSingle(w.thenRef, pullChain);
-            else if (w.thenValue !== undefined)
-              resolvedValue = coerceConstant(w.thenValue);
-          } else {
-            if (w.elseRef !== undefined)
-              resolvedValue = await this.pullSingle(w.elseRef, pullChain);
-            else if (w.elseValue !== undefined)
-              resolvedValue = coerceConstant(w.elseValue);
-          }
-        } else if ("condAnd" in w) {
-          const {
-            leftRef,
-            rightRef,
-            rightValue,
-            safe: isSafe,
-            rightSafe,
-          } = w.condAnd;
-          const leftVal = isSafe
-            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(leftRef, pullChain);
-          if (!leftVal) {
-            resolvedValue = false;
-          } else if (rightRef !== undefined) {
-            const rightVal = rightSafe
-              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
-                  if (isFatalError(e)) throw e;
-                  return undefined;
-                })
-              : await this.pullSingle(rightRef, pullChain);
-            resolvedValue = Boolean(rightVal);
-          } else if (rightValue !== undefined) {
-            resolvedValue = Boolean(coerceConstant(rightValue));
-          } else {
-            resolvedValue = Boolean(leftVal);
-          }
-        } else if ("condOr" in w) {
-          const {
-            leftRef,
-            rightRef,
-            rightValue,
-            safe: isSafe,
-            rightSafe,
-          } = w.condOr;
-          const leftVal = isSafe
-            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(leftRef, pullChain);
-          if (leftVal) {
-            resolvedValue = true;
-          } else if (rightRef !== undefined) {
-            const rightVal = rightSafe
-              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
-                  if (isFatalError(e)) throw e;
-                  return undefined;
-                })
-              : await this.pullSingle(rightRef, pullChain);
-            resolvedValue = Boolean(rightVal);
-          } else if (rightValue !== undefined) {
-            resolvedValue = Boolean(coerceConstant(rightValue));
-          } else {
-            resolvedValue = Boolean(leftVal);
-          }
-        } else if ("from" in w) {
-          if (w.safe) {
-            try {
-              resolvedValue = await this.pullSingle(w.from, pullChain);
-            } catch (err: any) {
-              if (isFatalError(err)) throw err;
-              resolvedValue = undefined;
-            }
-          } else {
-            resolvedValue = await this.pullSingle(w.from, pullChain);
-          }
-        } else {
-          continue;
-        }
+        let resolvedValue = await this.evaluateWireSource(w, pullChain);
 
         // --- Layer 2a: Falsy Gate (||) ---
         if (!resolvedValue && w.falsyFallbackRefs?.length) {
           for (const ref of w.falsyFallbackRefs) {
-            // Assign the fallback value regardless of whether it is truthy or falsy.
-            // e.g. `false || 0` will correctly update resolvedValue to `0`.
             resolvedValue = await this.pullSingle(ref, pullChain);
-
-            // If it is truthy, we are done! Short-circuit the || chain.
             if (resolvedValue) break;
           }
         }
@@ -1375,16 +1383,7 @@ export class ExecutionTree {
     if (!array) return result;
     const resolved = await result;
     if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-    const items = resolved as any[];
-    const finalShadowTrees: ExecutionTree[] = [];
-    for (const item of items) {
-      if (item === BREAK_SYM) break;
-      if (item === CONTINUE_SYM) continue;
-      const s = this.shadow();
-      s.state[this.elementTrunkKey] = item;
-      finalShadowTrees.push(s);
-    }
-    return finalShadowTrees;
+    return this.createShadowArray(resolved as any[]);
   }
 
   /**
@@ -1651,18 +1650,17 @@ export class ExecutionTree {
   }
 
   /**
-   * Recursively convert shadow trees into plain JS objects.
+   * Scan bridge wires to classify output fields at a given path prefix.
    *
-   * Wire categories at each level (prefix = P):
-   *   Leaf  — `to.path = [...P, name]`, no deeper paths → scalar
-   *   Array — direct wire AND deeper paths → pull as array, recurse
-   *   Nested object — only deeper paths, no direct wire → pull each
-   *             full path and assemble via setNested
+   * Returns a "plan" describing:
+   *   - `directFields` — leaf fields with wires at exactly `[...prefix, name]`
+   *   - `deepPaths`    — fields with wires deeper than prefix+1 (nested arrays/objects)
+   *   - `wireGroupsByPath` — wires pre-grouped by their full path key (#8)
+   *
+   * The plan is pure data (no side-effects) and is consumed by
+   * `materializeShadows` to drive the execution phase.
    */
-  private async materializeShadows(
-    items: ExecutionTree[],
-    pathPrefix: string[],
-  ): Promise<unknown[]> {
+  private planShadowOutput(pathPrefix: string[]) {
     const wires = this.bridge!.wires;
     const { type, field } = this.trunk;
 
@@ -1702,6 +1700,25 @@ export class ExecutionTree {
         arr.push(p);
       }
     }
+
+    return { directFields, deepPaths, wireGroupsByPath };
+  }
+
+  /**
+   * Recursively convert shadow trees into plain JS objects.
+   *
+   * Wire categories at each level (prefix = P):
+   *   Leaf  — `to.path = [...P, name]`, no deeper paths → scalar
+   *   Array — direct wire AND deeper paths → pull as array, recurse
+   *   Nested object — only deeper paths, no direct wire → pull each
+   *             full path and assemble via setNested
+   */
+  private async materializeShadows(
+    items: ExecutionTree[],
+    pathPrefix: string[],
+  ): Promise<unknown[]> {
+    const { directFields, deepPaths, wireGroupsByPath } =
+      this.planShadowOutput(pathPrefix);
 
     // #9/#10: Fast path — no nested arrays, only direct fields.
     // Collect all (shadow × field) resolutions.  When every value is already in
@@ -1894,16 +1911,7 @@ export class ExecutionTree {
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
       if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-      const items = resolved as any[];
-      const shadowTrees: ExecutionTree[] = [];
-      for (const item of items) {
-        if (item === BREAK_SYM) break;
-        if (item === CONTINUE_SYM) continue;
-        const s = this.shadow();
-        s.state[this.elementTrunkKey] = item;
-        shadowTrees.push(s);
-      }
-      return shadowTrees;
+      return this.createShadowArray(resolved as any[]);
     }
 
     // ── Resolve field from deferred define ────────────────────────────
@@ -1917,16 +1925,7 @@ export class ExecutionTree {
         if (!array) return response;
         const resolved = await response;
         if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-        const items = resolved as any[];
-        const shadowTrees: ExecutionTree[] = [];
-        for (const item of items) {
-          if (item === BREAK_SYM) break;
-          if (item === CONTINUE_SYM) continue;
-          const s = this.shadow();
-          s.state[this.elementTrunkKey] = item;
-          shadowTrees.push(s);
-        }
-        return shadowTrees;
+        return this.createShadowArray(resolved as any[]);
       }
     }
 
