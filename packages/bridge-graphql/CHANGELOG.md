@@ -1,5 +1,14 @@
 # @stackables/bridge-graphql
 
+## 1.0.2
+
+### Patch Changes
+
+- a92f7de: Fix JSONObject/JSON scalar fields dumping the full ExecutionTree instead of the resolved output object
+- Updated dependencies [a92f7de]
+- Updated dependencies [2023592]
+  - @stackables/bridge-core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
