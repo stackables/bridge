@@ -158,6 +158,15 @@ describe("engine hardening: bounded clone", () => {
     assert.ok(entry.input);
     assert.ok((entry.input!.data as string).length < 100);
   });
+
+  test("handles NaN/negative parameters gracefully", () => {
+    // Should not throw RangeError — parameters are clamped internally
+    const result = boundedClone([1, 2, 3], NaN, NaN, NaN) as any[];
+    assert.ok(Array.isArray(result));
+    // Negative depth clamps to 0, so arrays hit the depth limit immediately
+    const result2 = boundedClone([1, 2, 3], -1, -1, -1);
+    assert.equal(result2, "[depth limit]");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -277,6 +286,16 @@ describe("engine hardening: strict coerceConstant", () => {
   test("JSON-encoded strings are decoded", () => {
     assert.strictEqual(coerceConstant('"hello"'), "hello");
     assert.strictEqual(coerceConstant('"with \\"quotes\\""'), 'with "quotes"');
+  });
+
+  test("trailing backslash in JSON string is preserved", () => {
+    // '"trailing\' — backslash as last char before closing quote
+    assert.strictEqual(coerceConstant('"trailing\\\\"'), "trailing\\");
+  });
+
+  test("invalid unicode escape is preserved as literal", () => {
+    // '"\uZZZZ"' — not valid hex digits
+    assert.strictEqual(coerceConstant('"\\uZZZZ"'), "\\uZZZZ");
   });
 
   test("JSON objects are returned as raw string (no parse)", () => {

@@ -48,6 +48,9 @@ export function resolveWires(
   wires: Wire[],
   pullChain?: Set<string>,
 ): MaybePromise<any> {
+  // Abort discipline — honour pre-aborted signal even on the fast path
+  if (ctx.signal?.aborted) throw new BridgeAbortError();
+
   if (wires.length === 1) {
     const w = wires[0]!;
     if ("value" in w) return coerceConstant(w.value);

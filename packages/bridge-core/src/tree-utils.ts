@@ -91,6 +91,11 @@ function decodeJsonString(s: string): string {
   let result = "";
   for (let i = 0; i < inner.length; i++) {
     if (inner[i] === "\\") {
+      // If backslash is the last character, treat it as a literal backslash.
+      if (i + 1 >= inner.length) {
+        result += "\\";
+        break;
+      }
       i++;
       const ch = inner[i];
       if (ch === '"') result += '"';
@@ -103,7 +108,7 @@ function decodeJsonString(s: string): string {
       else if (ch === "f") result += "\f";
       else if (ch === "u") {
         const hex = inner.slice(i + 1, i + 5);
-        if (hex.length === 4) {
+        if (hex.length === 4 && /^[0-9a-fA-F]{4}$/.test(hex)) {
           result += String.fromCharCode(parseInt(hex, 16));
           i += 4;
         } else {
