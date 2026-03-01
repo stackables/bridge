@@ -65,15 +65,43 @@ for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
 }
 
 if (publishable.length === 0) fail("No publishable packages found");
-console.log(`\nFound ${publishable.length} publishable packages:`);
-for (const p of publishable) console.log(`  • ${p.name}@${p.pkg.version}`);
+
+// ── 2. Sort packages in dependency order (leaves first) ─────────────────────
+// pnpm pack triggers prepack → pnpm build, so each package must be packed
+// after its @stackables/* dependencies are already built.
+
+function topoSort(packages) {
+  const byName = new Map(packages.map((p) => [p.name, p]));
+  const visited = new Set();
+  const sorted = [];
+
+  function visit(p) {
+    if (visited.has(p.name)) return;
+    visited.add(p.name);
+    const deps = { ...p.pkg.dependencies, ...p.pkg.peerDependencies };
+    for (const dep of Object.keys(deps || {})) {
+      if (byName.has(dep)) visit(byName.get(dep));
+    }
+    sorted.push(p);
+  }
+
+  for (const p of packages) visit(p);
+  return sorted;
+}
+
+const sorted = topoSort(publishable);
+
+console.log(
+  `\nFound ${sorted.length} publishable packages (dependency order):`,
+);
+for (const p of sorted) console.log(`  • ${p.name}@${p.pkg.version}`);
 
 // ── 3. Pack every package ───────────────────────────────────────────────────
 
 console.log("\nPacking tarballs…");
 const tarballs = new Map(); // name → absolute path to .tgz
 
-for (const p of publishable) {
+for (const p of sorted) {
   const out = run("pnpm pack --pack-destination /tmp/bridge-smoke", {
     cwd: p.dir,
   }).trim();
