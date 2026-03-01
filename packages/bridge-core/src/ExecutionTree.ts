@@ -87,16 +87,6 @@ function trunkKey(ref: Trunk & { element?: boolean }): string {
   return `${ref.module}:${ref.type}:${ref.field}${ref.instance != null ? `:${ref.instance}` : ""}`;
 }
 
-/** Match two trunks (ignoring path and element) */
-function sameTrunk(a: Trunk, b: Trunk): boolean {
-  return (
-    a.module === b.module &&
-    a.type === b.type &&
-    a.field === b.field &&
-    (a.instance ?? undefined) === (b.instance ?? undefined)
-  );
-}
-
 /** Strict path equality */
 function pathEquals(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -236,17 +226,143 @@ function setNested(obj: any, path: string[], value: any): void {
   }
 }
 
+// ── Document Index (WeakMap-cached per BridgeDocument) ──────────────
+
+/** Key for wire indexing — matches sameTrunk semantics (ignores element flag) */
+function wireTargetKey(ref: Trunk): string {
+  return `${ref.module}:${ref.type}:${ref.field}${ref.instance != null ? `:${ref.instance}` : ""}`;
+}
+
+/** Pre-computed per-bridge wire and handle data */
+interface BridgeIndex {
+  /** Wires grouped by target trunk key (O(1) lookup vs O(n) filter) */
+  wiresByTarget: Map<string, Wire[]>;
+  /** Handle → @version tag mapping */
+  handleVersionMap: Map<string, string>;
+  /** Pipe fork key → pipe handle binding */
+  pipeHandleMap: Map<string, NonNullable<Bridge["pipeHandles"]>[number]>;
+}
+
+/** Pre-computed per-document data — computed once and cached via WeakMap */
+interface DocumentIndex {
+  /** Pre-parsed const definitions (JSON.parse done exactly once) */
+  constants: Record<string, any>;
+  /** Whether any constants exist */
+  hasConstants: boolean;
+  /** Bridge definitions keyed by "type:field" */
+  bridges: Map<string, Bridge>;
+  /** All tool definitions extracted from instructions */
+  toolDefs: ToolDef[];
+  /** Pre-merged tool definitions (lazily populated, shared across all trees) */
+  toolDefCache: Map<string, ToolDef | null>;
+  /** Per-bridge index data, keyed by "type:field" */
+  bridgeIndices: Map<string, BridgeIndex>;
+}
+
+/** Module-scoped cache — WeakMap ensures GC when the document is no longer referenced */
+const documentIndexCache = new WeakMap<BridgeDocument, DocumentIndex>();
+
+/** Build or retrieve the pre-computed index for a BridgeDocument. */
+function getDocumentIndex(doc: BridgeDocument): DocumentIndex {
+  let index = documentIndexCache.get(doc);
+  if (index) return index;
+
+  const bridges = new Map<string, Bridge>();
+  const constants: Record<string, any> = {};
+  const toolDefs: ToolDef[] = [];
+
+  for (const inst of doc.instructions) {
+    if (inst.kind === "bridge") {
+      bridges.set(`${inst.type}:${inst.field}`, inst);
+    } else if (inst.kind === "const") {
+      constants[inst.name] = JSON.parse(inst.value);
+    } else if (inst.kind === "tool") {
+      toolDefs.push(inst);
+    }
+  }
+
+  const bridgeIndices = new Map<string, BridgeIndex>();
+  for (const [key, bridge] of bridges) {
+    // Group wires by target trunk key for O(1) lookup
+    const wiresByTarget = new Map<string, Wire[]>();
+    for (const wire of bridge.wires) {
+      const tk = wireTargetKey(wire.to);
+      let group = wiresByTarget.get(tk);
+      if (!group) {
+        group = [];
+        wiresByTarget.set(tk, group);
+      }
+      group.push(wire);
+    }
+
+    // Build handle → version map (previously per-constructor)
+    const handleVersionMap = new Map<string, string>();
+    const instanceCounters = new Map<string, number>();
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool") continue;
+      const name = h.name;
+      const lastDot = name.lastIndexOf(".");
+      let module: string, field: string, counterKey: string, type: string;
+      if (lastDot !== -1) {
+        module = name.substring(0, lastDot);
+        field = name.substring(lastDot + 1);
+        counterKey = `${module}:${field}`;
+        type = bridge.type;
+      } else {
+        module = SELF_MODULE;
+        field = name;
+        counterKey = `Tools:${name}`;
+        type = "Tools";
+      }
+      const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
+      instanceCounters.set(counterKey, instance);
+      if (h.version) {
+        const vKey = trunkKey({ module, type, field, instance });
+        handleVersionMap.set(vKey, h.version);
+      }
+    }
+
+    // Build pipe handle map (previously per-constructor)
+    const pipeHandleMap = new Map<
+      string,
+      NonNullable<Bridge["pipeHandles"]>[number]
+    >();
+    if (bridge.pipeHandles) {
+      for (const ph of bridge.pipeHandles) {
+        pipeHandleMap.set(ph.key, ph);
+      }
+    }
+
+    bridgeIndices.set(key, { wiresByTarget, handleVersionMap, pipeHandleMap });
+  }
+
+  index = {
+    constants,
+    hasConstants: Object.keys(constants).length > 0,
+    bridges,
+    toolDefs,
+    toolDefCache: new Map(),
+    bridgeIndices,
+  };
+
+  documentIndexCache.set(doc, index);
+  return index;
+}
+
+// ── ExecutionTree ───────────────────────────────────────────────────
+
 export class ExecutionTree {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
   private toolDepCache: Map<string, Promise<any>> = new Map();
-  private toolDefCache: Map<string, ToolDef | null> = new Map();
+  private docIndex!: DocumentIndex;
+  private wireIndex: Map<string, Wire[]> | undefined;
   private pipeHandleMap:
     | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
     | undefined;
   /**
    * Maps trunk keys to `@version` strings from handle bindings.
-   * Populated in the constructor so `schedule()` can prefer versioned
+   * Populated from the document index so `schedule()` can prefer versioned
    * tool lookups (e.g. `std.str.toLowerCase@999.1`) over the default.
    */
   private handleVersionMap: Map<string, string> = new Map();
@@ -276,60 +392,35 @@ export class ExecutionTree {
       );
     }
     this.toolFns = { internal, ...(toolFns ?? {}) };
-    const instructions = document.instructions;
-    this.bridge = instructions.find(
-      (i): i is Bridge =>
-        i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
-    );
-    if (this.bridge?.pipeHandles) {
-      this.pipeHandleMap = new Map(
-        this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
-      );
-    }
-    // Build handle→version map from bridge handle bindings
-    if (this.bridge) {
-      const instanceCounters = new Map<string, number>();
-      for (const h of this.bridge.handles) {
-        if (h.kind !== "tool") continue;
-        const name = h.name;
-        const lastDot = name.lastIndexOf(".");
-        let module: string, field: string, counterKey: string, type: string;
-        if (lastDot !== -1) {
-          module = name.substring(0, lastDot);
-          field = name.substring(lastDot + 1);
-          counterKey = `${module}:${field}`;
-          type = this.trunk.type;
-        } else {
-          module = SELF_MODULE;
-          field = name;
-          counterKey = `Tools:${name}`;
-          type = "Tools";
-        }
-        const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
-        instanceCounters.set(counterKey, instance);
-        if (h.version) {
-          const key = trunkKey({ module, type, field, instance });
-          this.handleVersionMap.set(key, h.version);
-        }
-      }
-    }
+
+    // O(1) after the first call per document — all heavy work is cached
+    const index = getDocumentIndex(document);
+    this.docIndex = index;
+
+    const bridgeKey = `${trunk.type}:${trunk.field}`;
+    this.bridge = index.bridges.get(bridgeKey);
+
+    const bridgeIdx = index.bridgeIndices.get(bridgeKey);
+    this.wireIndex = bridgeIdx?.wiresByTarget;
+    this.handleVersionMap = bridgeIdx?.handleVersionMap ?? new Map();
+    this.pipeHandleMap = bridgeIdx?.pipeHandleMap;
+
     if (context) {
       this.state[
         trunkKey({ module: SELF_MODULE, type: "Context", field: "context" })
       ] = context;
     }
-    // Collect const definitions into a single namespace object
-    const constObj: Record<string, any> = {};
-    for (const inst of instructions) {
-      if (inst.kind === "const") {
-        constObj[inst.name] = JSON.parse(inst.value);
-      }
-    }
-    if (Object.keys(constObj).length > 0) {
+    // Use pre-parsed constants from the index (JSON.parse done exactly once)
+    if (index.hasConstants) {
       this.state[
         trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
-      ] = constObj;
+      ] = index.constants;
     }
+  }
+
+  /** O(1) lookup for wires targeting a specific trunk (replaces O(n) filter scans) */
+  private getWiresForTarget(target: Trunk): Wire[] {
+    return this.wireIndex?.get(wireTargetKey(target)) ?? [];
   }
 
   /** Derive tool name from a trunk */
@@ -399,17 +490,15 @@ export class ExecutionTree {
     return typeof internalFn === "function" ? internalFn : undefined;
   }
 
-  /** Resolve a ToolDef by name, merging the extends chain (cached) */
+  /** Resolve a ToolDef by name, merging the extends chain (cached per document) */
   private resolveToolDefByName(name: string): ToolDef | undefined {
-    if (this.toolDefCache.has(name))
-      return this.toolDefCache.get(name) ?? undefined;
+    const cache = this.docIndex.toolDefCache;
+    if (cache.has(name)) return cache.get(name) ?? undefined;
 
-    const toolDefs = this.document.instructions.filter(
-      (i): i is ToolDef => i.kind === "tool",
-    );
+    const toolDefs = this.docIndex.toolDefs;
     const base = toolDefs.find((t) => t.name === name);
     if (!base) {
-      this.toolDefCache.set(name, null);
+      cache.set(name, null);
       return undefined;
     }
 
@@ -458,7 +547,7 @@ export class ExecutionTree {
       }
     }
 
-    this.toolDefCache.set(name, merged);
+    cache.set(name, merged);
     return merged;
   }
 
@@ -571,8 +660,7 @@ export class ExecutionTree {
     // the target fork has bridge wires sourced from element data,
     // or a __local binding whose source chain touches element data.
     if (this.parent) {
-      const forkWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const forkWires = this.getWiresForTarget(target);
       const hasElementSource = forkWires.some(
         (w) =>
           ("from" in w && !!w.from.element) ||
@@ -593,11 +681,8 @@ export class ExecutionTree {
             field: w.from.field,
             instance: w.from.instance,
           };
-          return (
-            this.bridge?.wires.some(
-              (iw) =>
-                sameTrunk(iw.to, srcTrunk) && "from" in iw && !!iw.from.element,
-            ) ?? false
+          return this.getWiresForTarget(srcTrunk).some(
+            (iw) => "from" in iw && !!iw.from.element,
           );
         });
       if (!hasElementSource && !hasTransitiveElementSource) {
@@ -614,13 +699,10 @@ export class ExecutionTree {
       const baseTrunk = pipeFork?.baseTrunk;
 
       const baseWires = baseTrunk
-        ? (this.bridge?.wires.filter(
-            (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
-          ) ?? [])
+        ? this.getWiresForTarget(baseTrunk).filter((w) => !("pipe" in w))
         : [];
       // Fork-specific wires (pipe wires targeting the fork's own instance)
-      const forkWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+      const forkWires = this.getWiresForTarget(target);
       // Merge: base provides defaults, fork overrides
       const bridgeWires = [...baseWires, ...forkWires];
 
@@ -869,10 +951,9 @@ export class ExecutionTree {
       // dependency chains (e.g. requesting "city" should not fire the
       // lat/lon coalesce chains that call the geo tool).
       if (ref.path.length > 0 && ref.module.startsWith("__define_")) {
-        const fieldWires =
-          this.bridge?.wires.filter(
-            (w) => sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
-          ) ?? [];
+        const fieldWires = this.getWiresForTarget(ref).filter((w) =>
+          pathEquals(w.to.path, ref.path),
+        );
         if (fieldWires.length > 0) {
           return this.resolveWires(fieldWires, nextChain);
         }
@@ -1161,10 +1242,9 @@ export class ExecutionTree {
    *               in a shadow tree (mirrors `response()` array handling).
    */
   async pullOutputField(path: string[], array = false): Promise<unknown> {
-    const matches =
-      this.bridge?.wires.filter(
-        (w) => sameTrunk(w.to, this.trunk) && pathEquals(w.to.path, path),
-      ) ?? [];
+    const matches = this.getWiresForTarget(this.trunk).filter((w) =>
+      pathEquals(w.to.path, path),
+    );
     if (matches.length === 0) return undefined;
     const result = this.resolveWires(matches);
     if (!array) return result;
@@ -1195,19 +1275,19 @@ export class ExecutionTree {
     if (!bridge) return undefined;
 
     const { type, field } = this.trunk;
+    const outputTrunkWires = this.getWiresForTarget({
+      module: SELF_MODULE,
+      type,
+      field,
+    });
 
     // Shadow tree (array element) — resolve element-level output fields.
     // For scalar arrays ([JSON!]) GraphQL won't call sub-field resolvers,
     // so we eagerly materialise each element here.
     if (this.parent) {
       const outputFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          wire.to.path.length > 0
-        ) {
+      for (const wire of outputTrunkWires) {
+        if (wire.to.path.length > 0) {
           outputFields.add(wire.to.path[0]!);
         }
       }
@@ -1226,13 +1306,8 @@ export class ExecutionTree {
     }
 
     // Root wire (`o <- src`) — whole-object passthrough
-    const hasRootWire = bridge.wires.some(
-      (w) =>
-        "from" in w &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field &&
-        w.to.path.length === 0,
+    const hasRootWire = outputTrunkWires.some(
+      (w) => "from" in w && w.to.path.length === 0,
     );
     if (hasRootWire) {
       return this.pullOutputField([]);
@@ -1240,13 +1315,8 @@ export class ExecutionTree {
 
     // Object output — collect unique top-level field names
     const outputFields = new Set<string>();
-    for (const wire of bridge.wires) {
-      if (
-        wire.to.module === SELF_MODULE &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        wire.to.path.length > 0
-      ) {
+    for (const wire of outputTrunkWires) {
+      if (wire.to.path.length > 0) {
         outputFields.add(wire.to.path[0]!);
       }
     }
@@ -1256,24 +1326,17 @@ export class ExecutionTree {
     const result: Record<string, unknown> = {};
 
     const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
+      const exactWires = outputTrunkWires.filter((w) =>
+        pathEquals(w.to.path, prefix),
       );
       if (exactWires.length > 0) {
         return this.resolveWires(exactWires);
       }
 
       const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
+      for (const wire of outputTrunkWires) {
         const p = wire.to.path;
         if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
           p.length > prefix.length &&
           prefix.every((seg, i) => p[i] === seg)
         ) {
@@ -1320,15 +1383,15 @@ export class ExecutionTree {
     const forcePromises = this.executeForced();
 
     const { type, field } = this.trunk;
+    const outputTrunkWires = this.getWiresForTarget({
+      module: SELF_MODULE,
+      type,
+      field,
+    });
 
     // Is there a root-level wire targeting the output with path []?
-    const hasRootWire = bridge.wires.some(
-      (w) =>
-        "from" in w &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field &&
-        w.to.path.length === 0,
+    const hasRootWire = outputTrunkWires.some(
+      (w) => "from" in w && w.to.path.length === 0,
     );
 
     // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
@@ -1337,15 +1400,12 @@ export class ExecutionTree {
     // Local bindings (from.__local) are also element-scoped.
     // Pipe fork output wires in element context (e.g. concat template strings)
     // may have to.element === true instead.
-    const hasElementWires = bridge.wires.some(
+    const hasElementWires = outputTrunkWires.some(
       (w) =>
         "from" in w &&
         ((w.from as NodeRef).element === true ||
           (w.from as NodeRef).module === "__local" ||
-          w.to.element === true) &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field,
+          w.to.element === true),
     );
 
     if (hasRootWire && hasElementWires) {
@@ -1367,13 +1427,8 @@ export class ExecutionTree {
 
     // Object output — collect unique top-level field names
     const outputFields = new Set<string>();
-    for (const wire of bridge.wires) {
-      if (
-        wire.to.module === SELF_MODULE &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        wire.to.path.length > 0
-      ) {
+    for (const wire of outputTrunkWires) {
+      if (wire.to.path.length > 0) {
         outputFields.add(wire.to.path[0]!);
       }
     }
@@ -1390,12 +1445,8 @@ export class ExecutionTree {
     // Resolves a single output field at `prefix` — either via an exact-match
     // wire (leaf), or by collecting sub-fields from deeper wires (nested object).
     const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
+      const exactWires = outputTrunkWires.filter((w) =>
+        pathEquals(w.to.path, prefix),
       );
       if (exactWires.length > 0) {
         return this.resolveWires(exactWires);
@@ -1404,12 +1455,9 @@ export class ExecutionTree {
       // No exact wire — gather sub-field names from deeper-path wires
       // (e.g. `o.why { .temperature <- ... }` produces path ["why","temperature"])
       const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
+      for (const wire of outputTrunkWires) {
         const p = wire.to.path;
         if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
           p.length > prefix.length &&
           prefix.every((seg, i) => p[i] === seg)
         ) {
@@ -1449,20 +1497,18 @@ export class ExecutionTree {
     items: ExecutionTree[],
     pathPrefix: string[],
   ): Promise<unknown[]> {
-    const wires = this.bridge!.wires;
     const { type, field } = this.trunk;
+    const outputWires = this.getWiresForTarget({
+      module: SELF_MODULE,
+      type,
+      field,
+    });
 
     const directFields = new Set<string>();
     const deepPaths = new Map<string, string[][]>();
 
-    for (const wire of wires) {
+    for (const wire of outputWires) {
       const p = wire.to.path;
-      if (
-        wire.to.module !== SELF_MODULE ||
-        wire.to.type !== type ||
-        wire.to.field !== field
-      )
-        continue;
       if (p.length <= pathPrefix.length) continue;
       if (!pathPrefix.every((seg, i) => p[i] === seg)) continue;
 
@@ -1555,13 +1601,9 @@ export class ExecutionTree {
 
     if (pathSegments.length === 0) {
       // Direct output for scalar/list return types (e.g. [String!])
-      const directOutput =
-        this.bridge?.wires.filter(
-          (w) =>
-            sameTrunk(w.to, this.trunk) &&
-            w.to.path.length === 1 &&
-            w.to.path[0] === this.trunk.field,
-        ) ?? [];
+      const directOutput = this.getWiresForTarget(this.trunk).filter(
+        (w) => w.to.path.length === 1 && w.to.path[0] === this.trunk.field,
+      );
       if (directOutput.length > 0) {
         return this.resolveWires(directOutput);
       }
@@ -1571,13 +1613,11 @@ export class ExecutionTree {
     const cleanPath = pathSegments.filter((p) => !/^\d+$/.test(p));
 
     // Find wires whose target matches this trunk + path
-    const matches =
-      this.bridge?.wires.filter(
-        (w) =>
-          (w.to.element ? !!this.parent : true) &&
-          sameTrunk(w.to, this.trunk) &&
-          pathEquals(w.to.path, cleanPath),
-      ) ?? [];
+    const matches = this.getWiresForTarget(this.trunk).filter(
+      (w) =>
+        (w.to.element ? !!this.parent : true) &&
+        pathEquals(w.to.path, cleanPath),
+    );
 
     if (matches.length > 0) {
       // ── Lazy define resolution ──────────────────────────────────────
@@ -1686,26 +1726,22 @@ export class ExecutionTree {
    * for ones matching the requested field path.
    */
   private findDefineFieldWires(cleanPath: string[]): Wire[] {
-    const forwards =
-      this.bridge?.wires.filter(
-        (w): w is Extract<Wire, { from: NodeRef }> =>
-          "from" in w &&
-          sameTrunk(w.to, this.trunk) &&
-          w.to.path.length === 0 &&
-          w.from.module.startsWith("__define_out_") &&
-          w.from.path.length === 0,
-      ) ?? [];
+    const forwards = this.getWiresForTarget(this.trunk).filter(
+      (w): w is Extract<Wire, { from: NodeRef }> =>
+        "from" in w &&
+        w.to.path.length === 0 &&
+        w.from.module.startsWith("__define_out_") &&
+        w.from.path.length === 0,
+    );
 
     if (forwards.length === 0) return [];
 
     const result: Wire[] = [];
     for (const fw of forwards) {
       const defOutTrunk = fw.from;
-      const fieldWires =
-        this.bridge?.wires.filter(
-          (w) =>
-            sameTrunk(w.to, defOutTrunk) && pathEquals(w.to.path, cleanPath),
-        ) ?? [];
+      const fieldWires = this.getWiresForTarget(defOutTrunk).filter((w) =>
+        pathEquals(w.to.path, cleanPath),
+      );
       result.push(...fieldWires);
     }
     return result;
