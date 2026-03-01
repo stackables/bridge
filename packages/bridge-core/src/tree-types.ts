@@ -26,6 +26,16 @@ export class BridgeAbortError extends Error {
   }
 }
 
+/** Timeout error — raised when a tool call exceeds the configured timeout. */
+export class BridgeTimeoutError extends Error {
+  constructor(toolName: string, timeoutMs: number) {
+    super(
+      `Tool "${toolName}" timed out after ${timeoutMs}ms`,
+    );
+    this.name = "BridgeTimeoutError";
+  }
+}
+
 // ── Sentinels ───────────────────────────────────────────────────────────────
 
 /** Sentinel for `continue` — skip the current array element */
@@ -86,6 +96,8 @@ export interface Path {
 export interface TreeContext {
   /** Resolve a single NodeRef, returning sync when already in state. */
   pullSingle(ref: NodeRef, pullChain?: Set<string>): MaybePromise<any>;
+  /** External abort signal — cancels execution when triggered. */
+  signal?: AbortSignal;
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */

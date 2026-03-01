@@ -62,6 +62,17 @@ export type BridgeOptions = {
    * Defaults to silent no-ops so there is zero output unless you opt in.
    */
   logger?: Logger;
+  /**
+   * Hard timeout for tool calls in milliseconds.
+   * Tools that exceed this duration throw a `BridgeTimeoutError`.
+   * Default: 15_000 (15 seconds). Set to `0` to disable.
+   */
+  toolTimeoutMs?: number;
+  /**
+   * Maximum shadow-tree nesting depth.
+   * Default: 30. Increase for deeply nested array mappings.
+   */
+  maxDepth?: number;
 };
 
 /** Document can be a static BridgeDocument or a function that selects per-request */
@@ -160,6 +171,12 @@ export function bridgeTransform(
             );
 
             source.logger = logger;
+            if (options?.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+              source.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
+            }
+            if (options?.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+              source.maxDepth = Math.floor(options.maxDepth);
+            }
 
             if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);

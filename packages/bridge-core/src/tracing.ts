@@ -76,14 +76,101 @@ export type ToolTrace = {
 
 // ── TraceCollector ──────────────────────────────────────────────────────────
 
+/**
+ * Bounded clone utility — replaces `structuredClone` for trace data.
+ * Truncates arrays, strings, and deep objects to prevent OOM when
+ * tracing large payloads.
+ */
+export function boundedClone(
+  value: unknown,
+  maxArrayItems = 100,
+  maxStringLength = 1024,
+  depth = 5,
+): unknown {
+  // Clamp parameters to sane ranges to prevent RangeError from new Array()
+  const safeArrayItems = Math.max(
+    0,
+    Number.isFinite(maxArrayItems) ? Math.floor(maxArrayItems) : 100,
+  );
+  const safeStringLength = Math.max(
+    0,
+    Number.isFinite(maxStringLength) ? Math.floor(maxStringLength) : 1024,
+  );
+  const safeDepth = Math.max(
+    0,
+    Number.isFinite(depth) ? Math.floor(depth) : 5,
+  );
+  return _boundedClone(value, safeArrayItems, safeStringLength, safeDepth, 0);
+}
+
+function _boundedClone(
+  value: unknown,
+  maxArrayItems: number,
+  maxStringLength: number,
+  maxDepth: number,
+  currentDepth: number,
+): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    if (value.length > maxStringLength) {
+      return value.slice(0, maxStringLength) + `... (${value.length} chars)`;
+    }
+    return value;
+  }
+  if (typeof value !== "object") return value; // number, boolean, bigint, symbol
+  if (currentDepth >= maxDepth) return "[depth limit]";
+
+  if (Array.isArray(value)) {
+    const len = Math.min(value.length, maxArrayItems);
+    const result = new Array(len);
+    for (let i = 0; i < len; i++) {
+      result[i] = _boundedClone(
+        value[i],
+        maxArrayItems,
+        maxStringLength,
+        maxDepth,
+        currentDepth + 1,
+      );
+    }
+    if (value.length > maxArrayItems) {
+      result.push(`... (${value.length} items)`);
+    }
+    return result;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    result[key] = _boundedClone(
+      (value as Record<string, unknown>)[key],
+      maxArrayItems,
+      maxStringLength,
+      maxDepth,
+      currentDepth + 1,
+    );
+  }
+  return result;
+}
+
 /** Shared trace collector — one per request, passed through the tree. */
 export class TraceCollector {
   readonly traces: ToolTrace[] = [];
   readonly level: "basic" | "full";
   private readonly epoch = performance.now();
+  /** Max array items to keep in bounded clone (configurable). */
+  readonly maxArrayItems: number;
+  /** Max string length to keep in bounded clone (configurable). */
+  readonly maxStringLength: number;
+  /** Max object depth to keep in bounded clone (configurable). */
+  readonly cloneDepth: number;
 
-  constructor(level: "basic" | "full" = "full") {
+  constructor(
+    level: "basic" | "full" = "full",
+    options?: { maxArrayItems?: number; maxStringLength?: number; cloneDepth?: number },
+  ) {
     this.level = level;
+    this.maxArrayItems = options?.maxArrayItems ?? 100;
+    this.maxStringLength = options?.maxStringLength ?? 1024;
+    this.cloneDepth = options?.cloneDepth ?? 5;
   }
 
   /** Returns ms since the collector was created */
@@ -122,7 +209,17 @@ export class TraceCollector {
       durationMs: base.durationMs,
       startedAt: base.startedAt,
     };
-    if (base.input) t.input = structuredClone(base.input);
+    if (base.input) {
+      const clonedInput = boundedClone(
+        base.input,
+        this.maxArrayItems,
+        this.maxStringLength,
+        this.cloneDepth,
+      );
+      if (clonedInput && typeof clonedInput === "object") {
+        t.input = clonedInput as Record<string, any>;
+      }
+    }
     if (base.error) t.error = base.error;
     else if (base.output !== undefined) t.output = base.output;
     return t;

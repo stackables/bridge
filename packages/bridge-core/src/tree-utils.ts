@@ -43,11 +43,10 @@ export function pathEquals(a: string[], b: string[]): boolean {
 /**
  * Coerce a constant wire value string to its proper JS type.
  *
- * The parser stores all bare constants as strings (because the Wire type
- * uses `value: string`). JSON.parse recovers the original type:
- *   "true" → true, "false" → false, "null" → null, "42" → 42
- * Plain strings that aren't valid JSON (like "hello", "/search") fall
- * through and are returned as-is.
+ * Uses strict primitive parsing — no `JSON.parse` — to eliminate any
+ * hypothetical AST-injection gadget chains.  Handles boolean, null,
+ * numeric literals, and JSON-encoded strings (`'"hello"'` → `"hello"`).
+ * JSON objects/arrays in fallback positions return the raw string.
  *
  * Results are cached in a module-level Map because the same constant
  * strings appear repeatedly across shadow trees.  Only safe for
@@ -56,17 +55,72 @@ export function pathEquals(a: string[], b: string[]): boolean {
  */
 const constantCache = new Map<string, unknown>();
 export function coerceConstant(raw: string): unknown {
+  if (typeof raw !== "string") return raw;
   const cached = constantCache.get(raw);
   if (cached !== undefined) return cached;
   let result: unknown;
-  try {
-    result = JSON.parse(raw);
-  } catch {
-    result = raw;
+  const trimmed = raw.trim();
+  if (trimmed === "true") result = true;
+  else if (trimmed === "false") result = false;
+  else if (trimmed === "null") result = null;
+  else if (
+    trimmed.length >= 2 &&
+    trimmed.charCodeAt(0) === 0x22 /* " */ &&
+    trimmed.charCodeAt(trimmed.length - 1) === 0x22 /* " */
+  ) {
+    // JSON-encoded string — decode escape sequences safely
+    result = decodeJsonString(trimmed);
+  } else {
+    const num = Number(trimmed);
+    if (trimmed !== "" && !isNaN(num) && isFinite(num)) result = num;
+    else result = raw;
   }
   // Hard cap to prevent unbounded growth over long-lived processes.
   if (constantCache.size > 10_000) constantCache.clear();
   constantCache.set(raw, result);
+  return result;
+}
+
+/**
+ * Decode a JSON-encoded string literal (e.g. `'"hello"'` → `"hello"`).
+ * Handles standard JSON escape sequences without using `JSON.parse`.
+ */
+function decodeJsonString(s: string): string {
+  // Strip outer quotes
+  const inner = s.slice(1, -1);
+  let result = "";
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] === "\\") {
+      // If backslash is the last character, treat it as a literal backslash.
+      if (i + 1 >= inner.length) {
+        result += "\\";
+        break;
+      }
+      i++;
+      const ch = inner[i];
+      if (ch === '"') result += '"';
+      else if (ch === "\\") result += "\\";
+      else if (ch === "/") result += "/";
+      else if (ch === "n") result += "\n";
+      else if (ch === "r") result += "\r";
+      else if (ch === "t") result += "\t";
+      else if (ch === "b") result += "\b";
+      else if (ch === "f") result += "\f";
+      else if (ch === "u") {
+        const hex = inner.slice(i + 1, i + 5);
+        if (hex.length === 4 && /^[0-9a-fA-F]{4}$/.test(hex)) {
+          result += String.fromCharCode(parseInt(hex, 16));
+          i += 4;
+        } else {
+          result += "\\u";
+        }
+      } else {
+        result += "\\" + ch;
+      }
+    } else {
+      result += inner[i];
+    }
+  }
   return result;
 }
 
@@ -84,6 +138,11 @@ export function setNested(obj: any, path: string[], value: any): void {
       obj[key] = /^\d+$/.test(nextKey) ? [] : {};
     }
     obj = obj[key];
+    if (typeof obj !== "object" || obj === null) {
+      throw new Error(
+        `Cannot set nested property: value at "${key}" is not an object`,
+      );
+    }
   }
   if (path.length > 0) {
     const finalKey = path[path.length - 1];
