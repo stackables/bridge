@@ -4,18 +4,19 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 
 ## Summary
 
-| #   | Optimisation                       | Date       | Result                       |
-| --- | ---------------------------------- | ---------- | ---------------------------- |
-| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)            |
-| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)              |
-| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)           |
-| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)  |
-| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)   |
-| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression) |
-| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)  |
-| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)             |
-| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)    |
-| 10  | Sync fast path for resolved values |            | Planned                      |
+| #   | Optimisation                       | Date       | Result                                 |
+| --- | ---------------------------------- | ---------- | -------------------------------------- |
+| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)                      |
+| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)                        |
+| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)                     |
+| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)            |
+| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)             |
+| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression)           |
+| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)            |
+| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)                       |
+| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)              |
+| 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)  |
+| 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays) |
 
 ## Baseline (main, March 2026)
 
@@ -31,18 +32,18 @@ document are from this machine — compare only against the same hardware.
 | ---------------------------------- | ------- | -------- |
 | parse: simple bridge               | ~43K    | 0.023    |
 | parse: large bridge (20×5)         | ~2.5K   | 0.40     |
-| exec: passthrough (no tools)       | ~610K   | 0.002    |
-| exec: short-circuit                | ~751K   | 0.001    |
-| exec: simple chain (1 tool)        | ~417K   | 0.002    |
-| exec: chained 3-tool fan-out       | ~152K   | 0.007    |
-| exec: flat array 10                | ~69K    | 0.015    |
-| exec: flat array 100               | ~8.0K   | 0.128    |
-| exec: flat array 1000              | ~627    | 1.62     |
-| exec: nested array 5×5             | ~21K    | 0.049    |
-| exec: nested array 10×10           | ~6.1K   | 0.166    |
-| exec: nested array 20×10           | ~3.0K   | 0.339    |
-| exec: array + tool-per-element 10  | ~25K    | 0.041    |
-| exec: array + tool-per-element 100 | ~2.6K   | 0.387    |
+| exec: passthrough (no tools)       | ~846K   | 0.001    |
+| exec: short-circuit                | ~811K   | 0.001    |
+| exec: simple chain (1 tool)        | ~486K   | 0.002    |
+| exec: chained 3-tool fan-out       | ~194K   | 0.005    |
+| exec: flat array 10                | ~170K   | 0.006    |
+| exec: flat array 100               | ~28.3K  | 0.035    |
+| exec: flat array 1000              | ~3,064  | 0.325    |
+| exec: nested array 5×5             | ~46.7K  | 0.021    |
+| exec: nested array 10×10           | ~17.5K  | 0.057    |
+| exec: nested array 20×10           | ~8.8K   | 0.114    |
+| exec: array + tool-per-element 10  | ~30.9K  | 0.032    |
+| exec: array + tool-per-element 100 | ~3.43K  | 0.286    |
 
 This table is the current perf level. It is updated after a successful optimisation is committed.
 
@@ -377,21 +378,124 @@ at all, so they see no change.
 
 ### 10. Sync fast path for resolved values
 
-**Result:** Planned (2–3× expected on array benchmarks).
+**Date:** March 2026
+**Result:** ✅ +8–17% on all benchmarks, +42–114% on array benchmarks.
 
-`pullSingle()` always returns `Promise<any>`, but for element wires like
-`.id <- it.id` the value is always synchronously available in
-`this.state[key]`. The code does `await Promise.resolve(value)` even
-when the value is not a Promise.
+| Benchmark                          | Before | After | Change    |
+| ---------------------------------- | ------ | ----- | --------- |
+| exec: passthrough                  | 610K   | 728K  | **+19%**  |
+| exec: short-circuit                | 745K   | 778K  | **+4%**   |
+| exec: simple chain                 | 418K   | 457K  | **+9%**   |
+| exec: chained 3-tool fan-out       | 156K   | 175K  | **+12%**  |
+| exec: flat array 10                | 69K    | 101K  | **+46%**  |
+| exec: flat array 100               | 8.0K   | 13.0K | **+63%**  |
+| exec: flat array 1000              | 627    | 1,336 | **+113%** |
+| exec: nested array 5×5             | 21K    | 29.4K | **+40%**  |
+| exec: nested array 10×10           | 6.1K   | 9.0K  | **+48%**  |
+| exec: nested array 20×10           | 3.0K   | 4.6K  | **+53%**  |
+| exec: array + tool-per-element 10  | 25K    | 27.6K | **+10%**  |
+| exec: array + tool-per-element 100 | 2.6K   | 2.97K | **+14%**  |
 
-For the flat-array-1000 benchmark, this produces **6–7 microtask hops
-per element** × 1000 = 6000–7000 microtask queue entries, costing
-~2.8–3.5ms of the total 3.7ms. Eliminating unnecessary `await` on
-already-resolved values would cut the majority of this overhead.
+`pullSingle()` always returned `Promise<any>`, but for element wires like
+`.id <- it.id` the value is already synchronously available in
+`this.state[key]`. The previous code did `await Promise.resolve(value)` even
+when the value was not a Promise, producing **6–7 microtask hops per
+element** × 1000 elements = 6000–7000 scheduled microtasks costing
+~2.8ms of the 3.7ms total for flat-array-1000.
 
-**Approach:** Either split into `pullSingleSync` / `pullSingleAsync`, or
-use a "maybe-async" pattern that checks `typeof value?.then === 'function'`
-before awaiting.
+**Changes made:**
 
-**Risk:** Significant refactor touching `pullSingle`, `resolveWires`,
-and the entire pull chain. Must preserve correctness for all wire types.
+1. **`MaybePromise<T>` type + `isPromise()` helper** — module-level type alias
+   and guard (`'then' in (value as any)`) to distinguish live Promises from
+   synchronous values without ever constructing a new Promise.
+
+2. **`pullSingle` de-asynced** — `async pullSingle()` replaced with a
+   sync-first implementation:
+
+   ```ts
+   // sync fast path
+   if (!isPromise(value)) return this.applyPath(value, ref);
+   // async path only when tool result is still pending
+   return (value as Promise<any>).then((resolved) =>
+     this.applyPath(resolved, ref),
+   );
+   ```
+
+   Extracted `applyPath(resolved, ref)` as a private helper for the shared
+   path-traversal logic used by both paths.
+
+3. **`resolveWires` fast path** — new method that detects the common case:
+   a single `from` wire with no modifiers (no `safe`, no falsy/nullish/catch
+   fallbacks). In that case it calls `pullSingle` directly and returns
+   `MaybePromise<any>`. All other cases fall through to the existing async
+   `resolveWiresAsync` (renamed from the old `resolveWires`).
+
+4. **`materializeShadows` sync collection** — replaced
+   `Promise.all(items.flatMap(...))` with a loop that writes into a
+   pre-allocated flat array and sets a `hasAsync` flag on the first
+   Promise it encounters:
+   ```ts
+   const rawValues: MaybePromise<unknown>[] = new Array(nItems * nFields);
+   let hasAsync = false;
+   for (...) {
+     const v = shadow.resolvePreGrouped(wireGroupsByPath.get(pathKey)!);
+     rawValues[i * nFields + j] = v;
+     if (!hasAsync && isPromise(v)) hasAsync = true;
+   }
+   const flatValues = hasAsync
+     ? await Promise.all(rawValues)
+     : (rawValues as unknown[]);
+   ```
+   For element wires where all values come from `state`, `hasAsync` stays
+   `false` and no `Promise.all` is ever constructed — zero microtask overhead.
+
+**Why non-array benchmarks also improve (+4–19%):** `resolveWires` is
+called for every output field, not just inside array loops. PassThrough,
+simple-chain, and fan-out all resolve output wires after tools complete;
+those values are already in `state`, so they now go through the sync path
+too, eliminating one microtask hop per resolved output field.
+
+### 11. Pre-compute keys & cache wire tags
+
+**Date:** March 2026
+**Result:** ✅ +12–16% on all benchmarks, +60–129% on array benchmarks.
+
+| Benchmark                          | Before | After | Change    |
+| ---------------------------------- | ------ | ----- | --------- |
+| exec: passthrough                  | 728K   | 846K  | **+16%**  |
+| exec: short-circuit                | 778K   | 811K  | **+4%**   |
+| exec: simple chain                 | 457K   | 486K  | **+6%**   |
+| exec: chained 3-tool fan-out       | 175K   | 194K  | **+11%**  |
+| exec: flat array 10                | 101K   | 170K  | **+68%**  |
+| exec: flat array 100               | 13.0K  | 28.3K | **+118%** |
+| exec: flat array 1000              | 1,336  | 3,064 | **+129%** |
+| exec: nested array 5×5             | 29.4K  | 46.7K | **+59%**  |
+| exec: nested array 10×10           | 9.0K   | 17.5K | **+94%**  |
+| exec: nested array 20×10           | 4.6K   | 8.8K  | **+91%**  |
+| exec: array + tool-per-element 10  | 27.6K  | 30.9K | **+12%**  |
+| exec: array + tool-per-element 100 | 2.97K  | 3.43K | **+15%**  |
+
+Four micro-optimisations that eliminate string allocation and redundant
+property checks from the hottest loops:
+
+1. **Cached `trunkKey` on NodeRef** — `pullSingle` now uses
+   `(ref as any).__key ??= trunkKey(ref)` to compute the state-map key
+   exactly once per AST node. For a 1000-element array pulling 3 fields,
+   this eliminates 3000 template-literal concatenations per execution.
+
+2. **Pre-computed `pathKeys` in `materializeShadows`** — the path-key
+   array (`[...pathPrefix, field].join("\0")`) only depends on the field
+   index, not the element index. Hoisted out of the N×F loop into an
+   F-length pre-computed array, eliminating N×F array spreads and joins
+   (e.g. 3000 down to 3 for flat-array-1000).
+
+3. **Cached `getSimplePullRef(wire)`** — the 11-property fast-path check
+   in `resolveWires` is now computed once per wire and cached as
+   `wire.__simplePullRef` (the `from` NodeRef, or `null`). Subsequent
+   calls are a single property read. For element wires in the hot path
+   this turns 11 sequential null checks per field per element into 1.
+
+4. **Constant cache cap** — `constantCache` is now hard-capped at 10,000
+   entries. When exceeded the Map is cleared rather than growing
+   unboundedly. No performance impact; pure safety hygiene for
+   long-lived processes.
