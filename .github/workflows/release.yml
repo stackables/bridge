@@ -39,7 +39,11 @@ jobs:
         run: pnpm build
 
       - name: Smoke-test published artifacts
-        run: pnpm smoke
+        run: |
+          pnpm smoke
+          git status
+          git checkout -- .
+          git clean -fd
 
       - name: Create and publish versions
         uses: changesets/action@v1
