@@ -11,7 +11,7 @@
 
 import type { NodeRef, Wire } from "./types.ts";
 import type { MaybePromise, TreeContext } from "./tree-types.ts";
-import { isFatalError, applyControlFlow } from "./tree-types.ts";
+import { isFatalError, isPromise, applyControlFlow } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
 // ── Public entry point ──────────────────────────────────────────────────────
@@ -184,18 +184,29 @@ async function evaluateWireSource(
 /**
  * Pull a ref with optional safe-navigation: catches non-fatal errors and
  * returns `undefined` instead.  Used by condAnd / condOr evaluation.
+ * Returns `MaybePromise` so synchronous pulls skip microtask scheduling.
  */
 function pullSafe(
   ctx: TreeContext,
   ref: NodeRef,
   safe: boolean | undefined,
   pullChain?: Set<string>,
-): Promise<any> {
-  if (safe) {
-    return Promise.resolve(ctx.pullSingle(ref, pullChain)).catch((e: any) => {
+): MaybePromise<any> {
+  const pull = ctx.pullSingle(ref, pullChain);
+  if (!safe) return pull;
+
+  // Safe path — only wrap when the pull is async
+  if (!isPromise(pull)) {
+    try {
+      return pull; // sync + no error
+    } catch (e: any) {
       if (isFatalError(e)) throw e;
       return undefined;
-    });
+    }
   }
-  return Promise.resolve(ctx.pullSingle(ref, pullChain));
+
+  return pull.catch((e: any) => {
+    if (isFatalError(e)) throw e;
+    return undefined;
+  });
 }

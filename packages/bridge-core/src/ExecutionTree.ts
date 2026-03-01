@@ -602,6 +602,51 @@ export class ExecutionTree implements TreeContext {
   }
 
   /**
+   * Recursively resolve an output field at `prefix` — either via exact-match
+   * wires (leaf) or by collecting sub-fields from deeper wires (nested object).
+   *
+   * Shared by `collectOutput()` and `run()`.
+   */
+  private async resolveNestedField(prefix: string[]): Promise<unknown> {
+    const bridge = this.bridge!;
+    const { type, field } = this.trunk;
+
+    const exactWires = bridge.wires.filter(
+      (w) =>
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field &&
+        pathEquals(w.to.path, prefix),
+    );
+    if (exactWires.length > 0) {
+      return this.resolveWires(exactWires);
+    }
+
+    const subFields = new Set<string>();
+    for (const wire of bridge.wires) {
+      const p = wire.to.path;
+      if (
+        wire.to.module === SELF_MODULE &&
+        wire.to.type === type &&
+        wire.to.field === field &&
+        p.length > prefix.length &&
+        prefix.every((seg, i) => p[i] === seg)
+      ) {
+        subFields.add(p[prefix.length]!);
+      }
+    }
+    if (subFields.size === 0) return undefined;
+
+    const obj: Record<string, unknown> = {};
+    await Promise.all(
+      [...subFields].map(async (sub) => {
+        obj[sub] = await this.resolveNestedField([...prefix, sub]);
+      }),
+    );
+    return obj;
+  }
+
+  /**
    * Materialise all output wires into a plain JS object.
    *
    * Used by the GraphQL adapter when a bridge field returns a scalar type
@@ -673,45 +718,9 @@ export class ExecutionTree implements TreeContext {
 
     const result: Record<string, unknown> = {};
 
-    const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
-      );
-      if (exactWires.length > 0) {
-        return this.resolveWires(exactWires);
-      }
-
-      const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        const p = wire.to.path;
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          p.length > prefix.length &&
-          prefix.every((seg, i) => p[i] === seg)
-        ) {
-          subFields.add(p[prefix.length]!);
-        }
-      }
-      if (subFields.size === 0) return undefined;
-
-      const obj: Record<string, unknown> = {};
-      await Promise.all(
-        [...subFields].map(async (sub) => {
-          obj[sub] = await resolveField([...prefix, sub]);
-        }),
-      );
-      return obj;
-    };
-
     await Promise.all(
       [...outputFields].map(async (name) => {
-        result[name] = await resolveField([name]);
+        result[name] = await this.resolveNestedField([name]);
       }),
     );
     return result;
@@ -805,49 +814,9 @@ export class ExecutionTree implements TreeContext {
 
     const result: Record<string, unknown> = {};
 
-    // Resolves a single output field at `prefix` — either via an exact-match
-    // wire (leaf), or by collecting sub-fields from deeper wires (nested object).
-    const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
-      );
-      if (exactWires.length > 0) {
-        return this.resolveWires(exactWires);
-      }
-
-      // No exact wire — gather sub-field names from deeper-path wires
-      // (e.g. `o.why { .temperature <- ... }` produces path ["why","temperature"])
-      const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        const p = wire.to.path;
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          p.length > prefix.length &&
-          prefix.every((seg, i) => p[i] === seg)
-        ) {
-          subFields.add(p[prefix.length]!);
-        }
-      }
-      if (subFields.size === 0) return undefined;
-
-      const obj: Record<string, unknown> = {};
-      await Promise.all(
-        [...subFields].map(async (sub) => {
-          obj[sub] = await resolveField([...prefix, sub]);
-        }),
-      );
-      return obj;
-    };
-
     await Promise.all([
       ...[...outputFields].map(async (name) => {
-        result[name] = await resolveField([name]);
+        result[name] = await this.resolveNestedField([name]);
       }),
       ...forcePromises,
     ]);

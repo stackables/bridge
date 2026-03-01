@@ -8,7 +8,7 @@
  * keeping the dependency surface explicit.
  */
 
-import type { Bridge, Instruction, ToolDef, ToolMap, Wire } from "./types.ts";
+import type { Bridge, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { isPromise } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
@@ -18,6 +18,7 @@ import {
   resolveToolDefByName,
   resolveToolWires,
   resolveToolSource,
+  type ToolLookupContext,
 } from "./toolLookup.ts";
 
 // ── Context interface ───────────────────────────────────────────────────────
@@ -30,15 +31,7 @@ import {
  * dispatch logic that ties wire resolution, tool lookup, and instrumentation
  * together — but it is still a strict subset of the full class.
  */
-export interface SchedulerContext {
-  // ── Fields needed by toolLookup functions (ToolLookupContext compat) ────
-  readonly toolFns?: ToolMap | undefined;
-  readonly toolDefCache: Map<string, ToolDef | null>;
-  readonly toolDepCache: Map<string, Promise<any>>;
-  readonly instructions: readonly Instruction[];
-  readonly context?: Record<string, any> | undefined;
-  readonly state: Record<string, any>;
-
+export interface SchedulerContext extends ToolLookupContext {
   // ── Scheduler-specific fields ──────────────────────────────────────────
   readonly bridge: Bridge | undefined;
   /** Parent tree for shadow-tree delegation.  `schedule()` recurses via parent. */
@@ -55,13 +48,6 @@ export interface SchedulerContext {
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any>;
   /** Resolve a set of matched wires (delegates to resolveWires.ts). */
   resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any>;
-  /** Invoke a tool function with instrumentation. */
-  callTool(
-    toolName: string,
-    fnName: string,
-    fnImpl: (...args: any[]) => any,
-    input: Record<string, any>,
-  ): MaybePromise<any>;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
