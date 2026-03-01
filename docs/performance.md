@@ -22,7 +22,7 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 ## Baseline (main, March 2026)
 
 Benchmarks live in `packages/bridge/bench/engine.bench.ts` (tinybench).
-Historical tracking via [Bencher](https://bencher.dev) (project: `the-bridge`).
+Historical tracking via [Bencher](https://bencher.dev/console/projects/the-bridge/perf).
 
 Run locally: `pnpm bench`
 

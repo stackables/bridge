@@ -10,9 +10,9 @@ The Bridge replaces imperative orchestration code with static `.bridge` files. I
 
 The Bridge engine parses your wiring diagram, builds a dependency graph, and executes it - automatically handling parallelization, fallbacks, and data reshaping.
 
-- [See our roadmap](https://github.com/stackables/bridge/milestones) 
+- [See our roadmap](https://github.com/stackables/bridge/milestones)
 - [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
-
+- [Performance report](./docs/performance.md)
 
 ### How it looks
 
@@ -20,27 +20,24 @@ You write the topology; the engine handles the execution.
 
 ![suntax image](./docs/images/syntax-image.png)
 
-
 ### Why a language instead of code?
 
-* **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
-* **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
-* **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
-* **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
-* **Portable Execution:** The engine is hyper-lightweight and framework-agnostic. Run it in a Node backend, an Edge Worker (Cloudflare/Vercel), or directly in the browser.
-
+- **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
+- **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
+- **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
+- **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
+- **Portable Execution:** The engine is hyper-lightweight and framework-agnostic. Run it in a Node backend, an Edge Worker (Cloudflare/Vercel), or directly in the browser.
 
 ### Primary Use Cases
 
 Because The Bridge strictly controls how data flows from inputs to tools to outputs, it is the perfect engine for architectures that require strict boundaries and clean mappings.
 
 1. **[The "No-Code" BFF (Backend-for-Frontend)](https://bridge.sdk42.com/guides/bff/)**
-Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
+   Spin up a GraphQL BFF without maintaining a secondary codebase of resolvers, types, and DTOs. Frontend teams can aggregate and shape backend data just by writing `.bridge` files.
 1. **[The Egress Gateway](https://bridge.sdk42.com/guides/egress/)**
-Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
+   Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
 1. **[The Rule Engine / Policy Evaluator](https://bridge.sdk42.com/guides/rule-engine/)**
-Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
-
+   Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
 
 ## The Playground
 
@@ -70,17 +67,17 @@ The `.bridge` language is designed to be scannable.
 - `=` means static constant assignment.
 - `<-` means dynamic data flow.
 
-| Concept           | Syntax Example                | Description                                                                          |
-| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| **Constants**     | `.method = "POST"`            | Sets a static configuration value.                                                   |
-| **Wires**         | `.body <- i.userData`         | Pulls data from a source at runtime.                                                 |
-| **Side Effects**  | `force api catch null`        | Eagerly schedules a handle. Critical by default; `catch null` makes it fire-and-forget. |
-| **Pipes**         | `o.name <- uc:i.name`         | Chains data through a tool right-to-left.                                            |
-| **Null Coalesce** | `o.name <- i.name \|\| "N/A"` | Alternative used if the current source resolves to `null`.                           |
-| **Error Guard**   | `o.price <- api.price catch 0` | Alternative used if the current source **throws** an exception.                      |
-| **Ternary**       | `o.val <- i.isPro ? a : b`    | Evaluates condition; strictly pulls only the chosen branch.                          |
-| **Node Alias**    | `alias uc:i.name as name`     | Evaluates an expression once and caches it as a local graph node.                    |
-| **Arrays**        | `o <- items[] as it { }`      | Iterates over an array, creating a local shadow scope for each element.              |
+| Concept           | Syntax Example                 | Description                                                                             |
+| ----------------- | ------------------------------ | --------------------------------------------------------------------------------------- |
+| **Constants**     | `.method = "POST"`             | Sets a static configuration value.                                                      |
+| **Wires**         | `.body <- i.userData`          | Pulls data from a source at runtime.                                                    |
+| **Side Effects**  | `force api catch null`         | Eagerly schedules a handle. Critical by default; `catch null` makes it fire-and-forget. |
+| **Pipes**         | `o.name <- uc:i.name`          | Chains data through a tool right-to-left.                                               |
+| **Null Coalesce** | `o.name <- i.name \|\| "N/A"`  | Alternative used if the current source resolves to `null`.                              |
+| **Error Guard**   | `o.price <- api.price catch 0` | Alternative used if the current source **throws** an exception.                         |
+| **Ternary**       | `o.val <- i.isPro ? a : b`     | Evaluates condition; strictly pulls only the chosen branch.                             |
+| **Node Alias**    | `alias uc:i.name as name`      | Evaluates an expression once and caches it as a local graph node.                       |
+| **Arrays**        | `o <- items[] as it { }`       | Iterates over an array, creating a local shadow scope for each element.                 |
 
 **[Read the Full Language Guide](https://bridge.sdk42.com/reference/10-core-concepts/)**
 
