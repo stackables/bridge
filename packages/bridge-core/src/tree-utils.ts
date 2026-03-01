@@ -135,7 +135,7 @@ export function setNested(obj: any, path: string[], value: any): void {
     obj = obj[key];
     if (typeof obj !== "object" || obj === null) {
       throw new Error(
-        `Cannot set nested property on non-object at path segment: ${key}`,
+        `Cannot set nested property: value at "${key}" is not an object`,
       );
     }
   }

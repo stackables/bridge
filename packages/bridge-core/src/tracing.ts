@@ -196,7 +196,14 @@ export class TraceCollector {
       durationMs: base.durationMs,
       startedAt: base.startedAt,
     };
-    if (base.input) t.input = boundedClone(base.input, this.maxArrayItems, this.maxStringLength, this.cloneDepth) as Record<string, any>;
+    if (base.input) {
+      t.input = boundedClone(
+        base.input,
+        this.maxArrayItems,
+        this.maxStringLength,
+        this.cloneDepth,
+      ) as Record<string, any>;
+    }
     if (base.error) t.error = base.error;
     else if (base.output !== undefined) t.output = base.output;
     return t;

@@ -309,7 +309,7 @@ describe("engine hardening: setNested primitive guard", () => {
     const obj: any = { name: "hello" };
     assert.throws(
       () => setNested(obj, ["name", "inner"], "value"),
-      /Cannot set nested property on non-object at path segment: name/,
+      /Cannot set nested property: value at "name" is not an object/,
     );
   });
 
@@ -317,7 +317,7 @@ describe("engine hardening: setNested primitive guard", () => {
     const obj: any = { count: 42 };
     assert.throws(
       () => setNested(obj, ["count", "sub"], "value"),
-      /Cannot set nested property on non-object at path segment: count/,
+      /Cannot set nested property: value at "count" is not an object/,
     );
   });
 
