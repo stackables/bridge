@@ -1,0 +1,96 @@
+name: Benchmark
+
+on:
+  push:
+    branches: main
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+jobs:
+  benchmark_base:
+    name: Continuous Benchmarking with Bencher
+    if: github.event_name == 'push'
+    permissions:
+      checks: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run benchmarks
+        run: cd packages/bridge && CI=true pnpm bench > bench-results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: packages/bridge/bench-results.json
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track base branch benchmarks with Bencher
+        run: |
+          bencher run \
+            --project the-bridge \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch main \
+            --testbed ubuntu-latest \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --err \
+            --adapter json \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --file packages/bridge/bench-results.json
+
+  benchmark_pr:
+    name: Continuous Benchmarking PRs with Bencher
+    # Only run for PRs from the same repo (not forks)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run benchmarks
+        run: cd packages/bridge && CI=true pnpm bench > bench-results.json
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track PR benchmarks with Bencher
+        run: |
+          bencher run \
+            --project the-bridge \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch "$GITHUB_HEAD_REF" \
+            --start-point "$GITHUB_BASE_REF" \
+            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --err \
+            --adapter json \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --file packages/bridge/bench-results.json
