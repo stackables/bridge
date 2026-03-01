@@ -44,6 +44,8 @@ document are from this machine — compare only against the same hardware.
 | exec: array + tool-per-element 10  | ~22K    | 0.045    |
 | exec: array + tool-per-element 100 | ~2.2K   | 0.455    |
 
+This table is the current perf level. It is updated after a successful optimisation is committed.
+
 ---
 
 ## Optimisations
