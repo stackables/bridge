@@ -77,7 +77,7 @@ export type ToolTrace = {
 // ── TraceCollector ──────────────────────────────────────────────────────────
 
 /**
- * Bounded serialisation for trace payloads — prevents OOM when tools handle
+ * Bounded serialization for trace payloads — prevents OOM when tools handle
  * very large objects (e.g. a 50 MB database response).
  *
  * Truncates:

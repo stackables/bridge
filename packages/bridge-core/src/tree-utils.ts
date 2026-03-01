@@ -108,8 +108,13 @@ function decodeJsonString(s: string): string {
         case "b":  result += "\b"; break;
         case "f":  result += "\f"; break;
         case "u": {
-          result += String.fromCharCode(parseInt(s.slice(i + 1, i + 5), 16));
-          i += 4;
+          if (i + 5 > s.length - 1) {
+            // Incomplete \uXXXX sequence — pass through as-is
+            result += "u";
+          } else {
+            result += String.fromCharCode(parseInt(s.slice(i + 1, i + 5), 16));
+            i += 4;
+          }
           break;
         }
         default: result += s[i];

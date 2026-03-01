@@ -1,5 +1,5 @@
 /**
- * Tests for engine hardening & resource exhaustion defences.
+ * Tests for engine hardening & resource exhaustion defenses.
  *
  * Covers:
  *  1. Tool-call timeouts (toolTimeoutMs / BridgeTimeoutError)
