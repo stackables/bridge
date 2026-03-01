@@ -11,7 +11,7 @@
 
 import type { NodeRef, Wire } from "./types.ts";
 import type { MaybePromise, TreeContext } from "./tree-types.ts";
-import { isFatalError, isPromise, applyControlFlow } from "./tree-types.ts";
+import { isFatalError, isPromise, applyControlFlow, BridgeAbortError } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
 // ── Public entry point ──────────────────────────────────────────────────────
@@ -67,6 +67,9 @@ async function resolveWiresAsync(
   let lastError: any;
 
   for (const w of wires) {
+    // Abort discipline — yield immediately if client disconnected
+    if (ctx.signal?.aborted) throw new BridgeAbortError();
+
     // Constant wire — always wins, no modifiers
     if ("value" in w) return coerceConstant(w.value);
 

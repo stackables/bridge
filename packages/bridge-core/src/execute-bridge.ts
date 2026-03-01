@@ -48,6 +48,17 @@ export type ExecuteBridgeOptions = {
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
+  /**
+   * Hard timeout for tool calls in milliseconds.
+   * Tools that exceed this duration throw a `BridgeTimeoutError`.
+   * Default: 15_000 (15 seconds). Set to `0` to disable.
+   */
+  toolTimeoutMs?: number;
+  /**
+   * Maximum shadow-tree nesting depth.
+   * Default: 30. Increase for deeply nested array mappings.
+   */
+  maxDepth?: number;
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
@@ -111,6 +122,8 @@ export async function executeBridge<T = unknown>(
 
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;
+  if (options.toolTimeoutMs !== undefined) tree.toolTimeoutMs = options.toolTimeoutMs;
+  if (options.maxDepth !== undefined) tree.maxDepth = options.maxDepth;
 
   const traceLevel = options.trace ?? "off";
   if (traceLevel !== "off") {

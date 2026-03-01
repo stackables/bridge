@@ -16,6 +16,7 @@ import { SELF_MODULE } from "./types.ts";
 import {
   BridgePanicError,
   BridgeAbortError,
+  BridgeTimeoutError,
   MAX_EXECUTION_DEPTH,
   CONTINUE_SYM,
   BREAK_SYM,
@@ -54,6 +55,24 @@ import { resolveWires as _resolveWires } from "./resolveWires.ts";
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
 import { schedule as _schedule } from "./scheduleTools.ts";
 
+/** Race a promise against a timeout.  Rejects with BridgeTimeoutError on expiry. */
+function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  toolName: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new BridgeTimeoutError(toolName, ms)),
+      ms,
+    );
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
@@ -89,6 +108,18 @@ export class ExecutionTree implements TreeContext {
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
+  /**
+   * Hard timeout for tool calls in milliseconds.
+   * When set, tool calls that exceed this duration throw a `BridgeTimeoutError`.
+   * Default: 15_000 (15 seconds). Set to `0` to disable.
+   */
+  toolTimeoutMs: number = 15_000;
+  /**
+   * Maximum shadow-tree nesting depth.
+   * Overrides `MAX_EXECUTION_DEPTH` when set.
+   * Default: `MAX_EXECUTION_DEPTH` (30).
+   */
+  maxDepth: number = MAX_EXECUTION_DEPTH;
   /**
    * Registered tool function map.
    * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
@@ -215,13 +246,19 @@ export class ExecutionTree implements TreeContext {
       signal: this.signal,
     };
 
+    const timeoutMs = this.toolTimeoutMs;
+
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
     // has its default no-op provider, skip all instrumentation to
     // avoid closure allocation, template-string building, and no-op
     // metric calls.  See docs/performance.md (#5).
     if (!tracer && !logger && !isOtelActive()) {
-      return fnImpl(input, toolContext);
+      const result = fnImpl(input, toolContext);
+      if (timeoutMs > 0 && isPromise(result)) {
+        return raceTimeout(result, timeoutMs, toolName);
+      }
+      return result;
     }
 
     // ── Instrumented path ─────────────────────────────────────────
@@ -236,7 +273,11 @@ export class ExecutionTree implements TreeContext {
       async (span) => {
         const wallStart = performance.now();
         try {
-          const result = await fnImpl(input, toolContext);
+          const toolPromise = fnImpl(input, toolContext);
+          const result =
+            timeoutMs > 0 && isPromise(toolPromise)
+              ? await raceTimeout(toolPromise, timeoutMs, toolName)
+              : await toolPromise;
           const durationMs = roundMs(performance.now() - wallStart);
           toolCallCounter.add(1, metricAttrs);
           toolDurationHistogram.record(durationMs, metricAttrs);
@@ -304,7 +345,9 @@ export class ExecutionTree implements TreeContext {
     child.document = this.document;
     child.parent = this;
     child.depth = this.depth + 1;
-    if (child.depth > MAX_EXECUTION_DEPTH) {
+    child.maxDepth = this.maxDepth;
+    child.toolTimeoutMs = this.toolTimeoutMs;
+    if (child.depth > child.maxDepth) {
       throw new BridgePanicError(
         `Maximum execution depth exceeded (${child.depth}) at ${trunkKey(this.trunk)}. Check for infinite recursion or circular array mappings.`,
       );
@@ -331,6 +374,8 @@ export class ExecutionTree implements TreeContext {
   private createShadowArray(items: any[]): ExecutionTree[] {
     const shadows: ExecutionTree[] = [];
     for (const item of items) {
+      // Abort discipline — yield immediately if client disconnected
+      this.signal?.throwIfAborted();
       if (item === BREAK_SYM) break;
       if (item === CONTINUE_SYM) continue;
       const s = this.shadow();
