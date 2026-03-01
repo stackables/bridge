@@ -11,13 +11,15 @@
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
     "ci:publish": "pnpm publish -r --filter '@stackables/*'",
-    "test:coverage": "pnpm -r test:coverage"
+    "test:coverage": "pnpm -r test:coverage",
+    "bench": "pnpm -r bench"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
     "@eslint/js": "^10.0.1",
     "@tsconfig/node24": "^24.0.4",
     "eslint": "^10.0.2",
+    "tinybench": "^6.0.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
   }

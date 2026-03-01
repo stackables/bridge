@@ -22,7 +22,7 @@ jobs:
         run: pnpm install
       - name: Lint Types
         run: pnpm lint:types
-      - name: Lint with ESLint
-        run: pnpm lint:eslint
       - name: Test
         run: pnpm test
+      - name: Lint with ESLint
+        run: pnpm lint:eslint
