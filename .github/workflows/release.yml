@@ -35,6 +35,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build packages
+        run: pnpm build
+
+      - name: Smoke-test published artifacts
+        run: pnpm smoke
+
       - name: Create and publish versions
         uses: changesets/action@v1
         with:
