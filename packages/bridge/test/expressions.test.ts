@@ -1371,7 +1371,7 @@ bridge Query.test {
     assert.equal(data.result, false);
   });
 
-  test("safe navigation with sync tool: api?.missing and true", async () => {
+  test("safe navigation with sync tool: api?.score > 5 or false", async () => {
     const document = parseBridge(`version 1.5
 bridge Query.test {
   with failApi as api
