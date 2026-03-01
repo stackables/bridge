@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [closed]
 
+permissions:
+  contents: read
+
 jobs:
   archive_pr_branch:
     name: Archive closed PR branch with Bencher
