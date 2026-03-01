@@ -1414,9 +1414,9 @@ function extractAddressPath(node: CstNode): {
   const dotTokens = (node.children.Dot as IToken[] | undefined) ?? [];
 
   for (const seg of subs(node, "segment")) {
-    const firstTok = findFirstToken(seg);
     items.push({
-      offset: firstTok?.startOffset ?? 0,
+      offset:
+        seg.location?.startOffset ?? findFirstToken(seg)?.startOffset ?? 0,
       value: extractPathSegment(seg),
     });
   }
@@ -1440,11 +1440,16 @@ function extractAddressPath(node: CstNode): {
   // Match separators to segments: each separator precedes the next segment
   const segmentSafe: boolean[] = [];
   let rootSafe = false;
+  let sepIdx = -1;
   for (let i = 0; i < items.length; i++) {
-    // Find the separator that immediately precedes this segment
     const segOffset = items[i].offset;
-    const precedingSep = allSeps.filter((s) => s.offset < segOffset).pop();
-    const isSafe = precedingSep?.isSafe ?? false;
+    while (
+      sepIdx + 1 < allSeps.length &&
+      allSeps[sepIdx + 1].offset < segOffset
+    ) {
+      sepIdx++;
+    }
+    const isSafe = sepIdx >= 0 ? allSeps[sepIdx].isSafe : false;
     if (i === 0) {
       rootSafe = isSafe;
     }
@@ -1474,17 +1479,7 @@ function findFirstToken(node: CstNode): IToken | undefined {
 
 /* ── parsePath: split "a.b[0].c" → ["a","b","0","c"] ── */
 function parsePath(text: string): string[] {
-  const parts: string[] = [];
-  for (const segment of text.split(".")) {
-    const match = segment.match(/^([^[]+)(?:\[(\d*)\])?$/);
-    if (match) {
-      parts.push(match[1]);
-      if (match[2] !== undefined && match[2] !== "") parts.push(match[2]);
-    } else {
-      parts.push(segment);
-    }
-  }
-  return parts;
+  return text.split(/\.|\[|\]/).filter(Boolean);
 }
 
 /* ── Collect all tokens recursively from a CST node ── */

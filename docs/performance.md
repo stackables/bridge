@@ -479,10 +479,13 @@ too, eliminating one microtask hop per resolved output field.
 Four micro-optimisations that eliminate string allocation and redundant
 property checks from the hottest loops:
 
-1. **Cached `trunkKey` on NodeRef** — `pullSingle` now uses
-   `(ref as any).__key ??= trunkKey(ref)` to compute the state-map key
-   exactly once per AST node. For a 1000-element array pulling 3 fields,
-   this eliminates 3000 template-literal concatenations per execution.
+1. **Cached `trunkKey` on NodeRef** — `pullSingle` memoises the
+   state-map key per AST node as `ref[TRUNK_KEY_CACHE] ??= trunkKey(ref)`.
+   For a 1000-element array pulling 3 fields, this eliminates 3000
+   template-literal concatenations per execution. The cache is stored
+   under a `Symbol` key so V8 keeps it in a separate backing store that
+   doesn't participate in hidden-class transitions — the parser's object
+   shapes remain stable even though the engine writes to them at runtime.
 
 2. **Pre-computed `pathKeys` in `materializeShadows`** — the path-key
    array (`[...pathPrefix, field].join("\0")`) only depends on the field
@@ -492,9 +495,10 @@ property checks from the hottest loops:
 
 3. **Cached `getSimplePullRef(wire)`** — the 11-property fast-path check
    in `resolveWires` is now computed once per wire and cached as
-   `wire.__simplePullRef` (the `from` NodeRef, or `null`). Subsequent
-   calls are a single property read. For element wires in the hot path
-   this turns 11 sequential null checks per field per element into 1.
+   `wire[SIMPLE_PULL_CACHE]` (the `from` NodeRef, or `null`). Subsequent
+   calls are a single property read. Also a `Symbol` key (same rationale
+   as `TRUNK_KEY_CACHE`). For element wires in the hot path this turns
+   11 sequential null checks per field per element into 1.
 
 4. **Constant cache cap** — `constantCache` is now hard-capped at 10,000
    entries. When exceeded the Map is cleared rather than growing

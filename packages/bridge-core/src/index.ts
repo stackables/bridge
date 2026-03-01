@@ -32,14 +32,15 @@ export { mergeBridgeDocuments } from "./merge-documents.ts";
 
 // ── Execution tree (advanced) ───────────────────────────────────────────────
 
+export { ExecutionTree } from "./ExecutionTree.ts";
+export { TraceCollector } from "./tracing.ts";
+export type { ToolTrace, TraceLevel } from "./tracing.ts";
 export {
-  ExecutionTree,
-  TraceCollector,
   BridgeAbortError,
   BridgePanicError,
   MAX_EXECUTION_DEPTH,
-} from "./ExecutionTree.ts";
-export type { Logger, ToolTrace, TraceLevel } from "./ExecutionTree.ts";
+} from "./tree-types.ts";
+export type { Logger } from "./tree-types.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

@@ -1,12 +1,9 @@
-import { SpanStatusCode, metrics, trace } from "@opentelemetry/api";
-import { parsePath } from "./utils.ts";
 import { internal } from "./tools/index.ts";
 import type {
   Bridge,
   BridgeDocument,
-  ControlFlowInstruction,
+  Instruction,
   NodeRef,
-  ToolCallFn,
   ToolContext,
   ToolDef,
   ToolMap,
@@ -14,318 +11,76 @@ import type {
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 
-/** Fatal panic error — bypasses all error boundaries (`?.` and `catch`). */
-export class BridgePanicError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BridgePanicError";
-  }
-}
+// ── Imports from extracted modules ─────────────────────────────────────────
 
-/** Abort error — raised when an external AbortSignal cancels execution. */
-export class BridgeAbortError extends Error {
-  constructor(message = "Execution aborted by external signal") {
-    super(message);
-    this.name = "BridgeAbortError";
-  }
-}
+import {
+  BridgePanicError,
+  BridgeAbortError,
+  MAX_EXECUTION_DEPTH,
+  CONTINUE_SYM,
+  BREAK_SYM,
+  isPromise,
+} from "./tree-types.ts";
+import type {
+  MaybePromise,
+  Trunk,
+  Path,
+  Logger,
+  TreeContext,
+} from "./tree-types.ts";
 
-/** Sentinel for `continue` — skip the current array element */
-const CONTINUE_SYM = Symbol.for("BRIDGE_CONTINUE");
-/** Sentinel for `break` — halt array iteration */
-const BREAK_SYM = Symbol.for("BRIDGE_BREAK");
+import {
+  trunkKey,
+  sameTrunk,
+  pathEquals,
+  UNSAFE_KEYS,
+  roundMs,
+  TRUNK_KEY_CACHE,
+} from "./tree-utils.ts";
 
-/** Maximum shadow-tree nesting depth before a BridgePanicError is thrown. */
-export const MAX_EXECUTION_DEPTH = 30;
+import {
+  TraceCollector,
+  otelTracer,
+  isOtelActive,
+  toolCallCounter,
+  toolDurationHistogram,
+  toolErrorCounter,
+  SpanStatusCodeEnum,
+} from "./tracing.ts";
+import type { ToolTrace } from "./tracing.ts";
 
-const otelTracer = trace.getTracer("@stackables/bridge");
+import { resolveWires as _resolveWires } from "./resolveWires.ts";
 
-/**
- * Lazily detect whether the OpenTelemetry tracer is a real (recording)
- * tracer or the default no-op.  Probed once on first tool call; result
- * is cached for the lifetime of the process.
- *
- * If the SDK has not been registered by the time the first tool runs,
- * all subsequent calls will skip OTel instrumentation.
- */
-let _otelActive: boolean | undefined;
-function isOtelActive(): boolean {
-  if (_otelActive === undefined) {
-    const probe = otelTracer.startSpan("_bridge_probe_");
-    _otelActive = probe.isRecording();
-    probe.end();
-  }
-  return _otelActive;
-}
+import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
+import { schedule as _schedule } from "./scheduleTools.ts";
 
-const otelMeter = metrics.getMeter("@stackables/bridge");
-const toolCallCounter = otelMeter.createCounter("bridge.tool.calls", {
-  description: "Total number of tool invocations",
-});
-const toolDurationHistogram = otelMeter.createHistogram(
-  "bridge.tool.duration",
-  {
-    description: "Tool call duration in milliseconds",
-    unit: "ms",
-  },
-);
-const toolErrorCounter = otelMeter.createCounter("bridge.tool.errors", {
-  description: "Total number of tool invocation errors",
-});
-
-/** Round milliseconds to 2 decimal places */
-function roundMs(ms: number): number {
-  return Math.round(ms * 100) / 100;
-}
-
-/**
- * Structured logger interface for Bridge engine events.
- * Accepts any compatible logger: pino, winston, bunyan, `console`, etc.
- * All methods default to silent no-ops when no logger is provided.
- */
-export interface Logger {
-  debug?: (...args: any[]) => void;
-  info?: (...args: any[]) => void;
-  warn?: (...args: any[]) => void;
-  error?: (...args: any[]) => void;
-}
-
-/** Matches graphql's internal Path type (not part of the public exports map) */
-interface Path {
-  readonly prev: Path | undefined;
-  readonly key: string | number;
-  readonly typename: string | undefined;
-}
-
-type Trunk = { module: string; type: string; field: string; instance?: number };
-
-/** Stable string key for the state map */
-function trunkKey(ref: Trunk & { element?: boolean }): string {
-  if (ref.element) return `${ref.module}:${ref.type}:${ref.field}:*`;
-  return `${ref.module}:${ref.type}:${ref.field}${ref.instance != null ? `:${ref.instance}` : ""}`;
-}
-
-/** Match two trunks (ignoring path and element) */
-function sameTrunk(a: Trunk, b: Trunk): boolean {
-  return (
-    a.module === b.module &&
-    a.type === b.type &&
-    a.field === b.field &&
-    (a.instance ?? undefined) === (b.instance ?? undefined)
-  );
-}
-
-/** Strict path equality — manual loop avoids `.every()` closure allocation.  See docs/performance.md (#7). */
-function pathEquals(a: string[], b: string[]): boolean {
-  if (!a || !b) return a === b;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
-/** Check whether an error is a fatal halt (abort or panic) that must bypass all error boundaries. */
-function isFatalError(err: any): boolean {
-  return (
-    err instanceof BridgePanicError ||
-    err instanceof BridgeAbortError ||
-    err?.name === "BridgeAbortError" ||
-    err?.name === "BridgePanicError"
-  );
-}
-
-/**
- * A value that may already be resolved (synchronous) or still pending (asynchronous).
- * Using this instead of always returning `Promise<T>` lets callers skip
- * microtask scheduling when the value is immediately available.
- * See docs/performance.md (#10).
- */
-type MaybePromise<T> = T | Promise<T>;
-
-/** Returns `true` when `value` is a thenable (Promise or Promise-like). */
-function isPromise(value: unknown): value is Promise<unknown> {
-  return typeof (value as any)?.then === "function";
-}
-
-/**
- * Returns the `from` NodeRef when a wire qualifies for the simple-pull fast
- * path (single `from` wire, no safe/falsy/nullish/catch modifiers).  Returns
- * `null` otherwise.  The result is cached on the wire object so subsequent
- * calls are a single property read.  See docs/performance.md (#11).
- */
-function getSimplePullRef(w: Wire): NodeRef | null {
-  let ref: NodeRef | null | undefined = (w as any).__simplePullRef;
-  if (ref !== undefined) return ref;
-  ref =
-    "from" in w &&
-    !w.safe &&
-    !w.falsyFallbackRefs?.length &&
-    w.falsyControl == null &&
-    w.falsyFallback == null &&
-    w.nullishControl == null &&
-    !w.nullishFallbackRef &&
-    w.nullishFallback == null &&
-    !w.catchControl &&
-    !w.catchFallbackRef &&
-    w.catchFallback == null
-      ? w.from
-      : null;
-  (w as any).__simplePullRef = ref;
-  return ref;
-}
-
-/** Execute a control flow instruction, returning a sentinel or throwing. */
-function applyControlFlow(ctrl: ControlFlowInstruction): symbol {
-  if (ctrl.kind === "throw") throw new Error(ctrl.message);
-  if (ctrl.kind === "panic") throw new BridgePanicError(ctrl.message);
-  if (ctrl.kind === "continue") return CONTINUE_SYM;
-  /* ctrl.kind === "break" */
-  return BREAK_SYM;
-}
-
-/** Trace verbosity level.
- *  - `"off"` (default) — no collection, zero overhead
- *  - `"basic"` — tool, fn, timing, errors; no input/output
- *  - `"full"` — everything including input and output */
-export type TraceLevel = "basic" | "full" | "off";
-
-/** A single recorded tool invocation. */
-export type ToolTrace = {
-  /** Tool name as resolved (e.g. "hereGeo", "std.str.toUpperCase") */
-  tool: string;
-  /** The function that was called (e.g. "httpCall", "upperCase") */
-  fn: string;
-  /** Input object passed to the tool function (only in "full" level) */
-  input?: Record<string, any>;
-  /** Resolved output (only in "full" level, on success) */
-  output?: any;
-  /** Error message (present when the tool threw) */
-  error?: string;
-  /** Wall-clock duration in milliseconds */
-  durationMs: number;
-  /** Monotonic timestamp (ms) relative to the first trace in the request */
-  startedAt: number;
-};
-
-/** Shared trace collector — one per request, passed through the tree. */
-export class TraceCollector {
-  readonly traces: ToolTrace[] = [];
-  readonly level: "basic" | "full";
-  private readonly epoch = performance.now();
-
-  constructor(level: "basic" | "full" = "full") {
-    this.level = level;
-  }
-
-  /** Returns ms since the collector was created */
-  now(): number {
-    return roundMs(performance.now() - this.epoch);
-  }
-
-  record(trace: ToolTrace): void {
-    this.traces.push(trace);
-  }
-
-  /** Build a trace entry, omitting input/output for basic level. */
-  entry(base: {
-    tool: string;
-    fn: string;
-    startedAt: number;
-    durationMs: number;
-    input?: Record<string, any>;
-    output?: any;
-    error?: string;
-  }): ToolTrace {
-    if (this.level === "basic") {
-      const t: ToolTrace = {
-        tool: base.tool,
-        fn: base.fn,
-        durationMs: base.durationMs,
-        startedAt: base.startedAt,
-      };
-      if (base.error) t.error = base.error;
-      return t;
-    }
-    // full
-    const t: ToolTrace = {
-      tool: base.tool,
-      fn: base.fn,
-      durationMs: base.durationMs,
-      startedAt: base.startedAt,
-    };
-    if (base.input) t.input = structuredClone(base.input);
-    if (base.error) t.error = base.error;
-    else if (base.output !== undefined) t.output = base.output;
-    return t;
-  }
-}
-
-/** Set a value at a nested path, creating intermediate objects/arrays as needed */
-/**
- * Coerce a constant wire value string to its proper JS type.
- *
- * The parser stores all bare constants as strings (because the Wire type
- * uses `value: string`). JSON.parse recovers the original type:
- *   "true" → true, "false" → false, "null" → null, "42" → 42
- * Plain strings that aren't valid JSON (like "hello", "/search") fall
- * through and are returned as-is.
- *
- * Results are cached in a module-level Map because the same constant
- * strings appear repeatedly across shadow trees.  Only safe for
- * immutable values (primitives); callers must not mutate the returned
- * value.  See docs/performance.md (#6).
- */
-const constantCache = new Map<string, unknown>();
-function coerceConstant(raw: string): unknown {
-  const cached = constantCache.get(raw);
-  if (cached !== undefined) return cached;
-  let result: unknown;
-  try {
-    result = JSON.parse(raw);
-  } catch {
-    result = raw;
-  }
-  // Hard cap to prevent unbounded growth over long-lived processes.
-  if (constantCache.size > 10_000) constantCache.clear();
-  constantCache.set(raw, result);
-  return result;
-}
-
-const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-function setNested(obj: any, path: string[], value: any): void {
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
-    if (UNSAFE_KEYS.has(key)) throw new Error(`Unsafe assignment key: ${key}`);
-    const nextKey = path[i + 1];
-    if (obj[key] == null) {
-      obj[key] = /^\d+$/.test(nextKey) ? [] : {};
-    }
-    obj = obj[key];
-  }
-  if (path.length > 0) {
-    const finalKey = path[path.length - 1];
-    if (UNSAFE_KEYS.has(finalKey))
-      throw new Error(`Unsafe assignment key: ${finalKey}`);
-    obj[finalKey] = value;
-  }
-}
-
-export class ExecutionTree {
+export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
-  private toolDepCache: Map<string, Promise<any>> = new Map();
-  private toolDefCache: Map<string, ToolDef | null> = new Map();
-  private pipeHandleMap:
+  /**
+   * Cache for resolved tool dependency promises.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolDepCache: Map<string, Promise<any>> = new Map();
+  /**
+   * Cache for resolved ToolDef objects (null = not found).
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolDefCache: Map<string, ToolDef | null> = new Map();
+  /**
+   * Pipe fork lookup map — maps fork trunk keys to their base trunk.
+   * Public to satisfy `SchedulerContext` — used by `scheduleTools.ts`.
+   */
+  pipeHandleMap:
     | Map<string, NonNullable<Bridge["pipeHandles"]>[number]>
     | undefined;
   /**
    * Maps trunk keys to `@version` strings from handle bindings.
    * Populated in the constructor so `schedule()` can prefer versioned
    * tool lookups (e.g. `std.str.toLowerCase@999.1`) over the default.
+   * Public to satisfy `SchedulerContext` — used by `scheduleTools.ts`.
    */
-  private handleVersionMap: Map<string, string> = new Map();
+  handleVersionMap: Map<string, string> = new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -334,7 +89,11 @@ export class ExecutionTree {
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
-  private toolFns?: ToolMap;
+  /**
+   * Registered tool function map.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  toolFns?: ToolMap;
   /** Shadow-tree nesting depth (0 for root). */
   private depth: number;
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
@@ -344,8 +103,16 @@ export class ExecutionTree {
     public trunk: Trunk,
     private document: BridgeDocument,
     toolFns?: ToolMap,
-    private context?: Record<string, any>,
-    private parent?: ExecutionTree,
+    /**
+     * User-supplied context object.
+     * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+     */
+    public context?: Record<string, any>,
+    /**
+     * Parent tree (shadow-tree nesting).
+     * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+     */
+    public parent?: ExecutionTree,
   ) {
     this.depth = parent ? parent.depth + 1 : 0;
     if (this.depth > MAX_EXECUTION_DEPTH) {
@@ -411,469 +178,27 @@ export class ExecutionTree {
     }
   }
 
-  /** Derive tool name from a trunk */
-  private getToolName(target: Trunk): string {
-    if (target.module === SELF_MODULE) return target.field;
-    return `${target.module}.${target.field}`;
+  /**
+   * Accessor for the document's instruction list.
+   * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
+   */
+  get instructions(): readonly Instruction[] {
+    return this.document.instructions;
   }
 
-  /** Deep-lookup a tool function by dotted name (e.g. "std.str.toUpperCase").
-   *  Falls back to a flat key lookup for backward compat (e.g. "hereapi.geocode" as literal key). */
-  private lookupToolFn(
-    name: string,
-  ): ToolCallFn | ((...args: any[]) => any) | undefined {
-    if (name.includes(".")) {
-      // Try namespace traversal first
-      const parts = name.split(".");
-      let current: any = this.toolFns;
-      for (const part of parts) {
-        if (UNSAFE_KEYS.has(part)) return undefined;
-        if (current == null || typeof current !== "object") {
-          current = undefined;
-          break;
-        }
-        current = current[part];
-      }
-      if (typeof current === "function") return current;
-      // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
-      const flat = (this.toolFns as any)?.[name];
-      if (typeof flat === "function") return flat;
-
-      // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
-      // For "std.str.toLowerCase@999.1", check:
-      //   toolFns["std.str@999.1"]?.toLowerCase
-      //   toolFns["std@999.1"]?.str?.toLowerCase
-      const atIdx = name.lastIndexOf("@");
-      if (atIdx > 0) {
-        const baseName = name.substring(0, atIdx);
-        const version = name.substring(atIdx + 1);
-        const nameParts = baseName.split(".");
-        for (let i = nameParts.length - 1; i >= 1; i--) {
-          const nsKey = nameParts.slice(0, i).join(".") + "@" + version;
-          const remainder = nameParts.slice(i);
-          let ns: any = (this.toolFns as any)?.[nsKey];
-          if (ns != null && typeof ns === "object") {
-            for (const part of remainder) {
-              if (ns == null || typeof ns !== "object") {
-                ns = undefined;
-                break;
-              }
-              ns = ns[part];
-            }
-            if (typeof ns === "function") return ns;
-          }
-        }
-      }
-
-      return undefined;
-    }
-    // Try root level first
-    const fn = (this.toolFns as any)?.[name];
-    if (typeof fn === "function") return fn;
-    // Fall back to std namespace (builtins are callable without std. prefix)
-    const stdFn = (this.toolFns as any)?.std?.[name];
-    if (typeof stdFn === "function") return stdFn;
-    // Fall back to internal namespace (engine-internal tools: math ops, concat, etc.)
-    const internalFn = (this.toolFns as any)?.internal?.[name];
-    return typeof internalFn === "function" ? internalFn : undefined;
-  }
-
-  /** Resolve a ToolDef by name, merging the extends chain (cached) */
-  private resolveToolDefByName(name: string): ToolDef | undefined {
-    if (this.toolDefCache.has(name))
-      return this.toolDefCache.get(name) ?? undefined;
-
-    const toolDefs = this.document.instructions.filter(
-      (i): i is ToolDef => i.kind === "tool",
-    );
-    const base = toolDefs.find((t) => t.name === name);
-    if (!base) {
-      this.toolDefCache.set(name, null);
-      return undefined;
-    }
-
-    // Build extends chain: root → ... → leaf
-    const chain: ToolDef[] = [base];
-    let current = base;
-    while (current.extends) {
-      const parent = toolDefs.find((t) => t.name === current.extends);
-      if (!parent)
-        throw new Error(
-          `Tool "${current.name}" extends unknown tool "${current.extends}"`,
-        );
-      chain.unshift(parent);
-      current = parent;
-    }
-
-    // Merge: root provides base, each child overrides
-    const merged: ToolDef = {
-      kind: "tool",
-      name,
-      fn: chain[0].fn, // fn from root ancestor
-      deps: [],
-      wires: [],
-    };
-
-    for (const def of chain) {
-      // Merge deps (dedupe by handle)
-      for (const dep of def.deps) {
-        if (!merged.deps.some((d) => d.handle === dep.handle)) {
-          merged.deps.push(dep);
-        }
-      }
-      // Merge wires (child overrides parent by target; onError replaces onError)
-      for (const wire of def.wires) {
-        if (wire.kind === "onError") {
-          const idx = merged.wires.findIndex((w) => w.kind === "onError");
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
-        } else {
-          const idx = merged.wires.findIndex(
-            (w) => "target" in w && w.target === wire.target,
-          );
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
-        }
-      }
-    }
-
-    this.toolDefCache.set(name, merged);
-    return merged;
-  }
-
-  /** Resolve a tool definition's wires into a nested input object */
-  private async resolveToolWires(
-    toolDef: ToolDef,
-    input: Record<string, any>,
-  ): Promise<void> {
-    // Constants applied synchronously
-    for (const wire of toolDef.wires) {
-      if (wire.kind === "constant") {
-        setNested(input, parsePath(wire.target), coerceConstant(wire.value));
-      }
-    }
-
-    // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
-    const pullWires = toolDef.wires.filter((w) => w.kind === "pull");
-    if (pullWires.length > 0) {
-      const resolved = await Promise.all(
-        pullWires.map(async (wire) => ({
-          target: wire.target,
-          value: await this.resolveToolSource(wire.source, toolDef),
-        })),
-      );
-      for (const { target, value } of resolved) {
-        setNested(input, parsePath(target), value);
-      }
-    }
-  }
-
-  /** Resolve a source reference from a tool wire against its dependencies */
-  private async resolveToolSource(
-    source: string,
-    toolDef: ToolDef,
-  ): Promise<any> {
-    const dotIdx = source.indexOf(".");
-    const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
-    const restPath =
-      dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
-
-    const dep = toolDef.deps.find((d) => d.handle === handle);
-    if (!dep)
-      throw new Error(`Unknown source "${handle}" in tool "${toolDef.name}"`);
-
-    let value: any;
-    if (dep.kind === "context") {
-      // Walk the full parent chain for context
-      let cursor: ExecutionTree | undefined = this;
-      while (cursor && value === undefined) {
-        value = cursor.context;
-        cursor = cursor.parent;
-      }
-    } else if (dep.kind === "const") {
-      // Walk the full parent chain for const state
-      const constKey = trunkKey({
-        module: SELF_MODULE,
-        type: "Const",
-        field: "const",
-      });
-      let cursor: ExecutionTree | undefined = this;
-      while (cursor && value === undefined) {
-        value = cursor.state[constKey];
-        cursor = cursor.parent;
-      }
-    } else if (dep.kind === "tool") {
-      value = await this.resolveToolDep(dep.tool);
-    }
-
-    for (const segment of restPath) {
-      value = value?.[segment];
-    }
-    return value;
-  }
-
-  /** Call a tool dependency (cached per request) */
-  private resolveToolDep(toolName: string): Promise<any> {
-    // Check parent first (shadow trees delegate)
-    if (this.parent) return this.parent.resolveToolDep(toolName);
-
-    if (this.toolDepCache.has(toolName))
-      return this.toolDepCache.get(toolName)!;
-
-    const promise = (async () => {
-      const toolDef = this.resolveToolDefByName(toolName);
-      if (!toolDef) throw new Error(`Tool dependency "${toolName}" not found`);
-
-      const input: Record<string, any> = {};
-      await this.resolveToolWires(toolDef, input);
-
-      const fn = this.lookupToolFn(toolDef.fn!);
-      if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
-
-      // on error: wrap the tool call with fallback from onError wire
-      const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-      try {
-        return await this.callTool(toolName, toolDef.fn!, fn, input);
-      } catch (err) {
-        if (!onErrorWire) throw err;
-        if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-        return this.resolveToolSource(onErrorWire.source, toolDef);
-      }
-    })();
-
-    this.toolDepCache.set(toolName, promise);
-    return promise;
-  }
-
+  /** Schedule resolution for a target trunk — delegates to `scheduleTools.ts`. */
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any> {
-    // Delegate to parent (shadow trees don't schedule directly) unless
-    // the target fork has bridge wires sourced from element data,
-    // or a __local binding whose source chain touches element data.
-    if (this.parent) {
-      const forkWires =
-        this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-      const hasElementSource = forkWires.some(
-        (w) =>
-          ("from" in w && !!w.from.element) ||
-          ("condAnd" in w &&
-            (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
-          ("condOr" in w &&
-            (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
-      );
-      // For __local trunks, also check transitively: if the source is a
-      // pipe fork whose own wires reference element data, keep it local.
-      const hasTransitiveElementSource =
-        target.module === "__local" &&
-        forkWires.some((w) => {
-          if (!("from" in w)) return false;
-          const srcTrunk = {
-            module: w.from.module,
-            type: w.from.type,
-            field: w.from.field,
-            instance: w.from.instance,
-          };
-          return (
-            this.bridge?.wires.some(
-              (iw) =>
-                sameTrunk(iw.to, srcTrunk) && "from" in iw && !!iw.from.element,
-            ) ?? false
-          );
-        });
-      if (!hasElementSource && !hasTransitiveElementSource) {
-        return this.parent.schedule(target, pullChain);
-      }
-    }
-
-    // ── Sync work: collect and group bridge wires ─────────────────
-    // If this target is a pipe fork, also apply bridge wires from its base
-    // handle (non-pipe wires, e.g. `c.currency <- i.currency`) as defaults
-    // before the fork-specific pipe wires.
-    const targetKey = trunkKey(target);
-    const pipeFork = this.pipeHandleMap?.get(targetKey);
-    const baseTrunk = pipeFork?.baseTrunk;
-
-    const baseWires = baseTrunk
-      ? (this.bridge?.wires.filter(
-          (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
-        ) ?? [])
-      : [];
-    // Fork-specific wires (pipe wires targeting the fork's own instance)
-    const forkWires =
-      this.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-    // Merge: base provides defaults, fork overrides
-    const bridgeWires = [...baseWires, ...forkWires];
-
-    // Look up ToolDef for this target
-    const toolName = this.getToolName(target);
-    const toolDef = this.resolveToolDefByName(toolName);
-
-    // Group wires by target path so that || (null-fallback) and ??
-    // (error-fallback) semantics are honoured via resolveWires().
-    const wireGroups = new Map<string, Wire[]>();
-    for (const w of bridgeWires) {
-      const key = w.to.path.join(".");
-      let group = wireGroups.get(key);
-      if (!group) {
-        group = [];
-        wireGroups.set(key, group);
-      }
-      group.push(w);
-    }
-
-    // ── Async path: tool definition requires resolveToolWires + callTool ──
-    if (toolDef) {
-      return this.scheduleToolDef(toolName, toolDef, wireGroups, pullChain);
-    }
-
-    // ── Sync-capable path: no tool definition ──
-    // For __local bindings, __define_ pass-throughs, pipe forks backed by
-    // sync tools, and logic nodes — resolve bridge wires and return
-    // synchronously when all sources are already in state.
-    // See docs/performance.md (#12).
-    const groupEntries = Array.from(wireGroups.entries());
-    const nGroups = groupEntries.length;
-    const values: MaybePromise<any>[] = new Array(nGroups);
-    let hasAsync = false;
-    for (let i = 0; i < nGroups; i++) {
-      const v = this.resolveWires(groupEntries[i]![1], pullChain);
-      values[i] = v;
-      if (!hasAsync && isPromise(v)) hasAsync = true;
-    }
-
-    if (!hasAsync) {
-      return this.scheduleFinish(
-        target,
-        toolName,
-        groupEntries,
-        values as any[],
-        baseTrunk,
-      );
-    }
-    return Promise.all(values).then((resolved) =>
-      this.scheduleFinish(target, toolName, groupEntries, resolved, baseTrunk),
-    );
-  }
-
-  /**
-   * Assemble input from resolved wire values and either invoke a direct tool
-   * function or return the data for pass-through targets (local/define/logic).
-   * Returns synchronously when the tool function (if any) returns sync.
-   * See docs/performance.md (#12).
-   */
-  private scheduleFinish(
-    target: Trunk,
-    toolName: string,
-    groupEntries: [string, Wire[]][],
-    resolvedValues: any[],
-    baseTrunk: Trunk | undefined,
-  ): MaybePromise<any> {
-    const input: Record<string, any> = {};
-    const resolved: [string[], any][] = [];
-    for (let i = 0; i < groupEntries.length; i++) {
-      const path = groupEntries[i]![1][0]!.to.path;
-      const value = resolvedValues[i];
-      resolved.push([path, value]);
-      if (path.length === 0 && value != null && typeof value === "object") {
-        Object.assign(input, value);
-      } else {
-        setNested(input, path, value);
-      }
-    }
-
-    // Direct tool function lookup by name (simple or dotted).
-    // When the handle carries a @version tag, try the versioned key first
-    // (e.g. "std.str.toLowerCase@999.1") so user-injected overrides win.
-    // For pipe forks, fall back to the baseTrunk's version since forks
-    // use synthetic instance numbers (100000+).
-    const handleVersion =
-      this.handleVersionMap.get(trunkKey(target)) ??
-      (baseTrunk ? this.handleVersionMap.get(trunkKey(baseTrunk)) : undefined);
-    let directFn = handleVersion
-      ? this.lookupToolFn(`${toolName}@${handleVersion}`)
-      : undefined;
-    if (!directFn) {
-      directFn = this.lookupToolFn(toolName);
-    }
-    if (directFn) {
-      return this.callTool(toolName, toolName, directFn, input);
-    }
-
-    // Define pass-through: synthetic trunks created by define inlining
-    // act as data containers — bridge wires set their values, no tool needed.
-    if (target.module.startsWith("__define_")) {
-      return input;
-    }
-
-    // Local binding or logic node: the wire resolves the source and stores
-    // the result — no tool call needed.  For path=[] wires the resolved
-    // value may be a primitive (boolean from condAnd/condOr, string from
-    // a pipe tool like upperCase), so return the resolved value directly.
-    if (
-      target.module === "__local" ||
-      target.field === "__and" ||
-      target.field === "__or"
-    ) {
-      for (const [path, value] of resolved) {
-        if (path.length === 0) return value;
-      }
-      return input;
-    }
-
-    throw new Error(`No tool found for "${toolName}"`);
-  }
-
-  /**
-   * Full async schedule path for targets backed by a ToolDef.
-   * Resolves tool wires, bridge wires, and invokes the tool function
-   * with error recovery support.
-   */
-  private async scheduleToolDef(
-    toolName: string,
-    toolDef: ToolDef,
-    wireGroups: Map<string, Wire[]>,
-    pullChain: Set<string> | undefined,
-  ): Promise<any> {
-    // Build input object: tool wires first (base), then bridge wires (override)
-    const input: Record<string, any> = {};
-    await this.resolveToolWires(toolDef, input);
-
-    // Resolve bridge wires and apply on top
-    const groupEntries = Array.from(wireGroups.entries());
-    const resolved = await Promise.all(
-      groupEntries.map(async ([, group]): Promise<[string[], any]> => {
-        const value = await this.resolveWires(group, pullChain);
-        return [group[0].to.path, value];
-      }),
-    );
-    for (const [path, value] of resolved) {
-      if (path.length === 0 && value != null && typeof value === "object") {
-        Object.assign(input, value);
-      } else {
-        setNested(input, path, value);
-      }
-    }
-
-    // Call ToolDef-backed tool function
-    const fn = this.lookupToolFn(toolDef.fn!);
-    if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
-
-    // on error: wrap the tool call with fallback from onError wire
-    const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
-    try {
-      return await this.callTool(toolName, toolDef.fn!, fn, input);
-    } catch (err) {
-      if (!onErrorWire) throw err;
-      if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-      return this.resolveToolSource(onErrorWire.source, toolDef);
-    }
+    return _schedule(this, target, pullChain);
   }
 
   /**
    * Invoke a tool function, recording both an OpenTelemetry span and (when
-   * tracing is enabled) a ToolTrace entry.  All three tool-call sites in the
+   * tracing is enabled) a ToolTrace entry.  All tool-call sites in the
    * engine delegate here so instrumentation lives in exactly one place.
+   *
+   * Public to satisfy `ToolLookupContext` — called by `toolLookup.ts`.
    */
-  private callTool(
+  callTool(
     toolName: string,
     fnName: string,
     fnImpl: (...args: any[]) => any,
@@ -953,7 +278,7 @@ export class ExecutionTree {
           }
           span.recordException(err as Error);
           span.setStatus({
-            code: SpanStatusCode.ERROR,
+            code: SpanStatusCodeEnum.ERROR,
             message: (err as Error).message,
           });
           logger?.error?.(
@@ -997,6 +322,22 @@ export class ExecutionTree {
     child.logger = this.logger;
     child.signal = this.signal;
     return child;
+  }
+
+  /**
+   * Wrap raw array items into shadow trees, honouring `break` / `continue`
+   * sentinels.  Shared by `pullOutputField`, `response`, and `run`.
+   */
+  private createShadowArray(items: any[]): ExecutionTree[] {
+    const shadows: ExecutionTree[] = [];
+    for (const item of items) {
+      if (item === BREAK_SYM) break;
+      if (item === CONTINUE_SYM) continue;
+      const s = this.shadow();
+      s.state[this.elementTrunkKey] = item;
+      shadows.push(s);
+    }
+    return shadows;
   }
 
   /** Returns collected traces (empty array when tracing is disabled). */
@@ -1046,14 +387,19 @@ export class ExecutionTree {
    * Pull a single value.  Returns synchronously when already in state;
    * returns a Promise only when the value is a pending tool call.
    * See docs/performance.md (#10).
+   *
+   * Public to satisfy `TreeContext` — extracted modules call this via
+   * the interface.
    */
-  private pullSingle(
+  pullSingle(
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
   ): MaybePromise<any> {
-    // Cache trunkKey on the NodeRef to avoid repeated string allocation
-    // for the same AST node.  See docs/performance.md (#11).
-    const key = ((ref as any).__key ??= trunkKey(ref)) as string;
+    // Cache trunkKey on the NodeRef via a Symbol key to avoid repeated
+    // string allocation.  Symbol keys don't affect V8 hidden classes,
+    // so this won't degrade parser allocation-site throughput.
+    // See docs/performance.md (#11).
+    const key: string = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
 
     // ── Cycle detection ─────────────────────────────────────────────
     if (pullChain.has(key)) {
@@ -1160,195 +506,14 @@ export class ExecutionTree {
   }
 
   /**
-   * Resolve a set of matched wires.
+   * Resolve a set of matched wires — delegates to the extracted
+   * `resolveWires` module.  See `resolveWires.ts` for the full
+   * architecture comment (modifier layers, overdefinition, etc.).
    *
-   * Architecture: two distinct resolution axes —
-   *
-   *  **Falsy Gate** (`||`, within a wire): `falsyFallbackRefs` + `falsyFallback`
-   *    → truthy check — falsy values (0, "", false) trigger fallback chain.
-   *
-   *  **Overdefinition** (across wires): multiple wires target the same path
-   *    → nullish check — only null/undefined falls through to the next wire.
-   *
-   * Per-wire layers:
-   *   Layer 1  — Execution (pullSingle + safe modifier)
-   *   Layer 2a — Falsy Gate   (falsyFallbackRefs → falsyFallback / falsyControl)
-   *   Layer 2b — Nullish Gate  (nullishFallbackRef / nullishFallback / nullishControl)
-   *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
-   *
-   * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
-   * to return or continue to the next wire.
+   * Public to satisfy `SchedulerContext` — used by `scheduleTools.ts`.
    */
-  /**
-   * Resolve wires, returning synchronously when the hot path allows it.
-   *
-   * Fast path: single `from` wire with no fallback/catch modifiers, which is
-   * the common case for element field wires like `.id <- it.id`.  Delegates to
-   * `resolveWiresAsync` for anything more complex.
-   * See docs/performance.md (#10).
-   */
-  private resolveWires(
-    wires: Wire[],
-    pullChain?: Set<string>,
-  ): MaybePromise<any> {
-    if (wires.length === 1) {
-      const w = wires[0]!;
-      if ("value" in w) return coerceConstant(w.value);
-      const ref = getSimplePullRef(w);
-      if (ref) return this.pullSingle(ref, pullChain);
-    }
-    return this.resolveWiresAsync(wires, pullChain);
-  }
-
-  private async resolveWiresAsync(
-    wires: Wire[],
-    pullChain?: Set<string>,
-  ): Promise<any> {
-    let lastError: any;
-
-    for (const w of wires) {
-      // Constant wire — always wins, no modifiers
-      if ("value" in w) return coerceConstant(w.value);
-
-      try {
-        // --- Layer 1: Execution ---
-        let resolvedValue: any;
-
-        if ("cond" in w) {
-          const condValue = await this.pullSingle(w.cond, pullChain);
-          if (condValue) {
-            if (w.thenRef !== undefined)
-              resolvedValue = await this.pullSingle(w.thenRef, pullChain);
-            else if (w.thenValue !== undefined)
-              resolvedValue = coerceConstant(w.thenValue);
-          } else {
-            if (w.elseRef !== undefined)
-              resolvedValue = await this.pullSingle(w.elseRef, pullChain);
-            else if (w.elseValue !== undefined)
-              resolvedValue = coerceConstant(w.elseValue);
-          }
-        } else if ("condAnd" in w) {
-          const {
-            leftRef,
-            rightRef,
-            rightValue,
-            safe: isSafe,
-            rightSafe,
-          } = w.condAnd;
-          const leftVal = isSafe
-            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(leftRef, pullChain);
-          if (!leftVal) {
-            resolvedValue = false;
-          } else if (rightRef !== undefined) {
-            const rightVal = rightSafe
-              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
-                  if (isFatalError(e)) throw e;
-                  return undefined;
-                })
-              : await this.pullSingle(rightRef, pullChain);
-            resolvedValue = Boolean(rightVal);
-          } else if (rightValue !== undefined) {
-            resolvedValue = Boolean(coerceConstant(rightValue));
-          } else {
-            resolvedValue = Boolean(leftVal);
-          }
-        } else if ("condOr" in w) {
-          const {
-            leftRef,
-            rightRef,
-            rightValue,
-            safe: isSafe,
-            rightSafe,
-          } = w.condOr;
-          const leftVal = isSafe
-            ? await this.pullSingle(leftRef, pullChain).catch((e: any) => {
-                if (isFatalError(e)) throw e;
-                return undefined;
-              })
-            : await this.pullSingle(leftRef, pullChain);
-          if (leftVal) {
-            resolvedValue = true;
-          } else if (rightRef !== undefined) {
-            const rightVal = rightSafe
-              ? await this.pullSingle(rightRef, pullChain).catch((e: any) => {
-                  if (isFatalError(e)) throw e;
-                  return undefined;
-                })
-              : await this.pullSingle(rightRef, pullChain);
-            resolvedValue = Boolean(rightVal);
-          } else if (rightValue !== undefined) {
-            resolvedValue = Boolean(coerceConstant(rightValue));
-          } else {
-            resolvedValue = Boolean(leftVal);
-          }
-        } else if ("from" in w) {
-          if (w.safe) {
-            try {
-              resolvedValue = await this.pullSingle(w.from, pullChain);
-            } catch (err: any) {
-              if (isFatalError(err)) throw err;
-              resolvedValue = undefined;
-            }
-          } else {
-            resolvedValue = await this.pullSingle(w.from, pullChain);
-          }
-        } else {
-          continue;
-        }
-
-        // --- Layer 2a: Falsy Gate (||) ---
-        if (!resolvedValue && w.falsyFallbackRefs?.length) {
-          for (const ref of w.falsyFallbackRefs) {
-            // Assign the fallback value regardless of whether it is truthy or falsy.
-            // e.g. `false || 0` will correctly update resolvedValue to `0`.
-            resolvedValue = await this.pullSingle(ref, pullChain);
-
-            // If it is truthy, we are done! Short-circuit the || chain.
-            if (resolvedValue) break;
-          }
-        }
-
-        if (!resolvedValue) {
-          if (w.falsyControl) {
-            resolvedValue = applyControlFlow(w.falsyControl);
-          } else if (w.falsyFallback != null) {
-            resolvedValue = coerceConstant(w.falsyFallback);
-          }
-        }
-
-        // --- Layer 2b: Nullish Gate (??) ---
-        if (resolvedValue == null) {
-          if (w.nullishControl) {
-            resolvedValue = applyControlFlow(w.nullishControl);
-          } else if (w.nullishFallbackRef) {
-            resolvedValue = await this.pullSingle(
-              w.nullishFallbackRef,
-              pullChain,
-            );
-          } else if (w.nullishFallback != null) {
-            resolvedValue = coerceConstant(w.nullishFallback);
-          }
-        }
-
-        // --- Overdefinition Boundary ---
-        if (resolvedValue != null) return resolvedValue;
-      } catch (err: any) {
-        // --- Layer 3: Catch ---
-        if (isFatalError(err)) throw err;
-        if (w.catchControl) return applyControlFlow(w.catchControl);
-        if (w.catchFallbackRef)
-          return this.pullSingle(w.catchFallbackRef, pullChain);
-        if (w.catchFallback != null) return coerceConstant(w.catchFallback);
-        lastError = err;
-      }
-    }
-
-    if (lastError) throw lastError;
-    return undefined;
+  resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any> {
+    return _resolveWires(this, wires, pullChain);
   }
 
   /**
@@ -1375,16 +540,7 @@ export class ExecutionTree {
     if (!array) return result;
     const resolved = await result;
     if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-    const items = resolved as any[];
-    const finalShadowTrees: ExecutionTree[] = [];
-    for (const item of items) {
-      if (item === BREAK_SYM) break;
-      if (item === CONTINUE_SYM) continue;
-      const s = this.shadow();
-      s.state[this.elementTrunkKey] = item;
-      finalShadowTrees.push(s);
-    }
-    return finalShadowTrees;
+    return this.createShadowArray(resolved as any[]);
   }
 
   /**
@@ -1395,6 +551,51 @@ export class ExecutionTree {
    */
   resolvePreGrouped(wires: Wire[]): MaybePromise<unknown> {
     return this.resolveWires(wires);
+  }
+
+  /**
+   * Recursively resolve an output field at `prefix` — either via exact-match
+   * wires (leaf) or by collecting sub-fields from deeper wires (nested object).
+   *
+   * Shared by `collectOutput()` and `run()`.
+   */
+  private async resolveNestedField(prefix: string[]): Promise<unknown> {
+    const bridge = this.bridge!;
+    const { type, field } = this.trunk;
+
+    const exactWires = bridge.wires.filter(
+      (w) =>
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field &&
+        pathEquals(w.to.path, prefix),
+    );
+    if (exactWires.length > 0) {
+      return this.resolveWires(exactWires);
+    }
+
+    const subFields = new Set<string>();
+    for (const wire of bridge.wires) {
+      const p = wire.to.path;
+      if (
+        wire.to.module === SELF_MODULE &&
+        wire.to.type === type &&
+        wire.to.field === field &&
+        p.length > prefix.length &&
+        prefix.every((seg, i) => p[i] === seg)
+      ) {
+        subFields.add(p[prefix.length]!);
+      }
+    }
+    if (subFields.size === 0) return undefined;
+
+    const obj: Record<string, unknown> = {};
+    await Promise.all(
+      [...subFields].map(async (sub) => {
+        obj[sub] = await this.resolveNestedField([...prefix, sub]);
+      }),
+    );
+    return obj;
   }
 
   /**
@@ -1469,45 +670,9 @@ export class ExecutionTree {
 
     const result: Record<string, unknown> = {};
 
-    const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
-      );
-      if (exactWires.length > 0) {
-        return this.resolveWires(exactWires);
-      }
-
-      const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        const p = wire.to.path;
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          p.length > prefix.length &&
-          prefix.every((seg, i) => p[i] === seg)
-        ) {
-          subFields.add(p[prefix.length]!);
-        }
-      }
-      if (subFields.size === 0) return undefined;
-
-      const obj: Record<string, unknown> = {};
-      await Promise.all(
-        [...subFields].map(async (sub) => {
-          obj[sub] = await resolveField([...prefix, sub]);
-        }),
-      );
-      return obj;
-    };
-
     await Promise.all(
       [...outputFields].map(async (name) => {
-        result[name] = await resolveField([name]);
+        result[name] = await this.resolveNestedField([name]);
       }),
     );
     return result;
@@ -1601,49 +766,9 @@ export class ExecutionTree {
 
     const result: Record<string, unknown> = {};
 
-    // Resolves a single output field at `prefix` — either via an exact-match
-    // wire (leaf), or by collecting sub-fields from deeper wires (nested object).
-    const resolveField = async (prefix: string[]): Promise<unknown> => {
-      const exactWires = bridge.wires.filter(
-        (w) =>
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
-          pathEquals(w.to.path, prefix),
-      );
-      if (exactWires.length > 0) {
-        return this.resolveWires(exactWires);
-      }
-
-      // No exact wire — gather sub-field names from deeper-path wires
-      // (e.g. `o.why { .temperature <- ... }` produces path ["why","temperature"])
-      const subFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        const p = wire.to.path;
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          p.length > prefix.length &&
-          prefix.every((seg, i) => p[i] === seg)
-        ) {
-          subFields.add(p[prefix.length]!);
-        }
-      }
-      if (subFields.size === 0) return undefined;
-
-      const obj: Record<string, unknown> = {};
-      await Promise.all(
-        [...subFields].map(async (sub) => {
-          obj[sub] = await resolveField([...prefix, sub]);
-        }),
-      );
-      return obj;
-    };
-
     await Promise.all([
       ...[...outputFields].map(async (name) => {
-        result[name] = await resolveField([name]);
+        result[name] = await this.resolveNestedField([name]);
       }),
       ...forcePromises,
     ]);
@@ -1651,182 +776,14 @@ export class ExecutionTree {
   }
 
   /**
-   * Recursively convert shadow trees into plain JS objects.
-   *
-   * Wire categories at each level (prefix = P):
-   *   Leaf  — `to.path = [...P, name]`, no deeper paths → scalar
-   *   Array — direct wire AND deeper paths → pull as array, recurse
-   *   Nested object — only deeper paths, no direct wire → pull each
-   *             full path and assemble via setNested
+   * Recursively convert shadow trees into plain JS objects —
+   * delegates to `materializeShadows.ts`.
    */
-  private async materializeShadows(
+  private materializeShadows(
     items: ExecutionTree[],
     pathPrefix: string[],
   ): Promise<unknown[]> {
-    const wires = this.bridge!.wires;
-    const { type, field } = this.trunk;
-
-    const directFields = new Set<string>();
-    const deepPaths = new Map<string, string[][]>();
-    // #8: Pre-group wires by exact path — eliminates per-element re-filtering.
-    // Key: wire.to.path joined by \0 (null char is safe — field names are identifiers).
-    const wireGroupsByPath = new Map<string, Wire[]>();
-
-    for (const wire of wires) {
-      const p = wire.to.path;
-      if (
-        wire.to.module !== SELF_MODULE ||
-        wire.to.type !== type ||
-        wire.to.field !== field
-      )
-        continue;
-      if (p.length <= pathPrefix.length) continue;
-      if (!pathPrefix.every((seg, i) => p[i] === seg)) continue;
-
-      const name = p[pathPrefix.length]!;
-      if (p.length === pathPrefix.length + 1) {
-        directFields.add(name);
-        const pathKey = p.join("\0");
-        let group = wireGroupsByPath.get(pathKey);
-        if (!group) {
-          group = [];
-          wireGroupsByPath.set(pathKey, group);
-        }
-        group.push(wire);
-      } else {
-        let arr = deepPaths.get(name);
-        if (!arr) {
-          arr = [];
-          deepPaths.set(name, arr);
-        }
-        arr.push(p);
-      }
-    }
-
-    // #9/#10: Fast path — no nested arrays, only direct fields.
-    // Collect all (shadow × field) resolutions.  When every value is already in
-    // state (the hot case for element passthrough), resolvePreGrouped returns
-    // synchronously and we skip Promise.all entirely.
-    // See docs/performance.md (#9, #10).
-    if (deepPaths.size === 0) {
-      const directFieldArray = [...directFields];
-      const nFields = directFieldArray.length;
-      const nItems = items.length;
-      // Pre-compute pathKeys and wire groups — only depend on j, not i.
-      // See docs/performance.md (#11).
-      const preGroups: Wire[][] = new Array(nFields);
-      for (let j = 0; j < nFields; j++) {
-        const pathKey = [...pathPrefix, directFieldArray[j]!].join("\0");
-        preGroups[j] = wireGroupsByPath.get(pathKey)!;
-      }
-      const rawValues: MaybePromise<unknown>[] = new Array(nItems * nFields);
-      let hasAsync = false;
-      for (let i = 0; i < nItems; i++) {
-        const shadow = items[i]!;
-        for (let j = 0; j < nFields; j++) {
-          const v = shadow.resolvePreGrouped(preGroups[j]!);
-          rawValues[i * nFields + j] = v;
-          if (!hasAsync && isPromise(v)) hasAsync = true;
-        }
-      }
-      const flatValues: unknown[] = hasAsync
-        ? await Promise.all(rawValues)
-        : (rawValues as unknown[]);
-
-      const finalResults: unknown[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const obj: Record<string, unknown> = {};
-        let doBreak = false;
-        let doSkip = false;
-        for (let j = 0; j < nFields; j++) {
-          const v = flatValues[i * nFields + j];
-          if (v === BREAK_SYM) {
-            doBreak = true;
-            break;
-          }
-          if (v === CONTINUE_SYM) {
-            doSkip = true;
-            break;
-          }
-          obj[directFieldArray[j]!] = v;
-        }
-        if (doBreak) break;
-        if (doSkip) continue;
-        finalResults.push(obj);
-      }
-      return finalResults;
-    }
-
-    // Slow path: deep paths (nested arrays) present.
-    // Uses pre-grouped wires for direct fields (#8), original logic for the rest.
-    const rawResults = await Promise.all(
-      items.map(async (shadow) => {
-        const obj: Record<string, unknown> = {};
-        const tasks: Promise<void>[] = [];
-
-        for (const name of directFields) {
-          const fullPath = [...pathPrefix, name];
-          const hasDeeper = deepPaths.has(name);
-          tasks.push(
-            (async () => {
-              if (hasDeeper) {
-                const children = await shadow.pullOutputField(fullPath, true);
-                obj[name] = Array.isArray(children)
-                  ? await this.materializeShadows(
-                      children as ExecutionTree[],
-                      fullPath,
-                    )
-                  : children;
-              } else {
-                // #8: wireGroupsByPath is built in the same branch that populates
-                // directFields, so the group is always present — no fallback needed.
-                const pathKey = fullPath.join("\0");
-                obj[name] = await shadow.resolvePreGrouped(
-                  wireGroupsByPath.get(pathKey)!,
-                );
-              }
-            })(),
-          );
-        }
-
-        for (const [name, paths] of deepPaths) {
-          if (directFields.has(name)) continue;
-          tasks.push(
-            (async () => {
-              const nested: Record<string, unknown> = {};
-              await Promise.all(
-                paths.map(async (fullPath) => {
-                  const value = await shadow.pullOutputField(fullPath);
-                  setNested(
-                    nested,
-                    fullPath.slice(pathPrefix.length + 1),
-                    value,
-                  );
-                }),
-              );
-              obj[name] = nested;
-            })(),
-          );
-        }
-
-        await Promise.all(tasks);
-        // Check if any field resolved to a sentinel — propagate it
-        for (const v of Object.values(obj)) {
-          if (v === CONTINUE_SYM) return CONTINUE_SYM;
-          if (v === BREAK_SYM) return BREAK_SYM;
-        }
-        return obj;
-      }),
-    );
-
-    // Filter sentinels from the final result
-    const finalResults: unknown[] = [];
-    for (const item of rawResults) {
-      if (item === BREAK_SYM) break;
-      if (item === CONTINUE_SYM) continue;
-      finalResults.push(item);
-    }
-    return finalResults;
+    return _materializeShadows(this, items, pathPrefix);
   }
 
   async response(ipath: Path, array: boolean): Promise<any> {
@@ -1894,16 +851,7 @@ export class ExecutionTree {
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
       if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-      const items = resolved as any[];
-      const shadowTrees: ExecutionTree[] = [];
-      for (const item of items) {
-        if (item === BREAK_SYM) break;
-        if (item === CONTINUE_SYM) continue;
-        const s = this.shadow();
-        s.state[this.elementTrunkKey] = item;
-        shadowTrees.push(s);
-      }
-      return shadowTrees;
+      return this.createShadowArray(resolved as any[]);
     }
 
     // ── Resolve field from deferred define ────────────────────────────
@@ -1917,16 +865,7 @@ export class ExecutionTree {
         if (!array) return response;
         const resolved = await response;
         if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
-        const items = resolved as any[];
-        const shadowTrees: ExecutionTree[] = [];
-        for (const item of items) {
-          if (item === BREAK_SYM) break;
-          if (item === CONTINUE_SYM) continue;
-          const s = this.shadow();
-          s.state[this.elementTrunkKey] = item;
-          shadowTrees.push(s);
-        }
-        return shadowTrees;
+        return this.createShadowArray(resolved as any[]);
       }
     }
 

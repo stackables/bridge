@@ -14,13 +14,11 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { globSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
-// Read pnpm workspace to find packages
-const workspaceYaml = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+// Discover packages by scanning the ./packages directory
 const packageDirs = [];
 
 // Find all publishable package.json files (those with a "name" starting with @stackables/)
