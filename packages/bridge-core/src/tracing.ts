@@ -76,14 +76,77 @@ export type ToolTrace = {
 
 // ── TraceCollector ──────────────────────────────────────────────────────────
 
+/**
+ * Bounded serialisation for trace payloads — prevents OOM when tools handle
+ * very large objects (e.g. a 50 MB database response).
+ *
+ * Truncates:
+ *  - Arrays beyond `maxArrayItems` elements (default 100)
+ *  - Strings beyond `maxStringLength` characters (default 1 024)
+ *  - Object trees deeper than `maxDepth` levels (default 5)
+ */
+export function boundedClone(
+  value: unknown,
+  depth = 0,
+  maxDepth = 5,
+  maxArrayItems = 100,
+  maxStringLength = 1024,
+): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    return value.length > maxStringLength
+      ? value.slice(0, maxStringLength) + `…[+${value.length - maxStringLength}]`
+      : value;
+  }
+  if (typeof value !== "object") return value;
+  if (depth >= maxDepth) return "[…]";
+  if (Array.isArray(value)) {
+    const truncated = value.length > maxArrayItems;
+    const items: unknown[] = (
+      truncated ? value.slice(0, maxArrayItems) : value
+    ).map((item) =>
+      boundedClone(item, depth + 1, maxDepth, maxArrayItems, maxStringLength),
+    );
+    if (truncated) items.push(`…[+${value.length - maxArrayItems} more]`);
+    return items;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    out[k] = boundedClone(
+      v,
+      depth + 1,
+      maxDepth,
+      maxArrayItems,
+      maxStringLength,
+    );
+  }
+  return out;
+}
+
 /** Shared trace collector — one per request, passed through the tree. */
 export class TraceCollector {
   readonly traces: ToolTrace[] = [];
   readonly level: "basic" | "full";
+  /** Maximum number of array elements captured in a trace payload. */
+  readonly maxArrayItems: number;
+  /** Maximum string length (characters) captured in a trace payload. */
+  readonly maxStringLength: number;
+  /** Maximum object nesting depth captured in a trace payload. */
+  readonly cloneDepth: number;
   private readonly epoch = performance.now();
 
-  constructor(level: "basic" | "full" = "full") {
+  constructor(
+    level: "basic" | "full" = "full",
+    maxArrayItems = 100,
+    maxStringLength = 1024,
+    cloneDepth = 5,
+  ) {
     this.level = level;
+    this.maxArrayItems = maxArrayItems;
+    this.maxStringLength = maxStringLength;
+    this.cloneDepth = cloneDepth;
   }
 
   /** Returns ms since the collector was created */
@@ -122,7 +185,14 @@ export class TraceCollector {
       durationMs: base.durationMs,
       startedAt: base.startedAt,
     };
-    if (base.input) t.input = structuredClone(base.input);
+    if (base.input)
+      t.input = boundedClone(
+        base.input,
+        0,
+        this.cloneDepth,
+        this.maxArrayItems,
+        this.maxStringLength,
+      ) as Record<string, any>;
     if (base.error) t.error = base.error;
     else if (base.output !== undefined) t.output = base.output;
     return t;

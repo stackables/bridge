@@ -62,6 +62,17 @@ export type BridgeOptions = {
    * Defaults to silent no-ops so there is zero output unless you opt in.
    */
   logger?: Logger;
+  /**
+   * Maximum time (ms) a single tool call may run before a `BridgeTimeoutError`
+   * is thrown.  Default is `undefined` (no timeout).
+   * Set to e.g. `15_000` to guard against hung external APIs.
+   */
+  toolTimeoutMs?: number;
+  /**
+   * Maximum shadow-tree nesting depth before a `BridgePanicError` is thrown.
+   * Default is `MAX_EXECUTION_DEPTH` (30).
+   */
+  maxDepth?: number;
 };
 
 /** Document can be a static BridgeDocument or a function that selects per-request */
@@ -78,6 +89,8 @@ export function bridgeTransform(
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
+  const toolTimeoutMs = options?.toolTimeoutMs;
+  const maxDepth = options?.maxDepth;
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -160,6 +173,8 @@ export function bridgeTransform(
             );
 
             source.logger = logger;
+            if (toolTimeoutMs != null) source.toolTimeoutMs = toolTimeoutMs;
+            if (maxDepth != null) source.maxDepth = maxDepth;
 
             if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);

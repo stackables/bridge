@@ -16,6 +16,7 @@ import { SELF_MODULE } from "./types.ts";
 import {
   BridgePanicError,
   BridgeAbortError,
+  BridgeTimeoutError,
   MAX_EXECUTION_DEPTH,
   CONTINUE_SYM,
   BREAK_SYM,
@@ -54,6 +55,39 @@ import { resolveWires as _resolveWires } from "./resolveWires.ts";
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
 import { schedule as _schedule } from "./scheduleTools.ts";
 
+// ── Timeout helper ──────────────────────────────────────────────────────────
+
+/**
+ * Race a promise against a deadline.  Throws `BridgeTimeoutError` if the
+ * promise doesn't settle within `ms` milliseconds.  Cleans up the timer
+ * regardless of which side wins so there are no memory leaks.
+ */
+function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  toolName: string,
+  fnName: string,
+): Promise<T> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timerId = setTimeout(
+      () =>
+        reject(
+          new BridgeTimeoutError(
+            `Tool "${toolName}.${fnName}" timed out after ${ms}ms`,
+          ),
+        ),
+      ms,
+    );
+    // Allow the Node.js / Deno event loop to exit if this is the only
+    // pending handle (prevents hanging test runners etc.).
+    (timerId as any)?.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() =>
+    clearTimeout(timerId),
+  ) as Promise<T>;
+}
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
@@ -90,6 +124,19 @@ export class ExecutionTree implements TreeContext {
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
   /**
+   * Maximum time (ms) a single tool call may run before a `BridgeTimeoutError`
+   * is thrown.  `undefined` means no timeout (default).
+   * Example: set to `15_000` (15 s) to guard against hung external APIs.
+   */
+  toolTimeoutMs?: number;
+  /**
+   * Maximum shadow-tree nesting depth.  Exceeding this throws a
+   * `BridgePanicError`.  Defaults to `MAX_EXECUTION_DEPTH` (30).
+   * Set to a higher value for deeply recursive array mappings,
+   * or lower for stricter resource budgets.
+   */
+  maxDepth: number = MAX_EXECUTION_DEPTH;
+  /**
    * Registered tool function map.
    * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
    */
@@ -115,7 +162,9 @@ export class ExecutionTree implements TreeContext {
     public parent?: ExecutionTree,
   ) {
     this.depth = parent ? parent.depth + 1 : 0;
-    if (this.depth > MAX_EXECUTION_DEPTH) {
+    // Inherit maxDepth from parent so child trees respect the same limit.
+    if (parent) this.maxDepth = parent.maxDepth;
+    if (this.depth > this.maxDepth) {
       throw new BridgePanicError(
         `Maximum execution depth exceeded (${this.depth}) at ${trunkKey(trunk)}. Check for infinite recursion or circular array mappings.`,
       );
@@ -214,6 +263,7 @@ export class ExecutionTree implements TreeContext {
       logger: logger ?? {},
       signal: this.signal,
     };
+    const timeoutMs = this.toolTimeoutMs;
 
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
@@ -221,7 +271,12 @@ export class ExecutionTree implements TreeContext {
     // avoid closure allocation, template-string building, and no-op
     // metric calls.  See docs/performance.md (#5).
     if (!tracer && !logger && !isOtelActive()) {
-      return fnImpl(input, toolContext);
+      const result = fnImpl(input, toolContext);
+      // Apply timeout only to async (Promise-returning) tools.
+      if (timeoutMs != null && isPromise(result)) {
+        return raceTimeout(result, timeoutMs, toolName, fnName);
+      }
+      return result;
     }
 
     // ── Instrumented path ─────────────────────────────────────────
@@ -236,7 +291,16 @@ export class ExecutionTree implements TreeContext {
       async (span) => {
         const wallStart = performance.now();
         try {
-          const result = await fnImpl(input, toolContext);
+          const fnResult = fnImpl(input, toolContext);
+          const result =
+            timeoutMs != null && isPromise(fnResult)
+              ? await raceTimeout(
+                  fnResult as Promise<any>,
+                  timeoutMs,
+                  toolName,
+                  fnName,
+                )
+              : await fnResult;
           const durationMs = roundMs(performance.now() - wallStart);
           toolCallCounter.add(1, metricAttrs);
           toolDurationHistogram.record(durationMs, metricAttrs);
@@ -304,7 +368,7 @@ export class ExecutionTree implements TreeContext {
     child.document = this.document;
     child.parent = this;
     child.depth = this.depth + 1;
-    if (child.depth > MAX_EXECUTION_DEPTH) {
+    if (child.depth > this.maxDepth) {
       throw new BridgePanicError(
         `Maximum execution depth exceeded (${child.depth}) at ${trunkKey(this.trunk)}. Check for infinite recursion or circular array mappings.`,
       );
@@ -321,6 +385,8 @@ export class ExecutionTree implements TreeContext {
     child.tracer = this.tracer;
     child.logger = this.logger;
     child.signal = this.signal;
+    child.maxDepth = this.maxDepth;
+    child.toolTimeoutMs = this.toolTimeoutMs;
     return child;
   }
 
@@ -331,6 +397,8 @@ export class ExecutionTree implements TreeContext {
   private createShadowArray(items: any[]): ExecutionTree[] {
     const shadows: ExecutionTree[] = [];
     for (const item of items) {
+      // Abort check — yield if the caller cancelled the request mid-iteration.
+      if (this.signal?.aborted) throw new BridgeAbortError();
       if (item === BREAK_SYM) break;
       if (item === CONTINUE_SYM) continue;
       const s = this.shadow();

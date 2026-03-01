@@ -26,6 +26,14 @@ export class BridgeAbortError extends Error {
   }
 }
 
+/** Timeout error — raised when a tool call exceeds the configured `toolTimeoutMs` limit. */
+export class BridgeTimeoutError extends Error {
+  constructor(message = "Tool call timed out") {
+    super(message);
+    this.name = "BridgeTimeoutError";
+  }
+}
+
 // ── Sentinels ───────────────────────────────────────────────────────────────
 
 /** Sentinel for `continue` — skip the current array element */
@@ -37,6 +45,9 @@ export const BREAK_SYM = Symbol.for("BRIDGE_BREAK");
 
 /** Maximum shadow-tree nesting depth before a BridgePanicError is thrown. */
 export const MAX_EXECUTION_DEPTH = 30;
+
+/** Default tool-call timeout in milliseconds (15 seconds). */
+export const DEFAULT_TOOL_TIMEOUT_MS = 15_000;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +97,8 @@ export interface Path {
 export interface TreeContext {
   /** Resolve a single NodeRef, returning sync when already in state. */
   pullSingle(ref: NodeRef, pullChain?: Set<string>): MaybePromise<any>;
+  /** External abort signal — checked in hot loops to halt execution early. */
+  signal?: AbortSignal;
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */

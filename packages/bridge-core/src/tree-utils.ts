@@ -43,11 +43,13 @@ export function pathEquals(a: string[], b: string[]): boolean {
 /**
  * Coerce a constant wire value string to its proper JS type.
  *
- * The parser stores all bare constants as strings (because the Wire type
- * uses `value: string`). JSON.parse recovers the original type:
- *   "true" → true, "false" → false, "null" → null, "42" → 42
- * Plain strings that aren't valid JSON (like "hello", "/search") fall
- * through and are returned as-is.
+ * Uses strict primitive parsing — no `JSON.parse` — to eliminate any
+ * hypothetical AST-injection gadget chains while staying fully compatible
+ * with the values the parser produces:
+ *   "true"  → true,  "false" → false,  "null" → null
+ *   "42"    → 42,    "3.14"  → 3.14
+ *   '"hi"'  → "hi"  (JSON-encoded string literal — quotes decoded)
+ *   "hello" → "hello" (plain string — returned as-is)
  *
  * Results are cached in a module-level Map because the same constant
  * strings appear repeatedly across shadow trees.  Only safe for
@@ -56,17 +58,66 @@ export function pathEquals(a: string[], b: string[]): boolean {
  */
 const constantCache = new Map<string, unknown>();
 export function coerceConstant(raw: string): unknown {
+  if (typeof raw !== "string") return raw;
   const cached = constantCache.get(raw);
   if (cached !== undefined) return cached;
+
+  const trimmed = raw.trim();
   let result: unknown;
-  try {
-    result = JSON.parse(raw);
-  } catch {
-    result = raw;
+
+  if (trimmed === "true") result = true;
+  else if (trimmed === "false") result = false;
+  else if (trimmed === "null") result = null;
+  else {
+    const num = Number(trimmed);
+    if (!isNaN(num) && isFinite(num) && trimmed !== "") {
+      result = num;
+    } else if (
+      trimmed.length >= 2 &&
+      trimmed.startsWith('"') &&
+      trimmed.endsWith('"')
+    ) {
+      // JSON-encoded string literal — decode without JSON.parse
+      result = decodeJsonString(trimmed);
+    } else {
+      result = raw;
+    }
   }
+
   // Hard cap to prevent unbounded growth over long-lived processes.
   if (constantCache.size > 10_000) constantCache.clear();
   constantCache.set(raw, result);
+  return result;
+}
+
+/** Decode a JSON-encoded string (surrounded by double-quotes with JSON escape sequences). */
+function decodeJsonString(s: string): string {
+  // Fast path: no escapes present
+  if (!s.includes("\\")) return s.slice(1, -1);
+  let result = "";
+  for (let i = 1; i < s.length - 1; i++) {
+    if (s[i] === "\\") {
+      i++;
+      switch (s[i]) {
+        case '"':  result += '"'; break;
+        case "\\": result += "\\"; break;
+        case "/":  result += "/"; break;
+        case "n":  result += "\n"; break;
+        case "r":  result += "\r"; break;
+        case "t":  result += "\t"; break;
+        case "b":  result += "\b"; break;
+        case "f":  result += "\f"; break;
+        case "u": {
+          result += String.fromCharCode(parseInt(s.slice(i + 1, i + 5), 16));
+          i += 4;
+          break;
+        }
+        default: result += s[i];
+      }
+    } else {
+      result += s[i];
+    }
+  }
   return result;
 }
 
@@ -84,6 +135,11 @@ export function setNested(obj: any, path: string[], value: any): void {
       obj[key] = /^\d+$/.test(nextKey) ? [] : {};
     }
     obj = obj[key];
+    if (typeof obj !== "object" || obj === null) {
+      throw new Error(
+        `Cannot set nested property on non-object at path segment: ${key}`,
+      );
+    }
   }
   if (path.length > 0) {
     const finalKey = path[path.length - 1];
