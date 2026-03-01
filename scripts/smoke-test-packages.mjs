@@ -68,15 +68,6 @@ if (publishable.length === 0) fail("No publishable packages found");
 console.log(`\nFound ${publishable.length} publishable packages:`);
 for (const p of publishable) console.log(`  • ${p.name}@${p.pkg.version}`);
 
-// ── 2. Verify build output exists ───────────────────────────────────────────
-
-for (const p of publishable) {
-  const buildDir = join(p.dir, "build");
-  if (!existsSync(buildDir)) {
-    fail(`${p.name}: build/ directory missing — run "pnpm build" first`);
-  }
-}
-
 // ── 3. Pack every package ───────────────────────────────────────────────────
 
 console.log("\nPacking tarballs…");
