@@ -192,19 +192,27 @@ function pullSafe(
   safe: boolean | undefined,
   pullChain?: Set<string>,
 ): MaybePromise<any> {
-  const pull = ctx.pullSingle(ref, pullChain);
-  if (!safe) return pull;
-
-  // Safe path — only wrap when the pull is async
-  if (!isPromise(pull)) {
-    try {
-      return pull; // sync + no error
-    } catch (e: any) {
-      if (isFatalError(e)) throw e;
-      return undefined;
-    }
+  // FAST PATH: Unsafe wires bypass the try/catch overhead entirely
+  if (!safe) {
+    return ctx.pullSingle(ref, pullChain);
   }
 
+  // SAFE PATH: We must catch synchronous throws during the invocation
+  let pull: any;
+  try {
+    pull = ctx.pullSingle(ref, pullChain);
+  } catch (e: any) {
+    // Caught a synchronous error!
+    if (isFatalError(e)) throw e;
+    return undefined;
+  }
+
+  // If the result was synchronous and didn't throw, we just return it
+  if (!isPromise(pull)) {
+    return pull;
+  }
+
+  // If the result is a Promise, we must catch asynchronous rejections
   return pull.catch((e: any) => {
     if (isFatalError(e)) throw e;
     return undefined;
