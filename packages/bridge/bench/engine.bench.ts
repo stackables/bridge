@@ -204,7 +204,7 @@ bench.add("parse: simple bridge", () => {
   parseBridge(SIMPLE_CHAIN);
 });
 
-bench.add("parse: large bridge (20 handles × 5 wires)", () => {
+bench.add("parse: large bridge (20 handles x 5 wires)", () => {
   parseBridge(largeText);
 });
 
@@ -308,7 +308,7 @@ for (const [outer, inner] of [
   const fixture = nestedArrayBridge(outer, inner);
   const d = doc(fixture.text);
 
-  bench.add(`exec: nested array ${outer}×${inner}`, async () => {
+  bench.add(`exec: nested array ${outer}x${inner}`, async () => {
     await executeBridge({
       document: d,
       operation: "Query.nested",
