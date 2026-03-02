@@ -354,7 +354,6 @@ bridge Query.forecast {
     operation: "Query.forecast",
     tools: { api: async () => ({ temp: null, wind: null }) },
     expected: { summary: { temp: 0, wind: 0 } },
-    aotSupported: false, // nested scope blocks not yet AOT-compiled
   },
 ];
 
@@ -801,7 +800,6 @@ bridge Query.locate {
     input: { q: "unknown" },
     tools: { geoApi: () => ({ lat: null, lon: null }) },
     expected: { lat: 0, lon: 0 },
-    aotSupported: false, // const blocks not yet AOT-compiled
   },
 ];
 
@@ -822,7 +820,6 @@ bridge Query.greet {
     operation: "Query.greet",
     input: { name: "World" },
     expected: { message: "Hello, World!" },
-    aotSupported: false, // string interpolation not yet AOT-compiled
   },
   {
     name: "URL construction with interpolation",
@@ -839,7 +836,6 @@ bridge Query.url {
     input: { id: 42 },
     tools: { api: (p: any) => ({ data: p.path }) },
     expected: { result: "/users/42/orders" },
-    aotSupported: false,
   },
 ];
 
@@ -860,10 +856,9 @@ bridge Query.calc {
     operation: "Query.calc",
     input: { price: 10, qty: 3 },
     expected: { result: 30 },
-    aotSupported: false, // expressions not yet AOT-compiled
   },
   {
-    name: "comparison expression (greater than)",
+    name: "comparison expression (greater than or equal)",
     bridgeText: `version 1.5
 bridge Query.check {
   with input as i
@@ -874,7 +869,6 @@ bridge Query.check {
     operation: "Query.check",
     input: { age: 21 },
     expected: { isAdult: true },
-    aotSupported: false,
   },
 ];
 
@@ -904,7 +898,6 @@ bridge Query.weather {
       weatherApi: async () => ({ temperature: 25, feelsLike: 23 }),
     },
     expected: { why: { temperature: 25, city: "Berlin" } },
-    aotSupported: false, // nested scope blocks not yet AOT-compiled
   },
 ];
 

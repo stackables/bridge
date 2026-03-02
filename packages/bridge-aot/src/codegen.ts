@@ -134,6 +134,12 @@ interface ToolInfo {
   varName: string;
 }
 
+/** Set of internal tool field names that can be inlined by the AOT compiler. */
+const INTERNAL_TOOLS = new Set([
+  "concat", "add", "subtract", "multiply", "divide",
+  "eq", "neq", "gt", "gte", "lt", "lte", "not", "and", "or",
+]);
+
 class CodegenContext {
   private bridge: Bridge;
   private constDefs: Map<string, string>;
@@ -142,6 +148,8 @@ class CodegenContext {
   private varMap = new Map<string, string>();
   private tools = new Map<string, ToolInfo>();
   private toolCounter = 0;
+  /** Trunk keys of pipe/expression tools that use internal implementations. */
+  private internalToolKeys = new Set<string>();
 
   constructor(bridge: Bridge, constDefs: Map<string, string>, toolDefs: ToolDef[]) {
     this.bridge = bridge;
@@ -171,6 +179,24 @@ class CodegenContext {
           this.varMap.set(tk, vn);
           this.tools.set(tk, { trunkKey: tk, toolName: h.name, varName: vn });
           break;
+        }
+      }
+    }
+
+    // Register pipe handles (synthetic tool instances for interpolation,
+    // expressions, and explicit pipe operators)
+    if (bridge.pipeHandles) {
+      for (const ph of bridge.pipeHandles) {
+        // Use the pipe handle's key directly — it already includes the correct instance
+        const tk = ph.key;
+        if (!this.tools.has(tk)) {
+          const vn = `_t${++this.toolCounter}`;
+          this.varMap.set(tk, vn);
+          const field = ph.baseTrunk.field;
+          this.tools.set(tk, { trunkKey: tk, toolName: field, varName: vn });
+          if (INTERNAL_TOOLS.has(field)) {
+            this.internalToolKeys.add(tk);
+          }
         }
       }
     }
@@ -312,6 +338,11 @@ class CodegenContext {
     const toolDef = this.resolveToolDef(tool.toolName);
 
     if (!toolDef) {
+      // Check if this is an internal pipe tool (expressions, interpolation)
+      if (this.internalToolKeys.has(tool.trunkKey)) {
+        this.emitInternalToolCall(lines, tool, bridgeWires);
+        return;
+      }
       // Simple tool call — no ToolDef
       const inputObj = this.buildObjectLiteral(bridgeWires, (w) => w.to.path, 4);
       if (mode === "fire-and-forget") {
@@ -404,6 +435,96 @@ class CodegenContext {
   }
 
   /**
+   * Emit an inlined internal tool call (expressions, string interpolation).
+   *
+   * Instead of calling through the tools map, these are inlined as direct
+   * JavaScript operations — e.g., multiply becomes `Number(a) * Number(b)`.
+   */
+  private emitInternalToolCall(
+    lines: string[],
+    tool: ToolInfo,
+    bridgeWires: Wire[],
+  ): void {
+    const fieldName = tool.toolName;
+
+    // Collect input wires by their target path
+    const inputs = new Map<string, string>();
+    for (const w of bridgeWires) {
+      const path = w.to.path;
+      const key = path.join(".");
+      inputs.set(key, this.wireToExpr(w));
+    }
+
+    let expr: string;
+    const a = inputs.get("a") ?? "undefined";
+    const b = inputs.get("b") ?? "undefined";
+
+    switch (fieldName) {
+      case "add":
+        expr = `(Number(${a}) + Number(${b}))`;
+        break;
+      case "subtract":
+        expr = `(Number(${a}) - Number(${b}))`;
+        break;
+      case "multiply":
+        expr = `(Number(${a}) * Number(${b}))`;
+        break;
+      case "divide":
+        expr = `(Number(${a}) / Number(${b}))`;
+        break;
+      case "eq":
+        expr = `(${a} === ${b})`;
+        break;
+      case "neq":
+        expr = `(${a} !== ${b})`;
+        break;
+      case "gt":
+        expr = `(Number(${a}) > Number(${b}))`;
+        break;
+      case "gte":
+        expr = `(Number(${a}) >= Number(${b}))`;
+        break;
+      case "lt":
+        expr = `(Number(${a}) < Number(${b}))`;
+        break;
+      case "lte":
+        expr = `(Number(${a}) <= Number(${b}))`;
+        break;
+      case "not":
+        expr = `(!${a})`;
+        break;
+      case "and":
+        expr = `(Boolean(${a}) && Boolean(${b}))`;
+        break;
+      case "or":
+        expr = `(Boolean(${a}) || Boolean(${b}))`;
+        break;
+      case "concat": {
+        const parts: string[] = [];
+        for (let i = 0; ; i++) {
+          const partExpr = inputs.get(`parts.${i}`);
+          if (partExpr === undefined) break;
+          parts.push(partExpr);
+        }
+        // concat returns { value: string } — same as the runtime internal tool
+        const concatParts = parts.map((p) => `(${p} == null ? "" : String(${p}))`).join(" + ");
+        expr = `{ value: ${concatParts || '""'} }`;
+        break;
+      }
+      default: {
+        // Unknown internal tool — fall back to tools map call
+        const inputObj = this.buildObjectLiteral(bridgeWires, (w) => w.to.path, 4);
+        lines.push(
+          `  const ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj}, context);`,
+        );
+        return;
+      }
+    }
+
+    lines.push(`  const ${tool.varName} = ${expr};`);
+  }
+
+  /**
    * Resolve a ToolDef source reference (e.g. "ctx.apiKey") to a JS expression.
    * Handles context, const, and tool dependencies.
    */
@@ -419,18 +540,18 @@ class CodegenContext {
     if (dep.kind === "context") {
       baseExpr = "context";
     } else if (dep.kind === "const") {
-      // Resolve from the const definitions
+      // Resolve from the const definitions using JSON.parse (same as runtime)
       if (restPath.length > 0) {
         const constName = restPath[0]!;
         const val = this.constDefs.get(constName);
         if (val != null) {
-          if (restPath.length === 1) return emitCoerced(val);
-          baseExpr = emitCoerced(val);
+          const base = `JSON.parse(${JSON.stringify(val)})`;
+          if (restPath.length === 1) return base;
           const tail = restPath
             .slice(1)
             .map((p) => `?.[${JSON.stringify(p)}]`)
             .join("");
-          return `(${baseExpr})${tail}`;
+          return `(${base})${tail}`;
         }
       }
       return "undefined";
@@ -549,39 +670,77 @@ class CodegenContext {
       }
     }
 
-    lines.push("  return {");
+    // Build a nested tree from scalar wires using their full output path
+    interface TreeNode {
+      expr?: string;
+      children: Map<string, TreeNode>;
+    }
+    const tree: TreeNode = { children: new Map() };
 
-    // Emit scalar fields
     for (const w of scalarWires) {
-      const key = w.to.path[w.to.path.length - 1]!;
-      lines.push(`    ${JSON.stringify(key)}: ${this.wireToExpr(w)},`);
+      const path = w.to.path;
+      let current = tree;
+      for (let i = 0; i < path.length - 1; i++) {
+        const seg = path[i]!;
+        if (!current.children.has(seg)) {
+          current.children.set(seg, { children: new Map() });
+        }
+        current = current.children.get(seg)!;
+      }
+      const lastSeg = path[path.length - 1]!;
+      if (!current.children.has(lastSeg)) {
+        current.children.set(lastSeg, { children: new Map() });
+      }
+      current.children.get(lastSeg)!.expr = this.wireToExpr(w);
     }
 
-    // Emit array-mapped fields
+    // Emit array-mapped fields into the tree as well
     for (const [arrayField] of Object.entries(arrayIterators)) {
       const sourceW = arraySourceWires.get(arrayField);
       const elemWires = elementWires.get(arrayField) ?? [];
-
       if (!sourceW || elemWires.length === 0) continue;
 
       const arrayExpr = this.wireToExpr(sourceW);
-      lines.push(
-        `    ${JSON.stringify(arrayField)}: (${arrayExpr} ?? []).map((_el) => ({`,
-      );
-
-      for (const ew of elemWires) {
-        // Element wire: from.path = ["srcField"], to.path = ["arrayField", "destField"]
+      const elemParts = elemWires.map((ew) => {
         const destField = ew.to.path[ew.to.path.length - 1]!;
         const srcExpr = this.elementWireToExpr(ew);
-        lines.push(
-          `      ${JSON.stringify(destField)}: ${srcExpr},`,
-        );
-      }
+        return `      ${JSON.stringify(destField)}: ${srcExpr}`;
+      });
+      const mapExpr = `(${arrayExpr} ?? []).map((_el) => ({\n${elemParts.join(",\n")},\n    }))`;
 
-      lines.push("    })),");
+      if (!tree.children.has(arrayField)) {
+        tree.children.set(arrayField, { children: new Map() });
+      }
+      tree.children.get(arrayField)!.expr = mapExpr;
     }
 
-    lines.push("  };");
+    // Serialize the tree to a return statement
+    const objStr = this.serializeOutputTree(tree, 4);
+    lines.push(`  return ${objStr};`);
+  }
+
+  /** Serialize an output tree node into a JS object literal. */
+  private serializeOutputTree(
+    node: { children: Map<string, { expr?: string; children: Map<string, any> }> },
+    indent: number,
+  ): string {
+    const pad = " ".repeat(indent);
+    const entries: string[] = [];
+
+    for (const [key, child] of node.children) {
+      if (child.expr != null && child.children.size === 0) {
+        entries.push(`${pad}${JSON.stringify(key)}: ${child.expr}`);
+      } else if (child.children.size > 0 && child.expr == null) {
+        const nested = this.serializeOutputTree(child, indent + 2);
+        entries.push(`${pad}${JSON.stringify(key)}: ${nested}`);
+      } else {
+        // Has both expr and children — use expr (children override handled elsewhere)
+        entries.push(`${pad}${JSON.stringify(key)}: ${child.expr ?? "undefined"}`);
+      }
+    }
+
+    const innerPad = " ".repeat(indent - 2);
+    return `{\n${entries.join(",\n")},\n${innerPad}}`;
   }
 
   // ── Wire → expression ────────────────────────────────────────────────────
@@ -720,7 +879,7 @@ class CodegenContext {
 
   /** Convert a NodeRef to a JavaScript expression. */
   private refToExpr(ref: NodeRef): string {
-    // Const access: inline the constant value
+    // Const access: parse the JSON value at runtime, then access path
     if (
       ref.type === "Const" &&
       ref.field === "const" &&
@@ -729,9 +888,9 @@ class CodegenContext {
       const constName = ref.path[0]!;
       const val = this.constDefs.get(constName);
       if (val != null) {
-        if (ref.path.length === 1) return emitCoerced(val);
-        // Nested access into a parsed constant
-        const base = emitCoerced(val);
+        // The runtime uses JSON.parse(inst.value), so we must do the same.
+        const base = `JSON.parse(${JSON.stringify(val)})`;
+        if (ref.path.length === 1) return base;
         const tail = ref.path
           .slice(1)
           .map((p) => `?.[${JSON.stringify(p)}]`)
