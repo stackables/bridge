@@ -13,7 +13,7 @@
  *  - ToolDef merging (tool blocks with wires and `on error`)
  */
 
-import type { BridgeDocument, Bridge, Wire, NodeRef, ToolDef, ToolWire } from "@stackables/bridge-core";
+import type { BridgeDocument, Bridge, Wire, NodeRef, ToolDef } from "@stackables/bridge-core";
 
 const SELF_MODULE = "_";
 
@@ -29,6 +29,8 @@ export interface CompileResult {
   code: string;
   /** The exported function name */
   functionName: string;
+  /** The function body (without the function signature wrapper) */
+  functionBody: string;
 }
 
 /**
@@ -75,6 +77,14 @@ export function compileBridge(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Check if a wire has catch fallback modifiers. */
+function hasCatchFallback(w: Wire): boolean {
+  return (
+    ("catchFallback" in w && w.catchFallback != null) ||
+    ("catchFallbackRef" in w && !!w.catchFallbackRef)
+  );
+}
 
 function splitToolName(name: string): { module: string; fieldName: string } {
   const dotIdx = name.indexOf(".");
@@ -231,10 +241,7 @@ class CodegenContext {
     // These tools need try/catch wrapping to prevent unhandled rejections.
     const catchGuardedTools = new Set<string>();
     for (const w of outputWires) {
-      const hasCatch =
-        ("catchFallback" in w && w.catchFallback != null) ||
-        ("catchFallbackRef" in w && w.catchFallbackRef);
-      if (hasCatch && "from" in w) {
+      if (hasCatchFallback(w) && "from" in w) {
         const srcKey = refTrunkKey(w.from);
         catchGuardedTools.add(srcKey);
       }
@@ -274,7 +281,14 @@ class CodegenContext {
 
     lines.push("}");
     lines.push("");
-    return { code: lines.join("\n"), functionName: fnName };
+
+    // Extract function body (lines after the signature, before the closing brace)
+    const signatureIdx = lines.findIndex((l) => l.startsWith("export default async function"));
+    const closingIdx = lines.lastIndexOf("}");
+    const bodyLines = lines.slice(signatureIdx + 1, closingIdx);
+    const functionBody = bodyLines.join("\n");
+
+    return { code: lines.join("\n"), functionName: fnName, functionBody };
   }
 
   // ── Tool call emission ─────────────────────────────────────────────────────
@@ -324,12 +338,13 @@ class CodegenContext {
     const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
 
     // Build input: ToolDef wires first, then bridge wires override
-    const inputParts: string[] = [];
+    // Track entries by key for precise override matching
+    const inputEntries = new Map<string, string>();
 
     // ToolDef constant wires
     for (const tw of toolDef.wires) {
       if (tw.kind === "constant") {
-        inputParts.push(`    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`);
+        inputEntries.set(tw.target, `    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`);
       }
     }
 
@@ -337,25 +352,20 @@ class CodegenContext {
     for (const tw of toolDef.wires) {
       if (tw.kind === "pull") {
         const expr = this.resolveToolDepSource(tw.source, toolDef);
-        inputParts.push(`    ${JSON.stringify(tw.target)}: ${expr}`);
+        inputEntries.set(tw.target, `    ${JSON.stringify(tw.target)}: ${expr}`);
       }
     }
 
     // Bridge wires override ToolDef wires
     for (const bw of bridgeWires) {
       const path = bw.to.path;
-      if (path.length === 1) {
+      if (path.length >= 1) {
         const key = path[0]!;
-        // Remove any ToolDef wire with the same key
-        const idx = inputParts.findIndex((p) => p.includes(`${JSON.stringify(key)}:`));
-        if (idx >= 0) inputParts.splice(idx, 1);
-        inputParts.push(`    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`);
-      } else if (path.length > 1) {
-        // Nested path — just add it (buildObjectLiteral handles this)
-        const key = path[path.length - 1]!;
-        inputParts.push(`    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`);
+        inputEntries.set(key, `    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`);
       }
     }
+
+    const inputParts = [...inputEntries.values()];
 
     const inputObj = inputParts.length > 0
       ? `{\n${inputParts.join(",\n")},\n  }`
@@ -483,12 +493,13 @@ class CodegenContext {
       }
       for (const wire of def.wires) {
         if (wire.kind === "onError") {
-          const idx = merged.wires.findIndex((w: ToolWire) => w.kind === "onError");
+          const idx = merged.wires.findIndex((w) => w.kind === "onError");
           if (idx >= 0) merged.wires[idx] = wire;
           else merged.wires.push(wire);
-        } else {
+        } else if ("target" in wire) {
+          const target = wire.target;
           const idx = merged.wires.findIndex(
-            (w: ToolWire) => "target" in w && w.target === (wire as { target: string }).target,
+            (w) => "target" in w && w.target === target,
           );
           if (idx >= 0) merged.wires[idx] = wire;
           else merged.wires.push(wire);
@@ -673,10 +684,7 @@ class CodegenContext {
     }
 
     // Catch fallback — use error flag from catch-guarded tool call
-    const hasCatch =
-      ("catchFallback" in w && w.catchFallback != null) ||
-      ("catchFallbackRef" in w && w.catchFallbackRef);
-    if (hasCatch) {
+    if (hasCatchFallback(w)) {
       let catchExpr: string;
       if ("catchFallbackRef" in w && w.catchFallbackRef) {
         catchExpr = this.refToExpr(w.catchFallbackRef);

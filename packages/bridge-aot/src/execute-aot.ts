@@ -59,23 +59,13 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
     if (cached) return cached;
   }
 
-  const { code } = compileBridge(document, { operation });
-
-  // Extract the function body from the generated code
-  const bodyMatch = code.match(
-    /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
-  );
-  if (!bodyMatch) {
-    throw new Error(
-      `AOT compilation produced invalid code for "${operation}"`,
-    );
-  }
+  const { functionBody } = compileBridge(document, { operation });
 
   const fn = new AsyncFunction(
     "input",
     "tools",
     "context",
-    bodyMatch[1]!,
+    functionBody,
   ) as AotFn;
 
   if (!opMap) {
