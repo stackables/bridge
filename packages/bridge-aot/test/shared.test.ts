@@ -454,7 +454,6 @@ bridge Query.geocode {
       { name: "Berlin", lat: 52.53, lon: 13.39 },
       { name: "Bern", lat: 46.95, lon: 7.45 },
     ],
-    aotSupported: false, // root array output not yet AOT-compiled
   },
 ];
 
@@ -965,7 +964,6 @@ bridge Query.searchTrains {
         ],
       },
     ],
-    aotSupported: false, // nested arrays not yet AOT-compiled
   },
 ];
 
@@ -990,7 +988,6 @@ bridge Query.shout {
       toUpperCase: (p: any) => ({ out: p.in.toUpperCase() }),
     },
     expected: { loud: { out: "HELLO" } },
-    aotSupported: false, // pipe operators not yet AOT-compiled
   },
 ];
 

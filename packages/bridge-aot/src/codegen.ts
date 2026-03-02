@@ -639,15 +639,26 @@ class CodegenContext {
       return;
     }
 
-    // Check for root passthrough (wire with empty path)
+    // Detect array iterators
+    const arrayIterators = this.bridge.arrayIterators ?? {};
+    const isRootArray = "" in arrayIterators;
+
+    // Check for root passthrough (wire with empty path) — but not if it's a root array source
     const rootWire = outputWires.find((w) => w.to.path.length === 0);
-    if (rootWire) {
+    if (rootWire && !isRootArray) {
       lines.push(`  return ${this.wireToExpr(rootWire)};`);
       return;
     }
 
-    // Detect array iterators
-    const arrayIterators = this.bridge.arrayIterators ?? {};
+    // Handle root array output (o <- src.items[] as item { ... })
+    if (isRootArray && rootWire) {
+      const elemWires = outputWires.filter((w) => "from" in w && w.from.element);
+      const arrayExpr = this.wireToExpr(rootWire);
+      const body = this.buildElementBody(elemWires, arrayIterators, "_el", 4);
+      lines.push(`  return (${arrayExpr} ?? []).map((_el) => (${body}));`);
+      return;
+    }
+
     const arrayFields = new Set(Object.keys(arrayIterators));
 
     // Separate element wires from scalar wires
@@ -696,17 +707,20 @@ class CodegenContext {
 
     // Emit array-mapped fields into the tree as well
     for (const [arrayField] of Object.entries(arrayIterators)) {
+      if (arrayField === "") continue; // root array handled above
       const sourceW = arraySourceWires.get(arrayField);
       const elemWires = elementWires.get(arrayField) ?? [];
       if (!sourceW || elemWires.length === 0) continue;
 
+      // Strip the array field prefix from element wire paths
+      const shifted: Wire[] = elemWires.map((w) => ({
+        ...w,
+        to: { ...w.to, path: w.to.path.slice(1) },
+      }));
+
       const arrayExpr = this.wireToExpr(sourceW);
-      const elemParts = elemWires.map((ew) => {
-        const destField = ew.to.path[ew.to.path.length - 1]!;
-        const srcExpr = this.elementWireToExpr(ew);
-        return `      ${JSON.stringify(destField)}: ${srcExpr}`;
-      });
-      const mapExpr = `(${arrayExpr} ?? []).map((_el) => ({\n${elemParts.join(",\n")},\n    }))`;
+      const body = this.buildElementBody(shifted, arrayIterators, "_el", 6);
+      const mapExpr = `(${arrayExpr} ?? []).map((_el) => (${body}))`;
 
       if (!tree.children.has(arrayField)) {
         tree.children.set(arrayField, { children: new Map() });
@@ -741,6 +755,86 @@ class CodegenContext {
 
     const innerPad = " ".repeat(indent - 2);
     return `{\n${entries.join(",\n")},\n${innerPad}}`;
+  }
+
+  /**
+   * Build the body of a `.map()` callback from element wires.
+   *
+   * Handles nested array iterators: if an element wire targets a field that
+   * is itself an array iterator, a nested `.map()` is generated.
+   */
+  private buildElementBody(
+    elemWires: Wire[],
+    arrayIterators: Record<string, string>,
+    elVar: string,
+    indent: number,
+  ): string {
+    const pad = " ".repeat(indent);
+
+    // Separate into scalar element wires and sub-array source/element wires
+    interface TreeNode {
+      expr?: string;
+      children: Map<string, TreeNode>;
+    }
+    const tree: TreeNode = { children: new Map() };
+
+    // Group wires by whether they target a sub-array field
+    const subArraySources = new Map<string, Wire>(); // field → source wire
+    const subArrayElements = new Map<string, Wire[]>(); // field → element wires
+
+    for (const ew of elemWires) {
+      const topField = ew.to.path[0]!;
+
+      if (topField in arrayIterators && ew.to.path.length === 1 && !subArraySources.has(topField)) {
+        // This is the source wire for a sub-array (e.g., .legs <- c.sections[])
+        subArraySources.set(topField, ew);
+      } else if (topField in arrayIterators && ew.to.path.length > 1) {
+        // This is an element wire for a sub-array (e.g., .legs.trainName <- s.name)
+        const arr = subArrayElements.get(topField) ?? [];
+        arr.push(ew);
+        subArrayElements.set(topField, arr);
+      } else {
+        // Regular scalar element wire — add to tree using full path
+        const path = ew.to.path;
+        let current = tree;
+        for (let i = 0; i < path.length - 1; i++) {
+          const seg = path[i]!;
+          if (!current.children.has(seg)) {
+            current.children.set(seg, { children: new Map() });
+          }
+          current = current.children.get(seg)!;
+        }
+        const lastSeg = path[path.length - 1]!;
+        if (!current.children.has(lastSeg)) {
+          current.children.set(lastSeg, { children: new Map() });
+        }
+        current.children.get(lastSeg)!.expr = this.elementWireToExpr(ew, elVar);
+      }
+    }
+
+    // Handle sub-array fields
+    for (const [field, sourceW] of subArraySources) {
+      const innerElems = subArrayElements.get(field) ?? [];
+      if (innerElems.length === 0) continue;
+
+      // Shift inner element paths: remove the first segment (the sub-array field name)
+      const shifted: Wire[] = innerElems.map((w) => ({
+        ...w,
+        to: { ...w.to, path: w.to.path.slice(1) },
+      }));
+
+      const srcExpr = this.elementWireToExpr(sourceW, elVar);
+      const innerElVar = elVar === "_el" ? "_el2" : `_el${parseInt(elVar.replace("_el", "") || "1") + 1}`;
+      const innerBody = this.buildElementBody(shifted, arrayIterators, innerElVar, indent + 2);
+      const mapExpr = `(${srcExpr} ?? []).map((${innerElVar}) => (${innerBody}))`;
+
+      if (!tree.children.has(field)) {
+        tree.children.set(field, { children: new Map() });
+      }
+      tree.children.get(field)!.expr = mapExpr;
+    }
+
+    return this.serializeOutputTree(tree, indent);
   }
 
   // ── Wire → expression ────────────────────────────────────────────────────
@@ -807,12 +901,12 @@ class CodegenContext {
   }
 
   /** Convert an element wire (inside array mapping) to an expression. */
-  private elementWireToExpr(w: Wire): string {
+  private elementWireToExpr(w: Wire, elVar = "_el"): string {
     if ("value" in w) return emitCoerced(w.value);
     if ("from" in w) {
       // Element refs: from.element === true, path = ["srcField"]
       let expr =
-        "_el" +
+        elVar +
         w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
       expr = this.applyFallbacks(w, expr);
       return expr;
