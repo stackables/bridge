@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-compiler";
+import { executeBridge } from "@stackables/bridge-core";
 import { compileBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -472,5 +473,109 @@ bridge Query.conditional {
       tools,
     );
     assert.equal(capturedInput.mode, "basic");
+  });
+});
+
+// ── Benchmark: AOT vs Runtime ────────────────────────────────────────────────
+
+describe("AOT codegen: performance comparison", () => {
+  const bridgeText = `version 1.5
+bridge Query.chain {
+  with first as f
+  with second as s
+  with third as t
+  with input as i
+  with output as o
+
+  f.x <- i.value
+  s.y <- f.result
+  t.z <- s.result
+  o.final <- t.result ?? 0
+}`;
+
+  const tools = {
+    first: (p: any) => ({ result: (p.x ?? 0) + 1 }),
+    second: (p: any) => ({ result: (p.y ?? 0) * 2 }),
+    third: (p: any) => ({ result: (p.z ?? 0) + 10 }),
+  };
+
+  test("AOT produces same result as runtime executor", async () => {
+    const document = parseBridgeFormat(bridgeText);
+
+    // Runtime execution
+    const runtime = await executeBridge({
+      document: JSON.parse(JSON.stringify(document)),
+      operation: "Query.chain",
+      input: { value: 5 },
+      tools,
+    });
+
+    // AOT execution
+    const aotData = await compileAndRun(
+      bridgeText,
+      "Query.chain",
+      { value: 5 },
+      tools,
+    );
+
+    assert.deepEqual(aotData, runtime.data);
+  });
+
+  test("AOT execution is faster than runtime (sync tools)", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const iterations = 1000;
+
+    // Build AOT function once
+    const { code } = compileBridge(document, { operation: "Query.chain" });
+    const bodyMatch = code.match(
+      /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
+    );
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as typeof Function;
+    const aotFn = new AsyncFunction("input", "tools", "context", bodyMatch![1]!) as (
+      input: Record<string, unknown>,
+      tools: Record<string, (...args: any[]) => any>,
+      context: Record<string, unknown>,
+    ) => Promise<any>;
+
+    // Warm up
+    for (let i = 0; i < 10; i++) {
+      await aotFn({ value: i }, tools, {});
+      await executeBridge({
+        document: JSON.parse(JSON.stringify(document)),
+        operation: "Query.chain",
+        input: { value: i },
+        tools,
+      });
+    }
+
+    // Benchmark AOT
+    const aotStart = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      await aotFn({ value: i }, tools, {});
+    }
+    const aotTime = performance.now() - aotStart;
+
+    // Benchmark runtime
+    const rtStart = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      await executeBridge({
+        document: JSON.parse(JSON.stringify(document)),
+        operation: "Query.chain",
+        input: { value: i },
+        tools,
+      });
+    }
+    const rtTime = performance.now() - rtStart;
+
+    const speedup = rtTime / aotTime;
+    console.log(
+      `  AOT: ${aotTime.toFixed(1)}ms | Runtime: ${rtTime.toFixed(1)}ms | Speedup: ${speedup.toFixed(1)}×`,
+    );
+
+    // AOT should be measurably faster with sync tools
+    assert.ok(
+      speedup > 1.0,
+      `Expected AOT to be faster, got speedup: ${speedup.toFixed(2)}×`,
+    );
   });
 });
