@@ -6,6 +6,23 @@ import { compileBridge } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const AsyncFunction = Object.getPrototypeOf(async function () {})
+  .constructor as typeof Function;
+
+/** Build an async function from AOT-generated code. */
+function buildAotFn(code: string) {
+  const bodyMatch = code.match(
+    /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
+  );
+  if (!bodyMatch)
+    throw new Error(`Cannot extract function body from:\n${code}`);
+  return new AsyncFunction("input", "tools", "context", bodyMatch[1]!) as (
+    input: Record<string, unknown>,
+    tools: Record<string, (...args: any[]) => any>,
+    context: Record<string, unknown>,
+  ) => Promise<any>;
+}
+
 /**
  * Parse bridge text, compile to JS, evaluate the generated function,
  * and call it with the given input/tools/context.
@@ -18,20 +35,8 @@ async function compileAndRun(
   context: Record<string, unknown> = {},
 ): Promise<any> {
   const document = parseBridgeFormat(bridgeText);
-  const { code, functionName } = compileBridge(document, { operation });
-
-  // Use AsyncFunction constructor to evaluate the generated function body.
-  // Strip the export/function wrapper and extract just the body.
-  const bodyMatch = code.match(
-    /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
-  );
-  if (!bodyMatch) throw new Error(`Cannot extract function body from:\n${code}`);
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as typeof Function;
-  const fn = new AsyncFunction("input", "tools", "context", bodyMatch[1]!) as (
-    input: Record<string, unknown>,
-    tools: Record<string, (...args: any[]) => any>,
-    context: Record<string, unknown>,
-  ) => Promise<any>;
+  const { code } = compileBridge(document, { operation });
+  const fn = buildAotFn(code);
   return fn(input, tools, context);
 }
 
@@ -527,15 +532,7 @@ bridge Query.chain {
 
     // Build AOT function once
     const { code } = compileBridge(document, { operation: "Query.chain" });
-    const bodyMatch = code.match(
-      /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
-    );
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as typeof Function;
-    const aotFn = new AsyncFunction("input", "tools", "context", bodyMatch![1]!) as (
-      input: Record<string, unknown>,
-      tools: Record<string, (...args: any[]) => any>,
-      context: Record<string, unknown>,
-    ) => Promise<any>;
+    const aotFn = buildAotFn(code);
 
     // Warm up
     for (let i = 0; i < 10; i++) {

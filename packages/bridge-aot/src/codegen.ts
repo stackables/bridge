@@ -531,29 +531,29 @@ class CodegenContext {
   /** Get all source trunk keys a wire depends on. */
   private getSourceTrunks(w: Wire): string[] {
     const trunks: string[] = [];
-    const add = (ref: NodeRef) => trunks.push(refTrunkKey(ref));
+    const collectTrunk = (ref: NodeRef) => trunks.push(refTrunkKey(ref));
 
     if ("from" in w) {
-      add(w.from);
+      collectTrunk(w.from);
       if ("falsyFallbackRefs" in w && w.falsyFallbackRefs)
-        w.falsyFallbackRefs.forEach(add);
+        w.falsyFallbackRefs.forEach(collectTrunk);
       if ("nullishFallbackRef" in w && w.nullishFallbackRef)
-        add(w.nullishFallbackRef);
+        collectTrunk(w.nullishFallbackRef);
       if ("catchFallbackRef" in w && w.catchFallbackRef)
-        add(w.catchFallbackRef);
+        collectTrunk(w.catchFallbackRef);
     }
     if ("cond" in w) {
-      add(w.cond);
-      if (w.thenRef) add(w.thenRef);
-      if (w.elseRef) add(w.elseRef);
+      collectTrunk(w.cond);
+      if (w.thenRef) collectTrunk(w.thenRef);
+      if (w.elseRef) collectTrunk(w.elseRef);
     }
     if ("condAnd" in w) {
-      add(w.condAnd.leftRef);
-      if (w.condAnd.rightRef) add(w.condAnd.rightRef);
+      collectTrunk(w.condAnd.leftRef);
+      if (w.condAnd.rightRef) collectTrunk(w.condAnd.rightRef);
     }
     if ("condOr" in w) {
-      add(w.condOr.leftRef);
-      if (w.condOr.rightRef) add(w.condOr.rightRef);
+      collectTrunk(w.condOr.leftRef);
+      if (w.condOr.rightRef) collectTrunk(w.condOr.rightRef);
     }
     return trunks;
   }
