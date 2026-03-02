@@ -316,18 +316,18 @@ class CodegenContext {
       const inputObj = this.buildObjectLiteral(bridgeWires, (w) => w.to.path, 4);
       if (mode === "fire-and-forget") {
         lines.push(
-          `  try { await tools[${JSON.stringify(tool.toolName)}](${inputObj}); } catch (_e) {}`,
+          `  try { await tools[${JSON.stringify(tool.toolName)}](${inputObj}, context); } catch (_e) {}`,
         );
         lines.push(`  const ${tool.varName} = undefined;`);
       } else if (mode === "catch-guarded") {
         // Catch-guarded: store result; set error flag on failure
         lines.push(`  let ${tool.varName}, ${tool.varName}_err = false;`);
         lines.push(
-          `  try { ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj}); } catch (_e) { ${tool.varName}_err = true; }`,
+          `  try { ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj}, context); } catch (_e) { ${tool.varName}_err = true; }`,
         );
       } else {
         lines.push(
-          `  const ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj});`,
+          `  const ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj}, context);`,
         );
       }
       return;
@@ -376,7 +376,7 @@ class CodegenContext {
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
       lines.push(
-        `    ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj});`,
+        `    ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj}, context);`,
       );
       lines.push(`  } catch (_e) {`);
       if ("value" in onErrorWire) {
@@ -388,17 +388,17 @@ class CodegenContext {
       lines.push(`  }`);
     } else if (mode === "fire-and-forget") {
       lines.push(
-        `  try { await tools[${JSON.stringify(fnName)}](${inputObj}); } catch (_e) {}`,
+        `  try { await tools[${JSON.stringify(fnName)}](${inputObj}, context); } catch (_e) {}`,
       );
       lines.push(`  const ${tool.varName} = undefined;`);
     } else if (mode === "catch-guarded") {
       lines.push(`  let ${tool.varName}, ${tool.varName}_err = false;`);
       lines.push(
-        `  try { ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj}); } catch (_e) { ${tool.varName}_err = true; }`,
+        `  try { ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj}, context); } catch (_e) { ${tool.varName}_err = true; }`,
       );
     } else {
       lines.push(
-        `  const ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj});`,
+        `  const ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj}, context);`,
       );
     }
   }
