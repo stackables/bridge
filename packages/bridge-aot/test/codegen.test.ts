@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-compiler";
 import { executeBridge } from "@stackables/bridge-core";
-import { compileBridge } from "../src/index.ts";
+import { compileBridge, executeAot } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -574,5 +574,451 @@ bridge Query.chain {
       speedup > 1.0,
       `Expected AOT to be faster, got speedup: ${speedup.toFixed(2)}×`,
     );
+  });
+});
+
+// ── Phase 6: Catch fallback ──────────────────────────────────────────────────
+
+describe("AOT codegen: catch fallback", () => {
+  test("catch with constant fallback value", async () => {
+    const bridgeText = `version 1.5
+bridge Query.safe {
+  with api as a
+  with output as o
+
+  o.data <- a.result catch "fallback"
+}`;
+
+    const tools = {
+      api: () => { throw new Error("boom"); },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.safe",
+      {},
+      tools,
+    );
+    assert.deepEqual(data, { data: "fallback" });
+  });
+
+  test("catch does not trigger on success", async () => {
+    const bridgeText = `version 1.5
+bridge Query.noerr {
+  with api as a
+  with output as o
+
+  o.data <- a.result catch "fallback"
+}`;
+
+    const tools = {
+      api: () => ({ result: "success" }),
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.noerr",
+      {},
+      tools,
+    );
+    assert.deepEqual(data, { data: "success" });
+  });
+
+  test("catch with ref fallback", async () => {
+    const bridgeText = `version 1.5
+bridge Query.refCatch {
+  with primary as p
+  with backup as b
+  with output as o
+
+  o.data <- p.result catch b.fallback
+}`;
+
+    const tools = {
+      primary: () => { throw new Error("primary failed"); },
+      backup: () => ({ fallback: "from-backup" }),
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.refCatch",
+      {},
+      tools,
+    );
+    assert.deepEqual(data, { data: "from-backup" });
+  });
+});
+
+// ── Phase 7: Force statements ────────────────────────────────────────────────
+
+describe("AOT codegen: force statements", () => {
+  test("force tool runs even when output not queried", async () => {
+    let auditCalled = false;
+    let auditInput: any = null;
+
+    const bridgeText = `version 1.5
+bridge Query.search {
+  with mainApi as m
+  with audit.log as audit
+  with input as i
+  with output as o
+
+  m.q <- i.q
+  audit.action <- i.q
+  force audit
+  o.title <- m.title
+}`;
+
+    const tools = {
+      mainApi: async (p: any) => ({ title: "Hello World" }),
+      "audit.log": async (input: any) => {
+        auditCalled = true;
+        auditInput = input;
+        return { ok: true };
+      },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.search",
+      { q: "test" },
+      tools,
+    );
+
+    assert.equal(data.title, "Hello World");
+    assert.ok(auditCalled, "audit tool must be called");
+    assert.deepStrictEqual(auditInput, { action: "test" });
+  });
+
+  test("fire-and-forget force does not break response on error", async () => {
+    const bridgeText = `version 1.5
+bridge Query.safe {
+  with mainApi as m
+  with analytics as ping
+  with input as i
+  with output as o
+
+  m.q <- i.q
+  ping.event <- i.q
+  force ping catch null
+  o.title <- m.title
+}`;
+
+    const tools = {
+      mainApi: async () => ({ title: "OK" }),
+      analytics: async () => { throw new Error("analytics down"); },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.safe",
+      { q: "test" },
+      tools,
+    );
+
+    assert.equal(data.title, "OK");
+  });
+
+  test("critical force propagates errors", async () => {
+    const bridgeText = `version 1.5
+bridge Query.critical {
+  with mainApi as m
+  with audit.log as audit
+  with input as i
+  with output as o
+
+  m.q <- i.q
+  audit.action <- i.q
+  force audit
+  o.title <- m.title
+}`;
+
+    const tools = {
+      mainApi: async () => ({ title: "OK" }),
+      "audit.log": async () => { throw new Error("audit failed"); },
+    };
+
+    await assert.rejects(
+      () => compileAndRun(
+        bridgeText,
+        "Query.critical",
+        { q: "test" },
+        tools,
+      ),
+      /audit failed/,
+    );
+  });
+
+  test("force with constant-only wires (no pull)", async () => {
+    let sideEffectCalled = false;
+
+    const bridgeText = `version 1.5
+bridge Mutation.fire {
+  with sideEffect as se
+  with input as i
+  with output as o
+
+  se.action = "fire"
+  force se
+  o.ok = "true"
+}`;
+
+    const tools = {
+      sideEffect: async (input: any) => {
+        sideEffectCalled = true;
+        assert.equal(input.action, "fire");
+        return null;
+      },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Mutation.fire",
+      { action: "deploy" },
+      tools,
+    );
+
+    assert.equal(data.ok, true);
+    assert.ok(sideEffectCalled, "side-effect tool must run");
+  });
+});
+
+// ── Phase 8: ToolDef support ─────────────────────────────────────────────────
+
+describe("AOT codegen: ToolDef support", () => {
+  test("ToolDef constant wires merged with bridge wires", async () => {
+    let apiInput: any = null;
+
+    const bridgeText = `version 1.5
+tool restApi from std.httpCall {
+  with context
+  .method = "GET"
+  .baseUrl = "https://api.example.com"
+  .headers.Authorization <- context.token
+}
+
+bridge Query.data {
+  with restApi as api
+  with input as i
+  with output as o
+
+  api.path <- i.path
+  o.result <- api.body
+}`;
+
+    const tools = {
+      "std.httpCall": async (input: any) => {
+        apiInput = input;
+        return { body: { ok: true } };
+      },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.data",
+      { path: "/users" },
+      tools,
+      { token: "Bearer abc123" },
+    );
+
+    assert.equal(apiInput.method, "GET");
+    assert.equal(apiInput.baseUrl, "https://api.example.com");
+    assert.equal(apiInput.path, "/users");
+    assert.deepEqual(data, { result: { ok: true } });
+  });
+
+  test("bridge wires override ToolDef wires", async () => {
+    let apiInput: any = null;
+
+    const bridgeText = `version 1.5
+tool restApi from std.httpCall {
+  .method = "GET"
+  .timeout = 5000
+}
+
+bridge Query.custom {
+  with restApi as api
+  with output as o
+
+  api.method = "POST"
+  o.result <- api.data
+}`;
+
+    const tools = {
+      "std.httpCall": async (input: any) => {
+        apiInput = input;
+        return { data: "ok" };
+      },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.custom",
+      {},
+      tools,
+    );
+
+    // Bridge wire "POST" overrides ToolDef wire "GET"
+    assert.equal(apiInput.method, "POST");
+    // ToolDef wire timeout persists
+    assert.equal(apiInput.timeout, 5000);
+    assert.deepEqual(data, { result: "ok" });
+  });
+
+  test("ToolDef onError provides fallback on failure", async () => {
+    const bridgeText = `version 1.5
+tool safeApi from std.httpCall {
+  on error = {"status":"error","message":"service unavailable"}
+}
+
+bridge Query.safe {
+  with safeApi as api
+  with input as i
+  with output as o
+
+  api.url <- i.url
+  o <- api
+}`;
+
+    const tools = {
+      "std.httpCall": async () => { throw new Error("connection refused"); },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.safe",
+      { url: "https://broken.api" },
+      tools,
+    );
+
+    assert.deepEqual(data, { status: "error", message: "service unavailable" });
+  });
+
+  test("ToolDef extends chain", async () => {
+    let apiInput: any = null;
+
+    const bridgeText = `version 1.5
+tool baseApi from std.httpCall {
+  .method = "GET"
+  .baseUrl = "https://api.example.com"
+}
+
+tool userApi from baseApi {
+  .path = "/users"
+}
+
+bridge Query.users {
+  with userApi as api
+  with output as o
+
+  o <- api
+}`;
+
+    const tools = {
+      "std.httpCall": async (input: any) => {
+        apiInput = input;
+        return { users: [] };
+      },
+    };
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.users",
+      {},
+      tools,
+    );
+
+    assert.equal(apiInput.method, "GET");
+    assert.equal(apiInput.baseUrl, "https://api.example.com");
+    assert.equal(apiInput.path, "/users");
+    assert.deepEqual(data, { users: [] });
+  });
+});
+
+// ── Phase 9: executeAot integration ──────────────────────────────────────────
+
+describe("executeAot: compile-once, run-many", () => {
+  const bridgeText = `version 1.5
+bridge Query.echo {
+  with api as a
+  with input as i
+  with output as o
+
+  a.msg <- i.msg
+  o.reply <- a.echo
+}`;
+
+  test("basic executeAot works", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { data } = await executeAot({
+      document,
+      operation: "Query.echo",
+      input: { msg: "hello" },
+      tools: { api: (p: any) => ({ echo: p.msg + "!" }) },
+    });
+    assert.deepEqual(data, { reply: "hello!" });
+  });
+
+  test("executeAot caches compiled function", async () => {
+    const document = parseBridgeFormat(bridgeText);
+
+    // First call compiles
+    const { data: d1 } = await executeAot({
+      document,
+      operation: "Query.echo",
+      input: { msg: "first" },
+      tools: { api: (p: any) => ({ echo: p.msg }) },
+    });
+    assert.deepEqual(d1, { reply: "first" });
+
+    // Second call reuses cached function (same document object)
+    const { data: d2 } = await executeAot({
+      document,
+      operation: "Query.echo",
+      input: { msg: "second" },
+      tools: { api: (p: any) => ({ echo: p.msg }) },
+    });
+    assert.deepEqual(d2, { reply: "second" });
+  });
+
+  test("executeAot matches executeBridge result", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const tools = { api: (p: any) => ({ echo: `${p.msg}!` }) };
+
+    const aotResult = await executeAot({
+      document,
+      operation: "Query.echo",
+      input: { msg: "test" },
+      tools,
+    });
+
+    const rtResult = await executeBridge({
+      document: JSON.parse(JSON.stringify(document)),
+      operation: "Query.echo",
+      input: { msg: "test" },
+      tools,
+    });
+
+    assert.deepEqual(aotResult.data, rtResult.data);
+  });
+
+  test("executeAot with context", async () => {
+    const ctxBridge = `version 1.5
+bridge Query.secure {
+  with api as a
+  with context as ctx
+  with output as o
+
+  a.token <- ctx.key
+  o.result <- a.data
+}`;
+    const document = parseBridgeFormat(ctxBridge);
+    const { data } = await executeAot({
+      document,
+      operation: "Query.secure",
+      tools: { api: (p: any) => ({ data: p.token }) },
+      context: { key: "secret" },
+    });
+    assert.deepEqual(data, { result: "secret" });
   });
 });

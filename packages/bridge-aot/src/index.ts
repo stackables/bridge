@@ -9,3 +9,6 @@
 
 export { compileBridge } from "./codegen.ts";
 export type { CompileResult, CompileOptions } from "./codegen.ts";
+
+export { executeAot } from "./execute-aot.ts";
+export type { ExecuteAotOptions, ExecuteAotResult } from "./execute-aot.ts";

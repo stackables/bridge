@@ -6,11 +6,14 @@
  *  - Constant wires (`target = "value"`)
  *  - Nullish coalescing (`?? fallback`)
  *  - Falsy fallback (`|| fallback`)
+ *  - Catch fallback (`catch`)
  *  - Conditional wires (ternary)
  *  - Array mapping (`[] as iter { }`)
+ *  - Force statements (`force <handle>`, `force <handle> catch null`)
+ *  - ToolDef merging (tool blocks with wires and `on error`)
  */
 
-import type { BridgeDocument, Bridge, Wire, NodeRef } from "@stackables/bridge-core";
+import type { BridgeDocument, Bridge, Wire, NodeRef, ToolDef, ToolWire } from "@stackables/bridge-core";
 
 const SELF_MODULE = "_";
 
@@ -62,7 +65,12 @@ export function compileBridge(
     if (inst.kind === "const") constDefs.set(inst.name, inst.value);
   }
 
-  const ctx = new CodegenContext(bridge, constDefs);
+  // Collect tool definitions from the document
+  const toolDefs = document.instructions.filter(
+    (i): i is ToolDef => i.kind === "tool",
+  );
+
+  const ctx = new CodegenContext(bridge, constDefs, toolDefs);
   return ctx.compile();
 }
 
@@ -119,14 +127,16 @@ interface ToolInfo {
 class CodegenContext {
   private bridge: Bridge;
   private constDefs: Map<string, string>;
+  private toolDefs: ToolDef[];
   private selfTrunkKey: string;
   private varMap = new Map<string, string>();
   private tools = new Map<string, ToolInfo>();
   private toolCounter = 0;
 
-  constructor(bridge: Bridge, constDefs: Map<string, string>) {
+  constructor(bridge: Bridge, constDefs: Map<string, string>, toolDefs: ToolDef[]) {
     this.bridge = bridge;
     this.constDefs = constDefs;
+    this.toolDefs = toolDefs;
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
 
     for (const h of bridge.handles) {
@@ -184,6 +194,15 @@ class CodegenContext {
     const { bridge } = this;
     const fnName = `${bridge.type}_${bridge.field}`;
 
+    // Build a set of force tool trunk keys and their catch behavior
+    const forceMap = new Map<string, { catchError?: boolean }>();
+    if (bridge.forces) {
+      for (const f of bridge.forces) {
+        const tk = `${f.module}:${f.type}:${f.field}:${f.instance ?? 1}`;
+        forceMap.set(tk, { catchError: f.catchError });
+      }
+    }
+
     // Separate wires into tool inputs vs. output
     const outputWires: Wire[] = [];
     const toolWires = new Map<string, Wire[]>();
@@ -197,6 +216,27 @@ class CodegenContext {
         const arr = toolWires.get(toKey) ?? [];
         arr.push(w);
         toolWires.set(toKey, arr);
+      }
+    }
+
+    // Ensure force-only tools (no wires targeting them from output) are
+    // still included in the tool map for scheduling
+    for (const [tk] of forceMap) {
+      if (!toolWires.has(tk) && this.tools.has(tk)) {
+        toolWires.set(tk, []);
+      }
+    }
+
+    // Detect tools whose output is only referenced by catch-guarded wires.
+    // These tools need try/catch wrapping to prevent unhandled rejections.
+    const catchGuardedTools = new Set<string>();
+    for (const w of outputWires) {
+      const hasCatch =
+        ("catchFallback" in w && w.catchFallback != null) ||
+        ("catchFallbackRef" in w && w.catchFallbackRef);
+      if (hasCatch && "from" in w) {
+        const srcKey = refTrunkKey(w.from);
+        catchGuardedTools.add(srcKey);
       }
     }
 
@@ -218,10 +258,15 @@ class CodegenContext {
     for (const tk of toolOrder) {
       const tool = this.tools.get(tk)!;
       const wires = toolWires.get(tk) ?? [];
-      const inputObj = this.buildObjectLiteral(wires, (w) => w.to.path, 4);
-      lines.push(
-        `  const ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj});`,
-      );
+      const forceInfo = forceMap.get(tk);
+
+      if (forceInfo?.catchError) {
+        this.emitToolCall(lines, tool, wires, "fire-and-forget");
+      } else if (catchGuardedTools.has(tk)) {
+        this.emitToolCall(lines, tool, wires, "catch-guarded");
+      } else {
+        this.emitToolCall(lines, tool, wires, "normal");
+      }
     }
 
     // Emit output
@@ -230,6 +275,228 @@ class CodegenContext {
     lines.push("}");
     lines.push("");
     return { code: lines.join("\n"), functionName: fnName };
+  }
+
+  // ── Tool call emission ─────────────────────────────────────────────────────
+
+  /**
+   * Emit a tool call with ToolDef wire merging and onError support.
+   *
+   * If a ToolDef exists for the tool:
+   * 1. Apply ToolDef constant wires as base input
+   * 2. Apply ToolDef pull wires (resolved at runtime from tool deps)
+   * 3. Apply bridge wires on top (override)
+   * 4. Call the ToolDef's fn function (not the tool name)
+   * 5. Wrap in try/catch if onError wire exists
+   */
+  private emitToolCall(
+    lines: string[],
+    tool: ToolInfo,
+    bridgeWires: Wire[],
+    mode: "normal" | "fire-and-forget" | "catch-guarded" = "normal",
+  ): void {
+    const toolDef = this.resolveToolDef(tool.toolName);
+
+    if (!toolDef) {
+      // Simple tool call — no ToolDef
+      const inputObj = this.buildObjectLiteral(bridgeWires, (w) => w.to.path, 4);
+      if (mode === "fire-and-forget") {
+        lines.push(
+          `  try { await tools[${JSON.stringify(tool.toolName)}](${inputObj}); } catch (_e) {}`,
+        );
+        lines.push(`  const ${tool.varName} = undefined;`);
+      } else if (mode === "catch-guarded") {
+        // Catch-guarded: store result; set error flag on failure
+        lines.push(`  let ${tool.varName}, ${tool.varName}_err = false;`);
+        lines.push(
+          `  try { ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj}); } catch (_e) { ${tool.varName}_err = true; }`,
+        );
+      } else {
+        lines.push(
+          `  const ${tool.varName} = await tools[${JSON.stringify(tool.toolName)}](${inputObj});`,
+        );
+      }
+      return;
+    }
+
+    // ToolDef-backed tool call
+    const fnName = toolDef.fn ?? tool.toolName;
+    const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+
+    // Build input: ToolDef wires first, then bridge wires override
+    const inputParts: string[] = [];
+
+    // ToolDef constant wires
+    for (const tw of toolDef.wires) {
+      if (tw.kind === "constant") {
+        inputParts.push(`    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`);
+      }
+    }
+
+    // ToolDef pull wires — resolved from tool dependencies
+    for (const tw of toolDef.wires) {
+      if (tw.kind === "pull") {
+        const expr = this.resolveToolDepSource(tw.source, toolDef);
+        inputParts.push(`    ${JSON.stringify(tw.target)}: ${expr}`);
+      }
+    }
+
+    // Bridge wires override ToolDef wires
+    for (const bw of bridgeWires) {
+      const path = bw.to.path;
+      if (path.length === 1) {
+        const key = path[0]!;
+        // Remove any ToolDef wire with the same key
+        const idx = inputParts.findIndex((p) => p.includes(`${JSON.stringify(key)}:`));
+        if (idx >= 0) inputParts.splice(idx, 1);
+        inputParts.push(`    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`);
+      } else if (path.length > 1) {
+        // Nested path — just add it (buildObjectLiteral handles this)
+        const key = path[path.length - 1]!;
+        inputParts.push(`    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`);
+      }
+    }
+
+    const inputObj = inputParts.length > 0
+      ? `{\n${inputParts.join(",\n")},\n  }`
+      : "{}";
+
+    if (onErrorWire) {
+      // Wrap in try/catch for onError
+      lines.push(`  let ${tool.varName};`);
+      lines.push(`  try {`);
+      lines.push(
+        `    ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj});`,
+      );
+      lines.push(`  } catch (_e) {`);
+      if ("value" in onErrorWire) {
+        lines.push(`    ${tool.varName} = JSON.parse(${JSON.stringify(onErrorWire.value)});`);
+      } else {
+        const fallbackExpr = this.resolveToolDepSource(onErrorWire.source, toolDef);
+        lines.push(`    ${tool.varName} = ${fallbackExpr};`);
+      }
+      lines.push(`  }`);
+    } else if (mode === "fire-and-forget") {
+      lines.push(
+        `  try { await tools[${JSON.stringify(fnName)}](${inputObj}); } catch (_e) {}`,
+      );
+      lines.push(`  const ${tool.varName} = undefined;`);
+    } else if (mode === "catch-guarded") {
+      lines.push(`  let ${tool.varName}, ${tool.varName}_err = false;`);
+      lines.push(
+        `  try { ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj}); } catch (_e) { ${tool.varName}_err = true; }`,
+      );
+    } else {
+      lines.push(
+        `  const ${tool.varName} = await tools[${JSON.stringify(fnName)}](${inputObj});`,
+      );
+    }
+  }
+
+  /**
+   * Resolve a ToolDef source reference (e.g. "ctx.apiKey") to a JS expression.
+   * Handles context, const, and tool dependencies.
+   */
+  private resolveToolDepSource(source: string, toolDef: ToolDef): string {
+    const dotIdx = source.indexOf(".");
+    const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
+    const restPath = dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
+
+    const dep = toolDef.deps.find((d) => d.handle === handle);
+    if (!dep) return "undefined";
+
+    let baseExpr: string;
+    if (dep.kind === "context") {
+      baseExpr = "context";
+    } else if (dep.kind === "const") {
+      // Resolve from the const definitions
+      if (restPath.length > 0) {
+        const constName = restPath[0]!;
+        const val = this.constDefs.get(constName);
+        if (val != null) {
+          if (restPath.length === 1) return emitCoerced(val);
+          baseExpr = emitCoerced(val);
+          const tail = restPath
+            .slice(1)
+            .map((p) => `?.[${JSON.stringify(p)}]`)
+            .join("");
+          return `(${baseExpr})${tail}`;
+        }
+      }
+      return "undefined";
+    } else if (dep.kind === "tool") {
+      // Tool dependency — reference the tool's variable
+      const depToolInfo = this.findToolByName(dep.tool);
+      if (depToolInfo) {
+        baseExpr = depToolInfo.varName;
+      } else {
+        return "undefined";
+      }
+    } else {
+      return "undefined";
+    }
+
+    if (restPath.length === 0) return baseExpr;
+    return baseExpr + restPath.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+  }
+
+  /** Find a tool info by tool name. */
+  private findToolByName(name: string): ToolInfo | undefined {
+    for (const [, info] of this.tools) {
+      if (info.toolName === name) return info;
+    }
+    return undefined;
+  }
+
+  /**
+   * Resolve a ToolDef by name, merging the extends chain.
+   * Mirrors the runtime's resolveToolDefByName logic.
+   */
+  private resolveToolDef(name: string): ToolDef | undefined {
+    const base = this.toolDefs.find((t) => t.name === name);
+    if (!base) return undefined;
+
+    // Build extends chain: root → ... → leaf
+    const chain: ToolDef[] = [base];
+    let current = base;
+    while (current.extends) {
+      const parent = this.toolDefs.find((t) => t.name === current.extends);
+      if (!parent) break;
+      chain.unshift(parent);
+      current = parent;
+    }
+
+    // Merge: root provides base, each child overrides
+    const merged: ToolDef = {
+      kind: "tool",
+      name,
+      fn: chain[0]!.fn,
+      deps: [],
+      wires: [],
+    };
+
+    for (const def of chain) {
+      for (const dep of def.deps) {
+        if (!merged.deps.some((d) => d.handle === dep.handle)) {
+          merged.deps.push(dep);
+        }
+      }
+      for (const wire of def.wires) {
+        if (wire.kind === "onError") {
+          const idx = merged.wires.findIndex((w: ToolWire) => w.kind === "onError");
+          if (idx >= 0) merged.wires[idx] = wire;
+          else merged.wires.push(wire);
+        } else {
+          const idx = merged.wires.findIndex(
+            (w: ToolWire) => "target" in w && w.target === (wire as { target: string }).target,
+          );
+          if (idx >= 0) merged.wires[idx] = wire;
+          else merged.wires.push(wire);
+        }
+      }
+    }
+
+    return merged;
   }
 
   // ── Output generation ────────────────────────────────────────────────────
@@ -383,7 +650,7 @@ class CodegenContext {
     return this.wireToExpr(w);
   }
 
-  /** Apply falsy (||) and nullish (??) fallback chains to an expression. */
+  /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */
   private applyFallbacks(
     w: Wire,
     expr: string,
@@ -405,7 +672,40 @@ class CodegenContext {
       expr = `(${expr} ?? ${emitCoerced(w.nullishFallback)})`;
     }
 
+    // Catch fallback — use error flag from catch-guarded tool call
+    const hasCatch =
+      ("catchFallback" in w && w.catchFallback != null) ||
+      ("catchFallbackRef" in w && w.catchFallbackRef);
+    if (hasCatch) {
+      let catchExpr: string;
+      if ("catchFallbackRef" in w && w.catchFallbackRef) {
+        catchExpr = this.refToExpr(w.catchFallbackRef);
+      } else if ("catchFallback" in w && w.catchFallback != null) {
+        catchExpr = emitCoerced(w.catchFallback);
+      } else {
+        catchExpr = "undefined";
+      }
+
+      // Find the error flag for the source tool
+      const errFlag = this.getSourceErrorFlag(w);
+      if (errFlag) {
+        expr = `(${errFlag} ? ${catchExpr} : ${expr})`;
+      } else {
+        // Fallback: wrap in IIFE with try/catch
+        expr = `(() => { try { return ${expr}; } catch (_e) { return ${catchExpr}; } })()`;
+      }
+    }
+
     return expr;
+  }
+
+  /** Get the error flag variable name for a wire's source tool. */
+  private getSourceErrorFlag(w: Wire): string | undefined {
+    if (!("from" in w)) return undefined;
+    const srcKey = refTrunkKey(w.from);
+    const tool = this.tools.get(srcKey);
+    if (!tool) return undefined;
+    return `${tool.varName}_err`;
   }
 
   // ── NodeRef → expression ──────────────────────────────────────────────────

@@ -1,0 +1,126 @@
+/**
+ * AOT execution entry point — compile-once, run-many bridge execution.
+ *
+ * Compiles a bridge operation into a standalone async function on first call,
+ * caches the compiled function, and re-uses it on subsequent calls for
+ * zero-overhead execution.
+ */
+
+import type { BridgeDocument, ToolMap } from "@stackables/bridge-core";
+import { compileBridge } from "./codegen.ts";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export type ExecuteAotOptions = {
+  /** Parsed bridge document (from `parseBridge`). */
+  document: BridgeDocument;
+  /**
+   * Which bridge to execute, as `"Type.field"`.
+   * Example: `"Query.searchTrains"` or `"Mutation.sendEmail"`.
+   */
+  operation: string;
+  /** Input arguments — equivalent to GraphQL field arguments. */
+  input?: Record<string, unknown>;
+  /**
+   * Tool functions available to the engine.
+   * Flat or namespaced: `{ myNamespace: { myTool } }`.
+   */
+  tools?: ToolMap;
+  /** Context available via `with context as ctx` inside the bridge. */
+  context?: Record<string, unknown>;
+};
+
+export type ExecuteAotResult<T = unknown> = {
+  data: T;
+};
+
+// ── Cache ───────────────────────────────────────────────────────────────────
+
+type AotFn = (
+  input: Record<string, unknown>,
+  tools: Record<string, any>,
+  context: Record<string, unknown>,
+) => Promise<any>;
+
+const AsyncFunction = Object.getPrototypeOf(async function () {})
+  .constructor as typeof Function;
+
+/**
+ * Cache: one compiled function per (document identity × operation).
+ * Uses a WeakMap keyed on the document object so entries are GC'd when
+ * the document is no longer referenced.
+ */
+const fnCache = new WeakMap<BridgeDocument, Map<string, AotFn>>();
+
+function getOrCompile(document: BridgeDocument, operation: string): AotFn {
+  let opMap = fnCache.get(document);
+  if (opMap) {
+    const cached = opMap.get(operation);
+    if (cached) return cached;
+  }
+
+  const { code } = compileBridge(document, { operation });
+
+  // Extract the function body from the generated code
+  const bodyMatch = code.match(
+    /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
+  );
+  if (!bodyMatch) {
+    throw new Error(
+      `AOT compilation produced invalid code for "${operation}"`,
+    );
+  }
+
+  const fn = new AsyncFunction(
+    "input",
+    "tools",
+    "context",
+    bodyMatch[1]!,
+  ) as AotFn;
+
+  if (!opMap) {
+    opMap = new Map();
+    fnCache.set(document, opMap);
+  }
+  opMap.set(operation, fn);
+  return fn;
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Execute a bridge operation using AOT-compiled code.
+ *
+ * On first call for a given (document, operation) pair, compiles the bridge
+ * into a standalone JavaScript function and caches it. Subsequent calls
+ * reuse the cached function for zero-overhead execution.
+ *
+ * @example
+ * ```ts
+ * import { parseBridge } from "@stackables/bridge-compiler";
+ * import { executeAot } from "@stackables/bridge-aot";
+ *
+ * const document = parseBridge(readFileSync("my.bridge", "utf8"));
+ * const { data } = await executeAot({
+ *   document,
+ *   operation: "Query.myField",
+ *   input: { city: "Berlin" },
+ *   tools: { myApi: async (input) => fetch(...) },
+ * });
+ * ```
+ */
+export async function executeAot<T = unknown>(
+  options: ExecuteAotOptions,
+): Promise<ExecuteAotResult<T>> {
+  const {
+    document,
+    operation,
+    input = {},
+    tools = {},
+    context = {},
+  } = options;
+
+  const fn = getOrCompile(document, operation);
+  const data = await fn(input, tools as Record<string, any>, context);
+  return { data: data as T };
+}
