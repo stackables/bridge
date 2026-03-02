@@ -197,6 +197,66 @@ bridge Query.geocode {
   });
 });
 
+// ── Array on a sub-field (o.field <- items[] as x { ... }) ──────────────────
+
+describe("executeBridge: array mapping on sub-field", () => {
+  test("o.field <- src[] as x { .renamed <- x.original } renames fields", async () => {
+    const bridgeText = `version 1.5
+bridge Query.catalog {
+  with api as src
+  with output as o
+
+  o.title <- src.name
+  o.entries <- src.items[] as item {
+    .id <- item.item_id
+    .label <- item.item_name
+    .cost <- item.unit_price
+  }
+}`;
+    const { data } = await run(
+      bridgeText,
+      "Query.catalog",
+      {},
+      {
+        api: async () => ({
+          name: "Catalog A",
+          items: [
+            { item_id: 1, item_name: "Widget", unit_price: 9.99 },
+            { item_id: 2, item_name: "Gadget", unit_price: 14.5 },
+          ],
+        }),
+      },
+    );
+    assert.deepEqual(data, {
+      title: "Catalog A",
+      entries: [
+        { id: 1, label: "Widget", cost: 9.99 },
+        { id: 2, label: "Gadget", cost: 14.5 },
+      ],
+    });
+  });
+
+  test("empty array on sub-field returns empty array", async () => {
+    const bridgeText = `version 1.5
+bridge Query.listing {
+  with api as src
+  with output as o
+
+  o.count = 0
+  o.items <- src.things[] as t {
+    .name <- t.label
+  }
+}`;
+    const { data } = await run(
+      bridgeText,
+      "Query.listing",
+      {},
+      { api: async () => ({ things: [] }) },
+    );
+    assert.deepEqual(data, { count: 0, items: [] });
+  });
+});
+
 // ── Nested object from scope blocks (o.field { .sub <- ... }) ───────────────
 
 describe("executeBridge: nested object via scope block", () => {
