@@ -2,6 +2,8 @@
  * Shared utilities for the Bridge runtime.
  */
 
+import { BridgeTimeoutError } from "./tree-types.ts";
+
 /**
  * Split a dotted path string into path segments, expanding array indices.
  * e.g. "items[0].name" → ["items", "0", "name"]
@@ -20,4 +22,21 @@ export function parsePath(text: string): string[] {
     }
   }
   return parts;
+}
+
+/** Race a promise against a timeout.  Rejects with BridgeTimeoutError on expiry. */
+export function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  toolName: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new BridgeTimeoutError(toolName, ms)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  });
 }

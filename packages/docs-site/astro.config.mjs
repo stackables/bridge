@@ -82,6 +82,10 @@ export default defineConfig({
           label: "Advanced Topics",
           autogenerate: { directory: "advanced" },
         },
+        {
+          label: "Blog",
+          link: "/blog",
+        },
       ],
       plugins: [
         starlightCatppuccin({

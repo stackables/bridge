@@ -1,0 +1,75 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { getCollection } from "astro:content";
+
+function routeFromDocId(id: string): string {
+  // Starlight docs collection uses `id` as the content-path (e.g. "blog/foo.md").
+  // Convert to the runtime route ("/blog/foo/").
+  const withoutExt = id.replace(/\.(md|mdx)$/, "");
+  const withoutIndex = withoutExt.endsWith("/index")
+    ? withoutExt.slice(0, -"/index".length)
+    : withoutExt;
+  return `/${withoutIndex}/`;
+}
+
+function dateFromId(id: string): Date | undefined {
+  // Filenames are prefixed with YYYYMMDD, e.g. "blog/20260302-optimize.md"
+  const match = id.match(/(?:^|\/)(\d{4})(\d{2})(\d{2})/);
+  if (!match) return undefined;
+  const parsed = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+  );
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function formatDate(date: Date): string {
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+const docs = await getCollection("docs");
+const posts = docs
+  .filter((entry) => entry.id.startsWith("blog/"))
+  .map((entry) => ({
+    entry,
+    date: dateFromId(entry.id),
+    title: entry.data.title as string | undefined,
+  }))
+  .sort((a, b) => {
+    const aTime = a.date?.getTime() ?? 0;
+    const bTime = b.date?.getTime() ?? 0;
+    if (aTime !== bTime) return bTime - aTime;
+    return (b.title ?? "").localeCompare(a.title ?? "");
+  });
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "Blog",
+    prev: false,
+    next: false,
+    description: "The latest news and updates about The Bridge.",
+  }}
+>
+  <p>
+    Welcome to The Bridge's blog! We try to share the latest news, updates, and
+    insights about our project. Stay tuned for behind-the-scenes looks at how
+    we're building The Bridge.
+  </p>
+
+  <ul>
+    {
+      posts.map(({ entry, date, title }) => (
+        <li>
+          <a href={routeFromDocId(entry.id)}>{title ?? entry.id}</a>
+          {date ? <span> — {formatDate(date)}</span> : null}
+        </li>
+      ))
+    }
+  </ul>
+</StarlightPage>
