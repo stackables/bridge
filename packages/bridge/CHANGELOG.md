@@ -1,5 +1,14 @@
 # @stackables/bridge
 
+## 2.1.1
+
+### Patch Changes
+
+- Updated dependencies [e953c93]
+  - @stackables/bridge-core@1.1.1
+  - @stackables/bridge-compiler@1.0.6
+  - @stackables/bridge-graphql@1.1.1
+
 ## 2.1.0
 
 ### Minor Changes

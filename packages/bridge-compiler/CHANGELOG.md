@@ -1,5 +1,12 @@
 # @stackables/bridge-compiler
 
+## 1.0.6
+
+### Patch Changes
+
+- Updated dependencies [e953c93]
+  - @stackables/bridge-core@1.1.1
+
 ## 1.0.5
 
 ### Patch Changes
