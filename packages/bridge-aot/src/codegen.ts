@@ -126,6 +126,21 @@ function emitCoerced(raw: string): string {
   return JSON.stringify(raw);
 }
 
+/**
+ * Parse a const value at compile time and emit it as an inline JS literal.
+ * Since const values are JSON, we can JSON.parse at compile time and
+ * re-serialize as a JavaScript expression, avoiding runtime JSON.parse.
+ */
+function emitParsedConst(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    return JSON.stringify(parsed);
+  } catch {
+    // If JSON.parse fails, fall back to runtime parsing
+    return `JSON.parse(${JSON.stringify(raw)})`;
+  }
+}
+
 // ── Code-generation context ─────────────────────────────────────────────────
 
 interface ToolInfo {
@@ -540,12 +555,12 @@ class CodegenContext {
     if (dep.kind === "context") {
       baseExpr = "context";
     } else if (dep.kind === "const") {
-      // Resolve from the const definitions using JSON.parse (same as runtime)
+      // Resolve from the const definitions — inline parsed value
       if (restPath.length > 0) {
         const constName = restPath[0]!;
         const val = this.constDefs.get(constName);
         if (val != null) {
-          const base = `JSON.parse(${JSON.stringify(val)})`;
+          const base = emitParsedConst(val);
           if (restPath.length === 1) return base;
           const tail = restPath
             .slice(1)
@@ -654,8 +669,8 @@ class CodegenContext {
     if (isRootArray && rootWire) {
       const elemWires = outputWires.filter((w) => "from" in w && w.from.element);
       const arrayExpr = this.wireToExpr(rootWire);
-      const body = this.buildElementBody(elemWires, arrayIterators, "_el", 4);
-      lines.push(`  return (${arrayExpr} ?? []).map((_el) => (${body}));`);
+      const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
+      lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
       return;
     }
 
@@ -719,8 +734,8 @@ class CodegenContext {
       }));
 
       const arrayExpr = this.wireToExpr(sourceW);
-      const body = this.buildElementBody(shifted, arrayIterators, "_el", 6);
-      const mapExpr = `(${arrayExpr} ?? []).map((_el) => (${body}))`;
+      const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
+      const mapExpr = `(${arrayExpr} ?? []).map((_el0) => (${body}))`;
 
       if (!tree.children.has(arrayField)) {
         tree.children.set(arrayField, { children: new Map() });
@@ -766,9 +781,10 @@ class CodegenContext {
   private buildElementBody(
     elemWires: Wire[],
     arrayIterators: Record<string, string>,
-    elVar: string,
+    depth: number,
     indent: number,
   ): string {
+    const elVar = `_el${depth}`;
     const pad = " ".repeat(indent);
 
     // Separate into scalar element wires and sub-array source/element wires
@@ -824,8 +840,8 @@ class CodegenContext {
       }));
 
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
-      const innerElVar = elVar === "_el" ? "_el2" : `_el${parseInt(elVar.replace("_el", "") || "1") + 1}`;
-      const innerBody = this.buildElementBody(shifted, arrayIterators, innerElVar, indent + 2);
+      const innerElVar = `_el${depth + 1}`;
+      const innerBody = this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 2);
       const mapExpr = `(${srcExpr} ?? []).map((${innerElVar}) => (${innerBody}))`;
 
       if (!tree.children.has(field)) {
@@ -901,7 +917,7 @@ class CodegenContext {
   }
 
   /** Convert an element wire (inside array mapping) to an expression. */
-  private elementWireToExpr(w: Wire, elVar = "_el"): string {
+  private elementWireToExpr(w: Wire, elVar = "_el0"): string {
     if ("value" in w) return emitCoerced(w.value);
     if ("from" in w) {
       // Element refs: from.element === true, path = ["srcField"]
@@ -982,8 +998,7 @@ class CodegenContext {
       const constName = ref.path[0]!;
       const val = this.constDefs.get(constName);
       if (val != null) {
-        // The runtime uses JSON.parse(inst.value), so we must do the same.
-        const base = `JSON.parse(${JSON.stringify(val)})`;
+        const base = emitParsedConst(val);
         if (ref.path.length === 1) return base;
         const tail = ref.path
           .slice(1)

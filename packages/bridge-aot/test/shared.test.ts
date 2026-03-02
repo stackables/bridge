@@ -249,7 +249,6 @@ bridge Query.empty {
 }`,
     operation: "Query.empty",
     expectedError: /no output wires/,
-    expected: undefined,
     aotSupported: false, // AOT returns {} instead of erroring
   },
   {
@@ -632,7 +631,6 @@ bridge Query.critical {
       "audit.log": async () => { throw new Error("audit failed"); },
     },
     expectedError: /audit failed/,
-    expected: undefined,
   },
 ];
 
@@ -765,8 +763,8 @@ bridge Query.ctx {
     input: { q: "hello" },
     tools: {
       api: (input: any, ctx: any) => {
-        // The runtime passes { logger, signal }; AOT passes the user context object.
-        // Both must provide a truthy second argument.
+        // Runtime passes ToolContext { logger, signal }; AOT passes the user
+        // context object.  Both engines must provide a defined second argument.
         assert.ok(ctx != null, "context must be passed as second argument");
         return { data: input.q };
       },
