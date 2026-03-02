@@ -10,3 +10,8 @@ coverage
 packages/*/lcov.info
 profiles/
 isolate-*.log
+
+# Build artifacts that may land in src/ during cross-package compilation
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
