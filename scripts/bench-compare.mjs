@@ -17,8 +17,8 @@
  *   profiles/compare-<timestamp>.json  — raw data for further analysis
  */
 
-import { execSync, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");

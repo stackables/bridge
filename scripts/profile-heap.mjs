@@ -16,7 +16,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -130,7 +130,7 @@ if (doGC) {
     scriptToProfile,
   ];
 
-  let gcOutput = "";
+  let gcOutput;
   try {
     gcOutput = execFileSync("node", gcArgs, {
       cwd: ROOT,
@@ -178,6 +178,7 @@ if (doGC) {
     `Scavenge (young gen) events: ${scavenges}`,
     `Mark-Compact (old gen) events: ${markCompacts}`,
     `Total GC events: ${gcLines.length}`,
+    `Total GC pause: ${totalPauseMs.toFixed(2)}ms`,
     ``,
     `## Raw GC Events`,
     ``,
@@ -188,7 +189,9 @@ if (doGC) {
   const gcPath = join(PROFILES_DIR, `gc-${timestamp}.log`);
   writeFileSync(gcPath, gcReport, "utf-8");
   console.log(`✅ GC trace: profiles/gc-${timestamp}.log`);
-  console.log(`   Scavenges: ${scavenges}, Mark-Compacts: ${markCompacts}`);
+  console.log(
+    `   Scavenges: ${scavenges}, Mark-Compacts: ${markCompacts}, total pause: ${totalPauseMs.toFixed(2)}ms`,
+  );
 }
 
 console.log();

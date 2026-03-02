@@ -87,8 +87,7 @@ const env = {
 
 console.log("Running with V8 trace flags...");
 
-let stdout = "";
-let stderr = "";
+let stdout, stderr;
 try {
   stdout = execFileSync("node", nodeArgs, {
     cwd: ROOT,
@@ -97,6 +96,7 @@ try {
     maxBuffer: 100 * 1024 * 1024,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  stderr = "";
 } catch (e) {
   stdout = e.stdout ?? "";
   stderr = e.stderr ?? "";

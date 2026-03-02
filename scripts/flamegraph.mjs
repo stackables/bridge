@@ -17,14 +17,8 @@
  */
 
 import { execSync, execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-  existsSync,
-} from "node:fs";
-import { resolve, join, basename } from "node:path";
+import { mkdirSync, readdirSync, existsSync } from "node:fs";
+import { resolve, join } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const PROFILES_DIR = join(ROOT, "profiles");
@@ -122,7 +116,6 @@ if (hasSpeedscope) {
   }
 } else {
   // Fallback: convert to a format that speedscope.app can read
-  const name = basename(profilePath);
   console.log(`speedscope not installed locally.`);
   console.log(`\nOptions:`);
   console.log(`  1. Open https://www.speedscope.app and drag & drop:`);

@@ -20,7 +20,7 @@
  *   - Full call tree (top-down view)
  */
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   readdirSync,

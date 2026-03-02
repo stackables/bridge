@@ -18,8 +18,8 @@
  *   profiles/cpu-<timestamp>.cpuprofile
  */
 
-import { execSync, execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, renameSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
