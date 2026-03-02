@@ -39,6 +39,10 @@
       "@stackables/bridge": [
         "./packages/bridge/build/index.d.ts",
         "./packages/bridge/src/index.ts"
+      ],
+      "@stackables/bridge-aot": [
+        "./packages/bridge-aot/build/index.d.ts",
+        "./packages/bridge-aot/src/index.ts"
       ]
     }
   }
