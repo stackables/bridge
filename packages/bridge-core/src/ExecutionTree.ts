@@ -1,4 +1,40 @@
+import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
+import { resolveWires as _resolveWires } from "./resolveWires.ts";
+import { schedule as _schedule } from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
+import type { ToolTrace } from "./tracing.ts";
+import {
+  isOtelActive,
+  otelTracer,
+  SpanStatusCodeEnum,
+  toolCallCounter,
+  toolDurationHistogram,
+  toolErrorCounter,
+  TraceCollector,
+} from "./tracing.ts";
+import type {
+  Logger,
+  MaybePromise,
+  Path,
+  TreeContext,
+  Trunk,
+} from "./tree-types.ts";
+import {
+  BREAK_SYM,
+  BridgeAbortError,
+  BridgePanicError,
+  CONTINUE_SYM,
+  isPromise,
+  MAX_EXECUTION_DEPTH,
+} from "./tree-types.ts";
+import {
+  pathEquals,
+  roundMs,
+  sameTrunk,
+  TRUNK_KEY_CACHE,
+  trunkKey,
+  UNSAFE_KEYS,
+} from "./tree-utils.ts";
 import type {
   Bridge,
   BridgeDocument,
@@ -10,70 +46,7 @@ import type {
   Wire,
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-
-// ── Imports from extracted modules ─────────────────────────────────────────
-
-import {
-  BridgePanicError,
-  BridgeAbortError,
-  BridgeTimeoutError,
-  MAX_EXECUTION_DEPTH,
-  CONTINUE_SYM,
-  BREAK_SYM,
-  isPromise,
-} from "./tree-types.ts";
-import type {
-  MaybePromise,
-  Trunk,
-  Path,
-  Logger,
-  TreeContext,
-} from "./tree-types.ts";
-
-import {
-  trunkKey,
-  sameTrunk,
-  pathEquals,
-  UNSAFE_KEYS,
-  roundMs,
-  TRUNK_KEY_CACHE,
-} from "./tree-utils.ts";
-
-import {
-  TraceCollector,
-  otelTracer,
-  isOtelActive,
-  toolCallCounter,
-  toolDurationHistogram,
-  toolErrorCounter,
-  SpanStatusCodeEnum,
-} from "./tracing.ts";
-import type { ToolTrace } from "./tracing.ts";
-
-import { resolveWires as _resolveWires } from "./resolveWires.ts";
-
-import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
-import { schedule as _schedule } from "./scheduleTools.ts";
-
-/** Race a promise against a timeout.  Rejects with BridgeTimeoutError on expiry. */
-function raceTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  toolName: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new BridgeTimeoutError(toolName, ms)),
-      ms,
-    );
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
-  });
-}
+import { raceTimeout } from "./utils.ts";
 
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
@@ -264,7 +237,11 @@ export class ExecutionTree implements TreeContext {
         return result;
       } catch (err) {
         // Normalize platform AbortError to BridgeAbortError
-        if (this.signal?.aborted && err instanceof DOMException && err.name === "AbortError") {
+        if (
+          this.signal?.aborted &&
+          err instanceof DOMException &&
+          err.name === "AbortError"
+        ) {
           throw new BridgeAbortError();
         }
         throw err;
@@ -339,7 +316,11 @@ export class ExecutionTree implements TreeContext {
             (err as Error).message,
           );
           // Normalize platform AbortError to BridgeAbortError
-          if (this.signal?.aborted && err instanceof DOMException && err.name === "AbortError") {
+          if (
+            this.signal?.aborted &&
+            err instanceof DOMException &&
+            err.name === "AbortError"
+          ) {
             throw new BridgeAbortError();
           }
           throw err;

@@ -18,6 +18,9 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 | 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)  |
 | 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays) |
 | 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)     |
+| 13  | Share toolDefCache across shadows  | March 2026 | 🔲 Planned                             |
+| 14  | Pre-compute output wire topology   | March 2026 | 🔲 Planned                             |
+| 15  | Cache executeBridge setup per doc  | March 2026 | 🔲 Planned                             |
 
 ## Baseline (main, March 2026)
 
@@ -566,3 +569,165 @@ resolves wires directly via `resolvePreGrouped` → `resolveWires` →
 `schedule` skips the async IIFE and `callTool` skips the `async` wrapper,
 each tool call eliminates 2 microtask hops. `tool-per-element` benefits
 the most: 10–100 tool calls per execution, each now fully synchronous.
+
+### 13. Share `toolDefCache` across shadow trees
+
+**Date:** March 2026
+**Status:** 🔲 Planned
+**Target:** Array benchmarks (+2–5% expected)
+
+**Hypothesis:**
+
+`shadow()` currently creates `new Map()` for both `toolDepCache` and
+`toolDefCache` on every shadow tree. For flat-array-1000 that's 1,000
+Map allocations per execution — 2,000 Maps total.
+
+`toolDefCache` caches `ToolDef` resolution (`resolveToolDefByName`), which
+is a pure function of `document.instructions`. Since all shadow trees share
+the same document, the cache produces identical results. Sharing the parent's
+`toolDefCache` eliminates 1,000 Map allocations and gives every shadow tree
+instant cache hits for tool definitions already resolved by the root or a
+sibling.
+
+**Profiling evidence:**
+
+- `ExecutionTree` constructor/shadow = 0.8% of total ticks (400 ticks)
+- In the V8 tick bottom-up profile, `shadow()` appears at 0.4% self-time
+- For 1,000-element arrays, the `new Map()` call is amplified 1,000×
+
+**What to change:**
+
+In `ExecutionTree.shadow()` (ExecutionTree.ts ~L371):
+
+```ts
+// Before:
+child.toolDefCache = new Map();
+
+// After:
+child.toolDefCache = this.toolDefCache; // share — ToolDef is pure fn of instructions
+```
+
+`toolDepCache` must remain per-tree because it stores tool dependency
+promises (async results) that depend on each tree's specific context
+and element data.
+
+**Risk:** Low. `resolveToolDefByName` caches by tool name and the merged
+result depends only on instructions (same across all trees). No mutation
+of cached `ToolDef` objects downstream.
+
+### 14. Pre-compute output wire topology
+
+**Date:** March 2026
+**Status:** 🔲 Planned
+**Target:** All benchmarks (+1–3% expected)
+
+**Hypothesis:**
+
+`run()` calls `bridge.wires.some(...)` twice on every execution to classify
+the output wire topology:
+
+```ts
+const hasRootWire = bridge.wires.some(w =>
+  "from" in w && w.to.module === SELF_MODULE && w.to.type === type
+  && w.to.field === field && w.to.path.length === 0);
+
+const hasElementWires = bridge.wires.some(w =>
+  "from" in w && ((w.from as NodeRef).element === true || ...)
+  && w.to.module === SELF_MODULE && ...);
+```
+
+These booleans are **static per bridge definition** — they depend only on
+the bridge's wire array, which is immutable after parsing. Computing them
+once (either in the constructor or lazily with a Symbol-keyed cache on the
+Bridge object) eliminates redundant O(W) wire scans per `executeBridge()`.
+
+**Profiling evidence:**
+
+- `run` = 1.3% of total ticks (627 ticks)
+- `resolveNestedField` = 0.9% (433 ticks) — called in the object-output
+  branch, also does `bridge.wires.filter(...)` per field
+- Every `executeBridge()` call triggers these scans
+
+**What to change:**
+
+Option A — Compute in the `ExecutionTree` constructor and store as fields:
+
+```ts
+// In constructor, after bridge lookup:
+this._hasRootWire = bridge.wires.some(w => ...);
+this._hasElementWires = bridge.wires.some(w => ...);
+```
+
+Option B — Cache on the Bridge object via a Symbol key (like `TRUNK_KEY_CACHE`):
+
+```ts
+const TOPOLOGY_CACHE = Symbol.for("bridge.topology");
+// In run():
+const topo = ((bridge as any)[TOPOLOGY_CACHE] ??= computeTopology(bridge));
+```
+
+Option B avoids per-constructor cost and is shared across all trees for
+the same bridge.
+
+**Risk:** Low. Wire arrays are immutable after parsing.
+
+### 15. Cache `executeBridge()` setup per document
+
+**Date:** March 2026
+**Status:** 🔲 Planned
+**Target:** All benchmarks (+1–3% expected, more for repeated execution)
+
+**Hypothesis:**
+
+`executeBridge()` performs three setup operations on every call that produce
+identical results for the same document:
+
+1. **`resolveStd()`** (0.7% of ticks, 325 ticks) — Calls
+   `version.split(".").map(Number)` on both the bridge version and bundled
+   std version. For the common case (no version or bundled std satisfies),
+   this is pure overhead on repeat calls.
+
+2. **`checkHandleVersions()`** → **`collectVersionedHandles()`** (0.3%, 73 ticks)
+   — Iterates all instructions to find versioned handles, then validates
+   each one. The handle list and validation result are static per document.
+
+3. **`new ExecutionTree()` instruction scan** — The constructor does
+   `instructions.find(...)` to locate the matching bridge, and iterates
+   `instructions` again for `const` definitions. These results are the
+   same for every execution of the same document+operation.
+
+**Profiling evidence:**
+
+- `resolveStd` = 0.7% self-time (disproportionate for a pure setup function)
+- `collectVersionedHandles` = 0.3%
+- `executeBridge` = 0.4% (includes both setup calls)
+- Total setup overhead ≈ 1.4% of execution time
+
+**What to change:**
+
+Cache setup results on the `BridgeDocument` via Symbol keys:
+
+```ts
+const STD_CACHE = Symbol.for("bridge.resolvedStd");
+const VERSIONS_CHECKED = Symbol.for("bridge.versionsChecked");
+
+// In executeBridge():
+const stdResult = ((doc as any)[STD_CACHE] ??= resolveStd(
+  doc.version,
+  bundledStd,
+  BUNDLED_STD_VERSION,
+  userTools,
+));
+const { namespace: activeStd, version: activeStdVersion } = stdResult;
+
+if (!(doc as any)[VERSIONS_CHECKED]) {
+  checkHandleVersions(doc.instructions, allTools, activeStdVersion);
+  (doc as any)[VERSIONS_CHECKED] = true;
+}
+```
+
+**Risk:** Medium. The cache key must account for different `tools` maps
+passed to successive `executeBridge()` calls. If the same document is
+reused with different tool maps, the cached std resolution may be wrong.
+Safest approach: cache only when no user tools are provided, or use a
+`WeakMap<ToolMap, result>` keyed by the tools object.
