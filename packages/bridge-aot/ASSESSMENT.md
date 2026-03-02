@@ -3,7 +3,7 @@
 > **Status:** Experimental proof-of-concept (feature-rich)  
 > **Package:** `@stackables/bridge-aot`  
 > **Date:** March 2026  
-> **Tests:** 34 passing
+> **Tests:** 147 passing (34 unit + 113 shared data-driven)
 
 ---
 
@@ -25,6 +25,8 @@ JavaScript function** that executes the same data flow as the runtime
 | Falsy ref chain (`\|\|`) | ✅ | `out.x <- primary.x \|\| backup.x` |
 | Conditional/ternary | ✅ | `api.mode <- i.premium ? "full" : "basic"` |
 | Array mapping | ✅ | `out.items <- api.list[] as el { .id <- el.id }` |
+| Root array output | ✅ | `o <- api.items[] as el { ... }` |
+| Nested arrays | ✅ | `o <- items[] as i { .sub <- i.list[] as j { ... } }` |
 | Context access | ✅ | `api.token <- ctx.apiKey` |
 | Nested input paths | ✅ | `api.q <- i.address.city` |
 | Root passthrough | ✅ | `o <- api` |
@@ -39,15 +41,23 @@ JavaScript function** that executes the same data flow as the runtime
 | Bridge overrides ToolDef | ✅ | Bridge wires override ToolDef wires by key |
 | `executeAot()` API | ✅ | Drop-in replacement for `executeBridge()` |
 | Compile-once caching | ✅ | WeakMap cache keyed on document object |
+| Tool context injection | ✅ | `tools["name"](input, context)` — matches runtime |
+| Const blocks | ✅ | `const geo = { "lat": 0, "lon": 0 }` |
+| Nested scope blocks | ✅ | `o.info { .name <- api.name }` |
+| String interpolation | ✅ | `o.msg <- "Hello, {i.name}!"` |
+| Math expressions | ✅ | `o.total <- i.price * i.qty` |
+| Comparison expressions | ✅ | `o.isAdult <- i.age >= 18` |
+| Pipe operators | ✅ | `o.loud <- tu:i.text` |
+| Inlined internal tools | ✅ | Arithmetic, comparisons, concat — no tool call overhead |
 
 ### Not yet supported
 
 | Feature | Complexity | Notes |
 |---------|-----------|-------|
 | `define` blocks | High | Inline subgraph expansion |
-| Pipe operator chains | High | Fork routing, pipe handles |
 | Overdefinition | Medium | Multiple wires to same target, null-boundary |
 | `break` / `continue` | Medium | Array control flow sentinels |
+| `alias` declarations | Medium | Named intermediate values |
 | Tracing / observability | High | Would need to inject instrumentation |
 | Abort signal support | Low | Check `signal.aborted` between tool calls |
 | Tool timeout | Medium | `Promise.race` with timeout |
@@ -106,8 +116,8 @@ The benchmark compiles the bridge once, then runs 1000 iterations of AOT vs
 - **Network-bound workloads:** If tools spend 50ms+ making HTTP calls, the
   0.5ms framework overhead is noise. AOT helps most when tool execution is
   fast (in-memory transforms, math, data reshaping).
-- **Dynamic routing:** Bridges that use `define` blocks, pipe operators, or
-  runtime tool selection can't be fully ahead-of-time compiled.
+- **Dynamic routing:** Bridges that use `define` blocks or runtime tool
+  selection can't be fully ahead-of-time compiled.
 - **Tracing/observability:** The runtime's built-in tracing adds overhead but
   provides essential debugging information. AOT would need to re-implement
   this as optional instrumentation.
@@ -147,12 +157,12 @@ catch fallbacks, and force statements. Here's the updated analysis:
 #### Challenges
 
 1. **Feature parity gap (narrowing).** The main unsupported features are
-   `define` blocks, pipe operator chains, and overdefinition. These are used
+   `define` blocks, overdefinition, and `alias` declarations. These are used
    in advanced scenarios but not in the majority of production bridges.
 
 2. **Testing surface.** Every codegen path needs correctness tests that mirror
-   the runtime's behavior. Currently at 34 tests covering all supported
-   features.
+   the runtime's behavior. The shared data-driven test suite (113 cases) runs
+   each scenario against both runtime and AOT, ensuring parity.
 
 3. **Error reporting.** The runtime provides rich error context (which wire
    failed, which tool threw, stack traces through the execution tree). AOT
@@ -164,8 +174,9 @@ catch fallbacks, and force statements. Here's the updated analysis:
 #### Recommendation
 
 **Ship as experimental (`@stackables/bridge-aot`) and promote to stable once
-`define` blocks and pipe operators are supported.** The current feature set
-covers the majority of production bridges. Target bridges that:
+`define` blocks are supported.** The current feature set covers the vast
+majority of production bridges including pipe operators, string interpolation,
+expressions, const blocks, and nested arrays. Target bridges that:
 
 - Use pull wires, constants, fallbacks, and ToolDefs
 - May use `force` statements for side effects
@@ -234,7 +245,7 @@ Generates:
 
 ```javascript
 export default async function Query_catalog(input, tools, context) {
-  const _t1 = await tools["api"]({});
+  const _t1 = await tools["api"]({}, context);
   return {
     "title": (_t1?.["name"] ?? "Untitled"),
     "entries": (_t1?.["items"] ?? []).map((_el) => ({
@@ -270,7 +281,7 @@ export default async function Query_safe(input, tools, context) {
   try {
     _t1 = await tools["std.httpCall"]({
       "url": input?.["url"],
-    });
+    }, context);
   } catch (_e) {
     _t1 = JSON.parse('{"status":"error"}');
   }
@@ -300,10 +311,10 @@ Generates:
 export default async function Query_search(input, tools, context) {
   const _t1 = await tools["mainApi"]({
     "q": input?.["q"],
-  });
+  }, context);
   try { await tools["audit.log"]({
     "action": input?.["q"],
-  }); } catch (_e) {}
+  }, context); } catch (_e) {}
   const _t2 = undefined;
   return {
     "title": _t1?.["title"],
@@ -316,8 +327,9 @@ export default async function Query_search(input, tools, context) {
 ## Next Steps
 
 1. **`define` block support** — inline subgraph expansion at compile time.
-2. **Pipe operator chains** — fork routing with pipe handles.
+2. **`alias` declarations** — named intermediate values.
 3. **Abort signal support** — check `signal.aborted` between tool calls.
 4. **Source maps** — generate source maps pointing back to the `.bridge` file.
 5. **Benchmark suite** — use tinybench for reproducible perf comparisons.
 6. **`break`/`continue` in array mapping** — array control flow sentinels.
+7. **Tracing / observability** — optional instrumentation hooks.
