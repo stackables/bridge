@@ -14,7 +14,13 @@
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
     "ci:publish": "pnpm publish -r --filter '@stackables/*'",
     "test:coverage": "pnpm -r test:coverage",
-    "bench": "pnpm -r bench"
+    "bench": "pnpm -r bench",
+    "profile:cpu": "node scripts/profile-cpu.mjs",
+    "profile:ticks": "node scripts/profile-v8-ticks.mjs",
+    "profile:heap": "node scripts/profile-heap.mjs",
+    "profile:deopt": "node scripts/profile-deopt.mjs",
+    "profile:flamegraph": "node scripts/flamegraph.mjs",
+    "bench:compare": "node scripts/bench-compare.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
