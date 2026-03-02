@@ -316,4 +316,50 @@ bridge Query.items {
       { name: "Beta", score: 20 },
     ]);
   });
+
+  test("JSONObject with sub-field array mapping renames element fields", async () => {
+    const scalarTypeDefs = /* GraphQL */ `
+      scalar JSONObject
+      type Query {
+        catalog: JSONObject
+      }
+    `;
+
+    const scalarBridge = `version 1.5
+bridge Query.catalog {
+  with api as src
+  with output as o
+
+  o.title <- src.name
+  o.entries <- src.items[] as item {
+    .id <- item.item_id
+    .label <- item.item_name
+  }
+}`;
+
+    const instructions = parseBridge(scalarBridge);
+    const gateway = createGateway(scalarTypeDefs, instructions, {
+      tools: {
+        api: async () => ({
+          name: "My Catalog",
+          items: [
+            { item_id: 1, item_name: "Widget" },
+            { item_id: 2, item_name: "Gadget" },
+          ],
+        }),
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ catalog }`),
+    });
+
+    assert.deepStrictEqual(result.data.catalog, {
+      title: "My Catalog",
+      entries: [
+        { id: 1, label: "Widget" },
+        { id: 2, label: "Gadget" },
+      ],
+    });
+  });
 });

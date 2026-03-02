@@ -613,6 +613,32 @@ export class ExecutionTree implements TreeContext {
         pathEquals(w.to.path, prefix),
     );
     if (exactWires.length > 0) {
+      // Check for array mapping: exact wires (the array source) PLUS
+      // element-level wires deeper than prefix (the field mappings).
+      // E.g. `o.entries <- src[] as x { .id <- x.item_id }` produces
+      // an exact wire at ["entries"] and element wires at ["entries","id"].
+      const hasElementWires = bridge.wires.some(
+        (w) =>
+          "from" in w &&
+          ((w.from as NodeRef).element === true ||
+            (w.from as NodeRef).module === "__local" ||
+            w.to.element === true) &&
+          w.to.module === SELF_MODULE &&
+          w.to.type === type &&
+          w.to.field === field &&
+          w.to.path.length > prefix.length &&
+          prefix.every((seg, i) => w.to.path[i] === seg),
+      );
+
+      if (hasElementWires) {
+        // Array mapping on a sub-field: resolve the array source,
+        // create shadow trees, and materialise with field mappings.
+        const resolved = await this.resolveWires(exactWires);
+        if (!Array.isArray(resolved)) return resolved;
+        const shadows = this.createShadowArray(resolved);
+        return this.materializeShadows(shadows, prefix);
+      }
+
       return this.resolveWires(exactWires);
     }
 
