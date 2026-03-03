@@ -13,7 +13,11 @@ import type {
   ToolTrace,
   TraceLevel,
 } from "@stackables/bridge-core";
-import { TraceCollector, BridgePanicError, BridgeAbortError } from "@stackables/bridge-core";
+import {
+  TraceCollector,
+  BridgePanicError,
+  BridgeAbortError,
+} from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
 import { compileBridge } from "./codegen.ts";
 
@@ -121,6 +125,7 @@ function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
     console.error("----------------------\n");
     throw new Error(
       `Bridge compilation failed for '${operation}': ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 
