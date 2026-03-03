@@ -72,13 +72,27 @@ function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
 
   const { functionBody } = compileBridge(document, { operation });
 
-  const fn = new AsyncFunction(
-    "input",
-    "tools",
-    "context",
-    "__opts",
-    functionBody,
-  ) as BridgeFn;
+  let fn: BridgeFn;
+  try {
+    fn = new AsyncFunction(
+      "input",
+      "tools",
+      "context",
+      "__opts",
+      functionBody,
+    ) as BridgeFn;
+  } catch (err) {
+    // CRITICAL: Attach the generated code so developers can actually debug the syntax error
+    console.error(
+      `\n[Bridge Compiler Error] Failed to compile operation: ${operation}\n`,
+    );
+    console.error("--- GENERATED CODE ---");
+    console.error(functionBody);
+    console.error("----------------------\n");
+    throw new Error(
+      `Bridge compilation failed for '${operation}': ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   if (!opMap) {
     opMap = new Map();
