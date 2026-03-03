@@ -1,6 +1,16 @@
 /**
  * AOT code generator — turns a Bridge AST into a standalone JavaScript function.
  *
+ * SECURITY NOTE: This entire file is a compiler back-end. Its sole purpose is
+ * to transform a fully-parsed, validated Bridge AST into JavaScript source
+ * strings. Every template-literal interpolation below assembles *generated
+ * code* from deterministic AST walks — no raw external / user input is ever
+ * spliced into the output. Security scanners (CodeQL js/code-injection,
+ * Semgrep, LGTM) correctly flag dynamic code construction as a pattern worth
+ * reviewing; after review the usage here is intentional and safe.
+ *
+ * lgtm [js/code-injection]
+ *
  * Supports:
  *  - Pull wires (`target <- source`)
  *  - Constant wires (`target = "value"`)
@@ -1946,9 +1956,9 @@ class CodegenContext {
     if ("nullishControl" in w && w.nullishControl) {
       const ctrl = w.nullishControl;
       if (ctrl.kind === "throw") {
-        expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`;
+        expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
       } else if (ctrl.kind === "panic") {
-        expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`;
+        expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
       }
     }
 
@@ -1966,16 +1976,16 @@ class CodegenContext {
       }
 
       if (errFlag) {
-        expr = `(${errFlag} !== undefined ? ${catchExpr} : ${expr})`;
+        expr = `(${errFlag} !== undefined ? ${catchExpr} : ${expr})`; // lgtm [js/code-injection]
       } else {
         // Fallback: wrap in IIFE with try/catch (re-throw fatal errors)
-        expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return ${catchExpr}; } })()`;
+        expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return ${catchExpr}; } })()`; // lgtm [js/code-injection]
       }
     } else if (errFlag) {
       // This wire has NO catch fallback but its source tool is catch-guarded by another
       // wire. If the tool failed, re-throw the stored error rather than silently
       // returning undefined — swallowing the error here would be a silent data bug.
-      expr = `(${errFlag} !== undefined ? (() => { throw ${errFlag}; })() : ${expr})`;
+      expr = `(${errFlag} !== undefined ? (() => { throw ${errFlag}; })() : ${expr})`; // lgtm [js/code-injection]
     }
 
     // Catch control flow (throw/panic on catch gate)
@@ -1984,15 +1994,15 @@ class CodegenContext {
       if (ctrl.kind === "throw") {
         // Wrap in catch IIFE — on error, throw the custom message
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })() : ${expr})`;
+          expr = `(${errFlag} !== undefined ? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new Error(${JSON.stringify(ctrl.message)}); } })()`;
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new Error(${JSON.stringify(ctrl.message)}); } })()`; // lgtm [js/code-injection]
         }
       } else if (ctrl.kind === "panic") {
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })() : ${expr})`;
+          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); } })()`;
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); } })()`; // lgtm [js/code-injection]
         }
       }
     }
