@@ -33,6 +33,7 @@ Then pass it to the engine via the `tools` option.
 | ------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
 | [`@stackables/bridge`](https://www.npmjs.com/package/@stackables/bridge)                   | **The All-in-One** — everything in a single install      |
 | [`@stackables/bridge-core`](https://www.npmjs.com/package/@stackables/bridge-core)         | **The Engine** — runs pre-compiled bridge instructions   |
-| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Parser** — turns `.bridge` text into instructions  |
+| [`@stackables/bridge-parser`](https://www.npmjs.com/package/@stackables/bridge-parser)     | **The Parser** — turns `.bridge` text into instructions  |
+| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Compiler** — compiles BridgeDocument into optimized JavaScript |
 | [`@stackables/bridge-graphql`](https://www.npmjs.com/package/@stackables/bridge-graphql)   | **The Adapter** — wires bridges into a GraphQL schema    |
 | [`@stackables/bridge-types`](https://www.npmjs.com/package/@stackables/bridge-types)       | **Shared Types** — `ToolCallFn`, `ToolMap`, `CacheStore` |

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat } from "@stackables/bridge-compiler";
+import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge } from "@stackables/bridge-core";
 import { compileBridge, executeAot } from "../src/index.ts";
 
@@ -12,14 +12,15 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
 /** Build an async function from AOT-generated code. */
 function buildAotFn(code: string) {
   const bodyMatch = code.match(
-    /export default async function \w+\(input, tools, context\) \{([\s\S]*)\}\s*$/,
+    /export default async function \w+\(input, tools, context, __opts\) \{([\s\S]*)\}\s*$/,
   );
   if (!bodyMatch)
     throw new Error(`Cannot extract function body from:\n${code}`);
-  return new AsyncFunction("input", "tools", "context", bodyMatch[1]!) as (
+  return new AsyncFunction("input", "tools", "context", "__opts", bodyMatch[1]!) as (
     input: Record<string, unknown>,
     tools: Record<string, (...args: any[]) => any>,
     context: Record<string, unknown>,
+    opts?: Record<string, unknown>,
   ) => Promise<any>;
 }
 
@@ -407,7 +408,7 @@ bridge Query.test {
       "Query.test",
     );
     assert.ok(code.includes("export default async function Query_test"));
-    assert.ok(code.includes("(input, tools, context)"));
+    assert.ok(code.includes("(input, tools, context, __opts)"));
   });
 
   test("invalid operation throws", () => {
@@ -1020,5 +1021,51 @@ bridge Query.secure {
       context: { key: "secret" },
     });
     assert.deepEqual(data, { result: "secret" });
+  });
+});
+
+// ── Phase: Abort signal & timeout ────────────────────────────────────────────
+
+describe("executeAot: abort signal & timeout", () => {
+  test("abort signal prevents tool execution", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name
+}`);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      () =>
+        executeAot({
+          document,
+          operation: "Query.test",
+          tools: { api: async () => ({ name: "should not run" }) },
+          signal: controller.signal,
+        }),
+      /aborted/,
+    );
+  });
+
+  test("tool timeout triggers error", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o.name <- a.name
+}`);
+    await assert.rejects(
+      () =>
+        executeAot({
+          document,
+          operation: "Query.test",
+          tools: {
+            api: () => new Promise((resolve) => setTimeout(() => resolve({ name: "slow" }), 5000)),
+          },
+          toolTimeoutMs: 50,
+        }),
+      /Tool timeout/,
+    );
   });
 });

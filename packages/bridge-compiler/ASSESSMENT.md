@@ -1,15 +1,15 @@
-# Bridge AOT Compiler — Feasibility Assessment
+# Bridge Compiler — Assessment
 
-> **Status:** Experimental proof-of-concept (feature-rich)  
-> **Package:** `@stackables/core-native`  
+> **Status:** Experimental  
+> **Package:** `@stackables/bridge-compiler`  
 > **Date:** March 2026  
-> **Tests:** 178 passing (34 unit + 144 shared data-driven)
+> **Tests:** 184 passing (34 unit + 150 shared data-driven)
 
 ---
 
 ## What It Does
 
-The AOT (Ahead-of-Time) compiler takes a parsed `BridgeDocument` and a target
+The compiler takes a parsed `BridgeDocument` and a target
 operation (e.g. `"Query.livingStandard"`) and generates a **standalone async
 JavaScript function** that executes the same data flow as the runtime
 `ExecutionTree` — but without any of the runtime overhead.
@@ -55,14 +55,14 @@ JavaScript function** that executes the same data flow as the runtime
 | `break` / `continue` | ✅ | `item.name ?? continue`, `item.name ?? break` |
 | Null array preservation | ✅ | Null source arrays return null (not []) |
 
-### Not yet supported
+| Abort signal | ✅ | Pre-tool check: `signal.aborted` throws before each tool call |
+| Tool timeout | ✅ | `Promise.race` with configurable timeout per tool call |
 
-| Feature | Complexity | Notes |
-|---------|-----------|-------|
-| Tracing / observability | High | Would need to inject instrumentation |
-| Abort signal support | Low | Check `signal.aborted` between tool calls |
-| Tool timeout | Medium | `Promise.race` with timeout |
-| Source maps | Medium | Map generated JS back to `.bridge` file |
+### Not supported (won't fix)
+
+| Feature | Notes |
+|---------|-------|
+| Source maps | Will not be implemented |
 
 ---
 
@@ -73,10 +73,10 @@ JavaScript function** that executes the same data flow as the runtime
 **7× speedup** on a 3-tool chain with sync tools (1000 iterations, after warmup):
 
 ```
-AOT:  ~8ms  | Runtime: ~55ms | Speedup: ~7×
+Compiled:  ~8ms  | Runtime: ~55ms | Speedup: ~7×
 ```
 
-The benchmark compiles the bridge once, then runs 1000 iterations of AOT vs
+The benchmark compiles the bridge once, then runs 1000 iterations of compiled vs
 `executeBridge()`. Both produce identical results (verified by test).
 
 ### What the runtime ExecutionTree does per request
@@ -99,9 +99,9 @@ The benchmark compiles the bridge once, then runs 1000 iterations of AOT vs
 5. **Promise management** — `isPromise` checks, `MaybePromise` type unions,
    sync/async branching at every level.
 
-### What AOT eliminates
+### What the compiler eliminates
 
-| Overhead | Runtime cost | AOT |
+| Overhead | Runtime cost | Compiled |
 |----------|-------------|-----|
 | Trunk key computation | String concat + map lookup per wire | **Zero** — resolved at compile time |
 | Wire matching | `O(n)` scan per target | **Zero** — direct variable references |
@@ -112,15 +112,15 @@ The benchmark compiles the bridge once, then runs 1000 iterations of AOT vs
 | Promise branching | `isPromise()` check at every level | **Simplified** — single `await` per tool |
 | Safe-navigation | try/catch wrapping | `?.` optional chaining (V8-optimized) |
 
-### Where AOT does NOT help
+### Where the compiler does NOT help
 
 - **Network-bound workloads:** If tools spend 50ms+ making HTTP calls, the
-  0.5ms framework overhead is noise. AOT helps most when tool execution is
+  0.5ms framework overhead is noise. The compiler helps most when tool execution is
   fast (in-memory transforms, math, data reshaping).
 - **Dynamic routing:** Bridges that use `define` blocks or runtime tool
-  selection can't be fully ahead-of-time compiled.
+  selection can't be fully compiled ahead of time.
 - **Tracing/observability:** The runtime's built-in tracing adds overhead but
-  provides essential debugging information. AOT would need to re-implement
+  provides essential debugging information. The compiler would need to re-implement
   this as optional instrumentation.
 
 ---
@@ -129,14 +129,14 @@ The benchmark compiles the bridge once, then runs 1000 iterations of AOT vs
 
 ### Is this realistic to support alongside the current executor?
 
-**Yes.** The AOT compiler now supports the core feature set including ToolDefs,
+**Yes.** The compiler now supports the core feature set including ToolDefs,
 catch fallbacks, and force statements. Here's the updated analysis:
 
 #### Advantages
 
 1. **Production-ready feature coverage.** With ToolDef support (including
    extends chains, onError fallbacks, context/const dependencies), catch
-   fallbacks, and force statements, the AOT compiler handles the majority of
+   fallbacks, and force statements, the compiler handles the majority of
    real-world bridge files.
 
 2. **Drop-in replacement.** The `executeAot()` function matches the
@@ -147,13 +147,13 @@ catch fallbacks, and force statements. Here's the updated analysis:
    once per document lifetime. Subsequent calls reuse the cached function with
    zero overhead.
 
-4. **Complementary, not competing.** AOT handles the "hot path" (production
+4. **Complementary, not competing.** The compiler handles the "hot path" (production
    requests) while the runtime handles the "dev path" (debugging, tracing,
    dynamic features). Users opt in per-bridge.
 
 5. **Minimal maintenance burden.** The codegen is ~700 lines and operates on
-   the same AST. When new wire types are added, both the runtime and AOT need
-   updates, but the AOT changes are simpler (emit code vs. evaluate code).
+   the same AST. When new wire types are added, both the runtime and compiler need
+   updates, but the compiler changes are simpler (emit code vs. evaluate code).
 
 #### Challenges
 
@@ -163,19 +163,18 @@ catch fallbacks, and force statements. Here's the updated analysis:
 
 2. **Testing surface.** Every codegen path needs correctness tests that mirror
    the runtime's behavior. The shared data-driven test suite (113 cases) runs
-   each scenario against both runtime and AOT, ensuring parity.
+   each scenario against both runtime and compiled, ensuring parity.
 
 3. **Error reporting.** The runtime provides rich error context (which wire
-   failed, which tool threw, stack traces through the execution tree). AOT
+   failed, which tool threw, stack traces through the execution tree). Compiled
    errors are raw JavaScript errors with less context.
 
-4. **Versioning.** If the AST format changes, the AOT compiler must be
+4. **Versioning.** If the AST format changes, the compiler must be
    updated in lockstep. This couples the compiler and runtime release cycles.
 
 #### Recommendation
 
-**Ship as experimental (`@stackables/core-native`) and promote to stable once
-`define` blocks are supported.** The current feature set covers the vast
+**Ship as experimental (`@stackables/bridge-compiler`).** The current feature set covers the vast
 majority of production bridges including pipe operators, string interpolation,
 expressions, const blocks, and nested arrays. Target bridges that:
 
@@ -184,7 +183,7 @@ expressions, const blocks, and nested arrays. Target bridges that:
 - Are on the hot path and benefit from reduced latency
 
 The `compileBridge()` function already throws clear errors when encountering
-unsupported features, allowing users to incrementally adopt AOT.
+unsupported features, allowing users to incrementally adopt the compiler.
 
 ---
 
@@ -195,8 +194,8 @@ unsupported features, allowing users to incrementally adopt AOT.
 Compiles a bridge operation into standalone JavaScript source code.
 
 ```ts
-import { parseBridge } from "@stackables/bridge-compiler";
-import { compileBridge } from "@stackables/core-native";
+import { parseBridge } from "@stackables/bridge-parser";
+import { compileBridge } from "@stackables/bridge-compiler";
 
 const document = parseBridge(bridgeText);
 const { code, functionName } = compileBridge(document, {
@@ -210,8 +209,8 @@ const { code, functionName } = compileBridge(document, {
 Compile-once, run-many execution. Drop-in replacement for `executeBridge()`.
 
 ```ts
-import { parseBridge } from "@stackables/bridge-compiler";
-import { executeAot } from "@stackables/core-native";
+import { parseBridge } from "@stackables/bridge-parser";
+import { executeAot } from "@stackables/bridge-compiler";
 
 const document = parseBridge(bridgeText);
 const { data } = await executeAot({
@@ -325,12 +324,6 @@ export default async function Query_search(input, tools, context) {
 
 ---
 
-## Next Steps
+## Status
 
-1. **`define` block support** — inline subgraph expansion at compile time.
-2. **`alias` declarations** — named intermediate values.
-3. **Abort signal support** — check `signal.aborted` between tool calls.
-4. **Source maps** — generate source maps pointing back to the `.bridge` file.
-5. **Benchmark suite** — use tinybench for reproducible perf comparisons.
-6. **`break`/`continue` in array mapping** — array control flow sentinels.
-7. **Tracing / observability** — optional instrumentation hooks.
+All core language features are implemented and tested via 186 tests (36 unit + 150 shared data-driven parity tests). Source maps will not be implemented.

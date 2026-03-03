@@ -1,7 +1,7 @@
 {
   "name": "@stackables/bridge-compiler",
-  "version": "1.0.6",
-  "description": "Bridge DSL parser, serializer, and language service",
+  "version": "0.1.0",
+  "description": "Compiles a BridgeDocument into highly optimized JavaScript code",
   "main": "./build/index.js",
   "type": "module",
   "types": "./build/index.d.ts",
@@ -13,27 +13,26 @@
     }
   },
   "files": [
-    "build",
-    "README.md"
+    "build"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
     "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@stackables/bridge-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@stackables/bridge-parser": "workspace:*",
+    "@types/node": "^25.3.2",
+    "typescript": "^5.9.3"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stackables/bridge.git"
   },
   "license": "MIT",
-  "dependencies": {
-    "@stackables/bridge-core": "workspace:*",
-    "@stackables/bridge-stdlib": "workspace:*",
-    "chevrotain": "^11.1.2"
-  },
-  "devDependencies": {
-    "@types/node": "^25.3.2",
-    "typescript": "^5.9.3"
-  },
   "publishConfig": {
     "access": "public"
   }

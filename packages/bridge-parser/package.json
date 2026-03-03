@@ -1,7 +1,7 @@
 {
-  "name": "@stackables/core-native",
-  "version": "0.1.0",
-  "description": "Native ahead-of-time compiler for Bridge files into runnable JavaScript",
+  "name": "@stackables/bridge-parser",
+  "version": "2.0.0",
+  "description": "Bridge DSL parser — turns .bridge text into a BridgeDocument (AST)",
   "main": "./build/index.js",
   "type": "module",
   "types": "./build/index.d.ts",
@@ -13,26 +13,27 @@
     }
   },
   "files": [
-    "build"
+    "build",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
     "prepack": "pnpm build"
-  },
-  "dependencies": {
-    "@stackables/bridge-core": "workspace:*"
-  },
-  "devDependencies": {
-    "@stackables/bridge-compiler": "workspace:*",
-    "@types/node": "^25.3.2",
-    "typescript": "^5.9.3"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stackables/bridge.git"
   },
   "license": "MIT",
+  "dependencies": {
+    "@stackables/bridge-core": "workspace:*",
+    "@stackables/bridge-stdlib": "workspace:*",
+    "chevrotain": "^11.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.2",
+    "typescript": "^5.9.3"
+  },
   "publishConfig": {
     "access": "public"
   }

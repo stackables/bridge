@@ -6,7 +6,7 @@
  * zero-overhead execution.
  */
 
-import type { BridgeDocument, ToolMap } from "@stackables/bridge-core";
+import type { BridgeDocument, ToolMap, Logger } from "@stackables/bridge-core";
 import { compileBridge } from "./codegen.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -28,6 +28,16 @@ export type ExecuteAotOptions = {
   tools?: ToolMap;
   /** Context available via `with context as ctx` inside the bridge. */
   context?: Record<string, unknown>;
+  /** External abort signal — cancels execution when triggered. */
+  signal?: AbortSignal;
+  /**
+   * Hard timeout for tool calls in milliseconds.
+   * Tools that exceed this duration throw an error.
+   * Default: 0 (disabled).
+   */
+  toolTimeoutMs?: number;
+  /** Structured logger for tool calls. */
+  logger?: Logger;
 };
 
 export type ExecuteAotResult<T = unknown> = {
@@ -40,6 +50,7 @@ type AotFn = (
   input: Record<string, unknown>,
   tools: Record<string, any>,
   context: Record<string, unknown>,
+  opts?: { signal?: AbortSignal; toolTimeoutMs?: number; logger?: Logger },
 ) => Promise<any>;
 
 const AsyncFunction = Object.getPrototypeOf(async function () {})
@@ -65,6 +76,7 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
     "input",
     "tools",
     "context",
+    "__opts",
     functionBody,
   ) as AotFn;
 
@@ -87,8 +99,8 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
  *
  * @example
  * ```ts
- * import { parseBridge } from "@stackables/bridge-compiler";
- * import { executeAot } from "@stackables/core-native";
+ * import { parseBridge } from "@stackables/bridge-parser";
+ * import { executeAot } from "@stackables/bridge-compiler";
  *
  * const document = parseBridge(readFileSync("my.bridge", "utf8"));
  * const { data } = await executeAot({
@@ -108,9 +120,15 @@ export async function executeAot<T = unknown>(
     input = {},
     tools = {},
     context = {},
+    signal,
+    toolTimeoutMs,
+    logger,
   } = options;
 
   const fn = getOrCompile(document, operation);
-  const data = await fn(input, tools as Record<string, any>, context);
+  const opts = signal || toolTimeoutMs || logger
+    ? { signal, toolTimeoutMs, logger }
+    : undefined;
+  const data = await fn(input, tools as Record<string, any>, context, opts);
   return { data: data as T };
 }
