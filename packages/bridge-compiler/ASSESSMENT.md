@@ -3,7 +3,7 @@
 > **Status:** Experimental  
 > **Package:** `@stackables/bridge-compiler`  
 > **Date:** March 2026  
-> **Tests:** 184 passing (34 unit + 150 shared data-driven)
+> **Tests:** 186 passing (36 unit + 150 shared data-driven)
 
 ---
 
