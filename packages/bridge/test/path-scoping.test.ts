@@ -4,7 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import type { Bridge, BridgeDocument, Wire } from "../src/index.ts";
+import type { Bridge, Wire } from "../src/index.ts";
 import { forEachEngine } from "./_dual-run.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
@@ -387,7 +387,7 @@ bridge Query.test {
 
 // ── Execution tests ─────────────────────────────────────────────────────────
 
-forEachEngine("path scoping execution", (run, ctx) => {
+forEachEngine("path scoping execution", (run, _ctx) => {
   describe("basic", () => {
     test("scope block constants resolve at runtime", async () => {
       const bridge = `version 1.5
@@ -400,7 +400,7 @@ bridge Query.config {
     .lang = "en"
   }
 }`;
-      const result = await run(bridge, "Query.config");
+      const result = await run(bridge, "Query.config", {});
       assert.deepStrictEqual(result.data, { theme: "dark", lang: "en" });
     });
 
@@ -666,12 +666,9 @@ bridge Query.test {
 });
 
 // TODO: compiler doesn't fully support array mapper scope blocks and null path traversal yet
-forEachEngine("path scoping – array mapper execution", (run, ctx) => {
-  test(
-    "array mapper scope block executes correctly",
-    
-    async () => {
-      const bridge = `version 1.5
+forEachEngine("path scoping – array mapper execution", (run, _ctx) => {
+  test("array mapper scope block executes correctly", async () => {
+    const bridge = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -684,21 +681,17 @@ bridge Query.test {
     }
   }
 }`;
-      const result = await run(bridge, "Query.test", {
-        items: [{ title: "Hello" }, { title: "World" }],
-      });
-      assert.deepStrictEqual(result.data, [
-        { obj: { name: "Hello", code: 42 } },
-        { obj: { name: "World", code: 42 } },
-      ]);
-    },
-  );
+    const result = await run(bridge, "Query.test", {
+      items: [{ title: "Hello" }, { title: "World" }],
+    });
+    assert.deepStrictEqual(result.data, [
+      { obj: { name: "Hello", code: 42 } },
+      { obj: { name: "World", code: 42 } },
+    ]);
+  });
 
-  test(
-    "nested scope blocks inside array mapper execute correctly",
-    
-    async () => {
-      const bridge = `version 1.5
+  test("nested scope blocks inside array mapper execute correctly", async () => {
+    const bridge = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -713,25 +706,21 @@ bridge Query.test {
     }
   }
 }`;
-      const result = await run(bridge, "Query.test", {
-        items: [{ title: "Alice" }, { title: "Bob" }],
-      });
-      assert.deepStrictEqual(result.data, [
-        { level1: { level2: { name: "Alice", fixed: "ok" } } },
-        { level1: { level2: { name: "Bob", fixed: "ok" } } },
-      ]);
-    },
-  );
+    const result = await run(bridge, "Query.test", {
+      items: [{ title: "Alice" }, { title: "Bob" }],
+    });
+    assert.deepStrictEqual(result.data, [
+      { level1: { level2: { name: "Alice", fixed: "ok" } } },
+      { level1: { level2: { name: "Bob", fixed: "ok" } } },
+    ]);
+  });
 });
 
 // ── Null intermediate path access ────────────────────────────────────────────
 
-forEachEngine("path traversal: null intermediate segment", (run, ctx) => {
-  test(
-    "throws TypeError when intermediate path segment is null",
-    
-    async () => {
-      const bridgeText = `version 1.5
+forEachEngine("path traversal: null intermediate segment", (run, _ctx) => {
+  test("throws TypeError when intermediate path segment is null", async () => {
+    const bridgeText = `version 1.5
 bridge Query.test {
   with myTool as t
   with output as o
@@ -739,18 +728,17 @@ bridge Query.test {
 o.result <- t.user.profile.name
 
 }`;
-      await assert.rejects(
-        () =>
-          run(
-            bridgeText,
-            "Query.test",
-            {},
-            {
-              myTool: async () => ({ user: { profile: null } }),
-            },
-          ),
-        /Cannot read properties of null \(reading 'name'\)/,
-      );
-    },
-  );
+    await assert.rejects(
+      () =>
+        run(
+          bridgeText,
+          "Query.test",
+          {},
+          {
+            myTool: async () => ({ user: { profile: null } }),
+          },
+        ),
+      /Cannot read properties of null \(reading 'name'\)/,
+    );
+  });
 });

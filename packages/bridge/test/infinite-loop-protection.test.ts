@@ -43,7 +43,7 @@ bridge Query.test {
 // Dual-engine tests
 // ══════════════════════════════════════════════════════════════════════════════
 
-forEachEngine("infinite loop protection", (run, ctx) => {
+forEachEngine("infinite loop protection", (run, _ctx) => {
   test("normal array mapping works within depth limit", async () => {
     const bridgeText = `version 1.5
 bridge Query.items {
@@ -61,11 +61,8 @@ bridge Query.items {
   });
 
   // TODO: compiler does not have cycle detection
-  test(
-    "circular A→B→A dependency throws BridgePanicError",
-    
-    async () => {
-      const bridgeText = `version 1.5
+  test("circular A→B→A dependency throws BridgePanicError", async () => {
+    const bridgeText = `version 1.5
 bridge Query.loop {
   with toolA as a
   with toolB as b
@@ -74,20 +71,19 @@ bridge Query.loop {
   b.x <- a.result
   o.val <- a.result
 }`;
-      const tools = {
-        toolA: async (input: any) => ({ result: input.x }),
-        toolB: async (input: any) => ({ result: input.x }),
-      };
-      await assert.rejects(
-        () => run(bridgeText, "Query.loop", {}, tools),
-        (err: any) => {
-          assert.equal(err.name, "BridgePanicError");
-          assert.match(err.message, /Circular dependency detected/);
-          return true;
-        },
-      );
-    },
-  );
+    const tools = {
+      toolA: async (input: any) => ({ result: input.x }),
+      toolB: async (input: any) => ({ result: input.x }),
+    };
+    await assert.rejects(
+      () => run(bridgeText, "Query.loop", {}, tools),
+      (err: any) => {
+        assert.equal(err.name, "BridgePanicError");
+        assert.match(err.message, /Circular dependency detected/);
+        return true;
+      },
+    );
+  });
 
   test("non-circular dependencies work normally", async () => {
     const bridgeText = `version 1.5

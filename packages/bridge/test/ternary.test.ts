@@ -240,7 +240,7 @@ bridge Query.pricing {
 
 // ── Execution tests ───────────────────────────────────────────────────────────
 
-forEachEngine("ternary execution", (run, ctx) => {
+forEachEngine("ternary execution", (run, _ctx) => {
   describe("truthy condition", () => {
     test("selects then branch when condition is truthy", async () => {
       const { data } = await run(
@@ -342,31 +342,27 @@ bridge Query.pricing {
     });
 
     // TODO: compiler doesn't support catch on ternary branches yet
-    test(
-      "catch literal fallback fires when chosen branch throws",
-      
-      async () => {
-        const bridge = `version 1.5
+    test("catch literal fallback fires when chosen branch throws", async () => {
+      const bridge = `version 1.5
 bridge Query.pricing {
   with pro.getPrice as proTool
   with input as i
   with output as o
   o.amount <- i.isPro ? proTool.price : i.basicPrice catch -1
 }`;
-        const tools = {
-          "pro.getPrice": async () => {
-            throw new Error("api down");
-          },
-        };
-        const { data } = await run(
-          bridge,
-          "Query.pricing",
-          { isPro: true, basicPrice: 9 },
-          tools,
-        );
-        assert.equal((data as any).amount, -1);
-      },
-    );
+      const tools = {
+        "pro.getPrice": async () => {
+          throw new Error("api down");
+        },
+      };
+      const { data } = await run(
+        bridge,
+        "Query.pricing",
+        { isPro: true, basicPrice: 9 },
+        tools,
+      );
+      assert.equal((data as any).amount, -1);
+    });
 
     test("|| sourceRef fallback fires when chosen branch is null", async () => {
       const bridge = `version 1.5
@@ -390,14 +386,11 @@ bridge Query.pricing {
 
   describe("tool branches (lazy evaluation)", () => {
     // TODO: compiler eagerly calls all tools; doesn't support lazy ternary branch evaluation yet
-    test(
-      "only the chosen branch tool is called",
-      
-      async () => {
-        let proCalls = 0;
-        let basicCalls = 0;
+    test("only the chosen branch tool is called", async () => {
+      let proCalls = 0;
+      let basicCalls = 0;
 
-        const bridge = `version 1.5
+      const bridge = `version 1.5
 bridge Query.smartPrice {
   with pro.getPrice as proTool
   with basic.getPrice as basicTool
@@ -405,49 +398,40 @@ bridge Query.smartPrice {
   with output as o
   o.price <- i.isPro ? proTool.price : basicTool.price
 }`;
-        const tools = {
-          "pro.getPrice": async () => {
-            proCalls++;
-            return { price: 99.99 };
-          },
-          "basic.getPrice": async () => {
-            basicCalls++;
-            return { price: 9.99 };
-          },
-        };
+      const tools = {
+        "pro.getPrice": async () => {
+          proCalls++;
+          return { price: 99.99 };
+        },
+        "basic.getPrice": async () => {
+          basicCalls++;
+          return { price: 9.99 };
+        },
+      };
 
-        // When isPro=true: only proTool should be called
-        const pro = await run(
-          bridge,
-          "Query.smartPrice",
-          { isPro: true },
-          tools,
-        );
-        assert.equal((pro.data as any).price, 99.99);
-        assert.equal(proCalls, 1, "proTool called once");
-        assert.equal(basicCalls, 0, "basicTool not called");
+      // When isPro=true: only proTool should be called
+      const pro = await run(bridge, "Query.smartPrice", { isPro: true }, tools);
+      assert.equal((pro.data as any).price, 99.99);
+      assert.equal(proCalls, 1, "proTool called once");
+      assert.equal(basicCalls, 0, "basicTool not called");
 
-        // When isPro=false: only basicTool should be called
-        const basic = await run(
-          bridge,
-          "Query.smartPrice",
-          { isPro: false },
-          tools,
-        );
-        assert.equal((basic.data as any).price, 9.99);
-        assert.equal(proCalls, 1, "proTool still called only once");
-        assert.equal(basicCalls, 1, "basicTool called once");
-      },
-    );
+      // When isPro=false: only basicTool should be called
+      const basic = await run(
+        bridge,
+        "Query.smartPrice",
+        { isPro: false },
+        tools,
+      );
+      assert.equal((basic.data as any).price, 9.99);
+      assert.equal(proCalls, 1, "proTool still called only once");
+      assert.equal(basicCalls, 1, "basicTool called once");
+    });
   });
 
   describe("in array mapping", () => {
     // TODO: compiler doesn't support ternary inside array element mapping yet
-    test(
-      "ternary works inside array element mapping",
-      
-      async () => {
-        const bridge = `version 1.5
+    test("ternary works inside array element mapping", async () => {
+      const bridge = `version 1.5
 bridge Query.products {
   with catalog.list as api
   with output as o
@@ -456,31 +440,27 @@ bridge Query.products {
     .price <- item.isPro ? item.proPrice : item.basicPrice
   }
 }`;
-        const tools = {
-          "catalog.list": async () => ({
-            items: [
-              { name: "Widget", isPro: true, proPrice: 99, basicPrice: 9 },
-              { name: "Gadget", isPro: false, proPrice: 199, basicPrice: 19 },
-            ],
-          }),
-        };
-        const { data } = await run(bridge, "Query.products", {}, tools);
-        const products = data as any[];
-        assert.equal(products[0].name, "Widget");
-        assert.equal(products[0].price, 99, "isPro=true → proPrice");
-        assert.equal(products[1].name, "Gadget");
-        assert.equal(products[1].price, 19, "isPro=false → basicPrice");
-      },
-    );
+      const tools = {
+        "catalog.list": async () => ({
+          items: [
+            { name: "Widget", isPro: true, proPrice: 99, basicPrice: 9 },
+            { name: "Gadget", isPro: false, proPrice: 199, basicPrice: 19 },
+          ],
+        }),
+      };
+      const { data } = await run(bridge, "Query.products", {}, tools);
+      const products = data as any[];
+      assert.equal(products[0].name, "Widget");
+      assert.equal(products[0].price, 99, "isPro=true → proPrice");
+      assert.equal(products[1].name, "Gadget");
+      assert.equal(products[1].price, 19, "isPro=false → basicPrice");
+    });
   });
 
   describe("alias + fallback modifiers (Lazy Gate)", () => {
     // TODO: compiler doesn't support ?? panic on alias ternary yet
-    test(
-      "alias ternary + ?? panic fires on false branch → null",
-      
-      async () => {
-        const src = `version 1.5
+    test("alias ternary + ?? panic fires on false branch → null", async () => {
+      const src = `version 1.5
 bridge Query.location {
   with geoApi as geo
   with input as i
@@ -493,19 +473,18 @@ bridge Query.location {
   o.lat <- geo[0].lat
   o.lon <- geo[0].lon
 }`;
-        const tools = {
-          geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
-        };
-        await assert.rejects(
-          () => run(src, "Query.location", { age: 15, city: "Zurich" }, tools),
-          (err: Error) => {
-            assert.ok(err instanceof BridgePanicError);
-            assert.equal(err.message, "Must be 18 or older");
-            return true;
-          },
-        );
-      },
-    );
+      const tools = {
+        geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
+      };
+      await assert.rejects(
+        () => run(src, "Query.location", { age: 15, city: "Zurich" }, tools),
+        (err: Error) => {
+          assert.ok(err instanceof BridgePanicError);
+          assert.equal(err.message, "Must be 18 or older");
+          return true;
+        },
+      );
+    });
 
     test("alias ternary + ?? panic does NOT fire when condition is true", async () => {
       const src = `version 1.5
@@ -563,48 +542,40 @@ bridge Query.test {
     });
 
     // TODO: compiler doesn't support catch on alias ternary yet
-    test(
-      "alias ternary + catch literal fallback",
-      
-      async () => {
-        const src = `version 1.5
+    test("alias ternary + catch literal fallback", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   alias a.ok ? a.value : a.alt catch "safe" as result
   o.val <- result
 }`;
-        const tools = {
-          api: async () => {
-            throw new Error("boom");
-          },
-        };
-        const { data } = await run(src, "Query.test", {}, tools);
-        assert.equal((data as any).val, "safe");
-      },
-    );
+      const tools = {
+        api: async () => {
+          throw new Error("boom");
+        },
+      };
+      const { data } = await run(src, "Query.test", {}, tools);
+      assert.equal((data as any).val, "safe");
+    });
 
     // TODO: compiler doesn't support ?? panic on alias ternary yet
-    test(
-      "string alias ternary + ?? panic",
-      
-      async () => {
-        const src = `version 1.5
+    test("string alias ternary + ?? panic", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
   o.msg <- result
 }`;
-        await assert.rejects(
-          () => run(src, "Query.test", { secret: "world" }),
-          (err: Error) => {
-            assert.ok(err instanceof BridgePanicError);
-            assert.equal(err.message, "wrong secret");
-            return true;
-          },
-        );
-      },
-    );
+      await assert.rejects(
+        () => run(src, "Query.test", { secret: "world" }),
+        (err: Error) => {
+          assert.ok(err instanceof BridgePanicError);
+          assert.equal(err.message, "wrong secret");
+          return true;
+        },
+      );
+    });
   });
 });

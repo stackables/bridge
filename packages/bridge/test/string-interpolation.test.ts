@@ -8,7 +8,7 @@ import { forEachEngine } from "./_dual-run.ts";
 
 // ── String interpolation execution tests ────────────────────────────────────
 
-forEachEngine("string interpolation", (run, ctx) => {
+forEachEngine("string interpolation", (run, _ctx) => {
   test("simple placeholder", async () => {
     const bridge = `version 1.5
 bridge Query.test {
@@ -102,11 +102,8 @@ bridge Query.test {
   });
 
   // TODO: compiler doesn't support interpolation inside array element mapping yet
-  test(
-    "template in element lines",
-    
-    async () => {
-      const bridge = `version 1.5
+  test("template in element lines", async () => {
+    const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -116,18 +113,17 @@ bridge Query.test {
     .label <- "{it.name} (#{it.id})"
   }
 }`;
-      const { data } = await run(bridge, "Query.test", {
-        items: [
-          { id: "1", name: "Widget" },
-          { id: "2", name: "Gadget" },
-        ],
-      });
-      assert.deepEqual(data, [
-        { url: "/items/1", label: "Widget (#1)" },
-        { url: "/items/2", label: "Gadget (#2)" },
-      ]);
-    },
-  );
+    const { data } = await run(bridge, "Query.test", {
+      items: [
+        { id: "1", name: "Widget" },
+        { id: "2", name: "Gadget" },
+      ],
+    });
+    assert.deepEqual(data, [
+      { url: "/items/1", label: "Widget (#1)" },
+      { url: "/items/2", label: "Gadget (#2)" },
+    ]);
+  });
 
   test("template with || fallback", async () => {
     const bridge = `version 1.5

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { forEachEngine } from "./_dual-run.ts";
 
-forEachEngine("universal interpolation", (run, ctx) => {
+forEachEngine("universal interpolation", (run, _ctx) => {
   describe("fallback (||)", () => {
     test("template string in || fallback alternative", async () => {
       const bridge = `version 1.5
@@ -36,11 +36,8 @@ bridge Query.test {
     });
 
     // TODO: compiler doesn't support interpolation inside array element mapping yet
-    test(
-      "template string in || fallback inside array mapping",
-      
-      async () => {
-        const bridge = `version 1.5
+    test("template string in || fallback inside array mapping", async () => {
+      const bridge = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -49,15 +46,14 @@ bridge Query.test {
     .label <- it.customLabel || "{it.name} (#{it.id})"
   }
 }`;
-        const { data } = await run(bridge, "Query.test", {
-          items: [
-            { id: "1", name: "Widget", customLabel: null },
-            { id: "2", name: "Gadget", customLabel: "Custom" },
-          ],
-        });
-        assert.deepEqual(data, [{ label: "Widget (#1)" }, { label: "Custom" }]);
-      },
-    );
+      const { data } = await run(bridge, "Query.test", {
+        items: [
+          { id: "1", name: "Widget", customLabel: null },
+          { id: "2", name: "Gadget", customLabel: "Custom" },
+        ],
+      });
+      assert.deepEqual(data, [{ label: "Widget (#1)" }, { label: "Custom" }]);
+    });
   });
 
   describe("ternary (? :)", () => {
