@@ -920,7 +920,6 @@ class CodegenContext {
     indent: number,
   ): string {
     const elVar = `_el${depth}`;
-    const pad = " ".repeat(indent);
 
     // Separate into scalar element wires and sub-array source/element wires
     interface TreeNode {
