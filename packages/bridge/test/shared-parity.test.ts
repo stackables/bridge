@@ -1236,6 +1236,60 @@ bridge Query.test {
     },
     expected: { items: [{ name: "X" }, { name: "Y" }] },
   },
+  {
+    name: "continue in nested array",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .id <- order.id
+    .items <- order.items[] as item {
+      .sku <- item.sku ?? continue
+    }
+  }
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({
+        orders: [
+          { id: 1, items: [{ sku: "A" }, { sku: null }, { sku: "B" }] },
+          { id: 2, items: [{ sku: null }, { sku: "C" }] },
+        ],
+      }),
+    },
+    expected: [
+      { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
+      { id: 2, items: [{ sku: "C" }] },
+    ],
+  },
+  {
+    name: "break in nested array",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .id <- order.id
+    .items <- order.items[] as item {
+      .sku <- item.sku ?? break
+    }
+  }
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({
+        orders: [
+          { id: 1, items: [{ sku: "A" }, { sku: "B" }, { sku: null }, { sku: "D" }] },
+          { id: 2, items: [{ sku: null }, { sku: "E" }] },
+        ],
+      }),
+    },
+    expected: [
+      { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
+      { id: 2, items: [] },
+    ],
+  },
 ];
 
 runSharedSuite("Shared: break/continue", breakContinueCases);

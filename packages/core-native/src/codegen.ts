@@ -755,7 +755,9 @@ class CodegenContext {
     if (isRootArray && rootWire) {
       const elemWires = outputWires.filter((w) => "from" in w && w.from.element);
       const arrayExpr = this.wireToExpr(rootWire);
-      const cf = detectControlFlow(elemWires);
+      // Only check control flow on direct element wires, not sub-array element wires
+      const directElemWires = elemWires.filter((w) => w.to.path.length === 1);
+      const cf = detectControlFlow(directElemWires);
       if (cf === "continue") {
         // Use flatMap — skip elements that trigger continue
         const body = this.buildElementBodyWithControlFlow(elemWires, arrayIterators, 0, 4, "continue");
@@ -843,7 +845,9 @@ class CodegenContext {
       }));
 
       const arrayExpr = this.wireToExpr(sourceW);
-      const cf = detectControlFlow(shifted);
+      // Only check control flow on direct element wires (not sub-array element wires)
+      const directShifted = shifted.filter((w) => w.to.path.length === 1);
+      const cf = detectControlFlow(directShifted);
       let mapExpr: string;
       if (cf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(shifted, arrayIterators, 0, 6, "continue");
@@ -960,8 +964,18 @@ class CodegenContext {
 
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
       const innerElVar = `_el${depth + 1}`;
-      const innerBody = this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 2);
-      const mapExpr = `(${srcExpr})?.map((${innerElVar}) => (${innerBody})) ?? null`;
+      const innerCf = detectControlFlow(shifted);
+      let mapExpr: string;
+      if (innerCf === "continue") {
+        const cfBody = this.buildElementBodyWithControlFlow(shifted, arrayIterators, depth + 1, indent + 2, "continue");
+        mapExpr = `(${srcExpr})?.flatMap((${innerElVar}) => {\n${cfBody}\n${" ".repeat(indent + 2)}}) ?? null`;
+      } else if (innerCf === "break") {
+        const cfBody = this.buildElementBodyWithControlFlow(shifted, arrayIterators, depth + 1, indent + 4, "break");
+        mapExpr = `(() => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; for (const ${innerElVar} of _src) {\n${cfBody}\n${" ".repeat(indent + 2)}} return _result; })()`;
+      } else {
+        const innerBody = this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 2);
+        mapExpr = `(${srcExpr})?.map((${innerElVar}) => (${innerBody})) ?? null`;
+      }
 
       if (!tree.children.has(field)) {
         tree.children.set(field, { children: new Map() });
@@ -988,12 +1002,14 @@ class CodegenContext {
     const elVar = `_el${depth}`;
     const pad = " ".repeat(indent);
 
-    // Find the wire with control flow and extract the condition field
+    // Find the wire with control flow at the current depth level only
+    // (not sub-array element wires)
     const controlWire = elemWires.find(
       (w) =>
-        ("nullishControl" in w && w.nullishControl != null) ||
+        w.to.path.length === 1 &&
+        (("nullishControl" in w && w.nullishControl != null) ||
         ("falsyControl" in w && w.falsyControl != null) ||
-        ("catchControl" in w && w.catchControl != null),
+        ("catchControl" in w && w.catchControl != null)),
     );
 
     if (!controlWire || !("from" in controlWire)) {
@@ -1005,10 +1021,8 @@ class CodegenContext {
       return `${pad}  _result.push(${body});`;
     }
 
-    // Build the check expression from the control wire's source
-    const checkExpr =
-      elVar +
-      controlWire.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    // Build the check expression using elementWireToExpr to include fallbacks
+    const checkExpr = this.elementWireToExpr(controlWire, elVar);
 
     // Determine the check type
     const isNullish = "nullishControl" in controlWire && controlWire.nullishControl != null;
