@@ -54,7 +54,6 @@ JavaScript function** that executes the same data flow as the runtime
 | Overdefinition            | ✅     | `o.label <- api.label` + `o.label <- i.hint` — first non-null wins |
 | `break` / `continue`      | ✅     | `item.name ?? continue`, `item.name ?? break`                      |
 | Null array preservation   | ✅     | Null source arrays return null (not [])                            |
-
 | Abort signal | ✅ | Pre-tool check: `signal.aborted` throws before each tool call |
 | Tool timeout | ✅ | `Promise.race` with configurable timeout per tool call |
 
