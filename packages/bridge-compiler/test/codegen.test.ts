@@ -399,11 +399,11 @@ bridge Query.test {
 }`);
     assert.throws(
       () => compileBridge(document, { operation: "Query.missing" }),
-      /No bridge found/,
+      /No bridge definition found/,
     );
     assert.throws(
       () => compileBridge(document, { operation: "invalid" }),
-      /Invalid operation/,
+      /expected "Type\.field"/,
     );
   });
 

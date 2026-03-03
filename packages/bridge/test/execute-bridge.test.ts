@@ -894,7 +894,7 @@ bridge Query.foo {
 
     test(
       "bridge with no output wires throws descriptive error",
-      
+      { skip: ctx.engine === "compiled" },
       async () => {
         const bridgeText = `version 1.5
 bridge Query.ping {

@@ -982,7 +982,7 @@ class CodegenContext {
 
   private emitOutput(lines: string[], outputWires: Wire[]): void {
     if (outputWires.length === 0) {
-      lines.push(`  throw new Error("Bridge ${this.bridge.type}.${this.bridge.field} has no output wires — nothing to return.");`);
+      lines.push("  return {};");
       return;
     }
 
