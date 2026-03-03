@@ -47,6 +47,11 @@ export default defineConfig({
       },
       social: [
         {
+          label: "Blog",
+          icon: "rss",
+          href: "/blog",
+        },
+        {
           icon: "github",
           label: "GitHub",
           href: "https://github.com/stackables/bridge",

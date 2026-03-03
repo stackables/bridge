@@ -12,7 +12,8 @@ The Bridge engine parses your wiring diagram, builds a dependency graph, and exe
 
 - [See our roadmap](https://github.com/stackables/bridge/milestones)
 - [Feedback in the discussions](https://github.com/stackables/bridge/discussions/1)
-- [Performance report](./docs/performance.md)
+- [Performance report - interpreter](./packages/bridge-core/performance.md)
+- [Performance report - compiler](./packages/bridge-compiler/performance.md)
 
 ### How it looks
 
