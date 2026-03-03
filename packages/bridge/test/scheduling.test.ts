@@ -536,8 +536,10 @@ o.fromC <- c.result
 // Both deps are independent — they MUST resolve in parallel inside
 // resolveToolWires, not sequentially.
 
-forEachEngine("scheduling: tool-level deps resolve in parallel", (run, ctx) => {
-  const bridgeText = `version 1.5
+forEachEngine(
+  "scheduling: tool-level deps resolve in parallel",
+  (run, _ctx) => {
+    const bridgeText = `version 1.5
 tool authService from httpCall {
   with context
   .baseUrl = "https://auth.test"
@@ -578,55 +580,56 @@ o.value <- m.payload
 
 }`;
 
-  test("two independent tool deps (auth + quota) resolve in parallel, not sequentially", async (_t) => {
-    const calls: CallRecord[] = [];
-    const elapsed = createTimer();
+    test("two independent tool deps (auth + quota) resolve in parallel, not sequentially", async (_t) => {
+      const calls: CallRecord[] = [];
+      const elapsed = createTimer();
 
-    const httpCall = async (input: any) => {
-      const start = elapsed();
-      if (input.path === "/token") {
-        await sleep(50);
+      const httpCall = async (input: any) => {
+        const start = elapsed();
+        if (input.path === "/token") {
+          await sleep(50);
+          const end = elapsed();
+          calls.push({ name: "auth", startMs: start, endMs: end, input });
+          return { access_token: "tok_abc" };
+        }
+        if (input.path === "/check") {
+          await sleep(50);
+          const end = elapsed();
+          calls.push({ name: "quota", startMs: start, endMs: end, input });
+          return { token: "qt_xyz" };
+        }
         const end = elapsed();
-        calls.push({ name: "auth", startMs: start, endMs: end, input });
-        return { access_token: "tok_abc" };
-      }
-      if (input.path === "/check") {
-        await sleep(50);
-        const end = elapsed();
-        calls.push({ name: "quota", startMs: start, endMs: end, input });
-        return { token: "qt_xyz" };
-      }
-      const end = elapsed();
-      calls.push({ name: "main", startMs: start, endMs: end, input });
-      return { payload: "secret" };
-    };
+        calls.push({ name: "main", startMs: start, endMs: end, input });
+        return { payload: "secret" };
+      };
 
-    const start = performance.now();
-    const { data } = await run(
-      bridgeText,
-      "Query.secure",
-      { id: "x" },
-      { httpCall },
-      { context: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } } },
-    );
-    const wallMs = performance.now() - start;
+      const start = performance.now();
+      const { data } = await run(
+        bridgeText,
+        "Query.secure",
+        { id: "x" },
+        { httpCall },
+        { context: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } } },
+      );
+      const wallMs = performance.now() - start;
 
-    assert.equal(data.value, "secret");
+      assert.equal(data.value, "secret");
 
-    const auth = calls.find((c) => c.name === "auth")!;
-    const quota = calls.find((c) => c.name === "quota")!;
+      const auth = calls.find((c) => c.name === "auth")!;
+      const quota = calls.find((c) => c.name === "quota")!;
 
-    // Both deps should start near-simultaneously (parallel)
-    assert.ok(
-      Math.abs(auth.startMs - quota.startMs) < 15,
-      `auth and quota should start in parallel (Δ=${Math.abs(auth.startMs - quota.startMs)}ms)`,
-    );
+      // Both deps should start near-simultaneously (parallel)
+      assert.ok(
+        Math.abs(auth.startMs - quota.startMs) < 15,
+        `auth and quota should start in parallel (Δ=${Math.abs(auth.startMs - quota.startMs)}ms)`,
+      );
 
-    // Wall time: auth+quota in parallel (~50ms) + main (~0ms) ≈ 50-80ms
-    // If sequential: auth(50) + quota(50) + main = ~100ms+
-    assert.ok(
-      wallMs < 100,
-      `Wall time should be ~50ms (parallel deps), got ${Math.round(wallMs)}ms — deps may be resolving sequentially`,
-    );
-  });
-});
+      // Wall time: auth+quota in parallel (~50ms) + main (~0ms) ≈ 50-80ms
+      // If sequential: auth(50) + quota(50) + main = ~100ms+
+      assert.ok(
+        wallMs < 100,
+        `Wall time should be ~50ms (parallel deps), got ${Math.round(wallMs)}ms — deps may be resolving sequentially`,
+      );
+    });
+  },
+);
