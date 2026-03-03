@@ -16,7 +16,13 @@ function buildAotFn(code: string) {
   );
   if (!bodyMatch)
     throw new Error(`Cannot extract function body from:\n${code}`);
-  return new AsyncFunction("input", "tools", "context", "__opts", bodyMatch[1]!) as (
+  return new AsyncFunction(
+    "input",
+    "tools",
+    "context",
+    "__opts",
+    bodyMatch[1]!,
+  ) as (
     input: Record<string, unknown>,
     tools: Record<string, (...args: any[]) => any>,
     context: Record<string, unknown>,
@@ -249,12 +255,7 @@ bridge Query.falsy {
       api: () => ({ count: 0 }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.falsy",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.falsy", {}, tools);
     assert.deepEqual(data, { count: 0 });
   });
 
@@ -271,12 +272,7 @@ bridge Query.fallback {
       api: () => ({ label: "" }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.fallback",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.fallback", {}, tools);
     assert.deepEqual(data, { label: "default" });
   });
 
@@ -332,12 +328,7 @@ bridge Query.catalog {
       }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.catalog",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.catalog", {}, tools);
     assert.deepEqual(data, {
       title: "Catalog A",
       entries: [
@@ -362,12 +353,7 @@ bridge Query.empty {
       api: () => ({ list: [] }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.empty",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.empty", {}, tools);
     assert.deepEqual(data, { items: [] });
   });
 
@@ -386,12 +372,7 @@ bridge Query.nullable {
       api: () => ({ list: null }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.nullable",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.nullable", {}, tools);
     assert.deepEqual(data, { items: null });
   });
 });
@@ -591,15 +572,12 @@ bridge Query.safe {
 }`;
 
     const tools = {
-      api: () => { throw new Error("boom"); },
+      api: () => {
+        throw new Error("boom");
+      },
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.safe",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.safe", {}, tools);
     assert.deepEqual(data, { data: "fallback" });
   });
 
@@ -616,12 +594,7 @@ bridge Query.noerr {
       api: () => ({ result: "success" }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.noerr",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.noerr", {}, tools);
     assert.deepEqual(data, { data: "success" });
   });
 
@@ -636,16 +609,13 @@ bridge Query.refCatch {
 }`;
 
     const tools = {
-      primary: () => { throw new Error("primary failed"); },
+      primary: () => {
+        throw new Error("primary failed");
+      },
       backup: () => ({ fallback: "from-backup" }),
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.refCatch",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.refCatch", {}, tools);
     assert.deepEqual(data, { data: "from-backup" });
   });
 });
@@ -671,7 +641,7 @@ bridge Query.search {
 }`;
 
     const tools = {
-      mainApi: async (p: any) => ({ title: "Hello World" }),
+      mainApi: async (_p: any) => ({ title: "Hello World" }),
       "audit.log": async (input: any) => {
         auditCalled = true;
         auditInput = input;
@@ -707,7 +677,9 @@ bridge Query.safe {
 
     const tools = {
       mainApi: async () => ({ title: "OK" }),
-      analytics: async () => { throw new Error("analytics down"); },
+      analytics: async () => {
+        throw new Error("analytics down");
+      },
     };
 
     const data = await compileAndRun(
@@ -736,16 +708,13 @@ bridge Query.critical {
 
     const tools = {
       mainApi: async () => ({ title: "OK" }),
-      "audit.log": async () => { throw new Error("audit failed"); },
+      "audit.log": async () => {
+        throw new Error("audit failed");
+      },
     };
 
     await assert.rejects(
-      () => compileAndRun(
-        bridgeText,
-        "Query.critical",
-        { q: "test" },
-        tools,
-      ),
+      () => compileAndRun(bridgeText, "Query.critical", { q: "test" }, tools),
       /audit failed/,
     );
   });
@@ -852,12 +821,7 @@ bridge Query.custom {
       },
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.custom",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.custom", {}, tools);
 
     // Bridge wire "POST" overrides ToolDef wire "GET"
     assert.equal(apiInput.method, "POST");
@@ -882,7 +846,9 @@ bridge Query.safe {
 }`;
 
     const tools = {
-      "std.httpCall": async () => { throw new Error("connection refused"); },
+      "std.httpCall": async () => {
+        throw new Error("connection refused");
+      },
     };
 
     const data = await compileAndRun(
@@ -922,12 +888,7 @@ bridge Query.users {
       },
     };
 
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.users",
-      {},
-      tools,
-    );
+    const data = await compileAndRun(bridgeText, "Query.users", {}, tools);
 
     assert.equal(apiInput.method, "GET");
     assert.equal(apiInput.baseUrl, "https://api.example.com");
@@ -1061,7 +1022,10 @@ bridge Query.test {
           document,
           operation: "Query.test",
           tools: {
-            api: () => new Promise((resolve) => setTimeout(() => resolve({ name: "slow" }), 5000)),
+            api: () =>
+              new Promise((resolve) =>
+                setTimeout(() => resolve({ name: "slow" }), 5000),
+              ),
           },
           toolTimeoutMs: 50,
         }),
