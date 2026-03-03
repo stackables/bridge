@@ -86,6 +86,22 @@ function hasCatchFallback(w: Wire): boolean {
   );
 }
 
+/** Check if any wire in a set has a control flow instruction (break/continue). */
+function detectControlFlow(wires: Wire[]): "break" | "continue" | null {
+  for (const w of wires) {
+    if ("nullishControl" in w && w.nullishControl) {
+      return w.nullishControl.kind as "break" | "continue";
+    }
+    if ("falsyControl" in w && w.falsyControl) {
+      return w.falsyControl.kind as "break" | "continue";
+    }
+    if ("catchControl" in w && w.catchControl) {
+      return w.catchControl.kind as "break" | "continue";
+    }
+  }
+  return null;
+}
+
 function splitToolName(name: string): { module: string; fieldName: string } {
   const dotIdx = name.indexOf(".");
   if (dotIdx === -1) return { module: SELF_MODULE, fieldName: name };
@@ -739,8 +755,25 @@ class CodegenContext {
     if (isRootArray && rootWire) {
       const elemWires = outputWires.filter((w) => "from" in w && w.from.element);
       const arrayExpr = this.wireToExpr(rootWire);
-      const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-      lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
+      const cf = detectControlFlow(elemWires);
+      if (cf === "continue") {
+        // Use flatMap — skip elements that trigger continue
+        const body = this.buildElementBodyWithControlFlow(elemWires, arrayIterators, 0, 4, "continue");
+        lines.push(`  return (${arrayExpr} ?? []).flatMap((_el0) => {`);
+        lines.push(body);
+        lines.push(`  });`);
+      } else if (cf === "break") {
+        // Use a loop with early break
+        const body = this.buildElementBodyWithControlFlow(elemWires, arrayIterators, 0, 4, "break");
+        lines.push(`  const _result = [];`);
+        lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+        lines.push(body);
+        lines.push(`  }`);
+        lines.push(`  return _result;`);
+      } else {
+        const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
+        lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
+      }
       return;
     }
 
@@ -810,8 +843,18 @@ class CodegenContext {
       }));
 
       const arrayExpr = this.wireToExpr(sourceW);
-      const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
-      const mapExpr = `(${arrayExpr} ?? []).map((_el0) => (${body}))`;
+      const cf = detectControlFlow(shifted);
+      let mapExpr: string;
+      if (cf === "continue") {
+        const cfBody = this.buildElementBodyWithControlFlow(shifted, arrayIterators, 0, 6, "continue");
+        mapExpr = `(${arrayExpr})?.flatMap((_el0) => {\n${cfBody}\n    }) ?? null`;
+      } else if (cf === "break") {
+        const cfBody = this.buildElementBodyWithControlFlow(shifted, arrayIterators, 0, 8, "break");
+        mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${cfBody}\n      } return _result; })()`;
+      } else {
+        const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
+        mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
+      }
 
       if (!tree.children.has(arrayField)) {
         tree.children.set(arrayField, { children: new Map() });
@@ -918,7 +961,7 @@ class CodegenContext {
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
       const innerElVar = `_el${depth + 1}`;
       const innerBody = this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 2);
-      const mapExpr = `(${srcExpr} ?? []).map((${innerElVar}) => (${innerBody}))`;
+      const mapExpr = `(${srcExpr})?.map((${innerElVar}) => (${innerBody})) ?? null`;
 
       if (!tree.children.has(field)) {
         tree.children.set(field, { children: new Map() });
@@ -927,6 +970,62 @@ class CodegenContext {
     }
 
     return this.serializeOutputTree(tree, indent);
+  }
+
+  /**
+   * Build the body of a loop/flatMap callback with break/continue support.
+   *
+   * For "continue": generates flatMap body that returns [] to skip elements
+   * For "break": generates loop body that pushes to _result and breaks
+   */
+  private buildElementBodyWithControlFlow(
+    elemWires: Wire[],
+    arrayIterators: Record<string, string>,
+    depth: number,
+    indent: number,
+    mode: "break" | "continue",
+  ): string {
+    const elVar = `_el${depth}`;
+    const pad = " ".repeat(indent);
+
+    // Find the wire with control flow and extract the condition field
+    const controlWire = elemWires.find(
+      (w) =>
+        ("nullishControl" in w && w.nullishControl != null) ||
+        ("falsyControl" in w && w.falsyControl != null) ||
+        ("catchControl" in w && w.catchControl != null),
+    );
+
+    if (!controlWire || !("from" in controlWire)) {
+      // No control flow found — fall back to simple body
+      const body = this.buildElementBody(elemWires, arrayIterators, depth, indent);
+      if (mode === "continue") {
+        return `${pad}  return [${body}];`;
+      }
+      return `${pad}  _result.push(${body});`;
+    }
+
+    // Build the check expression from the control wire's source
+    const checkExpr =
+      elVar +
+      controlWire.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+
+    // Determine the check type
+    const isNullish = "nullishControl" in controlWire && controlWire.nullishControl != null;
+
+    if (mode === "continue") {
+      if (isNullish) {
+        return `${pad}  if (${checkExpr} == null) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
+      }
+      // falsyControl
+      return `${pad}  if (!${checkExpr}) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
+    }
+
+    // mode === "break"
+    if (isNullish) {
+      return `${pad}  if (${checkExpr} == null) break;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+    }
+    return `${pad}  if (!${checkExpr}) break;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
   }
 
   // ── Wire → expression ────────────────────────────────────────────────────

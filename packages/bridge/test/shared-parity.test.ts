@@ -422,7 +422,6 @@ bridge Query.nullable {
     operation: "Query.nullable",
     tools: { api: () => ({ list: null }) },
     expected: { items: null },
-    aotSupported: false, // AOT returns [] instead of null (known difference)
   },
   {
     name: "root array output",
@@ -1165,3 +1164,78 @@ bridge Query.lookup {
 ];
 
 runSharedSuite("Shared: overdefinition", overdefinitionCases);
+
+// ── 18. Break/continue in array mapping ─────────────────────────────────────
+
+const breakContinueCases: SharedTestCase[] = [
+  {
+    name: "continue skips null elements",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name ?? continue
+  }
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({
+        items: [
+          { name: "Alice" },
+          { name: null },
+          { name: "Bob" },
+          { name: null },
+        ],
+      }),
+    },
+    expected: [{ name: "Alice" }, { name: "Bob" }],
+  },
+  {
+    name: "break halts array processing",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.items[] as item {
+    .name <- item.name ?? break
+  }
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({
+        items: [
+          { name: "Alice" },
+          { name: "Bob" },
+          { name: null },
+          { name: "Carol" },
+        ],
+      }),
+    },
+    expected: [{ name: "Alice" }, { name: "Bob" }],
+  },
+  {
+    name: "continue in non-root array field",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o.items <- a.list[] as item {
+    .name <- item.name ?? continue
+  }
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({
+        list: [
+          { name: "X" },
+          { name: null },
+          { name: "Y" },
+        ],
+      }),
+    },
+    expected: { items: [{ name: "X" }, { name: "Y" }] },
+  },
+];
+
+runSharedSuite("Shared: break/continue", breakContinueCases);

@@ -391,7 +391,7 @@ bridge Query.nullable {
       {},
       tools,
     );
-    assert.deepEqual(data, { items: [] });
+    assert.deepEqual(data, { items: null });
   });
 });
 
