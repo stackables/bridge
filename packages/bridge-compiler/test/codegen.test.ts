@@ -204,14 +204,19 @@ bridge Query.secured {
     assert.deepEqual(data, { data: "test:secret123" });
   });
 
-  test("empty output returns empty object", async () => {
+  test("empty output throws descriptive error", async () => {
     const bridgeText = `version 1.5
 bridge Query.empty {
   with output as o
 }`;
 
-    const data = await compileAndRun(bridgeText, "Query.empty", {});
-    assert.deepEqual(data, {});
+    await assert.rejects(
+      () => compileAndRun(bridgeText, "Query.empty", {}),
+      (err: Error) => {
+        assert.match(err.message, /has no output wires/);
+        return true;
+      },
+    );
   });
 });
 
@@ -1356,5 +1361,67 @@ bridge Query.test {
     });
     assert.deepStrictEqual(result.traces, []);
     assert.equal(result.data.name, "Alice");
+  });
+});
+
+// ── Parallel scheduling ──────────────────────────────────────────────────────
+//
+// Verify that independent tool calls are batched into Promise.all in the
+// generated code, achieving true wall-clock parallelism.
+
+describe("AOT codegen: parallel scheduling", () => {
+  test("generated code contains Promise.all for independent tools", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.trio {
+  with svc.a as sa
+  with svc.b as sb
+  with svc.c as sc
+  with input as i
+  with output as o
+  sa.x <- i.x
+  sb.x <- i.x
+  sc.x <- i.x
+  o.a <- sa.result
+  o.b <- sb.result
+  o.c <- sc.result
+}`,
+      "Query.trio",
+    );
+    assert.ok(
+      code.includes("Promise.all"),
+      `Expected Promise.all in generated code, got:\n${code}`,
+    );
+  });
+
+  test("diamond generated code has Promise.all for second layer", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.dashboard {
+  with geo.code as gc
+  with weather.get as w
+  with census.get as c
+  with formatGreeting as fg
+  with input as i
+  with output as o
+  gc.city <- i.city
+  w.lat <- gc.lat
+  w.lng <- gc.lng
+  c.lat <- gc.lat
+  c.lng <- gc.lng
+  o.greeting <- fg:i.city
+  o.temp <- w.temp
+  o.humidity <- w.humidity
+  o.population <- c.population
+}`,
+      "Query.dashboard",
+    );
+    // First layer: geo.code + formatGreeting are independent → Promise.all
+    // Second layer: weather.get + census.get are independent → Promise.all
+    const allCount = (code.match(/Promise\.all/g) || []).length;
+    assert.ok(
+      allCount >= 2,
+      `Expected at least 2 Promise.all calls (layer1 + layer2), got ${allCount}. Code:\n${code}`,
+    );
   });
 });

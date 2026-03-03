@@ -101,7 +101,6 @@ bridge Query.test {
     assert.deepEqual(data, { url: "/users/john-doe/profile" });
   });
 
-  // TODO: compiler doesn't support interpolation inside array element mapping yet
   test("template in element lines", async () => {
     const bridge = `version 1.5
 bridge Query.test {

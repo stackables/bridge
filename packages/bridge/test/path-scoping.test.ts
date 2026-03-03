@@ -665,7 +665,6 @@ bridge Query.test {
   });
 });
 
-// TODO: compiler doesn't fully support array mapper scope blocks and null path traversal yet
 forEachEngine("path scoping – array mapper execution", (run, _ctx) => {
   test("array mapper scope block executes correctly", async () => {
     const bridge = `version 1.5

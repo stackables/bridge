@@ -35,7 +35,6 @@ bridge Query.test {
       assert.equal((data as any).label, "Jane Doe");
     });
 
-    // TODO: compiler doesn't support interpolation inside array element mapping yet
     test("template string in || fallback inside array mapping", async () => {
       const bridge = `version 1.5
 bridge Query.test {

@@ -1,9 +1,6 @@
-import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import { createGateway } from "./_gateway.ts";
+import { test } from "node:test";
+import { forEachEngine } from "./_dual-run.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -38,20 +35,7 @@ function sleep(ms: number) {
 //   • formatGreeting runs independently, doesn't wait for geocode
 //   • Total wall time ≈ max(geocode + max(weather, census), formatGreeting)
 
-describe("scheduling: diamond dependency dedup + parallelism", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      dashboard(city: String!): Dashboard
-    }
-    type Dashboard {
-      temp: Float
-      humidity: Float
-      population: Int
-      greeting: String
-    }
-  `;
-
-  const bridgeText = `version 1.5
+const diamondBridge = `version 1.5
 bridge Query.dashboard {
   with geo.code as gc
   with weather.get as w
@@ -81,68 +65,58 @@ o.population <- c.population
 
 }`;
 
-  function makeExecutorWithLog() {
-    const calls: CallRecord[] = [];
-    const elapsed = createTimer();
+function makeDiamondTools() {
+  const calls: CallRecord[] = [];
+  const elapsed = createTimer();
 
-    const tools: Record<string, any> = {
-      "geo.code": async (input: any) => {
-        const start = elapsed();
-        await sleep(50); // simulate network
-        const end = elapsed();
-        calls.push({ name: "geo.code", startMs: start, endMs: end, input });
-        return { lat: 52.53, lng: 13.38 };
-      },
-      "weather.get": async (input: any) => {
-        const start = elapsed();
-        await sleep(40); // simulate network
-        const end = elapsed();
-        calls.push({ name: "weather.get", startMs: start, endMs: end, input });
-        return { temp: 22.5, humidity: 65.0 };
-      },
-      "census.get": async (input: any) => {
-        const start = elapsed();
-        await sleep(30); // simulate network
-        const end = elapsed();
-        calls.push({ name: "census.get", startMs: start, endMs: end, input });
-        return { population: 3_748_148 };
-      },
-      formatGreeting: (input: { in: string }) => {
-        const start = elapsed();
-        calls.push({
-          name: "formatGreeting",
-          startMs: start,
-          endMs: start,
-          input,
-        });
-        return `Hello from ${input.in}!`;
-      },
-    };
+  const tools: Record<string, any> = {
+    "geo.code": async (input: any) => {
+      const start = elapsed();
+      await sleep(50);
+      const end = elapsed();
+      calls.push({ name: "geo.code", startMs: start, endMs: end, input });
+      return { lat: 52.53, lng: 13.38 };
+    },
+    "weather.get": async (input: any) => {
+      const start = elapsed();
+      await sleep(40);
+      const end = elapsed();
+      calls.push({ name: "weather.get", startMs: start, endMs: end, input });
+      return { temp: 22.5, humidity: 65.0 };
+    },
+    "census.get": async (input: any) => {
+      const start = elapsed();
+      await sleep(30);
+      const end = elapsed();
+      calls.push({ name: "census.get", startMs: start, endMs: end, input });
+      return { population: 3_748_148 };
+    },
+    formatGreeting: (input: { in: string }) => {
+      const start = elapsed();
+      calls.push({
+        name: "formatGreeting",
+        startMs: start,
+        endMs: start,
+        input,
+      });
+      return `Hello from ${input.in}!`;
+    },
+  };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-    return { executor, calls };
-  }
+  return { tools, calls };
+}
 
+forEachEngine("scheduling: diamond dependency dedup + parallelism", (run) => {
   test("geocode is called exactly once despite two consumers", async () => {
-    const { executor, calls } = makeExecutorWithLog();
-    await executor({
-      document: parse(
-        `{ dashboard(city: "Berlin") { temp humidity population greeting } }`,
-      ),
-    });
+    const { tools, calls } = makeDiamondTools();
+    await run(diamondBridge, "Query.dashboard", { city: "Berlin" }, tools);
     const geoCalls = calls.filter((c) => c.name === "geo.code");
     assert.equal(geoCalls.length, 1, "geocode must be called exactly once");
   });
 
   test("weatherApi and censusApi start concurrently after geocode", async () => {
-    const { executor, calls } = makeExecutorWithLog();
-    await executor({
-      document: parse(
-        `{ dashboard(city: "Berlin") { temp humidity population } }`,
-      ),
-    });
+    const { tools, calls } = makeDiamondTools();
+    await run(diamondBridge, "Query.dashboard", { city: "Berlin" }, tools);
 
     const geo = calls.find((c) => c.name === "geo.code")!;
     const weather = calls.find((c) => c.name === "weather.get")!;
@@ -159,8 +133,6 @@ o.population <- c.population
     );
 
     // Both must start BEFORE the other finishes ⟹ running in parallel
-    // (weather takes 40ms, census takes 30ms — if sequential, one would start
-    // after the other's endMs)
     assert.ok(
       Math.abs(weather.startMs - census.startMs) < 15,
       `weather and census should start near-simultaneously (Δ=${Math.abs(weather.startMs - census.startMs)}ms)`,
@@ -168,26 +140,23 @@ o.population <- c.population
   });
 
   test("all results are correct", async () => {
-    const { executor } = makeExecutorWithLog();
-    const result: any = await executor({
-      document: parse(
-        `{ dashboard(city: "Berlin") { temp humidity population greeting } }`,
-      ),
-    });
+    const { tools } = makeDiamondTools();
+    const { data } = await run(
+      diamondBridge,
+      "Query.dashboard",
+      { city: "Berlin" },
+      tools,
+    );
 
-    assert.equal(result.data.dashboard.temp, 22.5);
-    assert.equal(result.data.dashboard.humidity, 65.0);
-    assert.equal(result.data.dashboard.population, 3_748_148);
-    assert.equal(result.data.dashboard.greeting, "Hello from Berlin!");
+    assert.equal(data.temp, 22.5);
+    assert.equal(data.humidity, 65.0);
+    assert.equal(data.population, 3_748_148);
+    assert.equal(data.greeting, "Hello from Berlin!");
   });
 
   test("formatGreeting does not wait for geocode", async () => {
-    const { executor, calls } = makeExecutorWithLog();
-    await executor({
-      document: parse(
-        `{ dashboard(city: "Berlin") { temp population greeting } }`,
-      ),
-    });
+    const { tools, calls } = makeDiamondTools();
+    await run(diamondBridge, "Query.dashboard", { city: "Berlin" }, tools);
 
     const geo = calls.find((c) => c.name === "geo.code")!;
     const fg = calls.find((c) => c.name === "formatGreeting")!;
@@ -209,17 +178,7 @@ o.population <- c.population
 //   doubled.a <- d:i.a     ← fork 1
 //   doubled.b <- d:i.b     ← fork 2 (separate call, same tool fn)
 
-describe("scheduling: pipe forks run in parallel", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      doubled(a: Float!, b: Float!): Doubled
-    }
-    type Doubled {
-      a: Float
-      b: Float
-    }
-  `;
-
+forEachEngine("scheduling: pipe forks run in parallel", (run) => {
   const bridgeText = `version 1.5
 tool double from slowDoubler
 
@@ -248,24 +207,23 @@ o.b <- d:i.b
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const { data } = await run(
+      bridgeText,
+      "Query.doubled",
+      { a: 3, b: 7 },
+      tools,
+    );
 
-    const result: any = await executor({
-      document: parse(`{ doubled(a: 3, b: 7) { a b } }`),
-    });
-
-    assert.equal(result.data.doubled.a, 6);
-    assert.equal(result.data.doubled.b, 14);
+    assert.equal(data.a, 6);
+    assert.equal(data.b, 14);
 
     // Must be exactly 2 calls — no dedup (these are separate forks)
     assert.equal(calls.length, 2, "exactly 2 independent calls");
 
     // They should start near-simultaneously (parallel, not sequential)
     assert.ok(
-      Math.abs(calls[0].startMs - calls[1].startMs) < 15,
-      `forks should start in parallel (Δ=${Math.abs(calls[0].startMs - calls[1].startMs)}ms)`,
+      Math.abs(calls[0]!.startMs - calls[1]!.startMs) < 15,
+      `forks should start in parallel (Δ=${Math.abs(calls[0]!.startMs - calls[1]!.startMs)}ms)`,
     );
   });
 });
@@ -277,16 +235,7 @@ o.b <- d:i.b
 // toUpper must run first, then normalize gets toUpper's output.
 // Each tool called exactly once.
 
-describe("scheduling: chained pipes execute in correct order", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      processed(text: String!): ProcessedResult
-    }
-    type ProcessedResult {
-      result: String
-    }
-  `;
-
+forEachEngine("scheduling: chained pipes execute in correct order", (run) => {
   const bridgeText = `version 1.5
 bridge Query.processed {
   with input as i
@@ -314,15 +263,14 @@ o.result <- nm:tu:i.text
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const { data } = await run(
+      bridgeText,
+      "Query.processed",
+      { text: " hello  world " },
+      tools,
+    );
 
-    const result: any = await executor({
-      document: parse(`{ processed(text: " hello  world ") { result } }`),
-    });
-
-    assert.equal(result.data.processed.result, "HELLO WORLD");
+    assert.equal(data.result, "HELLO WORLD");
     assert.deepStrictEqual(callOrder, ["toUpper", "normalize"]);
   });
 
@@ -340,13 +288,7 @@ o.result <- nm:tu:i.text
       },
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    await executor({
-      document: parse(`{ processed(text: "test") { result } }`),
-    });
+    await run(bridgeText, "Query.processed", { text: "test" }, tools);
 
     assert.equal(callCounts["toUpper"], 1);
     assert.equal(callCounts["normalize"], 1);
@@ -358,18 +300,10 @@ o.result <- nm:tu:i.text
 // A single tool is consumed both via pipe AND via direct wire by different
 // output fields. The tool must be called only once.
 
-describe("scheduling: shared tool dedup across pipe and direct consumers", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      info(city: String!): CityInfo
-    }
-    type CityInfo {
-      rawName: String
-      shoutedName: String
-    }
-  `;
-
-  const bridgeText = `version 1.5
+forEachEngine(
+  "scheduling: shared tool dedup across pipe and direct consumers",
+  (run) => {
+    const bridgeText = `version 1.5
 bridge Query.info {
   with geo.lookup as g
   with toUpper as tu
@@ -382,35 +316,39 @@ o.shoutedName <- tu:g.name
 
 }`;
 
-  test("geo.lookup called once despite direct + pipe consumption", async () => {
-    const callCounts: Record<string, number> = {};
+    test("geo.lookup called once despite direct + pipe consumption", async () => {
+      const callCounts: Record<string, number> = {};
 
-    const tools: Record<string, any> = {
-      "geo.lookup": async (_input: any) => {
-        callCounts["geo.lookup"] = (callCounts["geo.lookup"] ?? 0) + 1;
-        await sleep(30);
-        return { name: "Berlin" };
-      },
-      toUpper: (input: any) => {
-        callCounts["toUpper"] = (callCounts["toUpper"] ?? 0) + 1;
-        return String(input.in).toUpperCase();
-      },
-    };
+      const tools: Record<string, any> = {
+        "geo.lookup": async (_input: any) => {
+          callCounts["geo.lookup"] = (callCounts["geo.lookup"] ?? 0) + 1;
+          await sleep(30);
+          return { name: "Berlin" };
+        },
+        toUpper: (input: any) => {
+          callCounts["toUpper"] = (callCounts["toUpper"] ?? 0) + 1;
+          return String(input.in).toUpperCase();
+        },
+      };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+      const { data } = await run(
+        bridgeText,
+        "Query.info",
+        { city: "Berlin" },
+        tools,
+      );
 
-    const result: any = await executor({
-      document: parse(`{ info(city: "Berlin") { rawName shoutedName } }`),
+      assert.equal(data.rawName, "Berlin");
+      assert.equal(data.shoutedName, "BERLIN");
+      assert.equal(
+        callCounts["geo.lookup"],
+        1,
+        "geo.lookup must be called once",
+      );
+      assert.equal(callCounts["toUpper"], 1);
     });
-
-    assert.equal(result.data.info.rawName, "Berlin");
-    assert.equal(result.data.info.shoutedName, "BERLIN");
-    assert.equal(callCounts["geo.lookup"], 1, "geo.lookup must be called once");
-    assert.equal(callCounts["toUpper"], 1);
-  });
-});
+  },
+);
 
 // ── Test 5: Wall-clock efficiency — total time approaches parallel optimum ───
 //
@@ -418,21 +356,12 @@ o.shoutedName <- tu:g.name
 //   input ──→ ├─ slowB (60ms) ─→ b
 //             └─ slowC (60ms) ─→ c
 //
-// If parallel: ~60ms.  If sequential: ~180ms.  Threshold: <100ms.
+// If parallel: ~60ms.  If sequential: ~180ms.  Threshold: <120ms.
 
-describe("scheduling: independent tools execute with true parallelism", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      trio(x: String!): Trio
-    }
-    type Trio {
-      a: String
-      b: String
-      c: String
-    }
-  `;
-
-  const bridgeText = `version 1.5
+forEachEngine(
+  "scheduling: independent tools execute with true parallelism",
+  (run) => {
+    const bridgeText = `version 1.5
 bridge Query.trio {
   with svc.a as sa
   with svc.b as sb
@@ -449,44 +378,153 @@ o.c <- sc.result
 
 }`;
 
-  test("three 60ms tools complete in ≈60ms, not 180ms", async () => {
-    const tools: Record<string, any> = {
-      "svc.a": async (input: any) => {
-        await sleep(60);
-        return { result: `A:${input.x}` };
-      },
-      "svc.b": async (input: any) => {
-        await sleep(60);
-        return { result: `B:${input.x}` };
-      },
-      "svc.c": async (input: any) => {
-        await sleep(60);
-        return { result: `C:${input.x}` };
-      },
-    };
+    test("three 60ms tools complete in ≈60ms, not 180ms", async () => {
+      const tools: Record<string, any> = {
+        "svc.a": async (input: any) => {
+          await sleep(60);
+          return { result: `A:${input.x}` };
+        },
+        "svc.b": async (input: any) => {
+          await sleep(60);
+          return { result: `B:${input.x}` };
+        },
+        "svc.c": async (input: any) => {
+          await sleep(60);
+          return { result: `C:${input.x}` };
+        },
+      };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+      const start = performance.now();
+      const { data } = await run(
+        bridgeText,
+        "Query.trio",
+        { x: "test" },
+        tools,
+      );
+      const wallMs = performance.now() - start;
 
-    const start = performance.now();
-    const result: any = await executor({
-      document: parse(`{ trio(x: "test") { a b c } }`),
+      assert.equal(data.a, "A:test");
+      assert.equal(data.b, "B:test");
+      assert.equal(data.c, "C:test");
+
+      assert.ok(
+        wallMs < 120,
+        `Wall time should be ~60ms (parallel), got ${Math.round(wallMs)}ms — tools may be running sequentially`,
+      );
     });
-    const wallMs = performance.now() - start;
+  },
+);
 
-    assert.equal(result.data.trio.a, "A:test");
-    assert.equal(result.data.trio.b, "B:test");
-    assert.equal(result.data.trio.c, "C:test");
+// ── Test 6: A||B then C depends on A ─────────────────────────────────────────
+//
+// Topology:
+//
+//   input ──→ A (50ms) ──→ C (needs A.value)
+//   input ──→ B (80ms)
+//
+// A and B should start in parallel.
+// C should start after A finishes but NOT wait for B.
+// Total wall time ≈ max(A + C, B) ≈ 80ms, not A + B + C = 160ms.
 
-    assert.ok(
-      wallMs < 120,
-      `Wall time should be ~60ms (parallel), got ${Math.round(wallMs)}ms — tools may be running sequentially`,
-    );
-  });
-});
+forEachEngine(
+  "scheduling: A||B parallel, C depends only on A (not B)",
+  (run, ctx) => {
+    const bridgeText = `version 1.5
+bridge Query.mixed {
+  with toolA as a
+  with toolB as b
+  with toolC as c
+  with input as i
+  with output as o
 
-// ── Test 6: Tool-level deps resolve in parallel ─────────────────────────────
+a.x <- i.x
+b.x <- i.x
+c.y <- a.value
+o.fromA <- a.value
+o.fromB <- b.value
+o.fromC <- c.result
+
+}`;
+
+    test("A and B start together, C starts after A (not after B)", async () => {
+      const calls: CallRecord[] = [];
+      const elapsed = createTimer();
+
+      const tools: Record<string, any> = {
+        toolA: async (input: any) => {
+          const start = elapsed();
+          await sleep(50);
+          const end = elapsed();
+          calls.push({ name: "A", startMs: start, endMs: end, input });
+          return { value: `A:${input.x}` };
+        },
+        toolB: async (input: any) => {
+          const start = elapsed();
+          await sleep(80);
+          const end = elapsed();
+          calls.push({ name: "B", startMs: start, endMs: end, input });
+          return { value: `B:${input.x}` };
+        },
+        toolC: async (input: any) => {
+          const start = elapsed();
+          await sleep(30);
+          const end = elapsed();
+          calls.push({ name: "C", startMs: start, endMs: end, input });
+          return { result: `C:${input.y}` };
+        },
+      };
+
+      const start = performance.now();
+      const { data } = await run(bridgeText, "Query.mixed", { x: "go" }, tools);
+      const wallMs = performance.now() - start;
+
+      // Correctness
+      assert.equal(data.fromA, "A:go");
+      assert.equal(data.fromB, "B:go");
+      assert.equal(data.fromC, "C:A:go");
+
+      const callA = calls.find((c) => c.name === "A")!;
+      const callB = calls.find((c) => c.name === "B")!;
+      const callC = calls.find((c) => c.name === "C")!;
+
+      // A and B should start near-simultaneously (both independent of each other)
+      assert.ok(
+        Math.abs(callA.startMs - callB.startMs) < 15,
+        `A and B should start in parallel (Δ=${Math.abs(callA.startMs - callB.startMs)}ms)`,
+      );
+
+      // C should start after A finishes
+      assert.ok(
+        callC.startMs >= callA.endMs - 1,
+        `C must start after A ends (C.start=${callC.startMs}, A.end=${callA.endMs})`,
+      );
+
+      // The runtime engine resolves C as soon as A finishes (optimal):
+      //   wall time ≈ max(A+C, B) = max(80, 80) = 80ms
+      // The compiled engine uses Promise.all layers, so C waits for the
+      // entire first layer (A + B) before starting:
+      //   wall time ≈ max(A, B) + C = 80 + 30 = 110ms
+      // Both are significantly better than full sequential: A+B+C = 160ms.
+      if (ctx.engine === "runtime") {
+        assert.ok(
+          callC.startMs < callB.endMs,
+          `[runtime] C should start before B finishes (C.start=${callC.startMs}, B.end=${callB.endMs})`,
+        );
+        assert.ok(
+          wallMs < 110,
+          `[runtime] Wall time should be ~80ms, got ${Math.round(wallMs)}ms`,
+        );
+      } else {
+        assert.ok(
+          wallMs < 140,
+          `[compiled] Wall time should be ~110ms (layer-based), got ${Math.round(wallMs)}ms`,
+        );
+      }
+    });
+  },
+);
+
+// ── Test 7: Tool-level deps resolve in parallel ─────────────────────────────
 //
 // A ToolDef can depend on multiple other tools via `with`:
 //   tool mainApi httpCall
@@ -498,16 +536,7 @@ o.c <- sc.result
 // Both deps are independent — they MUST resolve in parallel inside
 // resolveToolWires, not sequentially.
 
-describe("scheduling: tool-level deps resolve in parallel", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      secure(id: String!): SecureData
-    }
-    type SecureData {
-      value: String
-    }
-  `;
-
+forEachEngine("scheduling: tool-level deps resolve in parallel", (run, ctx) => {
   const bridgeText = `version 1.5
 tool authService from httpCall {
   with context
@@ -549,7 +578,7 @@ o.value <- m.payload
 
 }`;
 
-  test("two independent tool deps (auth + quota) resolve in parallel, not sequentially", async () => {
+  test("two independent tool deps (auth + quota) resolve in parallel, not sequentially", async (_t) => {
     const calls: CallRecord[] = [];
     const elapsed = createTimer();
 
@@ -572,20 +601,17 @@ o.value <- m.payload
       return { payload: "secret" };
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      context: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } },
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
     const start = performance.now();
-    const result: any = await executor({
-      document: parse(`{ secure(id: "x") { value } }`),
-    });
+    const { data } = await run(
+      bridgeText,
+      "Query.secure",
+      { id: "x" },
+      { httpCall },
+      { context: { auth: { clientId: "c1" }, quota: { apiKey: "k1" } } },
+    );
     const wallMs = performance.now() - start;
 
-    assert.equal(result.data.secure.value, "secret");
+    assert.equal(data.value, "secret");
 
     const auth = calls.find((c) => c.name === "auth")!;
     const quota = calls.find((c) => c.name === "quota")!;

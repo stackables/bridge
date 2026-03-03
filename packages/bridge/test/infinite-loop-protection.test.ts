@@ -60,7 +60,6 @@ bridge Query.items {
     assert.deepStrictEqual(result.data, [{ name: "a" }, { name: "b" }]);
   });
 
-  // TODO: compiler does not have cycle detection
   test("circular A→B→A dependency throws BridgePanicError", async () => {
     const bridgeText = `version 1.5
 bridge Query.loop {

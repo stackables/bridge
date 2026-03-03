@@ -251,7 +251,6 @@ bridge Query.test {
 
 forEachEngine("control flow execution", (run, _ctx) => {
   describe("throw", () => {
-    // TODO: compiler does not support throw control flow
     test("throw on || gate raises Error when value is falsy", async () => {
       const src = `version 1.5
 bridge Query.test {
@@ -318,7 +317,6 @@ bridge Query.test {
   });
 
   describe("panic", () => {
-    // TODO: compiler does not support panic control flow
     test("panic raises BridgePanicError", async () => {
       const src = `version 1.5
 bridge Query.test {
@@ -451,7 +449,6 @@ bridge Query.test {
       assert.deepStrictEqual(data, []);
     });
 
-    // TODO: compiler does not support catch on root array wire
     test("catch continue on root array wire returns [] when source throws", async () => {
       const src = `version 1.5
 bridge Query.test {
@@ -474,7 +471,6 @@ bridge Query.test {
   });
 
   describe("AbortSignal", () => {
-    // TODO: compiler does not support AbortSignal
     test("aborted signal prevents tool execution", async () => {
       const src = `version 1.5
 bridge Query.test {

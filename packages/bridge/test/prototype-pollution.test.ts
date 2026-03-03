@@ -6,9 +6,8 @@ import { forEachEngine } from "./_dual-run.ts";
 // Prototype pollution guards
 // ══════════════════════════════════════════════════════════════════════════════
 
-// TODO: compiler doesn't implement prototype pollution guards yet
-forEachEngine("prototype pollution", (run, ctx) => {
-  describe("setNested guard", { skip: ctx.engine === "compiled" }, () => {
+forEachEngine("prototype pollution", (run, _ctx) => {
+  describe("setNested guard", () => {
     test("blocks __proto__ via bridge wire input path", async () => {
       const bridgeText = `version 1.5
 bridge Query.test {
@@ -64,7 +63,7 @@ bridge Query.test {
     });
   });
 
-  describe("pullSingle guard", { skip: ctx.engine === "compiled" }, () => {
+  describe("pullSingle guard", () => {
     test("blocks __proto__ traversal on source ref", async () => {
       const bridgeText = `version 1.5
 bridge Query.test {
@@ -98,7 +97,7 @@ bridge Query.test {
     });
   });
 
-  describe("tool lookup guard", { skip: ctx.engine === "compiled" }, () => {
+  describe("tool lookup guard", () => {
     test("lookupToolFn blocks __proto__ in dotted tool name", async () => {
       const bridgeText = `version 1.5
 bridge Query.test {

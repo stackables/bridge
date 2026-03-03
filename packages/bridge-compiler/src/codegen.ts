@@ -228,6 +228,9 @@ class CodegenContext {
   private elementLocalVars = new Map<string, string>();
   /** Current element variable name, set during element wire expression generation. */
   private currentElVar: string | undefined;
+  /** Map from ToolDef dependency tool name to its emitted variable name.
+   *  Populated lazily by emitToolDeps to avoid duplicating calls. */
+  private toolDepVars = new Map<string, string>();
 
   constructor(
     bridge: Bridge,
@@ -389,6 +392,56 @@ class CodegenContext {
     const { bridge } = this;
     const fnName = `${bridge.type}_${bridge.field}`;
 
+    // ── Prototype pollution guards ──────────────────────────────────────
+    // Validate all wire paths and tool names at compile time, matching the
+    // runtime's setNested / pullSingle / lookupToolFn guards.
+    const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+    // 1. setNested guard — reject unsafe keys in wire target paths
+    for (const w of bridge.wires) {
+      for (const seg of w.to.path) {
+        if (UNSAFE_KEYS.has(seg))
+          throw new Error(`Unsafe assignment key: ${seg}`);
+      }
+    }
+
+    // 2. pullSingle guard — reject unsafe keys in wire source paths
+    for (const w of bridge.wires) {
+      const refs: NodeRef[] = [];
+      if ("from" in w) refs.push(w.from);
+      if ("cond" in w) {
+        refs.push(w.cond);
+        if (w.thenRef) refs.push(w.thenRef);
+        if (w.elseRef) refs.push(w.elseRef);
+      }
+      if ("condAnd" in w) {
+        refs.push(w.condAnd.leftRef);
+        if (w.condAnd.rightRef) refs.push(w.condAnd.rightRef);
+      }
+      if ("condOr" in w) {
+        refs.push(w.condOr.leftRef);
+        if (w.condOr.rightRef) refs.push(w.condOr.rightRef);
+      }
+      for (const ref of refs) {
+        for (const seg of ref.path) {
+          if (UNSAFE_KEYS.has(seg))
+            throw new Error(`Unsafe property traversal: ${seg}`);
+        }
+      }
+    }
+
+    // 3. tool lookup guard — reject unsafe segments in dotted tool names
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool") continue;
+      const segments = h.name.split(".");
+      for (const seg of segments) {
+        if (UNSAFE_KEYS.has(seg))
+          throw new Error(
+            `No tool found for "${h.name}" — prototype-pollution attempt blocked`,
+          );
+      }
+    }
+
     // Build a set of force tool trunk keys and their catch behavior
     const forceMap = new Map<string, { catchError?: boolean }>();
     if (bridge.forces) {
@@ -496,6 +549,8 @@ class CodegenContext {
 
     // Topological sort of tool calls (including define containers)
     const toolOrder = this.topologicalSort(toolWires);
+    // Layer-based grouping for parallel emission
+    const toolLayers = this.topologicalLayers(toolWires);
 
     // ── Overdefinition bypass analysis ────────────────────────────────────
     // When multiple wires target the same output path ("overdefinition"),
@@ -599,95 +654,122 @@ class CodegenContext {
     }
 
     // Emit tool calls and define container assignments
-    for (const tk of toolOrder) {
-      // Skip element-scoped tools and ternary-only tools — they are inlined
-      if (this.elementScopedTools.has(tk)) continue;
-      if (this.ternaryOnlyTools.has(tk)) continue;
-      // Skip dead tools — output never referenced and not a force call
-      if (
-        !referencedToolKeys.has(tk) &&
-        !forceMap.has(tk) &&
-        !this.defineContainers.has(tk)
-      )
-        continue;
+    // Tools in the same topological layer have no mutual dependencies and
+    // can execute in parallel — we emit them as a single Promise.all().
+    for (const layer of toolLayers) {
+      // Classify tools in this layer
+      const parallelBatch: { tk: string; tool: ToolInfo; wires: Wire[] }[] = [];
+      const sequentialKeys: string[] = [];
 
-      if (this.defineContainers.has(tk)) {
-        // Emit define container as a plain object assignment
-        const wires = defineWires.get(tk) ?? [];
-        const varName = this.varMap.get(tk)!;
-        // For wires with catch/safe, apply fallbacks per-wire using wireToExpr
-        // which already handles catch fallback via error flags
-        if (wires.length === 0) {
-          lines.push(`  const ${varName} = undefined;`);
-        } else if (wires.length === 1 && wires[0]!.to.path.length === 0) {
-          // Single wire with empty path — the define container IS the wire value
-          const w = wires[0]!;
-          let expr = this.wireToExpr(w);
-          // Handle safe flag (wire-level try/catch)
-          if ("safe" in w && w.safe) {
-            // Collect error flags from source tools
-            const errFlags: string[] = [];
-            const wAny = w as any;
-            if (wAny.from) {
-              const ef = this.getSourceErrorFlag(w);
-              if (ef) errFlags.push(ef);
-            }
-            if (wAny.cond) {
-              const condEf = this.getErrorFlagForRef(wAny.cond);
-              if (condEf) errFlags.push(condEf);
-              if (wAny.thenRef) {
-                const ef = this.getErrorFlagForRef(wAny.thenRef);
-                if (ef) errFlags.push(ef);
-              }
-              if (wAny.elseRef) {
-                const ef = this.getErrorFlagForRef(wAny.elseRef);
-                if (ef) errFlags.push(ef);
-              }
-            }
-            if (errFlags.length > 0) {
-              const errCheck = errFlags
-                .map((f) => `${f} !== undefined`)
-                .join(" || ");
-              expr = `(${errCheck} ? undefined : ${expr})`;
-            }
-          }
-          lines.push(`  const ${varName} = ${expr};`);
+      for (const tk of layer) {
+        if (this.elementScopedTools.has(tk)) continue;
+        if (this.ternaryOnlyTools.has(tk)) continue;
+        if (
+          !referencedToolKeys.has(tk) &&
+          !forceMap.has(tk) &&
+          !this.defineContainers.has(tk)
+        )
+          continue;
+
+        if (this.isParallelizableTool(tk, conditionalTools, forceMap)) {
+          const tool = this.tools.get(tk)!;
+          const wires = toolWires.get(tk) ?? [];
+          parallelBatch.push({ tk, tool, wires });
         } else {
-          const inputObj = this.buildObjectLiteral(wires, (w) => w.to.path, 4);
-          lines.push(`  const ${varName} = ${inputObj};`);
+          sequentialKeys.push(tk);
         }
-        continue;
       }
-      const tool = this.tools.get(tk)!;
-      const wires = toolWires.get(tk) ?? [];
-      const forceInfo = forceMap.get(tk);
 
-      // Check for overdefinition bypass — conditionally skip tools whose
-      // output contributions are all secondary (overdefined by earlier sources)
-      const bypass = conditionalTools.get(tk);
-      if (bypass && !forceInfo && !this.catchGuardedTools.has(tk)) {
-        // Emit conditional tool call: only call if prior sources are null
-        const condition = bypass.checkExprs
-          .map((expr) => `(${expr}) == null`)
-          .join(" || ");
-        lines.push(`  let ${tool.varName};`);
-        lines.push(`  if (${condition}) {`);
-        // Capture tool call into a buffer, then transform to assignment + indent
-        const buf: string[] = [];
-        this.emitToolCall(buf, tool, wires, "normal");
-        for (const line of buf) {
-          lines.push(
-            "  " +
-              line.replace(`const ${tool.varName} = `, `${tool.varName} = `),
-          );
-        }
-        lines.push(`  }`);
-      } else if (forceInfo?.catchError) {
-        this.emitToolCall(lines, tool, wires, "fire-and-forget");
-      } else if (this.catchGuardedTools.has(tk)) {
-        this.emitToolCall(lines, tool, wires, "catch-guarded");
-      } else {
+      // Emit parallelizable tools first so their variables are in scope when
+      // sequential tools (which may have bypass conditions referencing them) run.
+      if (parallelBatch.length === 1) {
+        const { tool, wires } = parallelBatch[0]!;
         this.emitToolCall(lines, tool, wires, "normal");
+      } else if (parallelBatch.length > 1) {
+        const varNames = parallelBatch
+          .map(({ tool }) => tool.varName)
+          .join(", ");
+        lines.push(`  const [${varNames}] = await Promise.all([`);
+        for (const { tool, wires } of parallelBatch) {
+          const callExpr = this.buildNormalCallExpr(tool, wires);
+          lines.push(`    ${callExpr},`);
+        }
+        lines.push(`  ]);`);
+      }
+
+      // Emit sequential (complex) tools one by one — same logic as before
+      for (const tk of sequentialKeys) {
+        if (this.defineContainers.has(tk)) {
+          const wires = defineWires.get(tk) ?? [];
+          const varName = this.varMap.get(tk)!;
+          if (wires.length === 0) {
+            lines.push(`  const ${varName} = undefined;`);
+          } else if (wires.length === 1 && wires[0]!.to.path.length === 0) {
+            const w = wires[0]!;
+            let expr = this.wireToExpr(w);
+            if ("safe" in w && w.safe) {
+              const errFlags: string[] = [];
+              const wAny = w as any;
+              if (wAny.from) {
+                const ef = this.getSourceErrorFlag(w);
+                if (ef) errFlags.push(ef);
+              }
+              if (wAny.cond) {
+                const condEf = this.getErrorFlagForRef(wAny.cond);
+                if (condEf) errFlags.push(condEf);
+                if (wAny.thenRef) {
+                  const ef = this.getErrorFlagForRef(wAny.thenRef);
+                  if (ef) errFlags.push(ef);
+                }
+                if (wAny.elseRef) {
+                  const ef = this.getErrorFlagForRef(wAny.elseRef);
+                  if (ef) errFlags.push(ef);
+                }
+              }
+              if (errFlags.length > 0) {
+                const errCheck = errFlags
+                  .map((f) => `${f} !== undefined`)
+                  .join(" || ");
+                expr = `(${errCheck} ? undefined : ${expr})`;
+              }
+            }
+            lines.push(`  const ${varName} = ${expr};`);
+          } else {
+            const inputObj = this.buildObjectLiteral(
+              wires,
+              (w) => w.to.path,
+              4,
+            );
+            lines.push(`  const ${varName} = ${inputObj};`);
+          }
+          continue;
+        }
+        const tool = this.tools.get(tk)!;
+        const wires = toolWires.get(tk) ?? [];
+        const forceInfo = forceMap.get(tk);
+        const bypass = conditionalTools.get(tk);
+        if (bypass && !forceInfo && !this.catchGuardedTools.has(tk)) {
+          const condition = bypass.checkExprs
+            .map((expr) => `(${expr}) == null`)
+            .join(" || ");
+          lines.push(`  let ${tool.varName};`);
+          lines.push(`  if (${condition}) {`);
+          const buf: string[] = [];
+          this.emitToolCall(buf, tool, wires, "normal");
+          for (const line of buf) {
+            lines.push(
+              "  " +
+                line.replace(`const ${tool.varName} = `, `${tool.varName} = `),
+            );
+          }
+          lines.push(`  }`);
+        } else if (forceInfo?.catchError) {
+          this.emitToolCall(lines, tool, wires, "fire-and-forget");
+        } else if (this.catchGuardedTools.has(tk)) {
+          this.emitToolCall(lines, tool, wires, "catch-guarded");
+        } else {
+          this.emitToolCall(lines, tool, wires, "normal");
+        }
       }
     }
 
@@ -766,6 +848,10 @@ class CodegenContext {
     // Build input: ToolDef wires first, then bridge wires override
     // Track entries by key for precise override matching
     const inputEntries = new Map<string, string>();
+
+    // Emit ToolDef-level tool dependency calls (e.g. `with authService as auth`)
+    // These must be emitted before building the input so their vars are in scope.
+    this.emitToolDeps(lines, toolDef);
 
     // ToolDef constant wires
     for (const tw of toolDef.wires) {
@@ -940,6 +1026,96 @@ class CodegenContext {
   }
 
   /**
+   * Emit ToolDef-level dependency tool calls.
+   *
+   * When a ToolDef declares `with authService as auth`, the auth handle
+   * references a separate tool that must be called before the main tool.
+   * This method recursively resolves the dependency chain, emitting calls
+   * in dependency order. Independent deps are parallelized with Promise.all.
+   *
+   * Results are cached in `toolDepVars` so each dep is called at most once.
+   */
+  private emitToolDeps(lines: string[], toolDef: ToolDef): void {
+    // Collect tool-kind deps that haven't been emitted yet
+    const pendingDeps: { handle: string; toolName: string }[] = [];
+    for (const dep of toolDef.deps) {
+      if (dep.kind === "tool" && !this.toolDepVars.has(dep.tool)) {
+        pendingDeps.push({ handle: dep.handle, toolName: dep.tool });
+      }
+    }
+    if (pendingDeps.length === 0) return;
+
+    // Recursively emit transitive deps first
+    for (const pd of pendingDeps) {
+      const depToolDef = this.resolveToolDef(pd.toolName);
+      if (depToolDef) {
+        this.emitToolDeps(lines, depToolDef);
+      }
+    }
+
+    // Now emit the current level deps — only the ones still not emitted
+    const toEmit = pendingDeps.filter(
+      (pd) => !this.toolDepVars.has(pd.toolName),
+    );
+    if (toEmit.length === 0) return;
+
+    // Build call expressions for each dep
+    const depCalls: { toolName: string; varName: string; callExpr: string }[] =
+      [];
+    for (const pd of toEmit) {
+      const depToolDef = this.resolveToolDef(pd.toolName);
+      if (!depToolDef) continue;
+
+      const fnName = depToolDef.fn ?? pd.toolName;
+      const varName = `_td${++this.toolCounter}`;
+
+      // Build input from the dep's ToolDef wires
+      const inputParts: string[] = [];
+
+      // Constant wires
+      for (const tw of depToolDef.wires) {
+        if (tw.kind === "constant") {
+          inputParts.push(
+            `      ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+          );
+        }
+      }
+
+      // Pull wires — resolved from the dep's own deps
+      for (const tw of depToolDef.wires) {
+        if (tw.kind === "pull") {
+          const expr = this.resolveToolDepSource(tw.source, depToolDef);
+          inputParts.push(`      ${JSON.stringify(tw.target)}: ${expr}`);
+        }
+      }
+
+      const inputObj =
+        inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n    }` : "{}";
+
+      // Build call expression (without `const X = await`)
+      const callExpr = `__call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+
+      depCalls.push({ toolName: pd.toolName, varName, callExpr });
+      this.toolDepVars.set(pd.toolName, varName);
+    }
+
+    if (depCalls.length === 0) return;
+
+    if (depCalls.length === 1) {
+      const dc = depCalls[0]!;
+      lines.push(`  const ${dc.varName} = await ${dc.callExpr};`);
+    } else {
+      // Parallel: independent deps resolve concurrently
+      const varNames = depCalls.map((dc) => dc.varName).join(", ");
+      lines.push(`  const [${varNames}] = await Promise.all([`);
+      for (const dc of depCalls) {
+        lines.push(`    ${dc.callExpr},`);
+      }
+      lines.push(`  ]);`);
+    }
+  }
+
+  /**
    * Resolve a ToolDef source reference (e.g. "ctx.apiKey") to a JS expression.
    * Handles context, const, and tool dependencies.
    */
@@ -972,12 +1148,18 @@ class CodegenContext {
       }
       return "undefined";
     } else if (dep.kind === "tool") {
-      // Tool dependency — reference the tool's variable
-      const depToolInfo = this.findToolByName(dep.tool);
-      if (depToolInfo) {
-        baseExpr = depToolInfo.varName;
+      // Tool dependency — first check ToolDef-level dep vars (emitted by emitToolDeps),
+      // then fall back to bridge-level tool handles
+      const depVar = this.toolDepVars.get(dep.tool);
+      if (depVar) {
+        baseExpr = depVar;
       } else {
-        return "undefined";
+        const depToolInfo = this.findToolByName(dep.tool);
+        if (depToolInfo) {
+          baseExpr = depToolInfo.varName;
+        } else {
+          return "undefined";
+        }
       }
     } else {
       return "undefined";
@@ -1051,7 +1233,16 @@ class CodegenContext {
 
   private emitOutput(lines: string[], outputWires: Wire[]): void {
     if (outputWires.length === 0) {
-      lines.push("  return {};");
+      // Match the runtime's error when no wires target the output
+      const { type, field } = this.bridge;
+      const hasForce = this.bridge.forces && this.bridge.forces.length > 0;
+      if (!hasForce) {
+        lines.push(
+          `  throw new Error(${JSON.stringify(`Bridge "${type}.${field}" has no output wires. Ensure at least one wire targets the output (e.g. \`o.field <- ...\`).`)});`,
+        );
+      } else {
+        lines.push("  return {};");
+      }
       return;
     }
 
@@ -2512,6 +2703,129 @@ class CodegenContext {
       if (w.condOr.rightRef) collectTrunk(w.condOr.rightRef);
     }
     return trunks;
+  }
+
+  /**
+   * Returns true if the tool can safely participate in a Promise.all() batch:
+   * plain normal-mode call with no bypass condition, no catch guard, no
+   * fire-and-forget, no onError ToolDef, and not an internal (sync) tool.
+   */
+  private isParallelizableTool(
+    tk: string,
+    conditionalTools: Map<string, { checkExprs: string[] }>,
+    forceMap: Map<string, { catchError?: boolean }>,
+  ): boolean {
+    if (this.defineContainers.has(tk)) return false;
+    if (this.internalToolKeys.has(tk)) return false;
+    if (this.catchGuardedTools.has(tk)) return false;
+    if (forceMap.get(tk)?.catchError) return false;
+    if (conditionalTools.has(tk)) return false;
+    const tool = this.tools.get(tk);
+    if (!tool) return false;
+    const toolDef = this.resolveToolDef(tool.toolName);
+    if (toolDef?.wires.some((w) => w.kind === "onError")) return false;
+    // Tools with ToolDef-level tool deps need their deps emitted first
+    if (toolDef?.deps.some((d) => d.kind === "tool")) return false;
+    return true;
+  }
+
+  /**
+   * Build a raw `__call(tools[...], {...}, ...)` expression suitable for use
+   * inside `Promise.all([...])` — no `await`, no `const` declaration.
+   * Only call this for tools where `isParallelizableTool` returns true.
+   */
+  private buildNormalCallExpr(tool: ToolInfo, bridgeWires: Wire[]): string {
+    const toolDef = this.resolveToolDef(tool.toolName);
+
+    if (!toolDef) {
+      const inputObj = this.buildObjectLiteral(
+        bridgeWires,
+        (w) => w.to.path,
+        4,
+      );
+      return `__call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)})`;
+    }
+
+    const fnName = toolDef.fn ?? tool.toolName;
+    const inputEntries = new Map<string, string>();
+    for (const tw of toolDef.wires) {
+      if (tw.kind === "constant") {
+        inputEntries.set(
+          tw.target,
+          `    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+        );
+      }
+    }
+    for (const tw of toolDef.wires) {
+      if (tw.kind === "pull") {
+        const expr = this.resolveToolDepSource(tw.source, toolDef);
+        inputEntries.set(
+          tw.target,
+          `    ${JSON.stringify(tw.target)}: ${expr}`,
+        );
+      }
+    }
+    for (const bw of bridgeWires) {
+      const path = bw.to.path;
+      if (path.length >= 1) {
+        const key = path[0]!;
+        inputEntries.set(
+          key,
+          `    ${JSON.stringify(key)}: ${this.wireToExpr(bw)}`,
+        );
+      }
+    }
+    const inputParts = [...inputEntries.values()];
+    const inputObj =
+      inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
+    return `__call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+  }
+
+  private topologicalLayers(toolWires: Map<string, Wire[]>): string[][] {
+    const toolKeys = [...this.tools.keys()];
+    const allKeys = [...toolKeys, ...this.defineContainers];
+    const adj = new Map<string, Set<string>>();
+
+    for (const key of allKeys) {
+      adj.set(key, new Set());
+    }
+
+    for (const key of allKeys) {
+      const wires = toolWires.get(key) ?? [];
+      for (const w of wires) {
+        for (const src of this.getSourceTrunks(w)) {
+          if (adj.has(src) && src !== key) {
+            adj.get(src)!.add(key);
+          }
+        }
+      }
+    }
+
+    const inDegree = new Map<string, number>();
+    for (const key of allKeys) inDegree.set(key, 0);
+    for (const [, neighbors] of adj) {
+      for (const n of neighbors) {
+        inDegree.set(n, (inDegree.get(n) ?? 0) + 1);
+      }
+    }
+
+    const layers: string[][] = [];
+    let frontier = allKeys.filter((k) => (inDegree.get(k) ?? 0) === 0);
+
+    while (frontier.length > 0) {
+      layers.push([...frontier]);
+      const next: string[] = [];
+      for (const node of frontier) {
+        for (const neighbor of adj.get(node) ?? []) {
+          const newDeg = (inDegree.get(neighbor) ?? 1) - 1;
+          inDegree.set(neighbor, newDeg);
+          if (newDeg === 0) next.push(neighbor);
+        }
+      }
+      frontier = next;
+    }
+
+    return layers;
   }
 
   private topologicalSort(toolWires: Map<string, Wire[]>): string[] {

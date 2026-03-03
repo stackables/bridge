@@ -250,7 +250,6 @@ bridge Query.empty {
 }`,
     operation: "Query.empty",
     expectedError: /no output wires/,
-    aotSupported: false, // AOT returns {} instead of erroring
   },
   {
     name: "tools receive correct chained inputs",

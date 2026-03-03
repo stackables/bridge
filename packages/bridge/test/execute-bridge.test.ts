@@ -368,7 +368,6 @@ bridge Query.catalog {
   // ── Nested object from scope blocks (o.field { .sub <- ... }) ───────────────
 
   describe("nested object via scope block", () => {
-    // TODO: compiler codegen bug — _t2_err not defined in scope blocks
     test("o.field { .sub <- ... } produces nested object", async () => {
       const bridgeText = `version 1.5
 bridge Query.weather {
@@ -492,7 +491,6 @@ bridge Query.searchTrains {
   // ── Alias declarations (alias <source> as <name>) ──────────────────────────
 
   describe("alias declarations", () => {
-    // TODO: compiler does not support alias in array iteration
     test("alias pipe:iter as name — evaluates pipe once per element", async () => {
       let enrichCallCount = 0;
       const bridgeText = `version 1.5
@@ -722,7 +720,6 @@ bridge Query.test {
       assert.equal(d2.score, 0);
     });
 
-    // TODO: compiler does not support catch on alias
     test("alias with catch error boundary", async () => {
       let callCount = 0;
       const bridgeText = `version 1.5
@@ -938,7 +935,6 @@ bridge Query.echo {
   // ── Error handling ──────────────────────────────────────────────────────────
 
   describe("errors", () => {
-    // TODO: compiler error messages differ from runtime
     test("invalid operation format throws", async () => {
       await assert.rejects(
         () => run("version 1.5", "badformat", {}),
@@ -958,11 +954,8 @@ bridge Query.foo {
       );
     });
 
-    test(
-      "bridge with no output wires throws descriptive error",
-      { skip: ctx.engine === "compiled" },
-      async () => {
-        const bridgeText = `version 1.5
+    test("bridge with no output wires throws descriptive error", async () => {
+      const bridgeText = `version 1.5
 bridge Query.ping {
   with myTool as m
   with input as i
@@ -971,18 +964,17 @@ bridge Query.ping {
 m.q <- i.q
 
 }`;
-        await assert.rejects(
-          () =>
-            run(
-              bridgeText,
-              "Query.ping",
-              { q: "x" },
-              { myTool: async () => ({}) },
-            ),
-          /no output wires/,
-        );
-      },
-    );
+      await assert.rejects(
+        () =>
+          run(
+            bridgeText,
+            "Query.ping",
+            { q: "x" },
+            { myTool: async () => ({}) },
+          ),
+        /no output wires/,
+      );
+    });
   });
 }); // end forEachEngine
 
