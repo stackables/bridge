@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge } from "@stackables/bridge-core";
-import { executeAot } from "@stackables/bridge-compiler";
+import { executeBridge as executeAot } from "@stackables/bridge-compiler";
 
 // ── Test-case type ──────────────────────────────────────────────────────────
 

@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "lint:types": "tsc -p tsconfig.check.json",
     "prepack": "pnpm build"
   },
   "repository": {

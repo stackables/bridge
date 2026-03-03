@@ -11,7 +11,7 @@ import { compileBridge } from "./codegen.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type ExecuteAotOptions = {
+export type ExecuteBridgeOptions = {
   /** Parsed bridge document (from `parseBridge`). */
   document: BridgeDocument;
   /**
@@ -40,13 +40,13 @@ export type ExecuteAotOptions = {
   logger?: Logger;
 };
 
-export type ExecuteAotResult<T = unknown> = {
+export type ExecuteBridgeResult<T = unknown> = {
   data: T;
 };
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 
-type AotFn = (
+type BridgeFn = (
   input: Record<string, unknown>,
   tools: Record<string, any>,
   context: Record<string, unknown>,
@@ -61,9 +61,9 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
  * Uses a WeakMap keyed on the document object so entries are GC'd when
  * the document is no longer referenced.
  */
-const fnCache = new WeakMap<BridgeDocument, Map<string, AotFn>>();
+const fnCache = new WeakMap<BridgeDocument, Map<string, BridgeFn>>();
 
-function getOrCompile(document: BridgeDocument, operation: string): AotFn {
+function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
   let opMap = fnCache.get(document);
   if (opMap) {
     const cached = opMap.get(operation);
@@ -78,7 +78,7 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
     "context",
     "__opts",
     functionBody,
-  ) as AotFn;
+  ) as BridgeFn;
 
   if (!opMap) {
     opMap = new Map();
@@ -100,10 +100,10 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
  * @example
  * ```ts
  * import { parseBridge } from "@stackables/bridge-parser";
- * import { executeAot } from "@stackables/bridge-compiler";
+ * import { executeBridge } from "@stackables/bridge-compiler";
  *
  * const document = parseBridge(readFileSync("my.bridge", "utf8"));
- * const { data } = await executeAot({
+ * const { data } = await executeBridge({
  *   document,
  *   operation: "Query.myField",
  *   input: { city: "Berlin" },
@@ -111,9 +111,9 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
  * });
  * ```
  */
-export async function executeAot<T = unknown>(
-  options: ExecuteAotOptions,
-): Promise<ExecuteAotResult<T>> {
+export async function executeBridge<T = unknown>(
+  options: ExecuteBridgeOptions,
+): Promise<ExecuteBridgeResult<T>> {
   const {
     document,
     operation,
@@ -126,9 +126,10 @@ export async function executeAot<T = unknown>(
   } = options;
 
   const fn = getOrCompile(document, operation);
-  const opts = signal || toolTimeoutMs || logger
-    ? { signal, toolTimeoutMs, logger }
-    : undefined;
+  const opts =
+    signal || toolTimeoutMs || logger
+      ? { signal, toolTimeoutMs, logger }
+      : undefined;
   const data = await fn(input, tools as Record<string, any>, context, opts);
   return { data: data as T };
 }

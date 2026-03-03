@@ -16,52 +16,52 @@ JavaScript function** that executes the same data flow as the runtime
 
 ### Supported features
 
-| Feature | Status | Example |
-|---------|--------|---------|
-| Pull wires (`<-`) | ✅ | `out.name <- api.name` |
-| Constant wires (`=`) | ✅ | `api.method = "GET"` |
-| Nullish coalescing (`??`) | ✅ | `out.x <- api.x ?? "default"` |
-| Falsy fallback (`\|\|`) | ✅ | `out.x <- api.x \|\| "fallback"` |
-| Falsy ref chain (`\|\|`) | ✅ | `out.x <- primary.x \|\| backup.x` |
-| Conditional/ternary | ✅ | `api.mode <- i.premium ? "full" : "basic"` |
-| Array mapping | ✅ | `out.items <- api.list[] as el { .id <- el.id }` |
-| Root array output | ✅ | `o <- api.items[] as el { ... }` |
-| Nested arrays | ✅ | `o <- items[] as i { .sub <- i.list[] as j { ... } }` |
-| Context access | ✅ | `api.token <- ctx.apiKey` |
-| Nested input paths | ✅ | `api.q <- i.address.city` |
-| Root passthrough | ✅ | `o <- api` |
-| `catch` fallbacks | ✅ | `out.data <- api.result catch "fallback"` |
-| `catch` ref fallbacks | ✅ | `out.data <- primary.val catch backup.val` |
-| `force` (critical) | ✅ | `force audit` — errors propagate |
-| `force catch null` | ✅ | `force ping catch null` — fire-and-forget |
-| ToolDef constant wires | ✅ | `tool api from httpCall { .method = "GET" }` |
-| ToolDef pull wires | ✅ | `tool api from httpCall { .token <- context.key }` |
-| ToolDef `on error` | ✅ | `tool api from httpCall { on error = {...} }` |
-| ToolDef `extends` chain | ✅ | `tool childApi from parentApi { .path = "/v2" }` |
-| Bridge overrides ToolDef | ✅ | Bridge wires override ToolDef wires by key |
-| `executeAot()` API | ✅ | Drop-in replacement for `executeBridge()` |
-| Compile-once caching | ✅ | WeakMap cache keyed on document object |
-| Tool context injection | ✅ | `tools["name"](input, context)` — matches runtime |
-| Const blocks | ✅ | `const geo = { "lat": 0, "lon": 0 }` |
-| Nested scope blocks | ✅ | `o.info { .name <- api.name }` |
-| String interpolation | ✅ | `o.msg <- "Hello, {i.name}!"` |
-| Math expressions | ✅ | `o.total <- i.price * i.qty` |
-| Comparison expressions | ✅ | `o.isAdult <- i.age >= 18` |
-| Pipe operators | ✅ | `o.loud <- tu:i.text` |
-| Inlined internal tools | ✅ | Arithmetic, comparisons, concat — no tool call overhead |
-| `define` blocks | ✅ | `define secureProfile { ... }` — inlined at compile time |
-| `alias` declarations | ✅ | `alias api.result.data as d` — virtual containers |
-| Overdefinition | ✅ | `o.label <- api.label` + `o.label <- i.hint` — first non-null wins |
-| `break` / `continue` | ✅ | `item.name ?? continue`, `item.name ?? break` |
-| Null array preservation | ✅ | Null source arrays return null (not []) |
+| Feature                   | Status | Example                                                            |
+| ------------------------- | ------ | ------------------------------------------------------------------ |
+| Pull wires (`<-`)         | ✅     | `out.name <- api.name`                                             |
+| Constant wires (`=`)      | ✅     | `api.method = "GET"`                                               |
+| Nullish coalescing (`??`) | ✅     | `out.x <- api.x ?? "default"`                                      |
+| Falsy fallback (`\|\|`)   | ✅     | `out.x <- api.x \|\| "fallback"`                                   |
+| Falsy ref chain (`\|\|`)  | ✅     | `out.x <- primary.x \|\| backup.x`                                 |
+| Conditional/ternary       | ✅     | `api.mode <- i.premium ? "full" : "basic"`                         |
+| Array mapping             | ✅     | `out.items <- api.list[] as el { .id <- el.id }`                   |
+| Root array output         | ✅     | `o <- api.items[] as el { ... }`                                   |
+| Nested arrays             | ✅     | `o <- items[] as i { .sub <- i.list[] as j { ... } }`              |
+| Context access            | ✅     | `api.token <- ctx.apiKey`                                          |
+| Nested input paths        | ✅     | `api.q <- i.address.city`                                          |
+| Root passthrough          | ✅     | `o <- api`                                                         |
+| `catch` fallbacks         | ✅     | `out.data <- api.result catch "fallback"`                          |
+| `catch` ref fallbacks     | ✅     | `out.data <- primary.val catch backup.val`                         |
+| `force` (critical)        | ✅     | `force audit` — errors propagate                                   |
+| `force catch null`        | ✅     | `force ping catch null` — fire-and-forget                          |
+| ToolDef constant wires    | ✅     | `tool api from httpCall { .method = "GET" }`                       |
+| ToolDef pull wires        | ✅     | `tool api from httpCall { .token <- context.key }`                 |
+| ToolDef `on error`        | ✅     | `tool api from httpCall { on error = {...} }`                      |
+| ToolDef `extends` chain   | ✅     | `tool childApi from parentApi { .path = "/v2" }`                   |
+| Bridge overrides ToolDef  | ✅     | Bridge wires override ToolDef wires by key                         |
+| `executeBridge()` API     | ✅     | Drop-in replacement for `executeBridge()`                          |
+| Compile-once caching      | ✅     | WeakMap cache keyed on document object                             |
+| Tool context injection    | ✅     | `tools["name"](input, context)` — matches runtime                  |
+| Const blocks              | ✅     | `const geo = { "lat": 0, "lon": 0 }`                               |
+| Nested scope blocks       | ✅     | `o.info { .name <- api.name }`                                     |
+| String interpolation      | ✅     | `o.msg <- "Hello, {i.name}!"`                                      |
+| Math expressions          | ✅     | `o.total <- i.price * i.qty`                                       |
+| Comparison expressions    | ✅     | `o.isAdult <- i.age >= 18`                                         |
+| Pipe operators            | ✅     | `o.loud <- tu:i.text`                                              |
+| Inlined internal tools    | ✅     | Arithmetic, comparisons, concat — no tool call overhead            |
+| `define` blocks           | ✅     | `define secureProfile { ... }` — inlined at compile time           |
+| `alias` declarations      | ✅     | `alias api.result.data as d` — virtual containers                  |
+| Overdefinition            | ✅     | `o.label <- api.label` + `o.label <- i.hint` — first non-null wins |
+| `break` / `continue`      | ✅     | `item.name ?? continue`, `item.name ?? break`                      |
+| Null array preservation   | ✅     | Null source arrays return null (not [])                            |
 
 | Abort signal | ✅ | Pre-tool check: `signal.aborted` throws before each tool call |
 | Tool timeout | ✅ | `Promise.race` with configurable timeout per tool call |
 
 ### Not supported (won't fix)
 
-| Feature | Notes |
-|---------|-------|
+| Feature     | Notes                   |
+| ----------- | ----------------------- |
 | Source maps | Will not be implemented |
 
 ---
@@ -101,16 +101,16 @@ The benchmark compiles the bridge once, then runs 1000 iterations of compiled vs
 
 ### What the compiler eliminates
 
-| Overhead | Runtime cost | Compiled |
-|----------|-------------|-----|
-| Trunk key computation | String concat + map lookup per wire | **Zero** — resolved at compile time |
-| Wire matching | `O(n)` scan per target | **Zero** — direct variable references |
-| State map reads/writes | Hash map get/set per resolution | **Zero** — local variables |
-| Topological ordering | Implicit via recursive pull | **Zero** — pre-sorted at compile time |
-| ToolDef resolution | Map lookup + inheritance chain walk | **Zero** — inlined at compile time |
-| Shadow tree creation | `Object.create` + state setup per element | **Replaced** by `.map()` call |
-| Promise branching | `isPromise()` check at every level | **Simplified** — single `await` per tool |
-| Safe-navigation | try/catch wrapping | `?.` optional chaining (V8-optimized) |
+| Overhead               | Runtime cost                              | Compiled                                 |
+| ---------------------- | ----------------------------------------- | ---------------------------------------- |
+| Trunk key computation  | String concat + map lookup per wire       | **Zero** — resolved at compile time      |
+| Wire matching          | `O(n)` scan per target                    | **Zero** — direct variable references    |
+| State map reads/writes | Hash map get/set per resolution           | **Zero** — local variables               |
+| Topological ordering   | Implicit via recursive pull               | **Zero** — pre-sorted at compile time    |
+| ToolDef resolution     | Map lookup + inheritance chain walk       | **Zero** — inlined at compile time       |
+| Shadow tree creation   | `Object.create` + state setup per element | **Replaced** by `.map()` call            |
+| Promise branching      | `isPromise()` check at every level        | **Simplified** — single `await` per tool |
+| Safe-navigation        | try/catch wrapping                        | `?.` optional chaining (V8-optimized)    |
 
 ### Where the compiler does NOT help
 
@@ -139,7 +139,7 @@ catch fallbacks, and force statements. Here's the updated analysis:
    fallbacks, and force statements, the compiler handles the majority of
    real-world bridge files.
 
-2. **Drop-in replacement.** The `executeAot()` function matches the
+2. **Drop-in replacement.** The `executeBridge()` function matches the
    `executeBridge()` interface — same options, same result shape. Users can
    switch with a one-line change.
 
@@ -204,16 +204,16 @@ const { code, functionName } = compileBridge(document, {
 // Write `code` to a file or evaluate it
 ```
 
-### `executeAot(options)`
+### `executeBridge(options)`
 
 Compile-once, run-many execution. Drop-in replacement for `executeBridge()`.
 
 ```ts
 import { parseBridge } from "@stackables/bridge-parser";
-import { executeAot } from "@stackables/bridge-compiler";
+import { executeBridge } from "@stackables/bridge-compiler";
 
 const document = parseBridge(bridgeText);
-const { data } = await executeAot({
+const { data } = await executeBridge({
   document,
   operation: "Query.catalog",
   input: { category: "widgets" },
@@ -247,10 +247,10 @@ Generates:
 export default async function Query_catalog(input, tools, context) {
   const _t1 = await tools["api"]({}, context);
   return {
-    "title": (_t1?.["name"] ?? "Untitled"),
-    "entries": (_t1?.["items"] ?? []).map((_el) => ({
-      "id": _el?.["item_id"],
-      "label": _el?.["item_name"],
+    title: _t1?.["name"] ?? "Untitled",
+    entries: (_t1?.["items"] ?? []).map((_el) => ({
+      id: _el?.["item_id"],
+      label: _el?.["item_name"],
     })),
   };
 }
@@ -279,9 +279,12 @@ Generates:
 export default async function Query_safe(input, tools, context) {
   let _t1;
   try {
-    _t1 = await tools["std.httpCall"]({
-      "url": input?.["url"],
-    }, context);
+    _t1 = await tools["std.httpCall"](
+      {
+        url: input?.["url"],
+      },
+      context,
+    );
   } catch (_e) {
     _t1 = JSON.parse('{"status":"error"}');
   }
@@ -309,15 +312,23 @@ Generates:
 
 ```javascript
 export default async function Query_search(input, tools, context) {
-  const _t1 = await tools["mainApi"]({
-    "q": input?.["q"],
-  }, context);
-  try { await tools["audit.log"]({
-    "action": input?.["q"],
-  }, context); } catch (_e) {}
+  const _t1 = await tools["mainApi"](
+    {
+      q: input?.["q"],
+    },
+    context,
+  );
+  try {
+    await tools["audit.log"](
+      {
+        action: input?.["q"],
+      },
+      context,
+    );
+  } catch (_e) {}
   const _t2 = undefined;
   return {
-    "title": _t1?.["title"],
+    title: _t1?.["title"],
   };
 }
 ```

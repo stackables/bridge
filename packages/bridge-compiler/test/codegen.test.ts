@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge } from "@stackables/bridge-core";
-import { compileBridge, executeAot } from "../src/index.ts";
+import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
