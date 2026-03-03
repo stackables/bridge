@@ -565,6 +565,42 @@ bridge Query.refCatch {
     },
     expected: { data: "from-backup" },
   },
+  {
+    // Regression: if Tool A is consumed by Wire 1 (has `catch`) AND Wire 2 (no `catch`),
+    // and Tool A throws, the AOT compiler must NOT silently return undefined for Wire 2.
+    // Wire 2 has no fallback — the failure must propagate and crash the bridge.
+    name: "unguarded wire referencing catch-guarded tool re-throws on error",
+    bridgeText: `version 1.5
+bridge Query.mixed {
+  with api as a
+  with output as o
+
+  o.safe  <- a.result catch "fallback"
+  o.risky <- a.id
+}`,
+    operation: "Query.mixed",
+    tools: {
+      api: () => {
+        throw new Error("api down");
+      },
+    },
+    expectedError: /api down/,
+  },
+  {
+    // Success path: when Tool A succeeds both wires return normally.
+    name: "unguarded wire referencing catch-guarded tool succeeds on no error",
+    bridgeText: `version 1.5
+bridge Query.mixed {
+  with api as a
+  with output as o
+
+  o.safe  <- a.result catch "fallback"
+  o.risky <- a.id
+}`,
+    operation: "Query.mixed",
+    tools: { api: () => ({ result: "ok", id: 42 }) },
+    expected: { safe: "ok", risky: 42 },
+  },
 ];
 
 runSharedSuite("Shared: catch fallbacks", catchCases);
