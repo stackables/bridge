@@ -88,7 +88,7 @@ function getOrCompile(document: BridgeDocument, operation: string): AotFn {
  * @example
  * ```ts
  * import { parseBridge } from "@stackables/bridge-compiler";
- * import { executeAot } from "@stackables/bridge-aot";
+ * import { executeAot } from "@stackables/core-native";
  *
  * const document = parseBridge(readFileSync("my.bridge", "utf8"));
  * const { data } = await executeAot({

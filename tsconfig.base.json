@@ -40,9 +40,9 @@
         "./packages/bridge/build/index.d.ts",
         "./packages/bridge/src/index.ts"
       ],
-      "@stackables/bridge-aot": [
-        "./packages/bridge-aot/build/index.d.ts",
-        "./packages/bridge-aot/src/index.ts"
+      "@stackables/core-native": [
+        "./packages/core-native/build/index.d.ts",
+        "./packages/core-native/src/index.ts"
       ]
     }
   }

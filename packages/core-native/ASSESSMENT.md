@@ -1,7 +1,7 @@
 # Bridge AOT Compiler — Feasibility Assessment
 
 > **Status:** Experimental proof-of-concept (feature-rich)  
-> **Package:** `@stackables/bridge-aot`  
+> **Package:** `@stackables/core-native`  
 > **Date:** March 2026  
 > **Tests:** 147 passing (34 unit + 113 shared data-driven)
 
@@ -173,7 +173,7 @@ catch fallbacks, and force statements. Here's the updated analysis:
 
 #### Recommendation
 
-**Ship as experimental (`@stackables/bridge-aot`) and promote to stable once
+**Ship as experimental (`@stackables/core-native`) and promote to stable once
 `define` blocks are supported.** The current feature set covers the vast
 majority of production bridges including pipe operators, string interpolation,
 expressions, const blocks, and nested arrays. Target bridges that:
@@ -195,7 +195,7 @@ Compiles a bridge operation into standalone JavaScript source code.
 
 ```ts
 import { parseBridge } from "@stackables/bridge-compiler";
-import { compileBridge } from "@stackables/bridge-aot";
+import { compileBridge } from "@stackables/core-native";
 
 const document = parseBridge(bridgeText);
 const { code, functionName } = compileBridge(document, {
@@ -210,7 +210,7 @@ Compile-once, run-many execution. Drop-in replacement for `executeBridge()`.
 
 ```ts
 import { parseBridge } from "@stackables/bridge-compiler";
-import { executeAot } from "@stackables/bridge-aot";
+import { executeAot } from "@stackables/core-native";
 
 const document = parseBridge(bridgeText);
 const { data } = await executeAot({

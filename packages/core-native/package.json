@@ -1,7 +1,7 @@
 {
-  "name": "@stackables/bridge-aot",
+  "name": "@stackables/core-native",
   "version": "0.1.0",
-  "description": "Experimental ahead-of-time compiler for Bridge files into runnable JavaScript",
+  "description": "Native ahead-of-time compiler for Bridge files into runnable JavaScript",
   "main": "./build/index.js",
   "type": "module",
   "types": "./build/index.d.ts",
