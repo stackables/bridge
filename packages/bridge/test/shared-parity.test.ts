@@ -33,8 +33,8 @@ interface SharedTestCase {
   tools?: Record<string, (...args: any[]) => any>;
   /** Context passed to the engine */
   context?: Record<string, unknown>;
-  /** Expected output data (deep-equality check) */
-  expected: unknown;
+  /** Expected output data (deep-equality check) — omitted when expectedError is set */
+  expected?: unknown;
   /** Whether the AOT compiler supports this case (default: true) */
   aotSupported?: boolean;
   /** Whether to expect an error (message pattern) instead of a result */
@@ -76,12 +76,13 @@ function runSharedSuite(suiteName: string, cases: SharedTestCase[]) {
     for (const c of cases) {
       describe(c.name, () => {
         if (c.expectedError) {
+          const expectedError = c.expectedError;
           test("runtime: throws expected error", async () => {
-            await assert.rejects(() => runRuntime(c), c.expectedError);
+            await assert.rejects(() => runRuntime(c), expectedError);
           });
           if (c.aotSupported !== false) {
             test("aot: throws expected error", async () => {
-              await assert.rejects(() => runAot(c), c.expectedError);
+              await assert.rejects(() => runAot(c), expectedError);
             });
           }
           return;
@@ -525,7 +526,11 @@ bridge Query.safe {
   o.data <- a.result catch "fallback"
 }`,
     operation: "Query.safe",
-    tools: { api: () => { throw new Error("boom"); } },
+    tools: {
+      api: () => {
+        throw new Error("boom");
+      },
+    },
     expected: { data: "fallback" },
   },
   {
@@ -553,7 +558,9 @@ bridge Query.refCatch {
 }`,
     operation: "Query.refCatch",
     tools: {
-      primary: () => { throw new Error("primary failed"); },
+      primary: () => {
+        throw new Error("primary failed");
+      },
       backup: () => ({ fallback: "from-backup" }),
     },
     expected: { data: "from-backup" },
@@ -605,7 +612,9 @@ bridge Query.safe {
     input: { q: "test" },
     tools: {
       mainApi: async () => ({ title: "OK" }),
-      analytics: async () => { throw new Error("analytics down"); },
+      analytics: async () => {
+        throw new Error("analytics down");
+      },
     },
     expected: { title: "OK" },
   },
@@ -627,7 +636,9 @@ bridge Query.critical {
     input: { q: "test" },
     tools: {
       mainApi: async () => ({ title: "OK" }),
-      "audit.log": async () => { throw new Error("audit failed"); },
+      "audit.log": async () => {
+        throw new Error("audit failed");
+      },
     },
     expectedError: /audit failed/,
   },
@@ -659,7 +670,7 @@ bridge Query.data {
     operation: "Query.data",
     input: { path: "/users" },
     tools: {
-      myHttp: async (input: any) => ({ body: { ok: true } }),
+      myHttp: async (_: any) => ({ body: { ok: true } }),
     },
     context: { token: "Bearer abc123" },
     expected: { result: { ok: true } },
@@ -707,7 +718,9 @@ bridge Query.safe {
     operation: "Query.safe",
     input: { url: "https://broken.api" },
     tools: {
-      myHttp: async () => { throw new Error("connection refused"); },
+      myHttp: async () => {
+        throw new Error("connection refused");
+      },
     },
     expected: { status: "error", message: "service unavailable" },
   },
@@ -1070,7 +1083,7 @@ bridge Query.weather {
     operation: "Query.weather",
     input: { city: "Berlin" },
     tools: {
-      weatherApi: async (input: any) => ({
+      weatherApi: async (_: any) => ({
         temperature: 22,
         humidity: 65,
         windSpeed: 15,
@@ -1227,11 +1240,7 @@ bridge Query.test {
     operation: "Query.test",
     tools: {
       api: async () => ({
-        list: [
-          { name: "X" },
-          { name: null },
-          { name: "Y" },
-        ],
+        list: [{ name: "X" }, { name: null }, { name: "Y" }],
       }),
     },
     expected: { items: [{ name: "X" }, { name: "Y" }] },
@@ -1280,7 +1289,10 @@ bridge Query.test {
     tools: {
       api: async () => ({
         orders: [
-          { id: 1, items: [{ sku: "A" }, { sku: "B" }, { sku: null }, { sku: "D" }] },
+          {
+            id: 1,
+            items: [{ sku: "A" }, { sku: "B" }, { sku: null }, { sku: "D" }],
+          },
           { id: 2, items: [{ sku: null }, { sku: "E" }] },
         ],
       }),
