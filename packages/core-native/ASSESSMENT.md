@@ -3,7 +3,7 @@
 > **Status:** Experimental proof-of-concept (feature-rich)  
 > **Package:** `@stackables/core-native`  
 > **Date:** March 2026  
-> **Tests:** 147 passing (34 unit + 113 shared data-driven)
+> **Tests:** 178 passing (34 unit + 144 shared data-driven)
 
 ---
 
@@ -49,15 +49,16 @@ JavaScript function** that executes the same data flow as the runtime
 | Comparison expressions | ✅ | `o.isAdult <- i.age >= 18` |
 | Pipe operators | ✅ | `o.loud <- tu:i.text` |
 | Inlined internal tools | ✅ | Arithmetic, comparisons, concat — no tool call overhead |
+| `define` blocks | ✅ | `define secureProfile { ... }` — inlined at compile time |
+| `alias` declarations | ✅ | `alias api.result.data as d` — virtual containers |
+| Overdefinition | ✅ | `o.label <- api.label` + `o.label <- i.hint` — first non-null wins |
+| `break` / `continue` | ✅ | `item.name ?? continue`, `item.name ?? break` |
+| Null array preservation | ✅ | Null source arrays return null (not []) |
 
 ### Not yet supported
 
 | Feature | Complexity | Notes |
 |---------|-----------|-------|
-| `define` blocks | High | Inline subgraph expansion |
-| Overdefinition | Medium | Multiple wires to same target, null-boundary |
-| `break` / `continue` | Medium | Array control flow sentinels |
-| `alias` declarations | Medium | Named intermediate values |
 | Tracing / observability | High | Would need to inject instrumentation |
 | Abort signal support | Low | Check `signal.aborted` between tool calls |
 | Tool timeout | Medium | `Promise.race` with timeout |
