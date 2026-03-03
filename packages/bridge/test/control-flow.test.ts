@@ -254,7 +254,7 @@ forEachEngine("control flow execution", (run, ctx) => {
     // TODO: compiler does not support throw control flow
     test(
       "throw on || gate raises Error when value is falsy",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -285,7 +285,7 @@ bridge Query.test {
 
     test(
       "throw on ?? gate raises Error when value is null",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -305,7 +305,7 @@ bridge Query.test {
 
     test(
       "throw on catch gate raises Error when source throws",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -333,7 +333,7 @@ bridge Query.test {
     // TODO: compiler does not support panic control flow
     test(
       "panic raises BridgePanicError",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -354,7 +354,7 @@ bridge Query.test {
 
     test(
       "panic bypasses catch gate",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -378,7 +378,7 @@ bridge Query.test {
 
     test(
       "panic bypasses safe navigation (?.)",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -478,7 +478,7 @@ bridge Query.test {
     // TODO: compiler does not support catch on root array wire
     test(
       "catch continue on root array wire returns [] when source throws",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -505,7 +505,7 @@ bridge Query.test {
     // TODO: compiler does not support AbortSignal
     test(
       "aborted signal prevents tool execution",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -533,7 +533,7 @@ bridge Query.test {
 
     test(
       "abort error bypasses catch gate",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -559,7 +559,7 @@ bridge Query.test {
 
     test(
       "abort error bypasses safe navigation (?.)",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {

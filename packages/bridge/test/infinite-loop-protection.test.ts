@@ -63,7 +63,7 @@ bridge Query.items {
   // TODO: compiler does not have cycle detection
   test(
     "circular A→B→A dependency throws BridgePanicError",
-    { skip: ctx.engine === "compiled" },
+    
     async () => {
       const bridgeText = `version 1.5
 bridge Query.loop {

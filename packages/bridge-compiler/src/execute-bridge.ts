@@ -13,7 +13,7 @@ import type {
   ToolTrace,
   TraceLevel,
 } from "@stackables/bridge-core";
-import { TraceCollector } from "@stackables/bridge-core";
+import { TraceCollector, BridgePanicError, BridgeAbortError } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
 import { compileBridge } from "./codegen.ts";
 
@@ -78,6 +78,8 @@ type BridgeFn = (
       output: any,
       error: any,
     ) => void;
+    __BridgePanicError?: new (...args: any[]) => Error;
+    __BridgeAbortError?: new (...args: any[]) => Error;
   },
 ) => Promise<any>;
 
@@ -209,43 +211,42 @@ export async function executeBridge<T = unknown>(
     tracer = new TraceCollector(traceLevel);
   }
 
-  const opts =
-    signal || toolTimeoutMs || logger || tracer
-      ? {
-          signal,
-          toolTimeoutMs,
-          logger,
-          __trace: tracer
-            ? (
-                toolName: string,
-                start: number,
-                end: number,
-                toolInput: any,
-                output: any,
-                error: any,
-              ) => {
-                const startedAt = tracer!.now();
-                const durationMs = Math.round((end - start) * 1000) / 1000;
-                tracer!.record(
-                  tracer!.entry({
-                    tool: toolName,
-                    fn: toolName,
-                    startedAt: Math.max(0, startedAt - durationMs),
-                    durationMs,
-                    input: toolInput,
-                    output,
-                    error:
-                      error instanceof Error
-                        ? error.message
-                        : error
-                          ? String(error)
-                          : undefined,
-                  }),
-                );
-              }
-            : undefined,
+  const opts: NonNullable<Parameters<BridgeFn>[3]> = {
+    signal,
+    toolTimeoutMs,
+    logger,
+    __BridgePanicError: BridgePanicError,
+    __BridgeAbortError: BridgeAbortError,
+    __trace: tracer
+      ? (
+          toolName: string,
+          start: number,
+          end: number,
+          toolInput: any,
+          output: any,
+          error: any,
+        ) => {
+          const startedAt = tracer!.now();
+          const durationMs = Math.round((end - start) * 1000) / 1000;
+          tracer!.record(
+            tracer!.entry({
+              tool: toolName,
+              fn: toolName,
+              startedAt: Math.max(0, startedAt - durationMs),
+              durationMs,
+              input: toolInput,
+              output,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : error
+                    ? String(error)
+                    : undefined,
+            }),
+          );
         }
-      : undefined;
+      : undefined,
+  };
   const data = await fn(input, flatTools, context, opts);
   return { data: data as T, traces: tracer?.traces ?? [] };
 }

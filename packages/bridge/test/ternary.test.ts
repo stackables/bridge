@@ -344,7 +344,7 @@ bridge Query.pricing {
     // TODO: compiler doesn't support catch on ternary branches yet
     test(
       "catch literal fallback fires when chosen branch throws",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridge = `version 1.5
 bridge Query.pricing {
@@ -392,7 +392,7 @@ bridge Query.pricing {
     // TODO: compiler eagerly calls all tools; doesn't support lazy ternary branch evaluation yet
     test(
       "only the chosen branch tool is called",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         let proCalls = 0;
         let basicCalls = 0;
@@ -445,7 +445,7 @@ bridge Query.smartPrice {
     // TODO: compiler doesn't support ternary inside array element mapping yet
     test(
       "ternary works inside array element mapping",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridge = `version 1.5
 bridge Query.products {
@@ -478,7 +478,7 @@ bridge Query.products {
     // TODO: compiler doesn't support ?? panic on alias ternary yet
     test(
       "alias ternary + ?? panic fires on false branch → null",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.location {
@@ -565,7 +565,7 @@ bridge Query.test {
     // TODO: compiler doesn't support catch on alias ternary yet
     test(
       "alias ternary + catch literal fallback",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {
@@ -587,7 +587,7 @@ bridge Query.test {
     // TODO: compiler doesn't support ?? panic on alias ternary yet
     test(
       "string alias ternary + ?? panic",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const src = `version 1.5
 bridge Query.test {

@@ -669,7 +669,7 @@ bridge Query.test {
 forEachEngine("path scoping – array mapper execution", (run, ctx) => {
   test(
     "array mapper scope block executes correctly",
-    { skip: ctx.engine === "compiled" },
+    
     async () => {
       const bridge = `version 1.5
 
@@ -696,7 +696,7 @@ bridge Query.test {
 
   test(
     "nested scope blocks inside array mapper execute correctly",
-    { skip: ctx.engine === "compiled" },
+    
     async () => {
       const bridge = `version 1.5
 
@@ -729,7 +729,7 @@ bridge Query.test {
 forEachEngine("path traversal: null intermediate segment", (run, ctx) => {
   test(
     "throws TypeError when intermediate path segment is null",
-    { skip: ctx.engine === "compiled" },
+    
     async () => {
       const bridgeText = `version 1.5
 bridge Query.test {

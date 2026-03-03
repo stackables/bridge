@@ -269,7 +269,7 @@ bridge Query.listing {
     // TODO: compiler codegen bug — _t2_err not defined in scope blocks
     test(
       "o.field { .sub <- ... } produces nested object",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.weather {
@@ -397,7 +397,7 @@ bridge Query.searchTrains {
     // TODO: compiler does not support alias in array iteration
     test(
       "alias pipe:iter as name — evaluates pipe once per element",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         let enrichCallCount = 0;
         const bridgeText = `version 1.5
@@ -437,7 +437,7 @@ bridge Query.list {
 
     test(
       "alias iter.subfield as name — iterator-relative plain ref",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.list {
@@ -466,7 +466,7 @@ bridge Query.list {
 
     test(
       "alias tool:iter as name — tool handle ref in array",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.items {
@@ -558,7 +558,7 @@ bridge Query.test {
 
     test(
       "top-level alias reused inside array — not re-evaluated per element",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         let ucCallCount = 0;
         const bridgeText = `version 1.5
@@ -643,7 +643,7 @@ bridge Query.test {
     // TODO: compiler does not support catch on alias
     test(
       "alias with catch error boundary",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         let callCount = 0;
         const bridgeText = `version 1.5
@@ -669,7 +669,7 @@ bridge Query.test {
 
     test(
       "alias with ?. safe execution",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.test {
@@ -867,7 +867,7 @@ bridge Query.echo {
     // TODO: compiler error messages differ from runtime
     test(
       "invalid operation format throws",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         await assert.rejects(
           () => run("version 1.5", "badformat", {}),
@@ -878,7 +878,7 @@ bridge Query.echo {
 
     test(
       "missing bridge definition throws",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.foo {
@@ -894,7 +894,7 @@ bridge Query.foo {
 
     test(
       "bridge with no output wires throws descriptive error",
-      { skip: ctx.engine === "compiled" },
+      
       async () => {
         const bridgeText = `version 1.5
 bridge Query.ping {

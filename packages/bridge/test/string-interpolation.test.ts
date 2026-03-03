@@ -104,7 +104,7 @@ bridge Query.test {
   // TODO: compiler doesn't support interpolation inside array element mapping yet
   test(
     "template in element lines",
-    { skip: ctx.engine === "compiled" },
+    
     async () => {
       const bridge = `version 1.5
 bridge Query.test {
