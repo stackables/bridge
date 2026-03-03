@@ -1251,7 +1251,7 @@ bridge Query.test {
   api.q <- i.q
   o.name <- api.name
 }`);
-    const result = await executeAot({
+    const result = await executeAot<any>({
       document,
       operation: "Query.test",
       input: { q: "hello" },
@@ -1271,7 +1271,7 @@ bridge Query.test {
   api.q <- i.q
   o.name <- api.name
 }`);
-    const result = await executeAot({
+    const result = await executeAot<any>({
       document,
       operation: "Query.test",
       input: { q: "hello" },
@@ -1326,7 +1326,7 @@ bridge Query.test {
   api.q <- i.q
   o.name <- api?.name catch "fallback"
 }`);
-    const result = await executeAot({
+    const result = await executeAot<any>({
       document,
       operation: "Query.test",
       input: { q: "hello" },
@@ -1349,7 +1349,7 @@ bridge Query.test {
   with output as o
   o.name <- i.name
 }`);
-    const result = await executeAot({
+    const result = await executeAot<any>({
       document,
       operation: "Query.test",
       input: { name: "Alice" },

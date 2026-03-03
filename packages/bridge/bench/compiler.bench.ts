@@ -285,8 +285,14 @@ addPair(
   chainedTools,
 );
 
-// Short-circuit — runtime-only since the compiler doesn't have overdefinition bypass
-// (compiler always calls all tools in topological order)
+// Short-circuit (overdefinition bypass)
+addPair(
+  "short-circuit (overdefinition)",
+  SHORT_CIRCUIT,
+  "Query.shortCircuit",
+  { cached: "already-here" },
+  { expensiveApi: () => ({ data: "expensive" }) },
+);
 
 // Fallback chains
 addPair(
