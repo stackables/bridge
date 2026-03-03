@@ -1033,3 +1033,328 @@ bridge Query.test {
     );
   });
 });
+
+// ── Overdefinition bypass ────────────────────────────────────────────────────
+
+describe("AOT codegen: overdefinition bypass", () => {
+  test("input before tool — tool skipped when input is non-null", async () => {
+    const callLog: string[] = [];
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with expensiveApi
+  with input as i
+  with output as o
+
+  o.val <- i.cached
+  o.val <- expensiveApi.data
+}`,
+      "Query.test",
+      { cached: "hit" },
+      {
+        expensiveApi: () => {
+          callLog.push("expensiveApi");
+          return { data: "expensive" };
+        },
+      },
+    );
+    assert.equal(result.val, "hit");
+    assert.deepStrictEqual(callLog, [], "tool should NOT be called");
+  });
+
+  test("input before tool — tool called when input is null", async () => {
+    const callLog: string[] = [];
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with expensiveApi
+  with input as i
+  with output as o
+
+  o.val <- i.cached
+  o.val <- expensiveApi.data
+}`,
+      "Query.test",
+      {},
+      {
+        expensiveApi: () => {
+          callLog.push("expensiveApi");
+          return { data: "expensive" };
+        },
+      },
+    );
+    assert.equal(result.val, "expensive");
+    assert.deepStrictEqual(callLog, ["expensiveApi"], "tool should be called");
+  });
+
+  test("tool before input — tool always called (primary position)", async () => {
+    const callLog: string[] = [];
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  o.label <- api.label
+  o.label <- i.hint
+}`,
+      "Query.test",
+      { hint: "from-input" },
+      {
+        api: () => {
+          callLog.push("api");
+          return { label: "from-api" };
+        },
+      },
+    );
+    // Tool is first (primary) → always called → wins
+    assert.equal(result.label, "from-api");
+    assert.deepStrictEqual(callLog, ["api"]);
+  });
+
+  test("two tools — second skipped when first resolves non-null", async () => {
+    const callLog: string[] = [];
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with svcA
+  with svcB
+  with input as i
+  with output as o
+
+  svcA.q <- i.q
+  svcB.q <- i.q
+  o.label <- svcA.label
+  o.label <- svcB.label
+}`,
+      "Query.test",
+      { q: "test" },
+      {
+        svcA: () => {
+          callLog.push("svcA");
+          return { label: "from-A" };
+        },
+        svcB: () => {
+          callLog.push("svcB");
+          return { label: "from-B" };
+        },
+      },
+    );
+    assert.equal(result.label, "from-A");
+    assert.deepStrictEqual(callLog, ["svcA"], "svcB should NOT be called");
+  });
+
+  test("tool with multiple fields — not skipped if one field is primary", async () => {
+    const callLog: string[] = [];
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  o.name <- i.hint
+  o.name <- api.name
+  o.score <- api.score
+}`,
+      "Query.test",
+      { hint: "from-input" },
+      {
+        api: () => {
+          callLog.push("api");
+          return { name: "from-api", score: 42 };
+        },
+      },
+    );
+    // api has primary contribution (score) + secondary (name)
+    // → can't skip → tool MUST be called
+    assert.equal(result.name, "from-input");
+    assert.equal(result.score, 42);
+    assert.deepStrictEqual(callLog, ["api"]);
+  });
+
+  test("overdefinition parity — matches runtime behavior", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with expensiveApi
+  with input as i
+  with output as o
+
+  o.val <- i.cached
+  o.val <- expensiveApi.data
+}`;
+    const document = parseBridgeFormat(bridgeText);
+    const tools = {
+      expensiveApi: () => ({ data: "expensive" }),
+    };
+
+    // With cached value
+    const rtWithCache = await executeBridge({
+      document,
+      operation: "Query.test",
+      input: { cached: "hit" },
+      tools,
+    });
+    const aotWithCache = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { cached: "hit" },
+      tools,
+    });
+    assert.deepStrictEqual(aotWithCache.data, rtWithCache.data);
+
+    // Without cached value
+    const rtNoCache = await executeBridge({
+      document,
+      operation: "Query.test",
+      input: {},
+      tools,
+    });
+    const aotNoCache = await executeAot({
+      document,
+      operation: "Query.test",
+      input: {},
+      tools,
+    });
+    assert.deepStrictEqual(aotNoCache.data, rtNoCache.data);
+  });
+
+  test("generated code contains conditional wrapping", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.test {
+  with expensiveApi
+  with input as i
+  with output as o
+
+  o.val <- i.cached
+  o.val <- expensiveApi.data
+}`,
+      "Query.test",
+    );
+    // Should contain a let declaration (conditional) instead of const
+    assert.ok(code.includes("let _t"), "should use let for conditional tool");
+    assert.ok(code.includes("if ("), "should have conditional check");
+  });
+});
+
+// ── Tracing support ──────────────────────────────────────────────────────────
+
+describe("AOT codegen: tracing", () => {
+  test("trace: off returns empty traces array", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.name <- api.name
+}`);
+    const result = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { q: "hello" },
+      tools: { api: () => ({ name: "world" }) },
+      trace: "off",
+    });
+    assert.deepStrictEqual(result.traces, []);
+    assert.equal(result.data.name, "world");
+  });
+
+  test("trace: basic records tool calls without input/output", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.name <- api.name
+}`);
+    const result = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { q: "hello" },
+      tools: {
+        api: async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          return { name: "world" };
+        },
+      },
+      trace: "basic",
+    });
+    assert.equal(result.data.name, "world");
+    assert.equal(result.traces.length, 1);
+    const trace = result.traces[0]!;
+    assert.equal(trace.tool, "api");
+    assert.ok(trace.durationMs >= 0);
+    assert.ok(trace.startedAt >= 0);
+    // basic level should NOT include input/output
+    assert.equal(trace.input, undefined);
+    assert.equal(trace.output, undefined);
+  });
+
+  test("trace: full includes input and output", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.name <- api.name
+}`);
+    const result = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { q: "hello" },
+      tools: { api: () => ({ name: "world" }) },
+      trace: "full",
+    });
+    assert.equal(result.traces.length, 1);
+    const trace = result.traces[0]!;
+    assert.equal(trace.tool, "api");
+    assert.deepStrictEqual(trace.input, { q: "hello" });
+    assert.deepStrictEqual(trace.output, { name: "world" });
+  });
+
+  test("trace records error on tool failure", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.name <- api?.name catch "fallback"
+}`);
+    const result = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { q: "hello" },
+      tools: {
+        api: () => {
+          throw new Error("HTTP 500");
+        },
+      },
+      trace: "full",
+    });
+    assert.equal(result.data.name, "fallback");
+    assert.equal(result.traces.length, 1);
+    assert.equal(result.traces[0]!.error, "HTTP 500");
+  });
+
+  test("no-trace result still has traces field", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+  o.name <- i.name
+}`);
+    const result = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { name: "Alice" },
+    });
+    assert.deepStrictEqual(result.traces, []);
+    assert.equal(result.data.name, "Alice");
+  });
+});

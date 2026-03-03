@@ -6,7 +6,15 @@
  * zero-overhead execution.
  */
 
-import type { BridgeDocument, ToolMap, Logger } from "@stackables/bridge-core";
+import type {
+  BridgeDocument,
+  ToolMap,
+  Logger,
+  ToolTrace,
+  TraceLevel,
+} from "@stackables/bridge-core";
+import { TraceCollector } from "@stackables/bridge-core";
+import { std as bundledStd } from "@stackables/bridge-stdlib";
 import { compileBridge } from "./codegen.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -38,10 +46,18 @@ export type ExecuteBridgeOptions = {
   toolTimeoutMs?: number;
   /** Structured logger for tool calls. */
   logger?: Logger;
+  /**
+   * Enable tool-call tracing.
+   * - `"off"` (default) — no collection, zero overhead
+   * - `"basic"` — tool, fn, timing, errors; no input/output
+   * - `"full"` — everything including input and output
+   */
+  trace?: TraceLevel;
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
   data: T;
+  traces: ToolTrace[];
 };
 
 // ── Cache ───────────────────────────────────────────────────────────────────
@@ -50,7 +66,19 @@ type BridgeFn = (
   input: Record<string, unknown>,
   tools: Record<string, any>,
   context: Record<string, unknown>,
-  opts?: { signal?: AbortSignal; toolTimeoutMs?: number; logger?: Logger },
+  opts?: {
+    signal?: AbortSignal;
+    toolTimeoutMs?: number;
+    logger?: Logger;
+    __trace?: (
+      toolName: string,
+      start: number,
+      end: number,
+      input: any,
+      output: any,
+      error: any,
+    ) => void;
+  },
 ) => Promise<any>;
 
 const AsyncFunction = Object.getPrototypeOf(async function () {})
@@ -102,6 +130,34 @@ function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
   return fn;
 }
 
+// ── Tool flattening ─────────────────────────────────────────────────────────
+
+/**
+ * Flatten a nested tool map into dotted-key entries.
+ *
+ * The generated code accesses tools via flat keys like `tools["std.str.toUpperCase"]`.
+ * This function converts nested structures (`{ std: { str: { toUpperCase: fn } } }`)
+ * into the flat form the generated code expects.
+ *
+ * Already-flat entries (e.g. `"std.httpCall": fn`) are preserved as-is.
+ */
+function flattenTools(
+  obj: Record<string, any>,
+  prefix = "",
+): Record<string, any> {
+  const flat: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    const val = obj[key];
+    if (typeof val === "function") {
+      flat[fullKey] = val;
+    } else if (val != null && typeof val === "object") {
+      Object.assign(flat, flattenTools(val, fullKey));
+    }
+  }
+  return flat;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -132,7 +188,7 @@ export async function executeBridge<T = unknown>(
     document,
     operation,
     input = {},
-    tools = {},
+    tools: userTools = {},
     context = {},
     signal,
     toolTimeoutMs,
@@ -140,10 +196,56 @@ export async function executeBridge<T = unknown>(
   } = options;
 
   const fn = getOrCompile(document, operation);
+
+  // Merge built-in std namespace with user-provided tools, then flatten
+  // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].
+  const allTools: ToolMap = { std: bundledStd, ...userTools };
+  const flatTools = flattenTools(allTools as Record<string, any>);
+
+  // Set up tracing if requested
+  const traceLevel = options.trace ?? "off";
+  let tracer: TraceCollector | undefined;
+  if (traceLevel !== "off") {
+    tracer = new TraceCollector(traceLevel);
+  }
+
   const opts =
-    signal || toolTimeoutMs || logger
-      ? { signal, toolTimeoutMs, logger }
+    signal || toolTimeoutMs || logger || tracer
+      ? {
+          signal,
+          toolTimeoutMs,
+          logger,
+          __trace: tracer
+            ? (
+                toolName: string,
+                start: number,
+                end: number,
+                toolInput: any,
+                output: any,
+                error: any,
+              ) => {
+                const startedAt = tracer!.now();
+                const durationMs = Math.round((end - start) * 1000) / 1000;
+                tracer!.record(
+                  tracer!.entry({
+                    tool: toolName,
+                    fn: toolName,
+                    startedAt: Math.max(0, startedAt - durationMs),
+                    durationMs,
+                    input: toolInput,
+                    output,
+                    error:
+                      error instanceof Error
+                        ? error.message
+                        : error
+                          ? String(error)
+                          : undefined,
+                  }),
+                );
+              }
+            : undefined,
+        }
       : undefined;
-  const data = await fn(input, tools as Record<string, any>, context, opts);
-  return { data: data as T };
+  const data = await fn(input, flatTools, context, opts);
+  return { data: data as T, traces: tracer?.traces ?? [] };
 }

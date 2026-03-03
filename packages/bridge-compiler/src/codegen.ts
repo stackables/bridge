@@ -278,6 +278,12 @@ class CodegenContext {
     // Register pipe handles (synthetic tool instances for interpolation,
     // expressions, and explicit pipe operators)
     if (bridge.pipeHandles) {
+      // Build handle→fullName map for resolving dotted tool names (e.g. "std.str.toUpperCase")
+      const handleToolNames = new Map<string, string>();
+      for (const h of bridge.handles) {
+        if (h.kind === "tool") handleToolNames.set(h.handle, h.name);
+      }
+
       for (const ph of bridge.pipeHandles) {
         // Use the pipe handle's key directly — it already includes the correct instance
         const tk = ph.key;
@@ -285,7 +291,14 @@ class CodegenContext {
           const vn = `_t${++this.toolCounter}`;
           this.varMap.set(tk, vn);
           const field = ph.baseTrunk.field;
-          this.tools.set(tk, { trunkKey: tk, toolName: field, varName: vn });
+          // Use the full tool name from the handle binding (e.g. "std.str.toUpperCase")
+          // falling back to just the field name for internal/synthetic handles
+          const fullToolName = handleToolNames.get(ph.handle) ?? field;
+          this.tools.set(tk, {
+            trunkKey: tk,
+            toolName: fullToolName,
+            varName: vn,
+          });
           if (INTERNAL_TOOLS.has(field)) {
             this.internalToolKeys.add(tk);
           }
@@ -407,6 +420,18 @@ class CodegenContext {
     // Topological sort of tool calls (including define containers)
     const toolOrder = this.topologicalSort(toolWires);
 
+    // ── Overdefinition bypass analysis ────────────────────────────────────
+    // When multiple wires target the same output path ("overdefinition"),
+    // the runtime's pull-based model skips later tools if earlier sources
+    // resolve non-null.  The compiler replicates this: if a tool's output
+    // contributions are ALL in secondary (non-first) position, the tool
+    // call is wrapped in a null-check on the prior sources.
+    const conditionalTools = this.analyzeOverdefinitionBypass(
+      outputWires,
+      toolOrder,
+      forceMap,
+    );
+
     // Build code lines
     const lines: string[] = [];
     lines.push(`// AOT-compiled bridge: ${bridge.type}.${bridge.field}`);
@@ -420,18 +445,33 @@ class CodegenContext {
     lines.push(
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
-    lines.push(`  async function __call(fn, input) {`);
+    lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(`  async function __call(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new Error("aborted");`);
-    lines.push(`    const p = fn(input, __ctx);`);
-    lines.push(`    if (__timeoutMs > 0) {`);
+    lines.push(`    const start = __trace ? performance.now() : 0;`);
+    lines.push(`    try {`);
+    lines.push(`      const p = fn(input, __ctx);`);
+    lines.push(`      let result;`);
+    lines.push(`      if (__timeoutMs > 0) {`);
     lines.push(
-      `      let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error("Tool timeout")), __timeoutMs); });`,
+      `        let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error("Tool timeout")), __timeoutMs); });`,
     );
     lines.push(
-      `      try { return await Promise.race([p, timeout]); } finally { clearTimeout(t); }`,
+      `        try { result = await Promise.race([p, timeout]); } finally { clearTimeout(t); }`,
     );
+    lines.push(`      } else {`);
+    lines.push(`        result = await p;`);
+    lines.push(`      }`);
+    lines.push(
+      `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
+    );
+    lines.push(`      return result;`);
+    lines.push(`    } catch (err) {`);
+    lines.push(
+      `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
+    );
+    lines.push(`      throw err;`);
     lines.push(`    }`);
-    lines.push(`    return p;`);
     lines.push(`  }`);
 
     // Emit tool calls and define container assignments
@@ -448,7 +488,27 @@ class CodegenContext {
       const wires = toolWires.get(tk) ?? [];
       const forceInfo = forceMap.get(tk);
 
-      if (forceInfo?.catchError) {
+      // Check for overdefinition bypass — conditionally skip tools whose
+      // output contributions are all secondary (overdefined by earlier sources)
+      const bypass = conditionalTools.get(tk);
+      if (bypass && !forceInfo && !this.catchGuardedTools.has(tk)) {
+        // Emit conditional tool call: only call if prior sources are null
+        const condition = bypass.checkExprs
+          .map((expr) => `(${expr}) == null`)
+          .join(" || ");
+        lines.push(`  let ${tool.varName};`);
+        lines.push(`  if (${condition}) {`);
+        // Capture tool call into a buffer, then transform to assignment + indent
+        const buf: string[] = [];
+        this.emitToolCall(buf, tool, wires, "normal");
+        for (const line of buf) {
+          lines.push(
+            "  " +
+              line.replace(`const ${tool.varName} = `, `${tool.varName} = `),
+          );
+        }
+        lines.push(`  }`);
+      } else if (forceInfo?.catchError) {
         this.emitToolCall(lines, tool, wires, "fire-and-forget");
       } else if (this.catchGuardedTools.has(tk)) {
         this.emitToolCall(lines, tool, wires, "catch-guarded");
@@ -508,18 +568,18 @@ class CodegenContext {
       );
       if (mode === "fire-and-forget") {
         lines.push(
-          `  try { await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}); } catch (_e) {}`,
+          `  try { await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)}); } catch (_e) {}`,
         );
         lines.push(`  const ${tool.varName} = undefined;`);
       } else if (mode === "catch-guarded") {
         // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
         lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
         lines.push(
-          `  try { ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}); } catch (_e) { ${tool.varName}_err = _e; }`,
+          `  try { ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)}); } catch (_e) { ${tool.varName}_err = _e; }`,
         );
       } else {
         lines.push(
-          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj});`,
+          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)});`,
         );
       }
       return;
@@ -576,7 +636,7 @@ class CodegenContext {
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
       lines.push(
-        `    ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj});`,
+        `    ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)});`,
       );
       lines.push(`  } catch (_e) {`);
       if ("value" in onErrorWire) {
@@ -593,18 +653,18 @@ class CodegenContext {
       lines.push(`  }`);
     } else if (mode === "fire-and-forget") {
       lines.push(
-        `  try { await __call(tools[${JSON.stringify(fnName)}], ${inputObj}); } catch (_e) {}`,
+        `  try { await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}); } catch (_e) {}`,
       );
       lines.push(`  const ${tool.varName} = undefined;`);
     } else if (mode === "catch-guarded") {
       // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
       lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
       lines.push(
-        `  try { ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}); } catch (_e) { ${tool.varName}_err = _e; }`,
+        `  try { ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}); } catch (_e) { ${tool.varName}_err = _e; }`,
       );
     } else {
       lines.push(
-        `  const ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj});`,
+        `  const ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)});`,
       );
     }
   }
@@ -696,7 +756,7 @@ class CodegenContext {
           4,
         );
         lines.push(
-          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj});`,
+          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)});`,
         );
         return;
       }
@@ -1423,6 +1483,174 @@ class CodegenContext {
 
     const innerPad = " ".repeat(indent - 2);
     return `{\n${entries.join(",\n")},\n${innerPad}}`;
+  }
+
+  // ── Overdefinition bypass ───────────────────────────────────────────────
+
+  /**
+   * Analyze output wires to identify tools that can be conditionally
+   * skipped ("overdefinition bypass").
+   *
+   * When multiple wires target the same output path, the runtime's
+   * pull-based model evaluates them in authored order and returns the
+   * first non-null result — later tools are never called.
+   *
+   * This method detects tools whose output contributions are ALL in
+   * secondary (non-first) position and returns check expressions that
+   * the caller uses to wrap the tool call in a null-guarded `if` block.
+   *
+   * Returns a Map from tool trunk key → { checkExprs: string[] }.
+   * The tool should only be called if ANY check expression is null.
+   */
+  private analyzeOverdefinitionBypass(
+    outputWires: Wire[],
+    toolOrder: string[],
+    forceMap: Map<string, { catchError?: boolean }>,
+  ): Map<string, { checkExprs: string[] }> {
+    const result = new Map<string, { checkExprs: string[] }>();
+
+    // Step 1: Group scalar output wires by path, preserving authored order.
+    // Skip root wires (empty path) and element wires (array mapping).
+    const outputByPath = new Map<string, Wire[]>();
+    for (const w of outputWires) {
+      if (w.to.path.length === 0) continue;
+      if ("from" in w && w.from.element) continue;
+      const pathKey = w.to.path.join(".");
+      const arr = outputByPath.get(pathKey) ?? [];
+      arr.push(w);
+      outputByPath.set(pathKey, arr);
+    }
+
+    // Step 2: For each overdefined path, track tool positions.
+    // toolTk → { secondaryPaths, hasPrimary }
+    const toolInfo = new Map<
+      string,
+      {
+        secondaryPaths: { pathKey: string; priorExpr: string }[];
+        hasPrimary: boolean;
+      }
+    >();
+
+    // Memoize tool sources referenced in prior chains per tool
+    const priorToolDeps = new Map<string, Set<string>>();
+
+    for (const [pathKey, wires] of outputByPath) {
+      if (wires.length < 2) continue; // no overdefinition
+
+      // Build progressive prior expression chain
+      let priorExpr: string | null = null;
+      const priorToolsForPath = new Set<string>();
+
+      for (let i = 0; i < wires.length; i++) {
+        const w = wires[i]!;
+        const wireExpr = this.wireToExpr(w);
+
+        // Check if this wire pulls from a tool
+        if ("from" in w && !w.from.element) {
+          const srcTk = refTrunkKey(w.from);
+          if (this.tools.has(srcTk) && !this.defineContainers.has(srcTk)) {
+            if (!toolInfo.has(srcTk)) {
+              toolInfo.set(srcTk, { secondaryPaths: [], hasPrimary: false });
+            }
+            const info = toolInfo.get(srcTk)!;
+
+            if (i === 0) {
+              info.hasPrimary = true;
+            } else {
+              info.secondaryPaths.push({
+                pathKey,
+                priorExpr: priorExpr!,
+              });
+              // Record which tools are referenced in prior expressions
+              if (!priorToolDeps.has(srcTk))
+                priorToolDeps.set(srcTk, new Set());
+              for (const dep of priorToolsForPath) {
+                priorToolDeps.get(srcTk)!.add(dep);
+              }
+            }
+          }
+        }
+
+        // Track tools referenced in this wire (for cascading conditionals)
+        if ("from" in w && !w.from.element) {
+          const refTk = refTrunkKey(w.from);
+          if (this.tools.has(refTk)) priorToolsForPath.add(refTk);
+        }
+
+        // Extend prior expression chain
+        if (i === 0) {
+          priorExpr = wireExpr;
+        } else {
+          priorExpr = `(${priorExpr} ?? ${wireExpr})`;
+        }
+      }
+    }
+
+    // Step 3: Build topological order index for dependency checking
+    const topoIndex = new Map(toolOrder.map((tk, i) => [tk, i]));
+
+    // Step 4: Determine which tools qualify for bypass
+    for (const [toolTk, info] of toolInfo) {
+      // Must be fully secondary (no primary contributions)
+      if (info.hasPrimary) continue;
+      if (info.secondaryPaths.length === 0) continue;
+
+      // Exclude force tools, catch-guarded tools, internal tools
+      if (forceMap.has(toolTk)) continue;
+      if (this.catchGuardedTools.has(toolTk)) continue;
+      if (this.internalToolKeys.has(toolTk)) continue;
+
+      // Exclude tools with onError in their ToolDef
+      const tool = this.tools.get(toolTk);
+      if (tool) {
+        const toolDef = this.resolveToolDef(tool.toolName);
+        if (toolDef?.wires.some((w) => w.kind === "onError")) continue;
+      }
+
+      // Check that all prior tool dependencies appear earlier in topological order
+      const thisIdx = topoIndex.get(toolTk) ?? Infinity;
+      const deps = priorToolDeps.get(toolTk);
+      let valid = true;
+      if (deps) {
+        for (const dep of deps) {
+          if ((topoIndex.get(dep) ?? Infinity) >= thisIdx) {
+            valid = false;
+            break;
+          }
+        }
+      }
+      if (!valid) continue;
+
+      // Check that the tool has no uncaptured output contributions
+      // (e.g., root wires or element wires that we skipped in analysis)
+      let hasUncaptured = false;
+      const capturedPaths = new Set(
+        info.secondaryPaths.map((sp) => sp.pathKey),
+      );
+      for (const w of outputWires) {
+        if (!("from" in w)) continue;
+        if (w.from.element) continue;
+        const srcTk = refTrunkKey(w.from);
+        if (srcTk !== toolTk) continue;
+        if (w.to.path.length === 0) {
+          hasUncaptured = true;
+          break;
+        }
+        const pk = w.to.path.join(".");
+        if (!capturedPaths.has(pk)) {
+          hasUncaptured = true;
+          break;
+        }
+      }
+      if (hasUncaptured) continue;
+
+      // All checks passed — this tool can be conditionally skipped
+      const checkExprs = info.secondaryPaths.map((sp) => sp.priorExpr);
+      const uniqueChecks = [...new Set(checkExprs)];
+      result.set(toolTk, { checkExprs: uniqueChecks });
+    }
+
+    return result;
   }
 
   // ── Dependency analysis & topological sort ────────────────────────────────

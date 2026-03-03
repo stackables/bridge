@@ -4,25 +4,9 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import { executeBridge } from "../src/index.ts";
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown> = {},
-  tools: Record<string, any> = {},
-  signal?: AbortSignal,
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
-    typeof parseBridge
-  >;
-  return executeBridge({ document, operation, input, tools, signal });
-}
+import { forEachEngine } from "./_dual-run.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Parser: control flow keywords
@@ -262,145 +246,164 @@ bridge Query.test {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 3. Engine: throw behavior
+// 3–6. Engine execution tests (run against both engines)
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("executeBridge: throw control flow", () => {
-  test("throw on || gate raises Error when value is falsy", async () => {
-    const src = `version 1.5
+forEachEngine("control flow execution", (run, ctx) => {
+  describe("throw", () => {
+    // TODO: compiler does not support throw control flow
+    test(
+      "throw on || gate raises Error when value is falsy",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name || throw "name is required"
 }`;
-    await assert.rejects(
-      () => run(src, "Query.test", { name: "" }),
-      (err: Error) => {
-        assert.equal(err.message, "name is required");
-        return true;
+        await assert.rejects(
+          () => run(src, "Query.test", { name: "" }),
+          (err: Error) => {
+            assert.equal(err.message, "name is required");
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("throw on || gate does NOT fire when value is truthy", async () => {
-    const src = `version 1.5
+    test("throw on || gate does NOT fire when value is truthy", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name || throw "name is required"
 }`;
-    const { data } = await run(src, "Query.test", { name: "Alice" });
-    assert.deepStrictEqual(data, { name: "Alice" });
-  });
+      const { data } = await run(src, "Query.test", { name: "Alice" });
+      assert.deepStrictEqual(data, { name: "Alice" });
+    });
 
-  test("throw on ?? gate raises Error when value is null", async () => {
-    const src = `version 1.5
+    test(
+      "throw on ?? gate raises Error when value is null",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name ?? throw "name cannot be null"
 }`;
-    await assert.rejects(
-      () => run(src, "Query.test", {}),
-      (err: Error) => {
-        assert.equal(err.message, "name cannot be null");
-        return true;
+        await assert.rejects(
+          () => run(src, "Query.test", {}),
+          (err: Error) => {
+            assert.equal(err.message, "name cannot be null");
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("throw on catch gate raises Error when source throws", async () => {
-    const src = `version 1.5
+    test(
+      "throw on catch gate raises Error when source throws",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a.name catch throw "api call failed"
 }`;
-    const tools = {
-      api: async () => {
-        throw new Error("network error");
-      },
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools),
-      (err: Error) => {
-        assert.equal(err.message, "api call failed");
-        return true;
+        const tools = {
+          api: async () => {
+            throw new Error("network error");
+          },
+        };
+        await assert.rejects(
+          () => run(src, "Query.test", {}, tools),
+          (err: Error) => {
+            assert.equal(err.message, "api call failed");
+            return true;
+          },
+        );
       },
     );
   });
-});
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 4. Engine: panic behavior (bypasses error boundaries)
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("executeBridge: panic control flow", () => {
-  test("panic raises BridgePanicError", async () => {
-    const src = `version 1.5
+  describe("panic", () => {
+    // TODO: compiler does not support panic control flow
+    test(
+      "panic raises BridgePanicError",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   o.name <- i.name ?? panic "fatal error"
 }`;
-    await assert.rejects(
-      () => run(src, "Query.test", {}),
-      (err: Error) => {
-        assert.ok(err instanceof BridgePanicError);
-        assert.equal(err.message, "fatal error");
-        return true;
+        await assert.rejects(
+          () => run(src, "Query.test", {}),
+          (err: Error) => {
+            assert.ok(err instanceof BridgePanicError);
+            assert.equal(err.message, "fatal error");
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("panic bypasses catch gate", async () => {
-    const src = `version 1.5
+    test(
+      "panic bypasses catch gate",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a.name ?? panic "fatal" catch "fallback"
 }`;
-    const tools = {
-      api: async () => ({ name: null }),
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools),
-      (err: Error) => {
-        assert.ok(err instanceof BridgePanicError);
-        assert.equal(err.message, "fatal");
-        return true;
+        const tools = {
+          api: async () => ({ name: null }),
+        };
+        await assert.rejects(
+          () => run(src, "Query.test", {}, tools),
+          (err: Error) => {
+            assert.ok(err instanceof BridgePanicError);
+            assert.equal(err.message, "fatal");
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("panic bypasses safe navigation (?.)", async () => {
-    const src = `version 1.5
+    test(
+      "panic bypasses safe navigation (?.)",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a?.name ?? panic "must not be null"
 }`;
-    const tools = {
-      api: async () => ({ name: null }),
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools),
-      (err: Error) => {
-        assert.ok(err instanceof BridgePanicError);
-        assert.equal(err.message, "must not be null");
-        return true;
+        const tools = {
+          api: async () => ({ name: null }),
+        };
+        await assert.rejects(
+          () => run(src, "Query.test", {}, tools),
+          (err: Error) => {
+            assert.ok(err instanceof BridgePanicError);
+            assert.equal(err.message, "must not be null");
+            return true;
+          },
+        );
       },
     );
   });
-});
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 5. Engine: continue/break in array iteration
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("executeBridge: continue/break in arrays", () => {
-  test("continue skips null elements in array mapping", async () => {
-    const src = `version 1.5
+  describe("continue/break in arrays", () => {
+    test("continue skips null elements in array mapping", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -408,25 +411,25 @@ bridge Query.test {
     .name <- item.name ?? continue
   }
 }`;
-    const tools = {
-      api: async () => ({
-        items: [
-          { name: "Alice" },
-          { name: null },
-          { name: "Bob" },
-          { name: null },
-        ],
-      }),
-    };
-    const { data } = (await run(src, "Query.test", {}, tools)) as {
-      data: any[];
-    };
-    assert.equal(data.length, 2);
-    assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
-  });
+      const tools = {
+        api: async () => ({
+          items: [
+            { name: "Alice" },
+            { name: null },
+            { name: "Bob" },
+            { name: null },
+          ],
+        }),
+      };
+      const { data } = (await run(src, "Query.test", {}, tools)) as {
+        data: any[];
+      };
+      assert.equal(data.length, 2);
+      assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
+    });
 
-  test("break halts array processing", async () => {
-    const src = `version 1.5
+    test("break halts array processing", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -434,28 +437,28 @@ bridge Query.test {
     .name <- item.name ?? break
   }
 }`;
-    const tools = {
-      api: async () => ({
-        items: [
-          { name: "Alice" },
-          { name: "Bob" },
-          { name: null },
-          { name: "Carol" },
-        ],
-      }),
-    };
-    const { data } = (await run(src, "Query.test", {}, tools)) as {
-      data: any[];
-    };
-    assert.equal(data.length, 2);
-    assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
-  });
+      const tools = {
+        api: async () => ({
+          items: [
+            { name: "Alice" },
+            { name: "Bob" },
+            { name: null },
+            { name: "Carol" },
+          ],
+        }),
+      };
+      const { data } = (await run(src, "Query.test", {}, tools)) as {
+        data: any[];
+      };
+      assert.equal(data.length, 2);
+      assert.deepStrictEqual(data, [{ name: "Alice" }, { name: "Bob" }]);
+    });
 
-  test("?? continue on root array wire returns [] when source is null", async () => {
-    // Guards against a crash where pullOutputField / response() would throw
-    // TypeError: items is not iterable when resolveWires returns CONTINUE_SYM
-    // for the root array wire itself.
-    const src = `version 1.5
+    test("?? continue on root array wire returns [] when source is null", async () => {
+      // Guards against a crash where pullOutputField / response() would throw
+      // TypeError: items is not iterable when resolveWires returns CONTINUE_SYM
+      // for the root array wire itself.
+      const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -463,17 +466,21 @@ bridge Query.test {
     .name <- item.name
   } ?? continue
 }`;
-    const tools = {
-      api: async () => ({ items: null }),
-    };
-    const { data } = (await run(src, "Query.test", {}, tools)) as {
-      data: any[];
-    };
-    assert.deepStrictEqual(data, []);
-  });
+      const tools = {
+        api: async () => ({ items: null }),
+      };
+      const { data } = (await run(src, "Query.test", {}, tools)) as {
+        data: any[];
+      };
+      assert.deepStrictEqual(data, []);
+    });
 
-  test("catch continue on root array wire returns [] when source throws", async () => {
-    const src = `version 1.5
+    // TODO: compiler does not support catch on root array wire
+    test(
+      "catch continue on root array wire returns [] when source throws",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
@@ -481,106 +488,120 @@ bridge Query.test {
     .name <- item.name
   } catch continue
 }`;
-    const tools = {
-      api: async () => {
-        throw new Error("service unavailable");
+        const tools = {
+          api: async () => {
+            throw new Error("service unavailable");
+          },
+        };
+        const { data } = (await run(src, "Query.test", {}, tools)) as {
+          data: any[];
+        };
+        assert.deepStrictEqual(data, []);
       },
-    };
-    const { data } = (await run(src, "Query.test", {}, tools)) as {
-      data: any[];
-    };
-    assert.deepStrictEqual(data, []);
+    );
   });
-});
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 6. AbortSignal integration
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("executeBridge: AbortSignal", () => {
-  test("aborted signal prevents tool execution", async () => {
-    const src = `version 1.5
+  describe("AbortSignal", () => {
+    // TODO: compiler does not support AbortSignal
+    test(
+      "aborted signal prevents tool execution",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a.name
 }`;
-    const controller = new AbortController();
-    controller.abort(); // Abort immediately
-    const tools = {
-      api: async () => {
-        throw new Error("should not be called");
-      },
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools, controller.signal),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
+        const controller = new AbortController();
+        controller.abort(); // Abort immediately
+        const tools = {
+          api: async () => {
+            throw new Error("should not be called");
+          },
+        };
+        await assert.rejects(
+          () =>
+            run(src, "Query.test", {}, tools, { signal: controller.signal }),
+          (err: Error) => {
+            assert.ok(err instanceof BridgeAbortError);
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("abort error bypasses catch gate", async () => {
-    const src = `version 1.5
+    test(
+      "abort error bypasses catch gate",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a.name catch "fallback"
 }`;
-    const controller = new AbortController();
-    controller.abort();
-    const tools = {
-      api: async () => ({ name: "test" }),
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools, controller.signal),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
+        const controller = new AbortController();
+        controller.abort();
+        const tools = {
+          api: async () => ({ name: "test" }),
+        };
+        await assert.rejects(
+          () =>
+            run(src, "Query.test", {}, tools, { signal: controller.signal }),
+          (err: Error) => {
+            assert.ok(err instanceof BridgeAbortError);
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("abort error bypasses safe navigation (?.)", async () => {
-    const src = `version 1.5
+    test(
+      "abort error bypasses safe navigation (?.)",
+      { skip: ctx.engine === "compiled" },
+      async () => {
+        const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a?.name
 }`;
-    const controller = new AbortController();
-    controller.abort();
-    const tools = {
-      api: async () => ({ name: "test" }),
-    };
-    await assert.rejects(
-      () => run(src, "Query.test", {}, tools, controller.signal),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
+        const controller = new AbortController();
+        controller.abort();
+        const tools = {
+          api: async () => ({ name: "test" }),
+        };
+        await assert.rejects(
+          () =>
+            run(src, "Query.test", {}, tools, { signal: controller.signal }),
+          (err: Error) => {
+            assert.ok(err instanceof BridgeAbortError);
+            return true;
+          },
+        );
       },
     );
-  });
 
-  test("signal is passed to tool context", async () => {
-    const src = `version 1.5
+    test("signal is passed to tool context", async () => {
+      const src = `version 1.5
 bridge Query.test {
   with api as a
   with output as o
   o.name <- a.name
 }`;
-    const controller = new AbortController();
-    let receivedSignal: AbortSignal | undefined;
-    const tools = {
-      api: async (_input: any, ctx: any) => {
-        receivedSignal = ctx.signal;
-        return { name: "test" };
-      },
-    };
-    await run(src, "Query.test", {}, tools, controller.signal);
-    assert.ok(receivedSignal);
-    assert.equal(receivedSignal, controller.signal);
+      const controller = new AbortController();
+      let receivedSignal: AbortSignal | undefined;
+      const tools = {
+        api: async (_input: any, ctx: any) => {
+          receivedSignal = ctx.signal;
+          return { name: "test" };
+        },
+      };
+      await run(src, "Query.test", {}, tools, { signal: controller.signal });
+      assert.ok(receivedSignal);
+      assert.equal(receivedSignal, controller.signal);
+    });
   });
 });
 

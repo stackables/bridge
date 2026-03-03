@@ -5,19 +5,7 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import type { Bridge, BridgeDocument, Wire } from "../src/index.ts";
-import { executeBridge } from "../src/index.ts";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown> = {},
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
-  return executeBridge({ document, operation, input });
-}
+import { forEachEngine } from "./_dual-run.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
 
@@ -399,9 +387,10 @@ bridge Query.test {
 
 // ── Execution tests ─────────────────────────────────────────────────────────
 
-describe("path scoping – execution", () => {
-  test("scope block constants resolve at runtime", async () => {
-    const bridge = `version 1.5
+forEachEngine("path scoping execution", (run, ctx) => {
+  describe("basic", () => {
+    test("scope block constants resolve at runtime", async () => {
+      const bridge = `version 1.5
 
 bridge Query.config {
   with output as o
@@ -411,12 +400,12 @@ bridge Query.config {
     .lang = "en"
   }
 }`;
-    const result = await run(bridge, "Query.config");
-    assert.deepStrictEqual(result.data, { theme: "dark", lang: "en" });
-  });
+      const result = await run(bridge, "Query.config");
+      assert.deepStrictEqual(result.data, { theme: "dark", lang: "en" });
+    });
 
-  test("scope block pull wires resolve at runtime", async () => {
-    const bridge = `version 1.5
+    test("scope block pull wires resolve at runtime", async () => {
+      const bridge = `version 1.5
 
 bridge Query.user {
   with input as i
@@ -427,18 +416,18 @@ bridge Query.user {
     .email <- i.email
   }
 }`;
-    const result = await run(bridge, "Query.user", {
-      name: "Alice",
-      email: "alice@test.com",
+      const result = await run(bridge, "Query.user", {
+        name: "Alice",
+        email: "alice@test.com",
+      });
+      assert.deepStrictEqual(result.data, {
+        name: "Alice",
+        email: "alice@test.com",
+      });
     });
-    assert.deepStrictEqual(result.data, {
-      name: "Alice",
-      email: "alice@test.com",
-    });
-  });
 
-  test("nested scope blocks resolve deeply nested objects", async () => {
-    const bridge = `version 1.5
+    test("nested scope blocks resolve deeply nested objects", async () => {
+      const bridge = `version 1.5
 
 bridge Query.profile {
   with input as i
@@ -449,15 +438,15 @@ bridge Query.profile {
   o.settings.theme <- i.theme || "light"
   o.settings.notifications = true
 }`;
-    // First verify this works with flat syntax
-    const flatResult = await run(bridge, "Query.profile", {
-      id: "42",
-      name: "Bob",
-      theme: "dark",
-    });
+      // First verify this works with flat syntax
+      const flatResult = await run(bridge, "Query.profile", {
+        id: "42",
+        name: "Bob",
+        theme: "dark",
+      });
 
-    // Then verify scope block syntax produces identical result
-    const scopedBridge = `version 1.5
+      // Then verify scope block syntax produces identical result
+      const scopedBridge = `version 1.5
 
 bridge Query.profile {
   with input as i
@@ -474,17 +463,17 @@ bridge Query.profile {
     }
   }
 }`;
-    const scopedResult = await run(scopedBridge, "Query.profile", {
-      id: "42",
-      name: "Bob",
-      theme: "dark",
+      const scopedResult = await run(scopedBridge, "Query.profile", {
+        id: "42",
+        name: "Bob",
+        theme: "dark",
+      });
+
+      assert.deepStrictEqual(scopedResult.data, flatResult.data);
     });
 
-    assert.deepStrictEqual(scopedResult.data, flatResult.data);
-  });
-
-  test("scope block on tool input wires to tool correctly", () => {
-    const bridge = `version 1.5
+    test("scope block on tool input wires to tool correctly", () => {
+      const bridge = `version 1.5
 
 tool api from std.httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
@@ -502,19 +491,19 @@ bridge Query.test {
   }
   o.success = true
 }`;
-    const parsed = parseBridge(bridge);
-    const br = parsed.instructions.find(
-      (i): i is Bridge => i.kind === "bridge",
-    )!;
-    const pullWires = br.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
-    const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
-    assert.ok(qWire, "wire to api.q should exist");
-  });
+      const parsed = parseBridge(bridge);
+      const br = parsed.instructions.find(
+        (i): i is Bridge => i.kind === "bridge",
+      )!;
+      const pullWires = br.wires.filter(
+        (w): w is Extract<Wire, { from: any }> => "from" in w,
+      );
+      const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
+      assert.ok(qWire, "wire to api.q should exist");
+    });
 
-  test("alias inside nested scope blocks parses correctly", () => {
-    const bridge = `version 1.5
+    test("alias inside nested scope blocks parses correctly", () => {
+      const bridge = `version 1.5
 
 bridge Query.user {
   with std.str.toUpperCase as uc
@@ -529,30 +518,31 @@ bridge Query.user {
     }
   }
 }`;
-    const parsed = parseBridge(bridge);
-    const br = parsed.instructions.find(
-      (i): i is Bridge => i.kind === "bridge",
-    )!;
-    const pullWires = br.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
-    // Alias creates a __local wire
-    const localWire = pullWires.find(
-      (w) => w.to.module === "__local" && w.to.field === "upper",
-    );
-    assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
-    // displayName wire reads from alias
-    const displayWire = pullWires.find(
-      (w) => w.to.path.join(".") === "info.displayName",
-    );
-    assert.ok(displayWire, "wire to o.info.displayName should exist");
-    assert.equal(displayWire!.from.module, "__local");
-    assert.equal(displayWire!.from.field, "upper");
-    // email wire reads from input
-    const emailWire = pullWires.find(
-      (w) => w.to.path.join(".") === "info.email",
-    );
-    assert.ok(emailWire, "wire to o.info.email should exist");
+      const parsed = parseBridge(bridge);
+      const br = parsed.instructions.find(
+        (i): i is Bridge => i.kind === "bridge",
+      )!;
+      const pullWires = br.wires.filter(
+        (w): w is Extract<Wire, { from: any }> => "from" in w,
+      );
+      // Alias creates a __local wire
+      const localWire = pullWires.find(
+        (w) => w.to.module === "__local" && w.to.field === "upper",
+      );
+      assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
+      // displayName wire reads from alias
+      const displayWire = pullWires.find(
+        (w) => w.to.path.join(".") === "info.displayName",
+      );
+      assert.ok(displayWire, "wire to o.info.displayName should exist");
+      assert.equal(displayWire!.from.module, "__local");
+      assert.equal(displayWire!.from.field, "upper");
+      // email wire reads from input
+      const emailWire = pullWires.find(
+        (w) => w.to.path.join(".") === "info.email",
+      );
+      assert.ok(emailWire, "wire to o.info.email should exist");
+    });
   });
 });
 
@@ -673,9 +663,15 @@ bridge Query.test {
       "nested.y pull wire should exist",
     );
   });
+});
 
-  test("array mapper scope block executes correctly at runtime", async () => {
-    const bridge = `version 1.5
+// TODO: compiler doesn't fully support array mapper scope blocks and null path traversal yet
+forEachEngine("path scoping – array mapper execution", (run, ctx) => {
+  test(
+    "array mapper scope block executes correctly",
+    { skip: ctx.engine === "compiled" },
+    async () => {
+      const bridge = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -688,17 +684,21 @@ bridge Query.test {
     }
   }
 }`;
-    const result = await run(bridge, "Query.test", {
-      items: [{ title: "Hello" }, { title: "World" }],
-    });
-    assert.deepStrictEqual(result.data, [
-      { obj: { name: "Hello", code: 42 } },
-      { obj: { name: "World", code: 42 } },
-    ]);
-  });
+      const result = await run(bridge, "Query.test", {
+        items: [{ title: "Hello" }, { title: "World" }],
+      });
+      assert.deepStrictEqual(result.data, [
+        { obj: { name: "Hello", code: 42 } },
+        { obj: { name: "World", code: 42 } },
+      ]);
+    },
+  );
 
-  test("nested scope blocks inside array mapper execute correctly", async () => {
-    const bridge = `version 1.5
+  test(
+    "nested scope blocks inside array mapper execute correctly",
+    { skip: ctx.engine === "compiled" },
+    async () => {
+      const bridge = `version 1.5
 
 bridge Query.test {
   with input as i
@@ -713,21 +713,25 @@ bridge Query.test {
     }
   }
 }`;
-    const result = await run(bridge, "Query.test", {
-      items: [{ title: "Alice" }, { title: "Bob" }],
-    });
-    assert.deepStrictEqual(result.data, [
-      { level1: { level2: { name: "Alice", fixed: "ok" } } },
-      { level1: { level2: { name: "Bob", fixed: "ok" } } },
-    ]);
-  });
+      const result = await run(bridge, "Query.test", {
+        items: [{ title: "Alice" }, { title: "Bob" }],
+      });
+      assert.deepStrictEqual(result.data, [
+        { level1: { level2: { name: "Alice", fixed: "ok" } } },
+        { level1: { level2: { name: "Bob", fixed: "ok" } } },
+      ]);
+    },
+  );
 });
 
 // ── Null intermediate path access ────────────────────────────────────────────
 
-describe("path traversal: null intermediate segment", () => {
-  test("throws TypeError when intermediate path segment is null", async () => {
-    const bridgeText = `version 1.5
+forEachEngine("path traversal: null intermediate segment", (run, ctx) => {
+  test(
+    "throws TypeError when intermediate path segment is null",
+    { skip: ctx.engine === "compiled" },
+    async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with myTool as t
   with output as o
@@ -735,18 +739,18 @@ bridge Query.test {
 o.result <- t.user.profile.name
 
 }`;
-    const raw = parseBridge(bridgeText);
-    const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.test",
-          input: {},
-          tools: { myTool: async () => ({ user: { profile: null } }) },
-        }),
-      /Cannot read properties of null \(reading 'name'\)/,
-    );
-  });
+      await assert.rejects(
+        () =>
+          run(
+            bridgeText,
+            "Query.test",
+            {},
+            {
+              myTool: async () => ({ user: { profile: null } }),
+            },
+          ),
+        /Cannot read properties of null \(reading 'name'\)/,
+      );
+    },
+  );
 });

@@ -138,6 +138,9 @@ importers:
       '@stackables/bridge-core':
         specifier: workspace:*
         version: link:../bridge-core
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
     devDependencies:
       '@stackables/bridge-parser':
         specifier: workspace:*

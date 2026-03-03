@@ -15,3 +15,6 @@ export type {
   ExecuteBridgeOptions,
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
+
+// Re-export trace types from bridge-core for convenience
+export type { TraceLevel, ToolTrace } from "@stackables/bridge-core";

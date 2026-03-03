@@ -22,7 +22,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@stackables/bridge-core": "workspace:*"
+    "@stackables/bridge-core": "workspace:*",
+    "@stackables/bridge-stdlib": "workspace:*"
   },
   "devDependencies": {
     "@stackables/bridge-parser": "workspace:*",
