@@ -158,7 +158,7 @@ run("npm install --ignore-scripts", { cwd: tempDir });
 const smokeScript = `
 import { parseBridgeFormat, executeBridge } from "@stackables/bridge";
 import { ExecutionTree } from "@stackables/bridge-core";
-import { parseBridgeChevrotain, serializeBridge } from "@stackables/bridge-compiler";
+import { parseBridgeChevrotain, serializeBridge } from "@stackables/bridge-parser";
 import { createHttpCall, std } from "@stackables/bridge-stdlib";
 import { bridgeTransform } from "@stackables/bridge-graphql";
 

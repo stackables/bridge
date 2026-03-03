@@ -1,20 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import { executeBridge } from "../src/index.ts";
-import type { BridgeDocument } from "../src/index.ts";
+import { test } from "node:test";
+import { forEachEngine } from "./_dual-run.ts";
 
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown> = {},
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as BridgeDocument;
-  return executeBridge({ document, operation, input });
-}
-
-describe("string interpolation || fallback priority", () => {
+forEachEngine("string interpolation || fallback priority", (run) => {
   test("template string with || fallback (flat wire)", async () => {
     const bridge = [
       "version 1.5",

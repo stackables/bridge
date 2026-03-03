@@ -1,35 +1,20 @@
 /**
- * @stackables/bridge-compiler — Bridge DSL parser, serializer, and language service.
+ * @stackables/bridge-compiler — Compiles BridgeDocument into optimized JavaScript.
  *
- * Turns `.bridge` source text into `BridgeDocument` (JSON AST) and provides
- * IDE intelligence (diagnostics, completions, hover).
+ * Compiles a BridgeDocument into a standalone JavaScript function that
+ * executes the same data flow without the ExecutionTree runtime overhead.
+ *
+ * @packageDocumentation
  */
 
-// ── Parser ──────────────────────────────────────────────────────────────────
+export { compileBridge } from "./codegen.ts";
+export type { CompileResult, CompileOptions } from "./codegen.ts";
 
-export {
-  parseBridgeChevrotain as parseBridge,
-  parseBridgeChevrotain,
-  parseBridgeDiagnostics,
-  PARSER_VERSION,
-} from "./parser/index.ts";
-export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
-export { BridgeLexer, allTokens } from "./parser/index.ts";
-
-// ── Serializer ──────────────────────────────────────────────────────────────
-
-export {
-  parseBridge as parseBridgeFormat,
-  serializeBridge,
-} from "./bridge-format.ts";
-
-// ── Language service ────────────────────────────────────────────────────────
-
-export { BridgeLanguageService } from "./language-service.ts";
+export { executeBridge } from "./execute-bridge.ts";
 export type {
-  BridgeCompletion,
-  BridgeHover,
-  CompletionKind,
-  Position,
-  Range,
-} from "./language-service.ts";
+  ExecuteBridgeOptions,
+  ExecuteBridgeResult,
+} from "./execute-bridge.ts";
+
+// Re-export trace types from bridge-core for convenience
+export type { TraceLevel, ToolTrace } from "@stackables/bridge-core";

@@ -1618,7 +1618,11 @@ function processElementLines(
   bridgeField: string,
   wires: Wire[],
   arrayIterators: Record<string, string>,
-  buildSourceExpr: (node: CstNode, lineNum: number) => NodeRef,
+  buildSourceExpr: (
+    node: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
   extractCoalesceAlt: (
     altNode: CstNode,
     lineNum: number,
@@ -1843,7 +1847,11 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          innerFromRef = buildSourceExpr(elemSourceNode!, elemLineNum);
+          innerFromRef = buildSourceExpr(
+            elemSourceNode!,
+            elemLineNum,
+            iterName,
+          );
         }
         const innerToRef: NodeRef = {
           module: SELF_MODULE,
@@ -1939,7 +1947,7 @@ function processElementLines(
             path: elemSrcSegs,
           };
         } else {
-          leftRef = buildSourceExpr(elemSourceNode!, elemLineNum);
+          leftRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterName);
         }
         elemCondRef = desugarExprChain(
           leftRef,
@@ -1960,7 +1968,7 @@ function processElementLines(
         };
         elemCondIsPipeFork = false;
       } else {
-        elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum);
+        elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterName);
         elemCondIsPipeFork =
           elemCondRef.instance != null &&
           elemCondRef.path.length === 0 &&
@@ -2201,7 +2209,11 @@ function processElementScopeLines(
   bridgeType: string,
   bridgeField: string,
   wires: Wire[],
-  buildSourceExpr: (node: CstNode, lineNum: number) => NodeRef,
+  buildSourceExpr: (
+    node: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ) => NodeRef,
   extractCoalesceAlt: (
     altNode: CstNode,
     lineNum: number,
@@ -2460,7 +2472,7 @@ function processElementScopeLines(
             path: srcSegs,
           };
         } else {
-          leftRef = buildSourceExpr(scopeSourceNode!, scopeLineNum);
+          leftRef = buildSourceExpr(scopeSourceNode!, scopeLineNum, iterName);
         }
         condRef = desugarExprChain(
           leftRef,
@@ -2481,7 +2493,7 @@ function processElementScopeLines(
         };
         condIsPipeFork = false;
       } else {
-        condRef = buildSourceExpr(scopeSourceNode!, scopeLineNum);
+        condRef = buildSourceExpr(scopeSourceNode!, scopeLineNum, iterName);
         condIsPipeFork =
           condRef.instance != null &&
           condRef.path.length === 0 &&
@@ -3343,6 +3355,7 @@ function buildBridgeBody(
   function buildSourceExprSafe(
     sourceNode: CstNode,
     lineNum: number,
+    iterName?: string,
   ): { ref: NodeRef; safe?: boolean } {
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
@@ -3350,7 +3363,18 @@ function buildBridgeBody(
     if (pipeNodes.length === 0) {
       const { root, segments, safe, rootSafe, segmentSafe } =
         extractAddressPath(headNode);
-      const ref = resolveAddress(root, segments, lineNum);
+      let ref: NodeRef;
+      if (iterName && root === iterName) {
+        ref = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          path: segments,
+        };
+      } else {
+        ref = resolveAddress(root, segments, lineNum);
+      }
       return {
         ref: {
           ...ref,
@@ -3384,7 +3408,18 @@ function buildBridgeBody(
       rootSafe: srcRootSafe,
       segmentSafe: srcSegmentSafe,
     } = extractAddressPath(actualSourceNode);
-    let prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
+    let prevOutRef: NodeRef;
+    if (iterName && srcRoot === iterName) {
+      prevOutRef = {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        element: true,
+        path: srcSegments,
+      };
+    } else {
+      prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
+    }
 
     // Process pipe handles right-to-left (innermost first)
     const reversed = [...pipeChainNodes].reverse();
@@ -3438,8 +3473,12 @@ function buildBridgeBody(
   }
 
   /** Backward-compat wrapper — returns just the NodeRef. */
-  function buildSourceExpr(sourceNode: CstNode, lineNum: number): NodeRef {
-    return buildSourceExprSafe(sourceNode, lineNum).ref;
+  function buildSourceExpr(
+    sourceNode: CstNode,
+    lineNum: number,
+    iterName?: string,
+  ): NodeRef {
+    return buildSourceExprSafe(sourceNode, lineNum, iterName).ref;
   }
 
   // ── Helper: desugar template string into synthetic internal.concat fork ─────

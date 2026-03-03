@@ -6,6 +6,6 @@
  */
 
 export * from "@stackables/bridge-core";
-export * from "@stackables/bridge-compiler";
+export * from "@stackables/bridge-parser";
 export * from "@stackables/bridge-graphql";
 export * from "@stackables/bridge-stdlib";

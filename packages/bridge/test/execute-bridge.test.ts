@@ -13,6 +13,7 @@ import {
 } from "../src/index.ts";
 import type { BridgeDocument } from "../src/index.ts";
 import { BridgeLanguageService } from "../src/index.ts";
+import { forEachEngine } from "./_dual-run.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,10 +36,15 @@ function run(
   });
 }
 
-// ── Object output (per-field wires) ─────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Language behavior tests (run against both engines)
+// ══════════════════════════════════════════════════════════════════════════════
 
-describe("executeBridge: object output", () => {
-  const bridgeText = `version 1.5
+forEachEngine("executeBridge", (run, ctx) => {
+  // ── Object output (per-field wires) ─────────────────────────────────────────
+
+  describe("object output", () => {
+    const bridgeText = `version 1.5
 bridge Query.livingStandard {
   with hereapi.geocode as gc
   with companyX.getLivingStandard as cx
@@ -53,56 +59,56 @@ bridge Query.livingStandard {
   out.lifeExpectancy <- ti.result
 }`;
 
-  const tools: Record<string, any> = {
-    "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
-    "companyX.getLivingStandard": async (_p: any) => ({
-      lifeExpectancy: "81.5",
-    }),
-    toInt: (p: { value: string }) => ({
-      result: Math.round(parseFloat(p.value)),
-    }),
-  };
-
-  test("chained providers resolve all fields", async () => {
-    const { data } = await run(
-      bridgeText,
-      "Query.livingStandard",
-      { location: "Berlin" },
-      tools,
-    );
-    assert.deepEqual(data, { lifeExpectancy: 82 });
-  });
-
-  test("tools receive correct chained inputs", async () => {
-    let geoParams: any;
-    let cxParams: any;
-    const spyTools = {
-      ...tools,
-      "hereapi.geocode": async (p: any) => {
-        geoParams = p;
-        return { lat: 52.53, lon: 13.38 };
-      },
-      "companyX.getLivingStandard": async (p: any) => {
-        cxParams = p;
-        return { lifeExpectancy: "81.5" };
-      },
+    const tools: Record<string, any> = {
+      "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
+      "companyX.getLivingStandard": async (_p: any) => ({
+        lifeExpectancy: "81.5",
+      }),
+      toInt: (p: { value: string }) => ({
+        result: Math.round(parseFloat(p.value)),
+      }),
     };
-    await run(
-      bridgeText,
-      "Query.livingStandard",
-      { location: "Berlin" },
-      spyTools,
-    );
-    assert.equal(geoParams.q, "Berlin");
-    assert.equal(cxParams.x, 52.53);
-    assert.equal(cxParams.y, 13.38);
+
+    test("chained providers resolve all fields", async () => {
+      const { data } = await run(
+        bridgeText,
+        "Query.livingStandard",
+        { location: "Berlin" },
+        tools,
+      );
+      assert.deepEqual(data, { lifeExpectancy: 82 });
+    });
+
+    test("tools receive correct chained inputs", async () => {
+      let geoParams: any;
+      let cxParams: any;
+      const spyTools = {
+        ...tools,
+        "hereapi.geocode": async (p: any) => {
+          geoParams = p;
+          return { lat: 52.53, lon: 13.38 };
+        },
+        "companyX.getLivingStandard": async (p: any) => {
+          cxParams = p;
+          return { lifeExpectancy: "81.5" };
+        },
+      };
+      await run(
+        bridgeText,
+        "Query.livingStandard",
+        { location: "Berlin" },
+        spyTools,
+      );
+      assert.equal(geoParams.q, "Berlin");
+      assert.equal(cxParams.x, 52.53);
+      assert.equal(cxParams.y, 13.38);
+    });
   });
-});
 
-// ── Whole-object passthrough (root wire: o <- ...) ──────────────────────────
+  // ── Whole-object passthrough (root wire: o <- ...) ──────────────────────────
 
-describe("executeBridge: root wire passthrough", () => {
-  const bridgeText = `version 1.5
+  describe("root wire passthrough", () => {
+    const bridgeText = `version 1.5
 bridge Query.getUser {
   with userApi as api
   with input as i
@@ -112,42 +118,42 @@ bridge Query.getUser {
   o <- api.user
 }`;
 
-  test("root object wire returns entire tool output", async () => {
-    const tools = {
-      userApi: async (_p: any) => ({
-        user: { name: "Alice", age: 30, email: "alice@example.com" },
-      }),
-    };
-    const { data } = await run(
-      bridgeText,
-      "Query.getUser",
-      { id: "123" },
-      tools,
-    );
-    assert.deepEqual(data, {
-      name: "Alice",
-      age: 30,
-      email: "alice@example.com",
+    test("root object wire returns entire tool output", async () => {
+      const tools = {
+        userApi: async (_p: any) => ({
+          user: { name: "Alice", age: 30, email: "alice@example.com" },
+        }),
+      };
+      const { data } = await run(
+        bridgeText,
+        "Query.getUser",
+        { id: "123" },
+        tools,
+      );
+      assert.deepEqual(data, {
+        name: "Alice",
+        age: 30,
+        email: "alice@example.com",
+      });
+    });
+
+    test("tool receives input args", async () => {
+      let captured: any;
+      const tools = {
+        userApi: async (p: any) => {
+          captured = p;
+          return { user: { name: "Bob" } };
+        },
+      };
+      await run(bridgeText, "Query.getUser", { id: "42" }, tools);
+      assert.equal(captured.id, "42");
     });
   });
 
-  test("tool receives input args", async () => {
-    let captured: any;
-    const tools = {
-      userApi: async (p: any) => {
-        captured = p;
-        return { user: { name: "Bob" } };
-      },
-    };
-    await run(bridgeText, "Query.getUser", { id: "42" }, tools);
-    assert.equal(captured.id, "42");
-  });
-});
+  // ── Array output (o <- items[] as x { ... }) ────────────────────────────────
 
-// ── Array output (o <- items[] as x { ... }) ────────────────────────────────
-
-describe("executeBridge: array output", () => {
-  const bridgeText = `version 1.5
+  describe("array output", () => {
+    const bridgeText = `version 1.5
 bridge Query.geocode {
   with hereapi.geocode as gc
   with input as i
@@ -161,47 +167,47 @@ bridge Query.geocode {
   }
 }`;
 
-  const tools: Record<string, any> = {
-    "hereapi.geocode": async () => ({
-      items: [
-        { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
-        { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
-      ],
-    }),
-  };
-
-  test("array elements are materialised with renamed fields", async () => {
-    const { data } = await run(
-      bridgeText,
-      "Query.geocode",
-      { search: "Ber" },
-      tools,
-    );
-    assert.deepEqual(data, [
-      { name: "Berlin", lat: 52.53, lon: 13.39 },
-      { name: "Bern", lat: 46.95, lon: 7.45 },
-    ]);
-  });
-
-  test("empty array returns empty array", async () => {
-    const emptyTools = {
-      "hereapi.geocode": async () => ({ items: [] }),
+    const tools: Record<string, any> = {
+      "hereapi.geocode": async () => ({
+        items: [
+          { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
+          { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
+        ],
+      }),
     };
-    const { data } = await run(
-      bridgeText,
-      "Query.geocode",
-      { search: "zzz" },
-      emptyTools,
-    );
-    assert.deepEqual(data, []);
+
+    test("array elements are materialised with renamed fields", async () => {
+      const { data } = await run(
+        bridgeText,
+        "Query.geocode",
+        { search: "Ber" },
+        tools,
+      );
+      assert.deepEqual(data, [
+        { name: "Berlin", lat: 52.53, lon: 13.39 },
+        { name: "Bern", lat: 46.95, lon: 7.45 },
+      ]);
+    });
+
+    test("empty array returns empty array", async () => {
+      const emptyTools = {
+        "hereapi.geocode": async () => ({ items: [] }),
+      };
+      const { data } = await run(
+        bridgeText,
+        "Query.geocode",
+        { search: "zzz" },
+        emptyTools,
+      );
+      assert.deepEqual(data, []);
+    });
   });
-});
 
-// ── Array on a sub-field (o.field <- items[] as x { ... }) ──────────────────
+  // ── Array on a sub-field (o.field <- items[] as x { ... }) ──────────────────
 
-describe("executeBridge: array mapping on sub-field", () => {
-  test("o.field <- src[] as x { .renamed <- x.original } renames fields", async () => {
-    const bridgeText = `version 1.5
+  describe("array mapping on sub-field", () => {
+    test("o.field <- src[] as x { .renamed <- x.original } renames fields", async () => {
+      const bridgeText = `version 1.5
 bridge Query.catalog {
   with api as src
   with output as o
@@ -213,31 +219,31 @@ bridge Query.catalog {
     .cost <- item.unit_price
   }
 }`;
-    const { data } = await run(
-      bridgeText,
-      "Query.catalog",
-      {},
-      {
-        api: async () => ({
-          name: "Catalog A",
-          items: [
-            { item_id: 1, item_name: "Widget", unit_price: 9.99 },
-            { item_id: 2, item_name: "Gadget", unit_price: 14.5 },
-          ],
-        }),
-      },
-    );
-    assert.deepEqual(data, {
-      title: "Catalog A",
-      entries: [
-        { id: 1, label: "Widget", cost: 9.99 },
-        { id: 2, label: "Gadget", cost: 14.5 },
-      ],
+      const { data } = await run(
+        bridgeText,
+        "Query.catalog",
+        {},
+        {
+          api: async () => ({
+            name: "Catalog A",
+            items: [
+              { item_id: 1, item_name: "Widget", unit_price: 9.99 },
+              { item_id: 2, item_name: "Gadget", unit_price: 14.5 },
+            ],
+          }),
+        },
+      );
+      assert.deepEqual(data, {
+        title: "Catalog A",
+        entries: [
+          { id: 1, label: "Widget", cost: 9.99 },
+          { id: 2, label: "Gadget", cost: 14.5 },
+        ],
+      });
     });
-  });
 
-  test("empty array on sub-field returns empty array", async () => {
-    const bridgeText = `version 1.5
+    test("empty array on sub-field returns empty array", async () => {
+      const bridgeText = `version 1.5
 bridge Query.listing {
   with api as src
   with output as o
@@ -247,21 +253,123 @@ bridge Query.listing {
     .name <- t.label
   }
 }`;
-    const { data } = await run(
-      bridgeText,
-      "Query.listing",
-      {},
-      { api: async () => ({ things: [] }) },
-    );
-    assert.deepEqual(data, { count: 0, items: [] });
+      const { data } = await run(
+        bridgeText,
+        "Query.listing",
+        {},
+        { api: async () => ({ things: [] }) },
+      );
+      assert.deepEqual(data, { count: 0, items: [] });
+    });
+
+    test("pipe inside array block resolves iterator variable", async () => {
+      const bridgeText = `version 1.5
+bridge Query.catalog {
+  with api as src
+  with std.str.toUpperCase as upper
+  with output as o
+
+  o.entries <- src.items[] as it {
+    .id <- it.id
+    .label <- upper:it.name
+  }
+}`;
+      const { data } = await run(
+        bridgeText,
+        "Query.catalog",
+        {},
+        {
+          api: async () => ({
+            items: [
+              { id: 1, name: "widget" },
+              { id: 2, name: "gadget" },
+            ],
+          }),
+        },
+      );
+      assert.deepEqual(data, {
+        entries: [
+          { id: 1, label: "WIDGET" },
+          { id: 2, label: "GADGET" },
+        ],
+      });
+    });
+
+    test("per-element tool call in sub-field array produces correct results", async () => {
+      const bridgeText = `version 1.5
+bridge Query.catalog {
+  with api as src
+  with enrich
+  with output as o
+
+  o.title <- src.name ?? "Untitled"
+  o.entries <- src.items[] as it {
+    alias enrich:it as e
+    .id <- it.item_id
+    .label <- e.name
+  }
+}`;
+      const { data } = await run(
+        bridgeText,
+        "Query.catalog",
+        {},
+        {
+          api: async () => ({
+            name: "Catalog A",
+            items: [{ item_id: 1 }, { item_id: 2 }],
+          }),
+          enrich: (input: any) => ({
+            name: `enriched-${input.in.item_id}`,
+          }),
+        },
+      );
+      assert.deepEqual(data, {
+        title: "Catalog A",
+        entries: [
+          { id: 1, label: "enriched-1" },
+          { id: 2, label: "enriched-2" },
+        ],
+      });
+    });
+
+    test("ternary expression inside array block", async () => {
+      const bridgeText = `version 1.5
+bridge Query.catalog {
+  with api as src
+  with output as o
+
+  o.entries <- src.items[] as it {
+    .id <- it.id
+    .active <- it.status == "active" ? true : false
+  }
+}`;
+      const { data } = await run(
+        bridgeText,
+        "Query.catalog",
+        {},
+        {
+          api: async () => ({
+            items: [
+              { id: 1, status: "active" },
+              { id: 2, status: "inactive" },
+            ],
+          }),
+        },
+      );
+      assert.deepEqual(data, {
+        entries: [
+          { id: 1, active: true },
+          { id: 2, active: false },
+        ],
+      });
+    });
   });
-});
 
-// ── Nested object from scope blocks (o.field { .sub <- ... }) ───────────────
+  // ── Nested object from scope blocks (o.field { .sub <- ... }) ───────────────
 
-describe("executeBridge: nested object via scope block", () => {
-  test("o.field { .sub <- ... } produces nested object", async () => {
-    const bridgeText = `version 1.5
+  describe("nested object via scope block", () => {
+    test("o.field { .sub <- ... } produces nested object", async () => {
+      const bridgeText = `version 1.5
 bridge Query.weather {
   with weatherApi as w
   with input as i
@@ -275,20 +383,20 @@ bridge Query.weather {
     .city <- i.city
   }
 }`;
-    const { data } = await run(
-      bridgeText,
-      "Query.weather",
-      { city: "Berlin" },
-      { weatherApi: async () => ({ temperature: 25, feelsLike: 23 }) },
-    );
-    assert.deepEqual(data, {
-      decision: true,
-      why: { temperature: 25, city: "Berlin" },
+      const { data } = await run(
+        bridgeText,
+        "Query.weather",
+        { city: "Berlin" },
+        { weatherApi: async () => ({ temperature: 25, feelsLike: 23 }) },
+      );
+      assert.deepEqual(data, {
+        decision: true,
+        why: { temperature: 25, city: "Berlin" },
+      });
     });
-  });
 
-  test("nested scope block with ?? default fills null response", async () => {
-    const bridgeText = `version 1.5
+    test("nested scope block with ?? default fills null response", async () => {
+      const bridgeText = `version 1.5
 bridge Query.forecast {
   with api as a
   with output as o
@@ -298,22 +406,22 @@ bridge Query.forecast {
     .wind <- a.wind ?? 0
   }
 }`;
-    const { data } = await run(
-      bridgeText,
-      "Query.forecast",
-      {},
-      {
-        api: async () => ({ temp: null, wind: null }),
-      },
-    );
-    assert.deepEqual(data, { summary: { temp: 0, wind: 0 } });
+      const { data } = await run(
+        bridgeText,
+        "Query.forecast",
+        {},
+        {
+          api: async () => ({ temp: null, wind: null }),
+        },
+      );
+      assert.deepEqual(data, { summary: { temp: 0, wind: 0 } });
+    });
   });
-});
 
-// ── Nested arrays (o <- items[] as x { .sub <- x.things[] as y { ... } }) ──
+  // ── Nested arrays (o <- items[] as x { .sub <- x.things[] as y { ... } }) ──
 
-describe("executeBridge: nested arrays", () => {
-  const bridgeText = `version 1.5
+  describe("nested arrays", () => {
+    const bridgeText = `version 1.5
 bridge Query.searchTrains {
   with transportApi as api
   with input as i
@@ -331,61 +439,61 @@ bridge Query.searchTrains {
   }
 }`;
 
-  const tools: Record<string, any> = {
-    transportApi: async () => ({
-      connections: [
+    const tools: Record<string, any> = {
+      transportApi: async () => ({
+        connections: [
+          {
+            id: "c1",
+            sections: [
+              {
+                name: "IC 8",
+                departure: { station: "Bern" },
+                arrival: { station: "Zürich" },
+              },
+              {
+                name: "S3",
+                departure: { station: "Zürich" },
+                arrival: { station: "Aarau" },
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    test("nested array elements are fully materialised", async () => {
+      const { data } = await run(
+        bridgeText,
+        "Query.searchTrains",
+        { from: "Bern", to: "Aarau" },
+        tools,
+      );
+      assert.deepEqual(data, [
         {
           id: "c1",
-          sections: [
+          legs: [
             {
-              name: "IC 8",
-              departure: { station: "Bern" },
-              arrival: { station: "Zürich" },
+              trainName: "IC 8",
+              origin: { station: "Bern" },
+              destination: { station: "Zürich" },
             },
             {
-              name: "S3",
-              departure: { station: "Zürich" },
-              arrival: { station: "Aarau" },
+              trainName: "S3",
+              origin: { station: "Zürich" },
+              destination: { station: "Aarau" },
             },
           ],
         },
-      ],
-    }),
-  };
-
-  test("nested array elements are fully materialised", async () => {
-    const { data } = await run(
-      bridgeText,
-      "Query.searchTrains",
-      { from: "Bern", to: "Aarau" },
-      tools,
-    );
-    assert.deepEqual(data, [
-      {
-        id: "c1",
-        legs: [
-          {
-            trainName: "IC 8",
-            origin: { station: "Bern" },
-            destination: { station: "Zürich" },
-          },
-          {
-            trainName: "S3",
-            origin: { station: "Zürich" },
-            destination: { station: "Aarau" },
-          },
-        ],
-      },
-    ]);
+      ]);
+    });
   });
-});
 
-// ── Alias declarations (alias <source> as <name>) ──────────────────────────
+  // ── Alias declarations (alias <source> as <name>) ──────────────────────────
 
-describe("executeBridge: alias declarations", () => {
-  test("alias pipe:iter as name — evaluates pipe once per element", async () => {
-    let enrichCallCount = 0;
-    const bridgeText = `version 1.5
+  describe("alias declarations", () => {
+    test("alias pipe:iter as name — evaluates pipe once per element", async () => {
+      let enrichCallCount = 0;
+      const bridgeText = `version 1.5
 bridge Query.list {
   with api
   with enrich
@@ -397,30 +505,30 @@ bridge Query.list {
     .b <- resp.b
   }
 }`;
-    const tools: Record<string, any> = {
-      api: async () => ({
-        items: [
-          { id: 1, name: "x" },
-          { id: 2, name: "y" },
-        ],
-      }),
-      enrich: async (input: any) => {
-        enrichCallCount++;
-        return { a: input.in.id * 10, b: input.in.name.toUpperCase() };
-      },
-    };
+      const tools: Record<string, any> = {
+        api: async () => ({
+          items: [
+            { id: 1, name: "x" },
+            { id: 2, name: "y" },
+          ],
+        }),
+        enrich: async (input: any) => {
+          enrichCallCount++;
+          return { a: input.in.id * 10, b: input.in.name.toUpperCase() };
+        },
+      };
 
-    const { data } = await run(bridgeText, "Query.list", {}, tools);
-    assert.deepEqual(data, [
-      { a: 10, b: "X" },
-      { a: 20, b: "Y" },
-    ]);
-    // enrich is called once per element (2 items = 2 calls), NOT twice per element
-    assert.equal(enrichCallCount, 2);
-  });
+      const { data } = await run(bridgeText, "Query.list", {}, tools);
+      assert.deepEqual(data, [
+        { a: 10, b: "X" },
+        { a: 20, b: "Y" },
+      ]);
+      // enrich is called once per element (2 items = 2 calls), NOT twice per element
+      assert.equal(enrichCallCount, 2);
+    });
 
-  test("alias iter.subfield as name — iterator-relative plain ref", async () => {
-    const bridgeText = `version 1.5
+    test("alias iter.subfield as name — iterator-relative plain ref", async () => {
+      const bridgeText = `version 1.5
 bridge Query.list {
   with api
   with output as o
@@ -431,21 +539,21 @@ bridge Query.list {
     .y <- n.b
   }
 }`;
-    const tools: Record<string, any> = {
-      api: async () => ({
-        items: [{ nested: { a: 1, b: 2 } }, { nested: { a: 3, b: 4 } }],
-      }),
-    };
+      const tools: Record<string, any> = {
+        api: async () => ({
+          items: [{ nested: { a: 1, b: 2 } }, { nested: { a: 3, b: 4 } }],
+        }),
+      };
 
-    const { data } = await run(bridgeText, "Query.list", {}, tools);
-    assert.deepEqual(data, [
-      { x: 1, y: 2 },
-      { x: 3, y: 4 },
-    ]);
-  });
+      const { data } = await run(bridgeText, "Query.list", {}, tools);
+      assert.deepEqual(data, [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ]);
+    });
 
-  test("alias tool:iter as name — tool handle ref in array", async () => {
-    const bridgeText = `version 1.5
+    test("alias tool:iter as name — tool handle ref in array", async () => {
+      const bridgeText = `version 1.5
 bridge Query.items {
   with api
   with std.str.toUpperCase as uc
@@ -457,25 +565,25 @@ bridge Query.items {
     .id <- it.id
   }
 }`;
-    const tools: Record<string, any> = {
-      api: async () => ({
-        items: [
-          { id: 1, name: "alice" },
-          { id: 2, name: "bob" },
-        ],
-      }),
-    };
+      const tools: Record<string, any> = {
+        api: async () => ({
+          items: [
+            { id: 1, name: "alice" },
+            { id: 2, name: "bob" },
+          ],
+        }),
+      };
 
-    const { data } = await run(bridgeText, "Query.items", {}, tools);
-    assert.deepEqual(data, [
-      { label: "ALICE", id: 1 },
-      { label: "BOB", id: 2 },
-    ]);
-  });
+      const { data } = await run(bridgeText, "Query.items", {}, tools);
+      assert.deepEqual(data, [
+        { label: "ALICE", id: 1 },
+        { label: "BOB", id: 2 },
+      ]);
+    });
 
-  test("top-level alias pipe:source as name — caches result", async () => {
-    let ucCallCount = 0;
-    const bridgeText = `version 1.5
+    test("top-level alias pipe:source as name — caches result", async () => {
+      let ucCallCount = 0;
+      const bridgeText = `version 1.5
 bridge Query.test {
   with myUC
   with input as i
@@ -487,30 +595,30 @@ bridge Query.test {
   o.label <- upper
   o.title <- upper
 }`;
-    const tools: Record<string, any> = {
-      myUC: (input: any) => {
-        ucCallCount++;
-        return input.in.toUpperCase();
-      },
-    };
+      const tools: Record<string, any> = {
+        myUC: (input: any) => {
+          ucCallCount++;
+          return input.in.toUpperCase();
+        },
+      };
 
-    const { data } = await run(
-      bridgeText,
-      "Query.test",
-      { name: "alice" },
-      tools,
-    );
-    assert.deepEqual(data, {
-      greeting: "ALICE",
-      label: "ALICE",
-      title: "ALICE",
+      const { data } = await run(
+        bridgeText,
+        "Query.test",
+        { name: "alice" },
+        tools,
+      );
+      assert.deepEqual(data, {
+        greeting: "ALICE",
+        label: "ALICE",
+        title: "ALICE",
+      });
+      // pipe tool called only once despite 3 reads
+      assert.equal(ucCallCount, 1);
     });
-    // pipe tool called only once despite 3 reads
-    assert.equal(ucCallCount, 1);
-  });
 
-  test("top-level alias handle.path as name — simple rename", async () => {
-    const bridgeText = `version 1.5
+    test("top-level alias handle.path as name — simple rename", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with myTool as api
   with input as i
@@ -522,19 +630,19 @@ bridge Query.test {
   o.name <- d.name
   o.email <- d.email
 }`;
-    const tools: Record<string, any> = {
-      myTool: async () => ({
-        result: { data: { name: "Alice", email: "alice@test.com" } },
-      }),
-    };
+      const tools: Record<string, any> = {
+        myTool: async () => ({
+          result: { data: { name: "Alice", email: "alice@test.com" } },
+        }),
+      };
 
-    const { data } = await run(bridgeText, "Query.test", { q: "hi" }, tools);
-    assert.deepEqual(data, { name: "Alice", email: "alice@test.com" });
-  });
+      const { data } = await run(bridgeText, "Query.test", { q: "hi" }, tools);
+      assert.deepEqual(data, { name: "Alice", email: "alice@test.com" });
+    });
 
-  test("top-level alias reused inside array — not re-evaluated per element", async () => {
-    let ucCallCount = 0;
-    const bridgeText = `version 1.5
+    test("top-level alias reused inside array — not re-evaluated per element", async () => {
+      let ucCallCount = 0;
+      const bridgeText = `version 1.5
 bridge Query.products {
   with api
   with myUC
@@ -551,35 +659,35 @@ bridge Query.products {
     .category <- upperCat
   }
 }`;
-    const tools: Record<string, any> = {
-      api: async () => ({
-        products: [
-          { title: "Phone", price: 999 },
-          { title: "Laptop", price: 1999 },
-        ],
-      }),
-      myUC: (input: any) => {
-        ucCallCount++;
-        return input.in.toUpperCase();
-      },
-    };
+      const tools: Record<string, any> = {
+        api: async () => ({
+          products: [
+            { title: "Phone", price: 999 },
+            { title: "Laptop", price: 1999 },
+          ],
+        }),
+        myUC: (input: any) => {
+          ucCallCount++;
+          return input.in.toUpperCase();
+        },
+      };
 
-    const { data } = await run(
-      bridgeText,
-      "Query.products",
-      { category: "electronics" },
-      tools,
-    );
-    assert.deepEqual(data, [
-      { name: "PHONE", price: 999, category: "ELECTRONICS" },
-      { name: "LAPTOP", price: 1999, category: "ELECTRONICS" },
-    ]);
-    // 1 call for top-level upperCat + 2 calls for per-element upper = 3 total
-    assert.equal(ucCallCount, 3);
-  });
+      const { data } = await run(
+        bridgeText,
+        "Query.products",
+        { category: "electronics" },
+        tools,
+      );
+      assert.deepEqual(data, [
+        { name: "PHONE", price: 999, category: "ELECTRONICS" },
+        { name: "LAPTOP", price: 1999, category: "ELECTRONICS" },
+      ]);
+      // 1 call for top-level upperCat + 2 calls for per-element upper = 3 total
+      assert.equal(ucCallCount, 3);
+    });
 
-  test("alias with || falsy fallback", async () => {
-    const bridgeText = `version 1.5
+    test("alias with || falsy fallback", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with output as o
   with input as i
@@ -588,16 +696,16 @@ bridge Query.test {
 
   o.name <- displayName
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", {
-      nickname: "Alice",
+      const { data: d1 } = await run(bridgeText, "Query.test", {
+        nickname: "Alice",
+      });
+      assert.equal(d1.name, "Alice");
+      const { data: d2 } = await run(bridgeText, "Query.test", {});
+      assert.equal(d2.name, "Guest");
     });
-    assert.equal(d1.name, "Alice");
-    const { data: d2 } = await run(bridgeText, "Query.test", {});
-    assert.equal(d2.name, "Guest");
-  });
 
-  test("alias with ?? nullish fallback", async () => {
-    const bridgeText = `version 1.5
+    test("alias with ?? nullish fallback", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with output as o
   with input as i
@@ -606,15 +714,15 @@ bridge Query.test {
 
   o.score <- score
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { score: 42 });
-    assert.equal(d1.score, 42);
-    const { data: d2 } = await run(bridgeText, "Query.test", {});
-    assert.equal(d2.score, 0);
-  });
+      const { data: d1 } = await run(bridgeText, "Query.test", { score: 42 });
+      assert.equal(d1.score, 42);
+      const { data: d2 } = await run(bridgeText, "Query.test", {});
+      assert.equal(d2.score, 0);
+    });
 
-  test("alias with catch error boundary", async () => {
-    let callCount = 0;
-    const bridgeText = `version 1.5
+    test("alias with catch error boundary", async () => {
+      let callCount = 0;
+      const bridgeText = `version 1.5
 bridge Query.test {
   with riskyApi as api
   with output as o
@@ -623,19 +731,19 @@ bridge Query.test {
 
   o.result <- safeVal
 }`;
-    const tools: Record<string, any> = {
-      riskyApi: () => {
-        callCount++;
-        throw new Error("Service unavailable");
-      },
-    };
-    const { data } = await run(bridgeText, "Query.test", {}, tools);
-    assert.equal(data.result, 99);
-    assert.equal(callCount, 1);
-  });
+      const tools: Record<string, any> = {
+        riskyApi: () => {
+          callCount++;
+          throw new Error("Service unavailable");
+        },
+      };
+      const { data } = await run(bridgeText, "Query.test", {}, tools);
+      assert.equal(data.result, 99);
+      assert.equal(callCount, 1);
+    });
 
-  test("alias with ?. safe execution", async () => {
-    const bridgeText = `version 1.5
+    test("alias with ?. safe execution", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with riskyApi as api
   with output as o
@@ -644,17 +752,17 @@ bridge Query.test {
 
   o.result <- safeVal || "fallback"
 }`;
-    const tools: Record<string, any> = {
-      riskyApi: () => {
-        throw new Error("Service unavailable");
-      },
-    };
-    const { data } = await run(bridgeText, "Query.test", {}, tools);
-    assert.equal(data.result, "fallback");
-  });
+      const tools: Record<string, any> = {
+        riskyApi: () => {
+          throw new Error("Service unavailable");
+        },
+      };
+      const { data } = await run(bridgeText, "Query.test", {}, tools);
+      assert.equal(data.result, "fallback");
+    });
 
-  test("alias with math expression (+ operator)", async () => {
-    const bridgeText = `version 1.5
+    test("alias with math expression (+ operator)", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -663,12 +771,12 @@ bridge Query.test {
 
   o.result <- bumped
 }`;
-    const { data } = await run(bridgeText, "Query.test", { price: 5 });
-    assert.equal(data.result, 15);
-  });
+      const { data } = await run(bridgeText, "Query.test", { price: 5 });
+      assert.equal(data.result, 15);
+    });
 
-  test("alias with comparison expression (== operator)", async () => {
-    const bridgeText = `version 1.5
+    test("alias with comparison expression (== operator)", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -677,14 +785,18 @@ bridge Query.test {
 
   o.isAdmin <- isAdmin
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { role: "admin" });
-    assert.equal(d1.isAdmin, true);
-    const { data: d2 } = await run(bridgeText, "Query.test", { role: "user" });
-    assert.equal(d2.isAdmin, false);
-  });
+      const { data: d1 } = await run(bridgeText, "Query.test", {
+        role: "admin",
+      });
+      assert.equal(d1.isAdmin, true);
+      const { data: d2 } = await run(bridgeText, "Query.test", {
+        role: "user",
+      });
+      assert.equal(d2.isAdmin, false);
+    });
 
-  test("alias with parenthesized expression", async () => {
-    const bridgeText = `version 1.5
+    test("alias with parenthesized expression", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -693,12 +805,12 @@ bridge Query.test {
 
   o.result <- doubled
 }`;
-    const { data } = await run(bridgeText, "Query.test", { a: 3, b: 4 });
-    assert.equal(data.result, 14);
-  });
+      const { data } = await run(bridgeText, "Query.test", { a: 3, b: 4 });
+      assert.equal(data.result, 14);
+    });
 
-  test("alias with string literal source", async () => {
-    const bridgeText = `version 1.5
+    test("alias with string literal source", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with output as o
 
@@ -706,12 +818,12 @@ bridge Query.test {
 
   o.result <- greeting
 }`;
-    const { data } = await run(bridgeText, "Query.test", {});
-    assert.equal(data.result, "hello world");
-  });
+      const { data } = await run(bridgeText, "Query.test", {});
+      assert.equal(data.result, "hello world");
+    });
 
-  test("alias with string literal comparison", async () => {
-    const bridgeText = `version 1.5
+    test("alias with string literal comparison", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -720,14 +832,14 @@ bridge Query.test {
 
   o.result <- matchesA
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { val: "a" });
-    assert.equal(d1.result, true);
-    const { data: d2 } = await run(bridgeText, "Query.test", { val: "b" });
-    assert.equal(d2.result, false);
-  });
+      const { data: d1 } = await run(bridgeText, "Query.test", { val: "a" });
+      assert.equal(d1.result, true);
+      const { data: d2 } = await run(bridgeText, "Query.test", { val: "b" });
+      assert.equal(d2.result, false);
+    });
 
-  test("alias with not prefix", async () => {
-    const bridgeText = `version 1.5
+    test("alias with not prefix", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -736,16 +848,18 @@ bridge Query.test {
 
   o.allowed <- allowed
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", {
-      blocked: false,
+      const { data: d1 } = await run(bridgeText, "Query.test", {
+        blocked: false,
+      });
+      assert.equal(d1.allowed, true);
+      const { data: d2 } = await run(bridgeText, "Query.test", {
+        blocked: true,
+      });
+      assert.equal(d2.allowed, false);
     });
-    assert.equal(d1.allowed, true);
-    const { data: d2 } = await run(bridgeText, "Query.test", { blocked: true });
-    assert.equal(d2.allowed, false);
-  });
 
-  test("alias with ternary expression", async () => {
-    const bridgeText = `version 1.5
+    test("alias with ternary expression", async () => {
+      const bridgeText = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
@@ -754,17 +868,17 @@ bridge Query.test {
 
   o.grade <- grade
 }`;
-    const { data: d1 } = await run(bridgeText, "Query.test", { score: 95 });
-    assert.equal(d1.grade, "A");
-    const { data: d2 } = await run(bridgeText, "Query.test", { score: 75 });
-    assert.equal(d2.grade, "B");
+      const { data: d1 } = await run(bridgeText, "Query.test", { score: 95 });
+      assert.equal(d1.grade, "A");
+      const { data: d2 } = await run(bridgeText, "Query.test", { score: 75 });
+      assert.equal(d2.grade, "B");
+    });
   });
-});
 
-// ── Constant wires ──────────────────────────────────────────────────────────
+  // ── Constant wires ──────────────────────────────────────────────────────────
 
-describe("executeBridge: constant wires", () => {
-  const bridgeText = `version 1.5
+  describe("constant wires", () => {
+    const bridgeText = `version 1.5
 bridge Query.info {
   with input as i
   with output as o
@@ -773,16 +887,16 @@ bridge Query.info {
   o.name <- i.name
 }`;
 
-  test("constant and input wires coexist", async () => {
-    const { data } = await run(bridgeText, "Query.info", { name: "World" });
-    assert.deepEqual(data, { greeting: "hello", name: "World" });
+    test("constant and input wires coexist", async () => {
+      const { data } = await run(bridgeText, "Query.info", { name: "World" });
+      assert.deepEqual(data, { greeting: "hello", name: "World" });
+    });
   });
-});
 
-// ── Tracing ─────────────────────────────────────────────────────────────────
+  // ── Tracing ─────────────────────────────────────────────────────────────────
 
-describe("executeBridge: tracing", () => {
-  const bridgeText = `version 1.5
+  describe("tracing", () => {
+    const bridgeText = `version 1.5
 bridge Query.echo {
   with myTool as t
   with input as i
@@ -792,56 +906,56 @@ bridge Query.echo {
   o.result <- t.y
 }`;
 
-  const tools = { myTool: (p: any) => ({ y: p.x * 2 }) };
+    const tools = { myTool: (p: any) => ({ y: p.x * 2 }) };
 
-  test("traces are empty when tracing is off", async () => {
-    const { traces } = await executeBridge({
-      document: parseBridge(bridgeText),
-      operation: "Query.echo",
-      input: { x: 5 },
-      tools,
+    test("traces are empty when tracing is off", async () => {
+      const { traces } = await ctx.executeFn({
+        document: parseBridge(bridgeText),
+        operation: "Query.echo",
+        input: { x: 5 },
+        tools,
+      });
+      assert.equal(traces.length, 0);
     });
-    assert.equal(traces.length, 0);
-  });
 
-  test("traces contain tool calls when tracing is enabled", async () => {
-    const { data, traces } = await executeBridge({
-      document: parseBridge(bridgeText),
-      operation: "Query.echo",
-      input: { x: 5 },
-      tools,
-      trace: "full",
+    test("traces contain tool calls when tracing is enabled", async () => {
+      const { data, traces } = await ctx.executeFn({
+        document: parseBridge(bridgeText),
+        operation: "Query.echo",
+        input: { x: 5 },
+        tools,
+        trace: "full",
+      });
+      assert.deepEqual(data, { result: 10 });
+      assert.ok(traces.length > 0);
+      assert.ok(traces.some((t) => t.tool === "myTool"));
     });
-    assert.deepEqual(data, { result: 10 });
-    assert.ok(traces.length > 0);
-    assert.ok(traces.some((t) => t.tool === "myTool"));
-  });
-});
-
-// ── Error handling ──────────────────────────────────────────────────────────
-
-describe("executeBridge: errors", () => {
-  test("invalid operation format throws", async () => {
-    await assert.rejects(
-      () => run("version 1.5", "badformat", {}),
-      /expected "Type\.field"/,
-    );
   });
 
-  test("missing bridge definition throws", async () => {
-    const bridgeText = `version 1.5
+  // ── Error handling ──────────────────────────────────────────────────────────
+
+  describe("errors", () => {
+    test("invalid operation format throws", async () => {
+      await assert.rejects(
+        () => run("version 1.5", "badformat", {}),
+        /expected "Type\.field"/,
+      );
+    });
+
+    test("missing bridge definition throws", async () => {
+      const bridgeText = `version 1.5
 bridge Query.foo {
   with output as o
   o.x = "ok"
 }`;
-    await assert.rejects(
-      () => run(bridgeText, "Query.bar", {}),
-      /No bridge definition found/,
-    );
-  });
+      await assert.rejects(
+        () => run(bridgeText, "Query.bar", {}),
+        /No bridge definition found/,
+      );
+    });
 
-  test("bridge with no output wires throws descriptive error", async () => {
-    const bridgeText = `version 1.5
+    test("bridge with no output wires throws descriptive error", async () => {
+      const bridgeText = `version 1.5
 bridge Query.ping {
   with myTool as m
   with input as i
@@ -850,13 +964,23 @@ bridge Query.ping {
 m.q <- i.q
 
 }`;
-    await assert.rejects(
-      () =>
-        run(bridgeText, "Query.ping", { q: "x" }, { myTool: async () => ({}) }),
-      /no output wires/,
-    );
+      await assert.rejects(
+        () =>
+          run(
+            bridgeText,
+            "Query.ping",
+            { q: "x" },
+            { myTool: async () => ({}) },
+          ),
+        /no output wires/,
+      );
+    });
   });
-});
+}); // end forEachEngine
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Runtime-specific tests (version compatibility, utilities)
+// ══════════════════════════════════════════════════════════════════════════════
 
 // ── Version compatibility ───────────────────────────────────────────────────
 

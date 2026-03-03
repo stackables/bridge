@@ -44,6 +44,7 @@
   "scripts": {
     "prebuild": "pnpm --filter @stackables/bridge build",
     "build": "node build.mjs",
+    "lint:types": "tsc -p tsconfig.check.json",
     "watch": "node build.mjs --watch",
     "prevscode:prepublish": "pnpm --filter @stackables/bridge build",
     "vscode:prepublish": "node build.mjs"

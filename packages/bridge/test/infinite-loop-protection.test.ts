@@ -1,33 +1,49 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
-  executeBridge,
   parseBridgeFormat as parseBridge,
   ExecutionTree,
   BridgePanicError,
   MAX_EXECUTION_DEPTH,
 } from "../src/index.ts";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown>,
-  tools: Record<string, any> = {},
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
-    typeof parseBridge
-  >;
-  return executeBridge({ document, operation, input, tools });
-}
+import { forEachEngine } from "./_dual-run.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Depth ceiling — prevents infinite shadow tree nesting
+// Runtime-only: ExecutionTree depth ceiling
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("depth ceiling", () => {
+  test("shadow() beyond MAX_EXECUTION_DEPTH throws BridgePanicError", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+  o.x <- i.x
+}`);
+    const document = JSON.parse(JSON.stringify(doc));
+    const trunk = { module: "__self__", type: "Query", field: "test" };
+    let tree = new ExecutionTree(trunk, document);
+
+    for (let i = 0; i < MAX_EXECUTION_DEPTH; i++) {
+      tree = tree.shadow();
+    }
+
+    assert.throws(
+      () => tree.shadow(),
+      (err: any) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.match(err.message, /Maximum execution depth exceeded/);
+        return true;
+      },
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Dual-engine tests
+// ══════════════════════════════════════════════════════════════════════════════
+
+forEachEngine("infinite loop protection", (run, _ctx) => {
   test("normal array mapping works within depth limit", async () => {
     const bridgeText = `version 1.5
 bridge Query.items {
@@ -41,45 +57,10 @@ bridge Query.items {
     const result = await run(bridgeText, "Query.items", {
       list: [{ name: "a" }, { name: "b" }],
     });
-    // Normal array mapping should succeed
     assert.deepStrictEqual(result.data, [{ name: "a" }, { name: "b" }]);
   });
 
-  test("shadow() beyond MAX_EXECUTION_DEPTH throws BridgePanicError", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  o.x <- i.x
-}`);
-    const document = JSON.parse(JSON.stringify(doc));
-    const trunk = { module: "__self__", type: "Query", field: "test" };
-    let tree = new ExecutionTree(trunk, document);
-
-    // Chain shadow trees to MAX_EXECUTION_DEPTH — should succeed
-    for (let i = 0; i < MAX_EXECUTION_DEPTH; i++) {
-      tree = tree.shadow();
-    }
-
-    // One more shadow must throw
-    assert.throws(
-      () => tree.shadow(),
-      (err: any) => {
-        assert.ok(err instanceof BridgePanicError);
-        assert.match(err.message, /Maximum execution depth exceeded/);
-        return true;
-      },
-    );
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Cycle detection — prevents circular dependency deadlocks
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("cycle detection", () => {
   test("circular A→B→A dependency throws BridgePanicError", async () => {
-    // Tool A wires its input from tool B, and tool B wires from tool A
     const bridgeText = `version 1.5
 bridge Query.loop {
   with toolA as a
@@ -118,7 +99,12 @@ bridge Query.chain {
       toolA: async (input: any) => ({ result: input.x + "A" }),
       toolB: async (input: any) => ({ result: input.x + "B" }),
     };
-    const result = await run(bridgeText, "Query.chain", { value: "start" }, tools);
+    const result = await run(
+      bridgeText,
+      "Query.chain",
+      { value: "start" },
+      tools,
+    );
     assert.deepStrictEqual(result.data, { val: "startAB" });
   });
 });

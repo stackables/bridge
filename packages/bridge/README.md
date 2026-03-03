@@ -99,7 +99,8 @@ Exit code is `1` when any errors are present, `0` when everything is clean.
 | Package                                                                                    | Role                     | When to reach for it                                                        |
 | ------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------- |
 | [`@stackables/bridge-core`](https://www.npmjs.com/package/@stackables/bridge-core)         | **The Engine**           | Edge workers, serverless — run pre-compiled instructions without the parser |
-| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Parser**           | Build-time compilation of `.bridge` files, or parse on the fly at startup   |
+| [`@stackables/bridge-parser`](https://www.npmjs.com/package/@stackables/bridge-parser)     | **The Parser**           | Parse `.bridge` files into a BridgeDocument (AST)                           |
+| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Compiler**         | Compile BridgeDocument into optimized JavaScript                            |
 | [`@stackables/bridge-graphql`](https://www.npmjs.com/package/@stackables/bridge-graphql)   | **The Adapter**          | Wire bridge instructions into an Apollo or Yoga GraphQL schema              |
 | [`@stackables/bridge-stdlib`](https://www.npmjs.com/package/@stackables/bridge-stdlib)     | **The Standard Library** | Customize or extend httpCall, string/array tools, audit, assert             |
 | [`@stackables/bridge-types`](https://www.npmjs.com/package/@stackables/bridge-types)       | **Shared Types**         | Writing a custom tool library or framework integration                      |

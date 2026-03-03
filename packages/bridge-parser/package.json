@@ -1,7 +1,7 @@
 {
-  "name": "@stackables/bridge-graphql",
-  "version": "1.1.1",
-  "description": "Bridge GraphQL adapter — wire bridges into a GraphQL schema",
+  "name": "@stackables/bridge-parser",
+  "version": "1.0.6",
+  "description": "Bridge DSL parser — turns .bridge text into a BridgeDocument (AST)",
   "main": "./build/index.js",
   "type": "module",
   "types": "./build/index.d.ts",
@@ -28,14 +28,12 @@
   "license": "MIT",
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",
-    "@stackables/bridge-stdlib": "workspace:*"
+    "@stackables/bridge-stdlib": "workspace:*",
+    "chevrotain": "^11.1.2"
   },
   "devDependencies": {
+    "@types/node": "^25.3.2",
     "typescript": "^5.9.3"
-  },
-  "peerDependencies": {
-    "graphql": "^16",
-    "@graphql-tools/utils": "^11"
   },
   "publishConfig": {
     "access": "public"

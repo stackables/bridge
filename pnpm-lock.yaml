@@ -101,15 +101,15 @@ importers:
 
   packages/bridge:
     dependencies:
-      '@stackables/bridge-compiler':
-        specifier: workspace:*
-        version: link:../bridge-compiler
       '@stackables/bridge-core':
         specifier: workspace:*
         version: link:../bridge-core
       '@stackables/bridge-graphql':
         specifier: workspace:*
         version: link:../bridge-graphql
+      '@stackables/bridge-parser':
+        specifier: workspace:*
+        version: link:../bridge-parser
       '@stackables/bridge-stdlib':
         specifier: workspace:*
         version: link:../bridge-stdlib
@@ -117,6 +117,9 @@ importers:
       '@graphql-tools/executor-http':
         specifier: ^3.1.0
         version: 3.1.0(@types/node@25.3.2)(graphql@16.13.0)
+      '@stackables/bridge-compiler':
+        specifier: workspace:*
+        version: link:../bridge-compiler
       '@types/node':
         specifier: ^25.3.2
         version: 25.3.2
@@ -138,10 +141,10 @@ importers:
       '@stackables/bridge-stdlib':
         specifier: workspace:*
         version: link:../bridge-stdlib
-      chevrotain:
-        specifier: ^11.1.2
-        version: 11.1.2
     devDependencies:
+      '@stackables/bridge-parser':
+        specifier: workspace:*
+        version: link:../bridge-parser
       '@types/node':
         specifier: ^25.3.2
         version: 25.3.2
@@ -183,6 +186,25 @@ importers:
         specifier: ^16
         version: 16.13.0
     devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/bridge-parser:
+    dependencies:
+      '@stackables/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      '@stackables/bridge-stdlib':
+        specifier: workspace:*
+        version: link:../bridge-stdlib
+      chevrotain:
+        specifier: ^11.1.2
+        version: 11.1.2
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.2
+        version: 25.3.2
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

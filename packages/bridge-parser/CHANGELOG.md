@@ -1,4 +1,4 @@
-# @stackables/bridge-compiler
+# @stackables/bridge-parser
 
 ## 1.0.6
 

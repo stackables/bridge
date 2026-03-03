@@ -1,20 +1,10 @@
 {
-  "extends": "@tsconfig/node24/tsconfig.json",
+  "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": [
-      "es2024",
-      "ESNext.Array",
-      "ESNext.Collection",
-      "ESNext.Error",
-      "ESNext.Iterator",
-      "ESNext.Promise",
-      "dom"
-    ],
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rootDir": "../..",
+    "baseUrl": "../..",
     "paths": {
       "@stackables/bridge-types": [
         "./packages/bridge-types/build/index.d.ts",
