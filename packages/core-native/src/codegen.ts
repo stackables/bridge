@@ -163,6 +163,8 @@ class CodegenContext {
   private varMap = new Map<string, string>();
   private tools = new Map<string, ToolInfo>();
   private toolCounter = 0;
+  /** Set of trunk keys for define-in/out virtual containers. */
+  private defineContainers = new Set<string>();
   /** Trunk keys of pipe/expression tools that use internal implementations. */
   private internalToolKeys = new Set<string>();
 
@@ -184,10 +186,38 @@ class CodegenContext {
         case "const":
           // Constants are inlined directly
           break;
+        case "define": {
+          // Define blocks are inlined at parse time. The parser creates
+          // __define_in_<handle> and __define_out_<handle> modules that act
+          // as virtual data containers for routing data in/out of the define.
+          const inModule = `__define_in_${h.handle}`;
+          const outModule = `__define_out_${h.handle}`;
+          const inTk = `${inModule}:${bridge.type}:${bridge.field}`;
+          const outTk = `${outModule}:${bridge.type}:${bridge.field}`;
+          const inVn = `_d${++this.toolCounter}`;
+          const outVn = `_d${++this.toolCounter}`;
+          this.varMap.set(inTk, inVn);
+          this.varMap.set(outTk, outVn);
+          this.defineContainers.add(inTk);
+          this.defineContainers.add(outTk);
+          break;
+        }
         case "tool": {
           const { module, fieldName } = splitToolName(h.name);
-          // Module-prefixed tools use the bridge's type; self-module tools use "Tools"
-          const refType = module === SELF_MODULE ? "Tools" : bridge.type;
+          // Module-prefixed tools use the bridge's type; self-module tools use "Tools".
+          // However, tools inlined from define blocks may use type "Define".
+          // We detect the correct type by scanning the wires for a matching ref.
+          let refType = module === SELF_MODULE ? "Tools" : bridge.type;
+          for (const w of bridge.wires) {
+            if (w.to.module === module && w.to.field === fieldName && w.to.instance != null) {
+              refType = w.to.type;
+              break;
+            }
+            if ("from" in w && w.from.module === module && w.from.field === fieldName && w.from.instance != null) {
+              refType = w.from.type;
+              break;
+            }
+          }
           const instance = this.findInstance(module, refType, fieldName);
           const tk = `${module}:${refType}:${fieldName}:${instance}`;
           const vn = `_t${++this.toolCounter}`;
@@ -254,15 +284,21 @@ class CodegenContext {
       }
     }
 
-    // Separate wires into tool inputs vs. output
+    // Separate wires into tool inputs, define containers, and output
     const outputWires: Wire[] = [];
     const toolWires = new Map<string, Wire[]>();
+    const defineWires = new Map<string, Wire[]>();
 
     for (const w of bridge.wires) {
       // Element wires (from array mapping) target the output, not a tool
       const toKey = refTrunkKey(w.to);
       if (toKey === this.selfTrunkKey) {
         outputWires.push(w);
+      } else if (this.defineContainers.has(toKey)) {
+        // Wire targets a define-in/out container
+        const arr = defineWires.get(toKey) ?? [];
+        arr.push(w);
+        defineWires.set(toKey, arr);
       } else {
         const arr = toolWires.get(toKey) ?? [];
         arr.push(w);
@@ -288,7 +324,14 @@ class CodegenContext {
       }
     }
 
-    // Topological sort of tool calls
+    // Merge define container entries into toolWires for topological sorting.
+    // Define containers are scheduled like tools (they have dependencies and
+    // dependants) but they emit simple object assignments instead of tool calls.
+    for (const [tk, wires] of defineWires) {
+      toolWires.set(tk, wires);
+    }
+
+    // Topological sort of tool calls (including define containers)
     const toolOrder = this.topologicalSort(toolWires);
 
     // Build code lines
@@ -302,8 +345,16 @@ class CodegenContext {
       `export default async function ${fnName}(input, tools, context) {`,
     );
 
-    // Emit tool calls
+    // Emit tool calls and define container assignments
     for (const tk of toolOrder) {
+      if (this.defineContainers.has(tk)) {
+        // Emit define container as a plain object assignment
+        const wires = defineWires.get(tk) ?? [];
+        const varName = this.varMap.get(tk)!;
+        const inputObj = this.buildObjectLiteral(wires, (w) => w.to.path, 4);
+        lines.push(`  const ${varName} = ${inputObj};`);
+        continue;
+      }
       const tool = this.tools.get(tk)!;
       const wires = toolWires.get(tk) ?? [];
       const forceInfo = forceMap.get(tk);
@@ -1135,19 +1186,21 @@ class CodegenContext {
   }
 
   private topologicalSort(toolWires: Map<string, Wire[]>): string[] {
+    // All node keys: tools + define containers
     const toolKeys = [...this.tools.keys()];
+    const allKeys = [...toolKeys, ...this.defineContainers];
     const adj = new Map<string, Set<string>>();
 
-    for (const key of toolKeys) {
+    for (const key of allKeys) {
       adj.set(key, new Set());
     }
 
     // Build adjacency: src → dst edges (deduplicated via Set)
-    for (const key of toolKeys) {
+    for (const key of allKeys) {
       const wires = toolWires.get(key) ?? [];
       for (const w of wires) {
         for (const src of this.getSourceTrunks(w)) {
-          if (this.tools.has(src) && src !== key) {
+          if (adj.has(src) && src !== key) {
             adj.get(src)!.add(key);
           }
         }
@@ -1156,7 +1209,7 @@ class CodegenContext {
 
     // Compute in-degree from the adjacency sets (avoids double-counting)
     const inDegree = new Map<string, number>();
-    for (const key of toolKeys) inDegree.set(key, 0);
+    for (const key of allKeys) inDegree.set(key, 0);
     for (const [, neighbors] of adj) {
       for (const n of neighbors) {
         inDegree.set(n, (inDegree.get(n) ?? 0) + 1);
@@ -1180,7 +1233,7 @@ class CodegenContext {
       }
     }
 
-    if (sorted.length !== toolKeys.length) {
+    if (sorted.length !== allKeys.length) {
       throw new Error("Circular dependency detected in tool calls");
     }
 

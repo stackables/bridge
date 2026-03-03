@@ -990,3 +990,95 @@ bridge Query.shout {
 ];
 
 runSharedSuite("Shared: pipe operators", pipeCases);
+
+// ── 15. Define blocks ───────────────────────────────────────────────────────
+
+const defineCases: SharedTestCase[] = [
+  {
+    name: "simple define block inlines tool call",
+    bridgeText: `version 1.5
+
+define userProfile {
+  with userApi as api
+  with input as i
+  with output as o
+  api.id <- i.userId
+  o.name <- api.login
+}
+
+bridge Query.user {
+  with userProfile as sp
+  with input as i
+  with output as o
+  sp.userId <- i.id
+  o.profile <- sp
+}`,
+    operation: "Query.user",
+    input: { id: 42 },
+    tools: {
+      userApi: async (input: any) => ({ login: "admin_" + input.id }),
+    },
+    expected: { profile: { name: "admin_42" } },
+  },
+  {
+    name: "define with module-prefixed tool",
+    bridgeText: `version 1.5
+
+define enrichedGeo {
+  with hereapi.geocode as gc
+  with input as i
+  with output as o
+  gc.q <- i.query
+  o.lat <- gc.lat
+  o.lon <- gc.lon
+}
+
+bridge Query.search {
+  with enrichedGeo as geo
+  with input as i
+  with output as o
+  geo.query <- i.location
+  o.coordinates <- geo
+}`,
+    operation: "Query.search",
+    input: { location: "Berlin" },
+    tools: {
+      "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
+    },
+    expected: { coordinates: { lat: 52.53, lon: 13.38 } },
+  },
+  {
+    name: "define with multiple output fields",
+    bridgeText: `version 1.5
+
+define weatherInfo {
+  with weatherApi as api
+  with input as i
+  with output as o
+  api.city <- i.cityName
+  o.temp <- api.temperature
+  o.humidity <- api.humidity
+  o.wind <- api.windSpeed
+}
+
+bridge Query.weather {
+  with weatherInfo as w
+  with input as i
+  with output as o
+  w.cityName <- i.city
+  o.forecast <- w
+}`,
+    operation: "Query.weather",
+    input: { city: "Berlin" },
+    tools: {
+      weatherApi: async (input: any) => ({
+        temperature: 22,
+        humidity: 65,
+        windSpeed: 15,
+      }),
+    },
+    expected: { forecast: { temp: 22, humidity: 65, wind: 15 } },
+  },
+];
+
+runSharedSuite("Shared: define blocks", defineCases);
