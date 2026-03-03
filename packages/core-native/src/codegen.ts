@@ -245,6 +245,25 @@ class CodegenContext {
         }
       }
     }
+
+    // Detect alias declarations — wires targeting __local:Shadow:<name> modules.
+    // These act as virtual containers (like define modules).
+    for (const w of bridge.wires) {
+      const toTk = refTrunkKey(w.to);
+      if (w.to.module === "__local" && w.to.type === "Shadow" && !this.varMap.has(toTk)) {
+        const vn = `_a${++this.toolCounter}`;
+        this.varMap.set(toTk, vn);
+        this.defineContainers.add(toTk);
+      }
+      if ("from" in w && w.from.module === "__local" && w.from.type === "Shadow") {
+        const fromTk = refTrunkKey(w.from);
+        if (!this.varMap.has(fromTk)) {
+          const vn = `_a${++this.toolCounter}`;
+          this.varMap.set(fromTk, vn);
+          this.defineContainers.add(fromTk);
+        }
+      }
+    }
   }
 
   /** Find the instance number for a tool from the wires. */
@@ -768,7 +787,13 @@ class CodegenContext {
       if (!current.children.has(lastSeg)) {
         current.children.set(lastSeg, { children: new Map() });
       }
-      current.children.get(lastSeg)!.expr = this.wireToExpr(w);
+      const node = current.children.get(lastSeg)!;
+      if (node.expr != null) {
+        // Overdefinition: combine with ?? — first non-null wins
+        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
+      } else {
+        node.expr = this.wireToExpr(w);
+      }
     }
 
     // Emit array-mapped fields into the tree as well
@@ -1120,7 +1145,12 @@ class CodegenContext {
       if (!current.children.has(lastSeg)) {
         current.children.set(lastSeg, { children: new Map() });
       }
-      current.children.get(lastSeg)!.expr = this.wireToExpr(w);
+      const node = current.children.get(lastSeg)!;
+      if (node.expr != null) {
+        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
+      } else {
+        node.expr = this.wireToExpr(w);
+      }
     }
 
     return this.serializeTreeNode(root, indent);

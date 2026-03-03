@@ -1082,3 +1082,86 @@ bridge Query.weather {
 ];
 
 runSharedSuite("Shared: define blocks", defineCases);
+
+// ── 16. Alias declarations ──────────────────────────────────────────────────
+
+const aliasCases: SharedTestCase[] = [
+  {
+    name: "top-level alias — simple rename",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with api
+  with output as o
+  alias api.result.data as d
+  o.value <- d.name
+}`,
+    operation: "Query.test",
+    tools: {
+      api: async () => ({ result: { data: { name: "hello" } } }),
+    },
+    expected: { value: "hello" },
+  },
+  {
+    name: "top-level alias with pipe — caches result",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with myUC
+  with input as i
+  with output as o
+
+  alias myUC:i.name as upper
+  o.greeting <- upper.out
+}`,
+    operation: "Query.test",
+    input: { name: "hello" },
+    tools: {
+      myUC: (p: any) => ({ out: p.in.toUpperCase() }),
+    },
+    expected: { greeting: "HELLO" },
+  },
+];
+
+runSharedSuite("Shared: alias declarations", aliasCases);
+
+// ── 17. Overdefinition ──────────────────────────────────────────────────────
+
+const overdefinitionCases: SharedTestCase[] = [
+  {
+    name: "first wire wins when both non-null",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with expensiveApi as api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.label <- api.label
+  o.label <- i.hint
+}`,
+    operation: "Query.lookup",
+    input: { q: "x", hint: "cheap" },
+    tools: {
+      expensiveApi: async () => ({ label: "from-api" }),
+    },
+    expected: { label: "from-api" },
+  },
+  {
+    name: "first wire null — falls through to second",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.label <- api.label
+  o.label <- i.hint
+}`,
+    operation: "Query.lookup",
+    input: { q: "x", hint: "fallback" },
+    tools: {
+      api: async () => ({ label: null }),
+    },
+    expected: { label: "fallback" },
+  },
+];
+
+runSharedSuite("Shared: overdefinition", overdefinitionCases);
