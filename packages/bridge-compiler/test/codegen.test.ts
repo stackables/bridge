@@ -1377,6 +1377,55 @@ bridge Query.test {
     assert.deepStrictEqual(aotNoCache.data, rtNoCache.data);
   });
 
+  test("constant overdefinition parity — first constant remains terminal", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "constantOverdef",
+          handles: [{ kind: "output", handle: "o" }],
+          wires: [
+            {
+              value: "null",
+              to: {
+                module: "_",
+                type: "Query",
+                field: "constantOverdef",
+                path: ["k"],
+              },
+            },
+            {
+              value: "false",
+              to: {
+                module: "_",
+                type: "Query",
+                field: "constantOverdef",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.constantOverdef",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.constantOverdef",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: null });
+  });
+
   test("generated code contains conditional wrapping", () => {
     const code = compileOnly(
       `version 1.5
