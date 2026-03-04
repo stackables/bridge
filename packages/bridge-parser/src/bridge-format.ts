@@ -74,9 +74,9 @@ export function serializeBridge(doc: BridgeDocument): string {
  */
 function needsQuoting(v: string): boolean {
   if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) return false; // JSON string literal
-  if (v === "" || v === "true" || v === "false" || v === "null") return false;
+  if (v === "true" || v === "false" || v === "null") return false;
   if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v)) return false; // number
-  if (/^\/[\w./-]*$/.test(v)) return false; // /path
+  if (/^\/[\w./-]+$/.test(v)) return false; // /path
   if (/^[a-zA-Z_][\w-]*$/.test(v)) return false; // identifier / keyword
   return true;
 }

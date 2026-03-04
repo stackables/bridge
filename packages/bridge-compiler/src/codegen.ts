@@ -30,9 +30,34 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
-import { matchesRequestedFields } from "@stackables/bridge-core";
 
 const SELF_MODULE = "_";
+
+function matchesRequestedFields(
+  fieldPath: string,
+  requestedFields: string[] | undefined,
+): boolean {
+  if (!requestedFields || requestedFields.length === 0) return true;
+
+  for (const pattern of requestedFields) {
+    if (pattern === fieldPath) return true;
+
+    if (fieldPath.startsWith(pattern + ".")) return true;
+
+    if (pattern.startsWith(fieldPath + ".")) return true;
+
+    if (pattern.endsWith(".*")) {
+      const prefix = pattern.slice(0, -2);
+      if (fieldPath.startsWith(prefix + ".")) {
+        const rest = fieldPath.slice(prefix.length + 1);
+        if (!rest.includes(".")) return true;
+      }
+      if (fieldPath === prefix) return true;
+    }
+  }
+
+  return false;
+}
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -1432,6 +1457,7 @@ class CodegenContext {
     // Build a nested tree from scalar wires using their full output path
     interface TreeNode {
       expr?: string;
+      terminal?: boolean;
       children: Map<string, TreeNode>;
     }
     const tree: TreeNode = { children: new Map() };
@@ -1451,12 +1477,7 @@ class CodegenContext {
         current.children.set(lastSeg, { children: new Map() });
       }
       const node = current.children.get(lastSeg)!;
-      if (node.expr != null) {
-        // Overdefinition: combine with ?? — first non-null wins
-        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
-      } else {
-        node.expr = this.wireToExpr(w);
-      }
+      this.mergeOverdefinedExpr(node, w);
     }
 
     // Emit array-mapped fields into the tree as well
@@ -1794,9 +1815,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condAnd;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} && ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) && Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} && ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -1807,9 +1829,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condOr;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} || ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) || Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} || ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -2230,9 +2253,9 @@ class CodegenContext {
 
     // Nullish coalescing (??)
     if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-      expr = `(${expr} ?? ${this.refToExpr(w.nullishFallbackRef)})`; // lgtm [js/code-injection]
+      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(w.nullishFallbackRef)}))`; // lgtm [js/code-injection]
     } else if ("nullishFallback" in w && w.nullishFallback != null) {
-      expr = `(${expr} ?? ${emitCoerced(w.nullishFallback)})`; // lgtm [js/code-injection]
+      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(w.nullishFallback)}))`; // lgtm [js/code-injection]
     }
     // Nullish control flow (throw/panic on ?? gate)
     if ("nullishControl" in w && w.nullishControl) {
@@ -2526,6 +2549,30 @@ class CodegenContext {
 
   // ── Nested object literal builder ─────────────────────────────────────────
 
+  private mergeOverdefinedExpr(
+    node: { expr?: string; terminal?: boolean },
+    wire: Wire,
+  ): void {
+    const nextExpr = this.wireToExpr(wire);
+    const nextIsConstant = "value" in wire;
+
+    if (node.expr == null) {
+      node.expr = nextExpr;
+      node.terminal = nextIsConstant;
+      return;
+    }
+
+    if (node.terminal) return;
+
+    if (nextIsConstant) {
+      node.expr = `((__v) => (__v != null ? __v : ${nextExpr}))(${node.expr})`;
+      node.terminal = true;
+      return;
+    }
+
+    node.expr = `(${node.expr} ?? ${nextExpr})`;
+  }
+
   /**
    * Build a JavaScript object literal from a set of wires.
    * Handles nested paths by creating nested object literals.
@@ -2540,6 +2587,7 @@ class CodegenContext {
     // Build tree
     interface TreeNode {
       expr?: string;
+      terminal?: boolean;
       children: Map<string, TreeNode>;
     }
     const root: TreeNode = { children: new Map() };
@@ -2560,11 +2608,7 @@ class CodegenContext {
         current.children.set(lastSeg, { children: new Map() });
       }
       const node = current.children.get(lastSeg)!;
-      if (node.expr != null) {
-        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
-      } else {
-        node.expr = this.wireToExpr(w);
-      }
+      this.mergeOverdefinedExpr(node, w);
     }
 
     return this.serializeTreeNode(root, indent);
