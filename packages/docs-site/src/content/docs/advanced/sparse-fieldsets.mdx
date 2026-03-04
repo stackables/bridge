@@ -34,6 +34,7 @@ const { data } = await executeBridge({
   requestedFields: ["id", "status", "legs.*"],
   tools: { /* ... */ },
 });
+
 ```
 
 When `requestedFields` is omitted (or empty), every output field is resolved
@@ -43,12 +44,12 @@ When `requestedFields` is omitted (or empty), every output field is resolved
 
 Patterns are **dot-separated paths** with an optional trailing wildcard:
 
-| Pattern           | Matches                                                      |
-| ----------------- | ------------------------------------------------------------ |
-| `"id"`            | The top-level `id` field                                     |
-| `"legs"`          | The entire `legs` object (all children included)             |
-| `"legs.duration"` | Only `legs.duration` — other `legs` children are skipped     |
-| `"legs.*"`        | Every immediate child of `legs` (e.g. `legs.duration`, `legs.distance`) |
+| Pattern | Matches |
+| --- | --- |
+| `"id"` | The top-level `id` field |
+| `"legs"` | The entire `legs` object (all children included) |
+| `"legs.duration"` | Only `legs.duration` — other `legs` children are skipped |
+| `"legs.*"` | Every immediate child of `legs` (e.g. `legs.duration`, `legs.distance`) |
 
 A field is included if **any** pattern matches it. Ancestor fields are
 included automatically when a deeper path is requested (e.g., requesting
@@ -78,11 +79,21 @@ app.get("/api/trains", async (req, res) => {
 
   res.json(data);
 });
-```
 
 ```
+
+```text
 GET /api/trains?from=Bern&to=Zürich&fields=id,status,legs.duration
+
 ```
+
+## Example: GraphQL Adapter
+
+If you are using the `@stackables/bridge-graphql` adapter, you do not need to use the `requestedFields` option at all. 
+
+Because the adapter hooks directly into the native GraphQL execution engine, sparse fieldsets are handled **automatically and implicitly**. If a client omits a field from their GraphQL query, the GraphQL engine simply never calls the resolver for that field. Because Bridge's interpreter executes lazily based on those resolver calls, any tools that feed exclusively into that unrequested field are never pulled. 
+
+You get perfect, pull-based efficiency out of the box, while retaining GraphQL's standard per-field error handling (Partial Success).
 
 ## How it works
 
@@ -106,7 +117,7 @@ Each shape is cached independently so subsequent calls with the same
 field set reuse the optimally-sized function.
 
 <Aside type="note">
-  Forced handles (`force`) are **always** executed regardless of
-  `requestedFields`, because they represent side-effects that must run
-  unconditionally.
+Forced handles (`force`) are **always** executed regardless of
+`requestedFields`, because they represent side-effects that must run
+unconditionally.
 </Aside>
