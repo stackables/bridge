@@ -63,7 +63,10 @@ while desktop apps fetch richer data from the same `.bridge` file:
 ```ts
 // Express / Fastify handler
 app.get("/api/trains", async (req, res) => {
-  const fields = req.query.fields?.split(","); // e.g. "id,status,legs.duration"
+  const raw = req.query.fields; // e.g. "id,status,legs.duration"
+  const fields = typeof raw === "string"
+    ? raw.split(",").filter((f) => /^[\w.*]+$/.test(f))
+    : undefined;
 
   const { data } = await executeBridge({
     document,

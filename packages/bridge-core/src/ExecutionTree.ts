@@ -661,9 +661,10 @@ export class ExecutionTree implements TreeContext {
     if (subFields.size === 0) return undefined;
 
     // Apply sparse fieldset filter at nested level
+    const prefixStr = prefix.join(".");
     const activeSubFields = this.requestedFields
       ? [...subFields].filter((sub) => {
-          const fullPath = [...prefix, sub].join(".");
+          const fullPath = prefixStr ? `${prefixStr}.${sub}` : sub;
           return matchesRequestedFields(fullPath, this.requestedFields);
         })
       : [...subFields];

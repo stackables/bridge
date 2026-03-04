@@ -648,7 +648,14 @@ class CodegenContext {
     // wires to discover all upstream dependencies.  Tools not in the
     // reachable set are dead code and can be skipped.
 
-    /** Extract all tool trunk keys referenced as sources in a set of wires. */
+    /**
+     * Extract all tool trunk keys referenced as **sources** in a set of
+     * wires.  A "source key" is the trunk key of a node that feeds data
+     * into a wire (the right-hand side of `target <- source`).  This
+     * includes pull refs, ternary branches, condAnd/condOr operands,
+     * and all fallback refs.  Used by the backward reachability analysis
+     * to discover which tools are transitively needed by the output.
+     */
     const collectSourceKeys = (wires: Wire[]): Set<string> => {
       const keys = new Set<string>();
       for (const w of wires) {
