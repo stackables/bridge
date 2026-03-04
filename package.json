@@ -5,9 +5,8 @@
   "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
   "scripts": {
     "test": "pnpm -r test",
-    "build": "pnpm -r build",
-    "lint:types": "pnpm -r --filter './packages/*' lint:types",
-    "lint:eslint": "eslint .",
+    "build": "pnpm -r --filter './packages/*' lint:types",
+    "lint": "eslint .",
     "check:exports": "node scripts/check-exports.mjs",
     "smoke": "node scripts/smoke-test-packages.mjs",
     "e2e": "pnpm -r e2e",

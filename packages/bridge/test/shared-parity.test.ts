@@ -1367,7 +1367,9 @@ bridge Query.data {
     operation: "Query.data",
     input: { x: 1, y: 2 },
     tools: {
-      expensive: () => { throw new Error("expensive tool should not be called"); },
+      expensive: () => {
+        throw new Error("expensive tool should not be called");
+      },
       cheap: (p: any) => ({ result: p.y * 10 }),
     },
     requestedFields: ["b"],
@@ -1456,8 +1458,12 @@ bridge Query.chain {
     input: { x: 10, y: 20 },
     tools: {
       toolA: (p: any) => ({ result: p.x * 2 }),
-      toolB: () => { throw new Error("toolB should not be called"); },
-      toolC: () => { throw new Error("toolC should not be called"); },
+      toolB: () => {
+        throw new Error("toolB should not be called");
+      },
+      toolC: () => {
+        throw new Error("toolC should not be called");
+      },
     },
     requestedFields: ["fromA"],
     expected: { fromA: 20 },
@@ -1482,7 +1488,9 @@ bridge Query.chain {
     operation: "Query.chain",
     input: { x: 10, y: 20 },
     tools: {
-      toolA: () => { throw new Error("toolA should not be called"); },
+      toolA: () => {
+        throw new Error("toolA should not be called");
+      },
       toolB: (p: any) => ({ result: null, partial: p.y }),
       toolC: (p: any) => ({ result: p.z + 5 }),
     },
@@ -1528,7 +1536,7 @@ bridge Query.nested {
     operation: "Query.nested",
     input: { id: 1 },
     tools: {
-      api: (p: any) => ({ name: "Alice", age: 30 }),
+      api: (_p: any) => ({ name: "Alice", age: 30 }),
     },
     requestedFields: ["detail.name"],
     expected: { detail: { name: "Alice" } },
@@ -1539,4 +1547,7 @@ bridge Query.nested {
   },
 ];
 
-runSharedSuite("Shared: sparse fieldsets (requestedFields)", sparseFieldsetCases);
+runSharedSuite(
+  "Shared: sparse fieldsets (requestedFields)",
+  sparseFieldsetCases,
+);
