@@ -30,6 +30,7 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
+import { matchesRequestedFields } from "@stackables/bridge-core";
 
 const SELF_MODULE = "_";
 
@@ -38,6 +39,12 @@ const SELF_MODULE = "_";
 export interface CompileOptions {
   /** The operation to compile, e.g. "Query.livingStandard" */
   operation: string;
+  /**
+   * Sparse fieldset filter — only emit code for the listed output fields.
+   * Supports dot-separated paths and a trailing `*` wildcard.
+   * Omit or pass an empty array to compile all output fields.
+   */
+  requestedFields?: string[];
 }
 
 export interface CompileResult {
@@ -88,7 +95,7 @@ export function compileBridge(
     (i): i is ToolDef => i.kind === "tool",
   );
 
-  const ctx = new CodegenContext(bridge, constDefs, toolDefs);
+  const ctx = new CodegenContext(bridge, constDefs, toolDefs, options.requestedFields);
   return ctx.compile();
 }
 
@@ -231,16 +238,20 @@ class CodegenContext {
   /** Map from ToolDef dependency tool name to its emitted variable name.
    *  Populated lazily by emitToolDeps to avoid duplicating calls. */
   private toolDepVars = new Map<string, string>();
+  /** Sparse fieldset filter for output wire pruning. */
+  private requestedFields: string[] | undefined;
 
   constructor(
     bridge: Bridge,
     constDefs: Map<string, string>,
     toolDefs: ToolDef[],
+    requestedFields?: string[],
   ) {
     this.bridge = bridge;
     this.constDefs = constDefs;
     this.toolDefs = toolDefs;
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
+    this.requestedFields = requestedFields?.length ? requestedFields : undefined;
 
     for (const h of bridge.handles) {
       switch (h.kind) {
@@ -452,7 +463,7 @@ class CodegenContext {
     }
 
     // Separate wires into tool inputs, define containers, and output
-    const outputWires: Wire[] = [];
+    const allOutputWires: Wire[] = [];
     const toolWires = new Map<string, Wire[]>();
     const defineWires = new Map<string, Wire[]>();
 
@@ -465,7 +476,7 @@ class CodegenContext {
         ? `${w.to.module}:${w.to.type}:${w.to.field}`
         : toKey;
       if (toTrunkNoElement === this.selfTrunkKey) {
-        outputWires.push(w);
+        allOutputWires.push(w);
       } else if (this.defineContainers.has(toKey)) {
         // Wire targets a define-in/out container
         const arr = defineWires.get(toKey) ?? [];
@@ -477,6 +488,19 @@ class CodegenContext {
         toolWires.set(toKey, arr);
       }
     }
+
+    // ── Sparse fieldset filtering ──────────────────────────────────────
+    // When requestedFields is provided, drop output wires for fields that
+    // weren't requested.  Kahn's algorithm will then naturally eliminate
+    // tools that only feed into those dropped wires.
+    const outputWires = this.requestedFields
+      ? allOutputWires.filter((w) => {
+          // Root wires (path length 0) and element wires are always included
+          if (w.to.path.length === 0) return true;
+          const fieldPath = w.to.path.join(".");
+          return matchesRequestedFields(fieldPath, this.requestedFields);
+        })
+      : allOutputWires;
 
     // Ensure force-only tools (no wires targeting them from output) are
     // still included in the tool map for scheduling
@@ -618,38 +642,61 @@ class CodegenContext {
     lines.push(`  }`);
 
     // ── Dead tool detection ────────────────────────────────────────────
-    // Detect tools whose output is never referenced by any output wire,
-    // other tool wire, or define container wire. These are dead code
-    // (e.g. a pipe-only handle whose forks are all element-scoped).
-    const referencedToolKeys = new Set<string>();
-    const allWireSources = [...outputWires, ...bridge.wires];
-    for (const w of allWireSources) {
-      if ("from" in w) referencedToolKeys.add(refTrunkKey(w.from));
-      if ("cond" in w) {
-        referencedToolKeys.add(refTrunkKey(w.cond));
-        if (w.thenRef) referencedToolKeys.add(refTrunkKey(w.thenRef));
-        if (w.elseRef) referencedToolKeys.add(refTrunkKey(w.elseRef));
+    // Detect which tools are reachable from the (possibly filtered) output
+    // wires.  Uses a backward reachability analysis: start from tools
+    // referenced in output wires, then transitively follow tool-input
+    // wires to discover all upstream dependencies.  Tools not in the
+    // reachable set are dead code and can be skipped.
+
+    /** Extract all tool trunk keys referenced as sources in a set of wires. */
+    const collectSourceKeys = (wires: Wire[]): Set<string> => {
+      const keys = new Set<string>();
+      for (const w of wires) {
+        if ("from" in w) keys.add(refTrunkKey(w.from));
+        if ("cond" in w) {
+          keys.add(refTrunkKey(w.cond));
+          if (w.thenRef) keys.add(refTrunkKey(w.thenRef));
+          if (w.elseRef) keys.add(refTrunkKey(w.elseRef));
+        }
+        if ("condAnd" in w) {
+          keys.add(refTrunkKey(w.condAnd.leftRef));
+          if (w.condAnd.rightRef) keys.add(refTrunkKey(w.condAnd.rightRef));
+        }
+        if ("condOr" in w) {
+          keys.add(refTrunkKey(w.condOr.leftRef));
+          if (w.condOr.rightRef) keys.add(refTrunkKey(w.condOr.rightRef));
+        }
+        if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
+          for (const ref of w.falsyFallbackRefs) keys.add(refTrunkKey(ref));
+        }
+        if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
+          keys.add(refTrunkKey(w.nullishFallbackRef));
+        }
+        if ("catchFallbackRef" in w && w.catchFallbackRef) {
+          keys.add(refTrunkKey(w.catchFallbackRef));
+        }
       }
-      if ("condAnd" in w) {
-        referencedToolKeys.add(refTrunkKey(w.condAnd.leftRef));
-        if (w.condAnd.rightRef)
-          referencedToolKeys.add(refTrunkKey(w.condAnd.rightRef));
-      }
-      if ("condOr" in w) {
-        referencedToolKeys.add(refTrunkKey(w.condOr.leftRef));
-        if (w.condOr.rightRef)
-          referencedToolKeys.add(refTrunkKey(w.condOr.rightRef));
-      }
-      // Also count falsy/nullish/catch fallback refs
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
-        for (const ref of w.falsyFallbackRefs)
-          referencedToolKeys.add(refTrunkKey(ref));
-      }
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-        referencedToolKeys.add(refTrunkKey(w.nullishFallbackRef));
-      }
-      if ("catchFallbackRef" in w && w.catchFallbackRef) {
-        referencedToolKeys.add(refTrunkKey(w.catchFallbackRef));
+      return keys;
+    };
+
+    // Seed: tools directly referenced by output wires + forced tools
+    const referencedToolKeys = collectSourceKeys(outputWires);
+    for (const tk of forceMap.keys()) referencedToolKeys.add(tk);
+
+    // Transitive closure: walk backward through tool input wires
+    const visited = new Set<string>();
+    const queue = [...referencedToolKeys];
+    while (queue.length > 0) {
+      const tk = queue.pop()!;
+      if (visited.has(tk)) continue;
+      visited.add(tk);
+      const deps = toolWires.get(tk);
+      if (!deps) continue;
+      for (const key of collectSourceKeys(deps)) {
+        if (!visited.has(key)) {
+          referencedToolKeys.add(key);
+          queue.push(key);
+        }
       }
     }
 
