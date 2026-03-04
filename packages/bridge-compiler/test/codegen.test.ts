@@ -1425,3 +1425,221 @@ bridge Query.dashboard {
     );
   });
 });
+
+// ── Async array mapping bugs ─────────────────────────────────────────────────
+
+describe("AOT codegen: async array mapping", () => {
+  test("catch fallback inside array mapping does not generate await in .map()", async () => {
+    // Bug 1: catch on element ref generates await (async () => { try ... })()
+    // inside a synchronous .map() callback → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.catchElem {
+  with api
+  with output as o
+
+  o.items <- api.results[] as item {
+    .name <- item.name catch "unknown"
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.catchElem");
+    // The generated code must be valid JS — try building & running it
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      { api: () => ({ results: [{ name: "Alice" }, { name: "Bob" }] }) },
+      {},
+    );
+    assert.deepEqual(result, {
+      items: [{ name: "Alice" }, { name: "Bob" }],
+    });
+  });
+
+  test("continue control flow with element-scoped tool uses async loop", async () => {
+    // Bug 2: ?? continue triggers flatMap, but element-scoped tool generates
+    // await __call() inside the non-async flatMap callback → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.contTool {
+  with api
+  with enricher
+  with output as o
+
+  o.items <- api.results[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.contTool");
+    // Must produce valid JS
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          results: [
+            { name: "Alice", itemId: 1 },
+            { name: null, itemId: 2 },
+            { name: "Carol", itemId: 3 },
+          ],
+        }),
+        enricher: (input: any) => ({ data: `enriched-${input.in?.itemId ?? "?"}` }),
+      },
+      {},
+    );
+    // item with null name is skipped by continue
+    assert.equal(result.items.length, 2);
+    assert.equal(result.items[0].name, "Alice");
+    assert.equal(result.items[1].name, "Carol");
+  });
+
+  test("nested sub-array with catch does not generate await in .map()", async () => {
+    // Bug 3: inner sub-array uses .map() but catch generates await inside it
+    const bridgeText = `version 1.5
+bridge Query.nestedCatch {
+  with api
+  with output as o
+
+  o <- api.groups[] as g {
+    .label <- g.name
+    .items <- g.items[] as sub {
+      .value <- sub.val catch "default"
+    }
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.nestedCatch");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          groups: [
+            {
+              name: "G1",
+              items: [{ val: "a" }, { val: "b" }],
+            },
+          ],
+        }),
+      },
+      {},
+    );
+    assert.deepEqual(result, [
+      {
+        label: "G1",
+        items: [{ value: "a" }, { value: "b" }],
+      },
+    ]);
+  });
+
+  test("nested sub-array with element-scoped tool uses async loop", async () => {
+    // Bug 3 variant: inner sub-array has element-scoped tool that generates
+    // await __call() inside synchronous .map() → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.nestedTool {
+  with api
+  with enricher
+  with output as o
+
+  o <- api.groups[] as g {
+    .label <- g.name
+    .items <- g.items[] as sub {
+      alias enricher:sub as e
+      .value <- e.data
+    }
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.nestedTool");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          groups: [
+            {
+              name: "G1",
+              items: [{ id: 1 }, { id: 2 }],
+            },
+          ],
+        }),
+        enricher: (input: any) => ({ data: `val-${input.in?.id ?? "?"}` }),
+      },
+      {},
+    );
+    assert.equal(result[0].label, "G1");
+    assert.equal(result[0].items.length, 2);
+  });
+
+  test("continue control flow with catch inside array uses async loop", async () => {
+    // Bug 1+2 combined: continue + catch fallback
+    const bridgeText = `version 1.5
+bridge Query.contCatch {
+  with api
+  with enricher
+  with output as o
+
+  o.items <- api.results[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data catch "n/a"
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.contCatch");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          results: [
+            { name: "Alice" },
+            { name: null },
+            { name: "Carol" },
+          ],
+        }),
+        enricher: (_input: any) => ({ data: "ok" }),
+      },
+      {},
+    );
+    assert.equal(result.items.length, 2);
+  });
+
+  test("non-root array field with continue and element-scoped tool uses async loop", async () => {
+    // Bug 2 for non-root arrays: the same flatMap issue in the sub-array codepath
+    const bridgeText = `version 1.5
+bridge Query.subContTool {
+  with api
+  with enricher
+  with output as o
+
+  o.title <- api.title
+  o.items <- api.items[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.subContTool");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          title: "Test",
+          items: [
+            { name: "Alice" },
+            { name: null },
+            { name: "Carol" },
+          ],
+        }),
+        enricher: (_input: any) => ({ data: "ok" }),
+      },
+      {},
+    );
+    assert.equal(result.title, "Test");
+    assert.equal(result.items.length, 2);
+  });
+});

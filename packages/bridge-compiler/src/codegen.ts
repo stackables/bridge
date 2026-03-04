@@ -95,7 +95,12 @@ export function compileBridge(
     (i): i is ToolDef => i.kind === "tool",
   );
 
-  const ctx = new CodegenContext(bridge, constDefs, toolDefs, options.requestedFields);
+  const ctx = new CodegenContext(
+    bridge,
+    constDefs,
+    toolDefs,
+    options.requestedFields,
+  );
   return ctx.compile();
 }
 
@@ -251,7 +256,9 @@ class CodegenContext {
     this.constDefs = constDefs;
     this.toolDefs = toolDefs;
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
-    this.requestedFields = requestedFields?.length ? requestedFields : undefined;
+    this.requestedFields = requestedFields?.length
+      ? requestedFields
+      : undefined;
 
     for (const h of bridge.handles) {
       switch (h.kind) {
@@ -1329,8 +1336,36 @@ class CodegenContext {
       // Only check control flow on direct element wires, not sub-array element wires
       const directElemWires = elemWires.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directElemWires);
-      if (cf === "continue") {
-        // Use flatMap — skip elements that trigger continue
+      // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
+      const needsAsync = elemWires.some((w) => this.wireNeedsAwait(w));
+
+      if (needsAsync) {
+        // ALL async processing must use for...of loop
+        const preambleLines: string[] = [];
+        this.elementLocalVars.clear();
+        this.collectElementPreamble(elemWires, "_el0", preambleLines);
+
+        const body = cf
+          ? this.buildElementBodyWithControlFlow(
+              elemWires,
+              arrayIterators,
+              0,
+              4,
+              cf === "continue" ? "for-continue" : "break",
+            )
+          : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
+
+        lines.push(`  const _result = [];`);
+        lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+        for (const pl of preambleLines) {
+          lines.push(`    ${pl}`);
+        }
+        lines.push(body);
+        lines.push(`  }`);
+        lines.push(`  return _result;`);
+        this.elementLocalVars.clear();
+      } else if (cf === "continue") {
+        // Use flatMap — skip elements that trigger continue (sync only)
         const body = this.buildElementBodyWithControlFlow(
           elemWires,
           arrayIterators,
@@ -1342,7 +1377,7 @@ class CodegenContext {
         lines.push(body);
         lines.push(`  });`);
       } else if (cf === "break") {
-        // Use a loop with early break
+        // Use a loop with early break (sync)
         const body = this.buildElementBodyWithControlFlow(
           elemWires,
           arrayIterators,
@@ -1357,44 +1392,7 @@ class CodegenContext {
         lines.push(`  return _result;`);
       } else {
         const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-        // Check if any element wire references an element-scoped non-internal tool (requires await)
-        const needsAsync = elemWires.some((w) => {
-          if ("from" in w && !w.from.element) {
-            const srcKey = refTrunkKey(w.from);
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              !this.internalToolKeys.has(srcKey)
-            )
-              return true;
-            // Check transitive: if the source is a define container that depends on an async element-scoped tool
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              this.defineContainers.has(srcKey)
-            ) {
-              return this.hasAsyncElementDeps(srcKey);
-            }
-          }
-          return false;
-        });
-        if (needsAsync) {
-          // Collect element-scoped real tool calls and define containers that need
-          // per-element computation. Emit them as loop-local variables.
-          const preambleLines: string[] = [];
-          this.elementLocalVars.clear();
-          this.collectElementPreamble(elemWires, "_el0", preambleLines);
-          const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-          lines.push(`  const _result = [];`);
-          lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
-          for (const pl of preambleLines) {
-            lines.push(`    ${pl}`);
-          }
-          lines.push(`    _result.push(${body});`);
-          lines.push(`  }`);
-          lines.push(`  return _result;`);
-          this.elementLocalVars.clear();
-        } else {
-          lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
-        }
+        lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
       }
       return;
     }
@@ -1478,8 +1476,29 @@ class CodegenContext {
       // Only check control flow on direct element wires (not sub-array element wires)
       const directShifted = shifted.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directShifted);
+      // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
+      const needsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
-      if (cf === "continue") {
+      if (needsAsync) {
+        // ALL async processing must use for...of inside an async IIFE
+        const preambleLines: string[] = [];
+        this.elementLocalVars.clear();
+        this.collectElementPreamble(shifted, "_el0", preambleLines);
+
+        const asyncBody = cf
+          ? this.buildElementBodyWithControlFlow(
+              shifted,
+              arrayIterators,
+              0,
+              8,
+              cf === "continue" ? "for-continue" : "break",
+            )
+          : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+
+        const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
+        mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
+        this.elementLocalVars.clear();
+      } else if (cf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1499,40 +1518,7 @@ class CodegenContext {
         mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${cfBody}\n      } return _result; })()`;
       } else {
         const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
-        // Check if any element wire references an element-scoped non-internal tool (requires await)
-        const needsAsync = shifted.some((w) => {
-          if ("from" in w && !w.from.element) {
-            const srcKey = refTrunkKey(w.from);
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              !this.internalToolKeys.has(srcKey)
-            )
-              return true;
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              this.defineContainers.has(srcKey)
-            ) {
-              return this.hasAsyncElementDeps(srcKey);
-            }
-          }
-          return false;
-        });
-        if (needsAsync) {
-          const preambleLines: string[] = [];
-          this.elementLocalVars.clear();
-          this.collectElementPreamble(shifted, "_el0", preambleLines);
-          const asyncBody = this.buildElementBody(
-            shifted,
-            arrayIterators,
-            0,
-            8,
-          );
-          const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-          mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _r = []; for (const _el0 of _src) {\n${preamble}\n      _r.push(${asyncBody});\n    } return _r; })()`;
-          this.elementLocalVars.clear();
-        } else {
-          mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
-        }
+        mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
       }
 
       if (!tree.children.has(arrayField)) {
@@ -1647,8 +1633,22 @@ class CodegenContext {
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
       const innerElVar = `_el${depth + 1}`;
       const innerCf = detectControlFlow(shifted);
+      // Check if inner loop needs async (element-scoped tools or catch fallbacks)
+      const innerNeedsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
-      if (innerCf === "continue") {
+      if (innerNeedsAsync) {
+        // Inner async loop must use for...of inside an async IIFE
+        const innerBody = innerCf
+          ? this.buildElementBodyWithControlFlow(
+              shifted,
+              arrayIterators,
+              depth + 1,
+              indent + 4,
+              innerCf === "continue" ? "for-continue" : "break",
+            )
+          : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
+        mapExpr = `await (async () => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; for (const ${innerElVar} of _src) {\n${innerBody}\n${" ".repeat(indent + 2)}} return _result; })()`;
+      } else if (innerCf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1696,7 +1696,7 @@ class CodegenContext {
     arrayIterators: Record<string, string>,
     depth: number,
     indent: number,
-    mode: "break" | "continue",
+    mode: "break" | "continue" | "for-continue",
   ): string {
     const elVar = `_el${depth}`;
     const pad = " ".repeat(indent);
@@ -1738,6 +1738,14 @@ class CodegenContext {
       }
       // falsyControl
       return `${pad}  if (!${checkExpr}) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
+    }
+
+    // mode === "for-continue" — same as break but uses native 'continue' keyword
+    if (mode === "for-continue") {
+      if (isNullish) {
+        return `${pad}  if (${checkExpr} == null) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      }
+      return `${pad}  if (!${checkExpr}) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
     }
 
     // mode === "break"
@@ -2016,6 +2024,35 @@ class CodegenContext {
     const inputObj = this.buildElementToolInput(toolWires, elVar);
     const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
     return `await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+  }
+
+  /**
+   * Check if a wire's generated expression would contain `await`.
+   * Used to determine whether array loops must be async (for...of) instead of .map()/.flatMap().
+   */
+  private wireNeedsAwait(w: Wire): boolean {
+    // Element-scoped non-internal tool reference generates await __call()
+    if ("from" in w && !w.from.element) {
+      const srcKey = refTrunkKey(w.from);
+      if (
+        this.elementScopedTools.has(srcKey) &&
+        !this.internalToolKeys.has(srcKey)
+      )
+        return true;
+      if (
+        this.elementScopedTools.has(srcKey) &&
+        this.defineContainers.has(srcKey)
+      ) {
+        return this.hasAsyncElementDeps(srcKey);
+      }
+    }
+    // Catch fallback/control without errFlag → applyFallbacks generates await (async () => ...)()
+    if (
+      (hasCatchFallback(w) || hasCatchControl(w)) &&
+      !this.getSourceErrorFlag(w)
+    )
+      return true;
+    return false;
   }
 
   /** Check if an element-scoped tool has transitive async dependencies. */
