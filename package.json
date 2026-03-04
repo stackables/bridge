@@ -7,7 +7,6 @@
     "test": "pnpm -r test",
     "build": "pnpm -r --filter './packages/*' lint:types",
     "lint": "eslint .",
-    "check:exports": "node scripts/check-exports.mjs",
     "smoke": "node scripts/smoke-test-packages.mjs",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",

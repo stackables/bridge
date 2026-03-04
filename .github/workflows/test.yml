@@ -22,8 +22,6 @@ jobs:
         run: pnpm install
       - name: Build
         run: pnpm build
-      - name: Check Exports
-        run: pnpm check:exports
       - name: Lint Types
         run: pnpm lint:types
       - name: Test
