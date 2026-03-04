@@ -73,16 +73,17 @@ console.log(code); // Prints the raw `export default async function...` string
 
 ## API: `ExecuteBridgeOptions`
 
-| Option           | Type                  | What it does                                                                     |
-| ---------------- | --------------------- | -------------------------------------------------------------------------------- |
-| `document`       | `BridgeDocument`      | The parsed AST from `@stackables/bridge-parser`.                                 |
-| `operation`      | `string`              | Which bridge to run, e.g. `"Query.myField"`.                                     |
-| `input?`         | `Record<string, any>` | Input arguments — equivalent to GraphQL field args.                              |
-| `tools?`         | `ToolMap`             | Your custom tool functions (merged with built-in `std`).                         |
-| `context?`       | `Record<string, any>` | Shared data available via `with context as ctx` in `.bridge` files.              |
-| `signal?`        | `AbortSignal`         | Pass an `AbortSignal` to cancel execution and upstream HTTP requests mid-flight. |
-| `toolTimeoutMs?` | `number`              | Fails the execution if a single tool takes longer than this threshold.           |
-| `logger?`        | `Logger`              | Structured logger for tool calls.                                                |
+| Option             | Type                  | What it does                                                                     |
+| ------------------ | --------------------- | -------------------------------------------------------------------------------- |
+| `document`         | `BridgeDocument`      | The parsed AST from `@stackables/bridge-parser`.                                 |
+| `operation`        | `string`              | Which bridge to run, e.g. `"Query.myField"`.                                     |
+| `input?`           | `Record<string, any>` | Input arguments — equivalent to GraphQL field args.                              |
+| `tools?`           | `ToolMap`             | Your custom tool functions (merged with built-in `std`).                         |
+| `context?`         | `Record<string, any>` | Shared data available via `with context as ctx` in `.bridge` files.              |
+| `signal?`          | `AbortSignal`         | Pass an `AbortSignal` to cancel execution and upstream HTTP requests mid-flight. |
+| `toolTimeoutMs?`   | `number`              | Fails the execution if a single tool takes longer than this threshold.           |
+| `logger?`          | `Logger`              | Structured logger for tool calls.                                                |
+| `requestedFields?` | `string[]`            | Sparse fieldset filter — only resolve the listed output fields. Supports dot-separated paths and a trailing `*` wildcard (e.g. `["id", "legs.*"]`). Omit to resolve all fields. |
 
 _Returns:_ `Promise<{ data: T }>`
 
