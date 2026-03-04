@@ -13,6 +13,7 @@ import {
   parseBridgeFormat as parseBridge,
   executeBridge,
 } from "../src/index.ts";
+import { executeBridge as executeBridgeCompiled } from "@stackables/bridge-compiler";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -325,6 +326,93 @@ for (const size of [10, 100]) {
 
   bench.add(`exec: array + tool-per-element ${size}`, async () => {
     await executeBridge({
+      document: d,
+      operation: "Query.enriched",
+      input: {},
+      tools: fixture.tools,
+    });
+  });
+}
+
+// ── Compiled engine – mirror all execution benchmarks ───────────────────────
+
+bench.add("compiled: absolute baseline (passthrough, no tools)", async () => {
+  await executeBridgeCompiled({
+    document: passthroughDoc,
+    operation: "Query.passthrough",
+    input: { id: "123", name: "Alice" },
+  });
+});
+
+bench.add("compiled: short-circuit (overdefinition bypass)", async () => {
+  await executeBridgeCompiled({
+    document: shortCircuitDoc,
+    operation: "Query.shortCircuit",
+    input: { cached: "instant_data" },
+    tools: {
+      expensiveApi: async () => {
+        throw new Error("Should not be called!");
+      },
+    },
+  });
+});
+
+bench.add("compiled: simple chain (1 tool)", async () => {
+  await executeBridgeCompiled({
+    document: simpleDoc,
+    operation: "Query.simple",
+    input: { q: "hello" },
+    tools: simpleTools,
+  });
+});
+
+bench.add("compiled: chained 3-tool fan-out", async () => {
+  await executeBridgeCompiled({
+    document: chainedDoc,
+    operation: "Query.chained",
+    input: { q: "test" },
+    tools: chainedTools,
+  });
+});
+
+for (const size of [10, 100, 1000]) {
+  const fixture = flatArrayBridge(size);
+  const d = doc(fixture.text);
+
+  bench.add(`compiled: flat array ${size} items`, async () => {
+    await executeBridgeCompiled({
+      document: d,
+      operation: "Query.flatArray",
+      input: {},
+      tools: fixture.tools,
+    });
+  });
+}
+
+for (const [outer, inner] of [
+  [5, 5],
+  [10, 10],
+  [20, 10],
+] as const) {
+  const fixture = nestedArrayBridge(outer, inner);
+  const d = doc(fixture.text);
+
+  bench.add(`compiled: nested array ${outer}x${inner}`, async () => {
+    await executeBridgeCompiled({
+      document: d,
+      operation: "Query.nested",
+      input: {},
+      tools: fixture.tools,
+    });
+  });
+}
+
+for (const size of [10, 100]) {
+  const fixture = arrayWithToolPerElement(size);
+  const d = doc(fixture.text);
+
+  bench.add(`compiled: array + tool-per-element ${size}`, async () => {
+    await executeBridgeCompiled({
       document: d,
       operation: "Query.enriched",
       input: {},

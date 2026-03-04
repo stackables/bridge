@@ -22,7 +22,8 @@
     "lint:types": "tsc -p tsconfig.check.json",
     "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
     "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --conditions source --test test/*.test.ts",
-    "bench": "node --experimental-transform-types --conditions source bench/engine.bench.ts"
+    "bench": "node --experimental-transform-types --conditions source bench/engine.bench.ts",
+    "bench:compiler": "node --experimental-transform-types --conditions source bench/compiler.bench.ts"
   },
   "repository": {
     "type": "git",
@@ -36,13 +37,14 @@
   "homepage": "https://github.com/stackables/bridge#readme",
   "devDependencies": {
     "@graphql-tools/executor-http": "^3.1.0",
+    "@stackables/bridge-compiler": "workspace:*",
     "@types/node": "^25.3.2",
     "graphql": "^16.13.0",
     "graphql-yoga": "^5.18.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@stackables/bridge-compiler": "workspace:*",
+    "@stackables/bridge-parser": "workspace:*",
     "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-graphql": "workspace:*",
     "@stackables/bridge-stdlib": "workspace:*"

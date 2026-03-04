@@ -1,5 +1,6 @@
 ---
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import AnchorHeading from "@astrojs/starlight/components/AnchorHeading.astro";
 import { getCollection } from "astro:content";
 
 function routeFromDocId(id: string): string {
@@ -43,7 +44,7 @@ const posts = docs
   .sort((a, b) => {
     const aTime = a.date?.getTime() ?? 0;
     const bTime = b.date?.getTime() ?? 0;
-    if (aTime !== bTime) return bTime - aTime;
+    if (aTime !== bTime) return aTime - bTime;
     return (b.title ?? "").localeCompare(a.title ?? "");
   });
 ---
@@ -62,6 +63,7 @@ const posts = docs
     we're building The Bridge.
   </p>
 
+  <AnchorHeading level="2" id="2026">2026</AnchorHeading>
   <ul>
     {
       posts.map(({ entry, date, title }) => (

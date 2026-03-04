@@ -21,7 +21,7 @@
       "@/*": ["./src/*"],
       "@stackables/bridge": ["../bridge/src/index.ts"],
       "@stackables/bridge-core": ["../bridge-core/src/index.ts"],
-      "@stackables/bridge-compiler": ["../bridge-compiler/src/index.ts"],
+      "@stackables/bridge-parser": ["../bridge-parser/src/index.ts"],
       "@stackables/bridge-graphql": ["../bridge-graphql/src/index.ts"],
       "@stackables/bridge-stdlib": ["../bridge-stdlib/src/index.ts"]
     }

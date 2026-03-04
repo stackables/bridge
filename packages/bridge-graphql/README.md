@@ -7,7 +7,7 @@ The GraphQL adapter for [The Bridge](https://github.com/stackables/bridge) — t
 # Installing
 
 ```bash
-npm install @stackables/bridge-graphql @stackables/bridge-compiler graphql @graphql-tools/utils
+npm install @stackables/bridge-graphql @stackables/bridge-parser graphql @graphql-tools/utils
 ```
 
 `graphql` (≥ 16) and `@graphql-tools/utils` (≥ 11) are peer dependencies.
@@ -16,7 +16,7 @@ npm install @stackables/bridge-graphql @stackables/bridge-compiler graphql @grap
 
 ```ts
 import { bridgeTransform } from "@stackables/bridge-graphql";
-import { parseBridge } from "@stackables/bridge-compiler";
+import { parseBridge } from "@stackables/bridge-parser";
 import { createSchema, createYoga } from "graphql-yoga";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -53,7 +53,8 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 | Package                                                                                    | What it does                                                        |
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
 | [`@stackables/bridge`](https://www.npmjs.com/package/@stackables/bridge)                   | **The All-in-One** — everything in a single install                 |
-| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Parser** — turns `.bridge` text into instructions             |
+| [`@stackables/bridge-parser`](https://www.npmjs.com/package/@stackables/bridge-parser)     | **The Parser** — turns `.bridge` text into instructions             |
+| [`@stackables/bridge-compiler`](https://www.npmjs.com/package/@stackables/bridge-compiler) | **The Compiler** — compiles BridgeDocument into optimized JavaScript |
 | [`@stackables/bridge-core`](https://www.npmjs.com/package/@stackables/bridge-core)         | **The Engine** — also supports standalone execution without GraphQL |
 | [`@stackables/bridge-stdlib`](https://www.npmjs.com/package/@stackables/bridge-stdlib)     | **The Standard Library** — httpCall, strings, arrays, and more      |
 | [`@stackables/bridge-types`](https://www.npmjs.com/package/@stackables/bridge-types)       | **Shared Types** — `ToolCallFn`, `ToolMap`, `CacheStore`            |

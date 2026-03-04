@@ -4,26 +4,11 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import { executeBridge } from "../src/index.ts";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown>,
-  tools: Record<string, any> = {},
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
-    typeof parseBridge
-  >;
-  return executeBridge({ document, operation, input, tools });
-}
+import { forEachEngine } from "./_dual-run.ts";
 
 // ── String interpolation execution tests ────────────────────────────────────
 
-describe("string interpolation: basic", () => {
+forEachEngine("string interpolation", (run, _ctx) => {
   test("simple placeholder", async () => {
     const bridge = `version 1.5
 bridge Query.test {
@@ -98,9 +83,7 @@ bridge Query.test {
     const { data } = await run(bridge, "Query.test", { missing: null });
     assert.deepEqual(data, { text: "Value: " });
   });
-});
 
-describe("string interpolation: tool interaction", () => {
   test("interpolation with tool output", async () => {
     const bridge = `version 1.5
 bridge Query.test {
@@ -117,9 +100,7 @@ bridge Query.test {
     const { data } = await run(bridge, "Query.test", { userId: "1" }, tools);
     assert.deepEqual(data, { url: "/users/john-doe/profile" });
   });
-});
 
-describe("string interpolation: array mapping", () => {
   test("template in element lines", async () => {
     const bridge = `version 1.5
 bridge Query.test {
@@ -142,9 +123,7 @@ bridge Query.test {
       { url: "/items/2", label: "Gadget (#2)" },
     ]);
   });
-});
 
-describe("string interpolation: fallback chains", () => {
   test("template with || fallback", async () => {
     const bridge = `version 1.5
 bridge Query.test {

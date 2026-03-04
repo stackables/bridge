@@ -17,7 +17,8 @@ Choose your packages based on where and how you plan to execute your graphs.
 | --------------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
 | **`@stackables/bridge`**          | **The All-in-One** | Quick starts, monoliths, or when bundle size doesn't matter.                       |
 | **`@stackables/bridge-core`**     | **The Engine**     | Edge workers, serverless functions, and running pre-compiled `.bridge` files.      |
-| **`@stackables/bridge-compiler`** | **The Parser**     | Compiling `.bridge` files to JSON at build time, or parsing on the fly at startup. |
+| **`@stackables/bridge-parser`**   | **The Parser**     | Parsing `.bridge` files to JSON at build time, or parsing on the fly at startup.  |
+| **`@stackables/bridge-compiler`** | **The Compiler**   | Compiling BridgeDocument into optimized JavaScript code.                           |
 | **`@stackables/bridge-graphql`**  | **The Adapter**    | Wiring Bridge documents directly into an Apollo or Yoga GraphQL schema.            |
 
 ---
@@ -33,11 +34,11 @@ _This is the most common setup and the default in our Getting Started guide._
 If you are running a traditional Node.js GraphQL server, you will usually parse your `.bridge` files "Just-In-Time" (JIT) right when the server starts up, and wire them into your schema. For this, you need the compiler and the GraphQL adapter.
 
 ```bash
-npm install @stackables/bridge-graphql @stackables/bridge-compiler graphql
+npm install @stackables/bridge-graphql @stackables/bridge-parser graphql
 ```
 
 ```typescript
-import { parseBridgeDiagnostics } from "@stackables/bridge-compiler";
+import { parseBridgeDiagnostics } from "@stackables/bridge-parser";
 import { bridgeTransform } from "@stackables/bridge-graphql";
 
 // Read the files, parse them into BridgeDocuments, and attach them to the schema
@@ -57,7 +58,7 @@ Instead of parsing files on the server, you parse them "Ahead-Of-Time" (AOT) dur
    Install the compiler as a dev dependency so it never touches your production bundle.
 
    ```bash
-   npm install --save-dev @stackables/bridge-compiler
+   npm install --save-dev @stackables/bridge-parser
    ```
 
    Write a quick build script to compile your `.bridge` files into a single `bridge.json` file.

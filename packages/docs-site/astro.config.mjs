@@ -26,8 +26,8 @@ export default defineConfig({
         "@stackables/bridge-stdlib": fileURLToPath(
           new URL("../bridge-stdlib/src/index.ts", import.meta.url),
         ),
-        "@stackables/bridge-compiler": fileURLToPath(
-          new URL("../bridge-compiler/src/index.ts", import.meta.url),
+        "@stackables/bridge-parser": fileURLToPath(
+          new URL("../bridge-parser/src/index.ts", import.meta.url),
         ),
         "@stackables/bridge-graphql": fileURLToPath(
           new URL("../bridge-graphql/src/index.ts", import.meta.url),
@@ -46,6 +46,11 @@ export default defineConfig({
         src: "./src/assets/logo.svg",
       },
       social: [
+        {
+          label: "Blog",
+          icon: "rss",
+          href: "/blog",
+        },
         {
           icon: "github",
           label: "GitHub",
