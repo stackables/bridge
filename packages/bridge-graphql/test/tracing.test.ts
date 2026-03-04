@@ -2,8 +2,8 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { ToolTrace } from "../src/index.ts";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import type { ToolTrace } from "@stackables/bridge-core";
+import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -185,10 +185,22 @@ importers:
       '@stackables/bridge-stdlib':
         specifier: workspace:*
         version: link:../bridge-stdlib
-      graphql:
-        specifier: ^16
-        version: 16.13.0
     devDependencies:
+      '@graphql-tools/executor-http':
+        specifier: ^3.1.0
+        version: 3.1.0(@types/node@25.3.2)(graphql@16.13.0)
+      '@stackables/bridge-parser':
+        specifier: workspace:*
+        version: link:../bridge-parser
+      '@types/node':
+        specifier: ^25.3.2
+        version: 25.3.2
+      graphql:
+        specifier: ^16.13.0
+        version: 16.13.0
+      graphql-yoga:
+        specifier: ^5.18.0
+        version: 5.18.0(graphql@16.13.0)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

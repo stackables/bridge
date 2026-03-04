@@ -3,7 +3,7 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { createGateway } from "./_gateway.ts";
 
 const typeDefs = /* GraphQL */ `
