@@ -1,5 +1,20 @@
 # @stackables/bridge-parser
 
+## 1.1.1
+
+### Patch Changes
+
+- [#84](https://github.com/stackables/bridge/pull/84) [`837ec1c`](https://github.com/stackables/bridge/commit/837ec1cc74c0a76e205d818b94c33b4c28e3628d) Thanks [@aarne](https://github.com/aarne)! - Fix several AOT compiler/runtime parity bugs discovered via fuzzing:
+
+  - Fix `condAnd` and `condOr` code generation to match runtime boolean semantics.
+  - Fix nullish fallback chaining so `??` handling matches runtime overdefinition boundaries.
+  - Fix overdefinition precedence so the first constant wire remains terminal, matching runtime behavior.
+  - Fix `serializeBridge` quoting for empty-string and slash-only string constants so parse/serialize/parse round-trips remain valid.
+  - Add deterministic regression coverage for these parity cases to prevent regressions.
+
+- Updated dependencies [[`cf5cd2e`](https://github.com/stackables/bridge/commit/cf5cd2e40e6339fb3e896e05dbdbe66b0b5d77a9)]:
+  - @stackables/bridge-core@1.2.0
+
 ## 1.1.0
 
 ### Minor Changes

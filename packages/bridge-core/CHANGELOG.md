@@ -1,5 +1,17 @@
 # @stackables/bridge-core
 
+## 1.2.0
+
+### Minor Changes
+
+- [#82](https://github.com/stackables/bridge/pull/82) [`cf5cd2e`](https://github.com/stackables/bridge/commit/cf5cd2e40e6339fb3e896e05dbdbe66b0b5d77a9) Thanks [@aarne](https://github.com/aarne)! - Add `requestedFields` option to `executeBridge()` for sparse fieldset filtering.
+
+  When provided, only the listed output fields (and their transitive tool dependencies) are resolved.
+  Tools that feed exclusively into unrequested fields are never called, reducing latency and upstream
+  bandwidth.
+
+  Supports dot-separated paths and a trailing wildcard (`["id", "price", "legs.*"]`).
+
 ## 1.1.1
 
 ### Patch Changes
