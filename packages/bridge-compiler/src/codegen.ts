@@ -2257,9 +2257,9 @@ class CodegenContext {
 
     // Nullish coalescing (??)
     if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-      expr = `(${expr} ?? ${this.refToExpr(w.nullishFallbackRef)})`; // lgtm [js/code-injection]
+      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(w.nullishFallbackRef)}))`; // lgtm [js/code-injection]
     } else if ("nullishFallback" in w && w.nullishFallback != null) {
-      expr = `(${expr} ?? ${emitCoerced(w.nullishFallback)})`; // lgtm [js/code-injection]
+      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(w.nullishFallback)}))`; // lgtm [js/code-injection]
     }
     // Nullish control flow (throw/panic on ?? gate)
     if ("nullishControl" in w && w.nullishControl) {

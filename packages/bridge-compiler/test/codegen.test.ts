@@ -305,6 +305,55 @@ bridge Query.refFallback {
     );
     assert.deepEqual(data, { value: "from-backup" });
   });
+
+  test("nullish fallback to null matches runtime overdefinition semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "nullishProbe",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              from: {
+                module: "_",
+                type: "Query",
+                field: "nullishProbe",
+                path: ["m"],
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "nullishProbe",
+                path: ["k"],
+              },
+              nullishFallback: "null",
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.nullishProbe",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.nullishProbe",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: undefined });
+  });
 });
 
 // ── Phase 3: Array mapping ───────────────────────────────────────────────────
