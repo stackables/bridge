@@ -1545,6 +1545,146 @@ bridge Query.nested {
     // current codegen.  Runtime handles this via resolveNestedField.
     aotSupported: false,
   },
+
+  // ── 7. Array-mapped output with requestedFields ──────────────────────
+  {
+    name: "array-mapped output filters top-level fields via requestedFields",
+    bridgeText: `version 1.5
+bridge Query.trips {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+  a.to <- i.to
+
+  o <- a.items[] as item {
+    .id <- item.id
+    .provider <- item.provider
+    .price <- item.price
+    .legs <- item.legs
+  }
+}`,
+    operation: "Query.trips",
+    input: { from: "A", to: "B" },
+    tools: {
+      api: () => ({
+        items: [
+          { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+          { id: 2, provider: "Y", price: 80, legs: [{ name: "L2" }] },
+        ],
+      }),
+    },
+    requestedFields: ["id", "legs"],
+    expected: [
+      { id: 1, legs: [{ name: "L1" }] },
+      { id: 2, legs: [{ name: "L2" }] },
+    ],
+    // AOT doesn't support per-element sparse fieldsets yet.
+    aotSupported: false,
+  },
+
+  // ── 8. Array-mapped output: nested path filters within elements ──────
+  {
+    name: "array-mapped output with nested requestedFields path",
+    bridgeText: `version 1.5
+bridge Query.trains {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+  a.to <- i.to
+
+  o <- a.connections[] as c {
+    .id <- c.id
+    .provider = "SBB"
+    .departureTime <- c.departure
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.name
+      .destination <- s.dest
+    }
+  }
+}`,
+    operation: "Query.trains",
+    input: { from: "Bern", to: "Zürich" },
+    tools: {
+      api: () => ({
+        connections: [
+          {
+            id: 1,
+            departure: "08:00",
+            sections: [
+              { name: "IC1", dest: "Zürich" },
+              { name: "IC2", dest: "Basel" },
+            ],
+          },
+        ],
+      }),
+    },
+    requestedFields: ["legs.destination"],
+    expected: [
+      {
+        legs: [{ destination: "Zürich" }, { destination: "Basel" }],
+      },
+    ],
+    aotSupported: false,
+  },
+
+  // ── 9. Deeply nested path inside array-mapped output ─────────────────
+  {
+    name: "array-mapped output: deep nested path filters sub-fields",
+    bridgeText: `version 1.5
+bridge Query.trains {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+
+  o <- a.connections[] as c {
+    .id <- c.id
+    .provider = "SBB"
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.name
+
+      .destination.station.name <- s.arrStation
+      .destination.plannedTime <- s.arrTime
+      .destination.actualTime <- s.arrActual
+      .destination.platform <- s.arrPlatform
+    }
+  }
+}`,
+    operation: "Query.trains",
+    input: { from: "Bern" },
+    tools: {
+      api: () => ({
+        connections: [
+          {
+            id: 1,
+            sections: [
+              {
+                name: "IC1",
+                arrStation: "Zürich",
+                arrTime: "08:30",
+                arrActual: "08:32",
+                arrPlatform: "3",
+              },
+            ],
+          },
+        ],
+      }),
+    },
+    requestedFields: ["legs.destination.actualTime"],
+    expected: [
+      {
+        legs: [{ destination: { actualTime: "08:32" } }],
+      },
+    ],
+    aotSupported: false,
+  },
 ];
 
 runSharedSuite(

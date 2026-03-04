@@ -46,7 +46,10 @@ import type {
   Wire,
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { filterOutputFields, matchesRequestedFields } from "./requested-fields.ts";
+import {
+  filterOutputFields,
+  matchesRequestedFields,
+} from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 
 export class ExecutionTree implements TreeContext {
@@ -106,7 +109,7 @@ export class ExecutionTree implements TreeContext {
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
   private elementTrunkKey: string;
   /** Sparse fieldset filter — set by `run()` when requestedFields is provided. */
-  private requestedFields: string[] | undefined;
+  requestedFields: string[] | undefined;
 
   constructor(
     public trunk: Trunk,

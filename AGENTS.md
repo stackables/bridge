@@ -11,7 +11,9 @@ A declarative dataflow language (`.bridge` files) and pull-based execution engin
 ## Prerequisites
 
 - **Node.js ≥ 24**, **pnpm ≥ 10**
+- `nvm use 24` or similar in case correct node is not already installed
 - `pnpm install` to set up
+
 
 ## Mandatory Workflow
 

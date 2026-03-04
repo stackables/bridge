@@ -1,10 +1,19 @@
+import type { PlaygroundMode } from "./share";
+
 export type Example = {
   name: string;
   description: string;
+  mode?: PlaygroundMode;
   schema: string;
   bridge: string;
   queries: { name: string; query: string }[];
   context: string;
+  /** Standalone-mode per-query state (parallel array to queries). */
+  standaloneQueries?: {
+    operation: string;
+    outputFields: string;
+    input: Record<string, unknown>;
+  }[];
 };
 
 export const examples: Example[] = [
@@ -45,6 +54,13 @@ bridge Query.greet {
     lower
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.greet",
+        outputFields: "",
+        input: { name: "Hello Bridge" },
       },
     ],
     context: `{}`,
@@ -121,6 +137,13 @@ bridge Query.profile {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.profile",
+        outputFields: "",
+        input: {},
+      },
+    ],
     context: `{
   "user": {
     "id": "usr_42",
@@ -169,6 +192,13 @@ bridge Query.location {
     lon
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.location",
+        outputFields: "",
+        input: { city: "Berlin" },
       },
     ],
     context: `{}`,
@@ -292,6 +322,18 @@ bridge Query.searchTrains {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.searchTrains",
+        outputFields: "",
+        input: { from: "Bern", to: "Zürich" },
+      },
+      {
+        operation: "Query.searchTrains",
+        outputFields: "departureTime,arrivalTime,transfers",
+        input: { from: "Zürich", to: "Genève" },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -326,6 +368,13 @@ bridge Query.echo {
     count
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.echo",
+        outputFields: "",
+        input: { text: "Hello Bridge!", count: 42 },
       },
     ],
     context: `{}`,
@@ -365,6 +414,13 @@ bridge Query.pricing {
     eligible
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.pricing",
+        outputFields: "",
+        input: { dollars: 9.99, quantity: 3 },
       },
     ],
     context: `{}`,
@@ -413,6 +469,13 @@ bridge Query.pricing {
     discount
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.pricing",
+        outputFields: "",
+        input: { isPro: true, proPrice: 49.99, basicPrice: 9.99 },
       },
     ],
     context: `{}`,
@@ -474,6 +537,13 @@ bridge Mutation.submitFeedback {
     message
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Mutation.submitFeedback",
+        outputFields: "",
+        input: { text: "Great product!", rating: 5 },
       },
     ],
     context: `{}`,
@@ -544,6 +614,13 @@ bridge Query.profile {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.profile",
+        outputFields: "",
+        input: { userId: "1" },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -595,6 +672,18 @@ bridge Query.userProfile {
     badge
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.userProfile",
+        outputFields: "",
+        input: { firstName: "Alice", lastName: "Smith", id: "42" },
+      },
+      {
+        operation: "Query.userProfile",
+        outputFields: "",
+        input: { firstName: "Bob", lastName: "Johnson", id: "99" },
       },
     ],
     context: `{}`,
@@ -698,6 +787,23 @@ bridge Query.createPayload {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.createPayload",
+        outputFields: "",
+        input: {
+          name: "Alice",
+          email: "alice@example.com",
+          theme: "dark",
+          isPro: true,
+        },
+      },
+      {
+        operation: "Query.createPayload",
+        outputFields: "",
+        input: { name: "Bob", email: "bob@example.com", isPro: false },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -741,6 +847,137 @@ bridge Query.evaluate {
     requireMFA
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.evaluate",
+        outputFields: "",
+        input: { age: 25, verified: true, role: "USER" },
+      },
+      {
+        operation: "Query.evaluate",
+        outputFields: "",
+        input: { age: 15, verified: false, role: "ADMIN" },
+      },
+    ],
+    context: `{}`,
+  },
+  // ── Standalone (no-GraphQL) examples ────────────────────────────────────
+  {
+    name: "Weather (Standalone)",
+    description:
+      "Geocode a city and fetch its current temperature — no GraphQL schema needed",
+    mode: "standalone",
+    schema: "",
+    bridge: `version 1.5
+
+# Tool 1: Geocoder — city name → lat/lon (Nominatim, no auth required)
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = /search
+  .format = "json"
+  .limit = "1"
+  .headers.User-Agent = "BridgeDemo/1.0"
+}
+
+# Tool 2: Weather forecast — lat/lon → temperature (Open-Meteo, no auth required)
+tool weather from std.httpCall {
+  .baseUrl = "https://api.open-meteo.com/v1"
+  .method = GET
+  .path = /forecast
+  .current_weather = "true"
+}
+
+bridge Query.getWeather {
+  with geo
+  with weather as w
+  with input as i
+  with output as o
+
+  geo.q <- i.city
+
+  w.latitude  <- geo[0].lat
+  w.longitude <- geo[0].lon
+
+  o.city        <- i.city
+  o.lat         <- geo[0].lat
+  o.lon         <- geo[0].lon
+  o.temperature <- w.current_weather.temperature
+  o.unit        = "°C"
+  o.timezone    <- w.timezone
+}`,
+    queries: [{ name: "Berlin", query: "" }],
+    standaloneQueries: [
+      {
+        operation: "Query.getWeather",
+        outputFields: "",
+        input: { city: "Berlin" },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    name: "SBB Trains (Standalone)",
+    description:
+      "Search Swiss train connections — standalone execution without GraphQL",
+    mode: "standalone",
+    schema: "",
+    bridge: `version 1.5
+
+tool sbbApi from std.httpCall {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  .cache = 60
+  on error = { "connections": [] }
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.connections[] as c {
+    .id <- c.from.station.id
+    .provider = "SBB"
+    .departureTime <- c.from.departure
+    .arrivalTime <- c.to.arrival
+    .transfers <- c.transfers || 0
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+
+      .origin.station.id <- s.departure.station.id
+      .origin.station.name <- s.departure.station.name
+      .origin.plannedTime <- s.departure.departure
+      .origin.platform <- s.departure.platform
+
+      .destination.station.id <- s.arrival.station.id
+      .destination.station.name <- s.arrival.station.name
+      .destination.plannedTime <- s.arrival.arrival
+      .destination.platform <- s.arrival.platform
+    }
+  }
+}`,
+    queries: [
+      { name: "Bern → Zürich", query: "" },
+      { name: "Zürich → Genève", query: "" },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.searchTrains",
+        outputFields: "",
+        input: { from: "Bern", to: "Zürich" },
+      },
+      {
+        operation: "Query.searchTrains",
+        outputFields: "departureTime,arrivalTime,transfers",
+        input: { from: "Zürich", to: "Genève" },
       },
     ],
     context: `{}`,

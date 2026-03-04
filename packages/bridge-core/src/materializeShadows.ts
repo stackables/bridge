@@ -13,6 +13,7 @@ import { SELF_MODULE } from "./types.ts";
 import { setNested } from "./tree-utils.ts";
 import { isPromise, CONTINUE_SYM, BREAK_SYM } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
+import { matchesRequestedFields } from "./requested-fields.ts";
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ import type { MaybePromise, Trunk } from "./tree-types.ts";
 export interface MaterializerHost {
   readonly bridge: { readonly wires: readonly Wire[] } | undefined;
   readonly trunk: Trunk;
+  /** Sparse fieldset filter — passed through from ExecutionTree. */
+  readonly requestedFields?: string[] | undefined;
 }
 
 // ── Shadow tree duck type ───────────────────────────────────────────────────
@@ -116,6 +119,26 @@ export async function materializeShadows(
     pathPrefix,
   );
 
+  // Apply sparse fieldset filter: remove fields not matched by requestedFields.
+  const { requestedFields } = host;
+  if (requestedFields && requestedFields.length > 0) {
+    const prefixStr = pathPrefix.join(".");
+    for (const name of [...directFields]) {
+      const fullPath = prefixStr ? `${prefixStr}.${name}` : name;
+      if (!matchesRequestedFields(fullPath, requestedFields)) {
+        directFields.delete(name);
+        const pathKey = [...pathPrefix, name].join("\0");
+        wireGroupsByPath.delete(pathKey);
+      }
+    }
+    for (const [name] of [...deepPaths]) {
+      const fullPath = prefixStr ? `${prefixStr}.${name}` : name;
+      if (!matchesRequestedFields(fullPath, requestedFields)) {
+        deepPaths.delete(name);
+      }
+    }
+  }
+
   // #9/#10: Fast path — no nested arrays, only direct fields.
   // Collect all (shadow × field) resolutions.  When every value is already in
   // state (the hot case for element passthrough), resolvePreGrouped returns
@@ -205,11 +228,19 @@ export async function materializeShadows(
 
       for (const [name, paths] of deepPaths) {
         if (directFields.has(name)) continue;
+        // Filter individual deep paths against requestedFields
+        const activePaths =
+          requestedFields && requestedFields.length > 0
+            ? paths.filter((fp) =>
+                matchesRequestedFields(fp.join("."), requestedFields),
+              )
+            : paths;
+        if (activePaths.length === 0) continue;
         tasks.push(
           (async () => {
             const nested: Record<string, unknown> = {};
             await Promise.all(
-              paths.map(async (fullPath) => {
+              activePaths.map(async (fullPath) => {
                 const value = await shadow.pullOutputField(fullPath);
                 setNested(nested, fullPath.slice(pathPrefix.length + 1), value);
               }),
