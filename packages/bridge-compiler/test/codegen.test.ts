@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge } from "@stackables/bridge-core";
+import type { BridgeDocument } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -465,6 +466,108 @@ bridge Query.conditional {
       tools,
     );
     assert.equal(capturedInput.mode, "basic");
+  });
+
+  test("condAnd parity — matches runtime boolean semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "probe",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              condAnd: {
+                leftRef: {
+                  module: "_",
+                  type: "Query",
+                  field: "probe",
+                  path: ["m"],
+                },
+                rightValue: "null",
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "probe",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.probe",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.probe",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: false });
+  });
+
+  test("condOr parity — matches runtime boolean semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "probeOr",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              condOr: {
+                leftRef: {
+                  module: "_",
+                  type: "Query",
+                  field: "probeOr",
+                  path: ["m"],
+                },
+                rightValue: "null",
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "probeOr",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.probeOr",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.probeOr",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: false });
   });
 });
 
@@ -1484,7 +1587,9 @@ bridge Query.contTool {
             { name: "Carol", itemId: 3 },
           ],
         }),
-        enricher: (input: any) => ({ data: `enriched-${input.in?.itemId ?? "?"}` }),
+        enricher: (input: any) => ({
+          data: `enriched-${input.in?.itemId ?? "?"}`,
+        }),
       },
       {},
     );
@@ -1593,11 +1698,7 @@ bridge Query.contCatch {
       {},
       {
         api: () => ({
-          results: [
-            { name: "Alice" },
-            { name: null },
-            { name: "Carol" },
-          ],
+          results: [{ name: "Alice" }, { name: null }, { name: "Carol" }],
         }),
         enricher: (_input: any) => ({ data: "ok" }),
       },
@@ -1629,11 +1730,7 @@ bridge Query.subContTool {
       {
         api: () => ({
           title: "Test",
-          items: [
-            { name: "Alice" },
-            { name: null },
-            { name: "Carol" },
-          ],
+          items: [{ name: "Alice" }, { name: null }, { name: "Carol" }],
         }),
         enricher: (_input: any) => ({ data: "ok" }),
       },

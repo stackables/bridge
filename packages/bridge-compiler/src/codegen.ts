@@ -30,9 +30,34 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
-import { matchesRequestedFields } from "@stackables/bridge-core";
 
 const SELF_MODULE = "_";
+
+function matchesRequestedFields(
+  fieldPath: string,
+  requestedFields: string[] | undefined,
+): boolean {
+  if (!requestedFields || requestedFields.length === 0) return true;
+
+  for (const pattern of requestedFields) {
+    if (pattern === fieldPath) return true;
+
+    if (fieldPath.startsWith(pattern + ".")) return true;
+
+    if (pattern.startsWith(fieldPath + ".")) return true;
+
+    if (pattern.endsWith(".*")) {
+      const prefix = pattern.slice(0, -2);
+      if (fieldPath.startsWith(prefix + ".")) {
+        const rest = fieldPath.slice(prefix.length + 1);
+        if (!rest.includes(".")) return true;
+      }
+      if (fieldPath === prefix) return true;
+    }
+  }
+
+  return false;
+}
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -1794,9 +1819,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condAnd;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} && ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) && Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} && ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -1807,9 +1833,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condOr;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} || ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) || Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} || ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
