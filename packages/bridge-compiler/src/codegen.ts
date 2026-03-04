@@ -961,9 +961,13 @@ class CodegenContext {
     }
 
     // Bridge wires override ToolDef wires
+    let spreadExprForToolDef: string | undefined;
     for (const bw of bridgeWires) {
       const path = bw.to.path;
-      if (path.length >= 1) {
+      if (path.length === 0) {
+        // Spread wire: ...sourceExpr — captures all fields from source
+        spreadExprForToolDef = this.wireToExpr(bw);
+      } else if (path.length >= 1) {
         const key = path[0]!;
         inputEntries.set(
           key,
@@ -974,8 +978,16 @@ class CodegenContext {
 
     const inputParts = [...inputEntries.values()];
 
-    const inputObj =
-      inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
+    let inputObj: string;
+    if (spreadExprForToolDef !== undefined) {
+      // Spread wire present: { ...spreadExpr, field1: ..., field2: ... }
+      const spreadEntry = `    ...${spreadExprForToolDef}`;
+      const allParts = [spreadEntry, ...inputParts];
+      inputObj = `{\n${allParts.join(",\n")},\n  }`;
+    } else {
+      inputObj =
+        inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
+    }
 
     if (onErrorWire) {
       // Wrap in try/catch for onError
@@ -2584,7 +2596,25 @@ class CodegenContext {
   ): string {
     if (wires.length === 0) return "{}";
 
-    // Build tree
+    // Separate root wire (path=[]) from field-specific wires
+    let rootExpr: string | undefined;
+    const fieldWires: Wire[] = [];
+
+    for (const w of wires) {
+      const path = getPath(w);
+      if (path.length === 0) {
+        rootExpr = this.wireToExpr(w);
+      } else {
+        fieldWires.push(w);
+      }
+    }
+
+    // Only a root wire — simple passthrough expression
+    if (rootExpr !== undefined && fieldWires.length === 0) {
+      return rootExpr;
+    }
+
+    // Build tree from field-specific wires
     interface TreeNode {
       expr?: string;
       terminal?: boolean;
@@ -2592,9 +2622,8 @@ class CodegenContext {
     }
     const root: TreeNode = { children: new Map() };
 
-    for (const w of wires) {
+    for (const w of fieldWires) {
       const path = getPath(w);
-      if (path.length === 0) return this.wireToExpr(w);
       let current = root;
       for (let i = 0; i < path.length - 1; i++) {
         const seg = path[i]!;
@@ -2611,7 +2640,8 @@ class CodegenContext {
       this.mergeOverdefinedExpr(node, w);
     }
 
-    return this.serializeTreeNode(root, indent);
+    // Spread + field overrides: { ...rootExpr, field1: ..., field2: ... }
+    return this.serializeTreeNode(root, indent, rootExpr);
   }
 
   private serializeTreeNode(
@@ -2619,9 +2649,14 @@ class CodegenContext {
       children: Map<string, { expr?: string; children: Map<string, unknown> }>;
     },
     indent: number,
+    spreadExpr?: string,
   ): string {
     const pad = " ".repeat(indent);
     const entries: string[] = [];
+
+    if (spreadExpr !== undefined) {
+      entries.push(`${pad}...${spreadExpr}`);
+    }
 
     for (const [key, child] of node.children) {
       if (child.children.size === 0) {

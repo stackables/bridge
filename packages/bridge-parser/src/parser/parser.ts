@@ -42,6 +42,7 @@ import {
   LSquare,
   RSquare,
   Equals,
+  Spread,
   Dot,
   Colon,
   Comma,
@@ -547,7 +548,7 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scoping block: target { .field <- source | .field = value | .field { ... } | alias ... as ... }
+        // Path scoping block: target { lines: .field <- source, .field = value, .field { ... }, alias ... as ..., ...source }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "scopeBlock" });
           this.MANY3(() =>
@@ -557,6 +558,7 @@ class BridgeParser extends CstParser {
                   this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }),
               },
               { ALT: () => this.SUBRULE(this.pathScopeLine) },
+              { ALT: () => this.SUBRULE(this.scopeSpreadLine) },
             ]),
           );
           this.CONSUME(RCurly);
@@ -681,11 +683,22 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scope block: .field { .subField <- source | .subField = value | ... }
+        // Path scope block: .field { lines: .subField <- source, ...source, .subField = value, ... }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "elemScopeBlock" });
           this.MANY3(() =>
-            this.SUBRULE(this.pathScopeLine, { LABEL: "elemScopeLine" }),
+            this.OR3([
+              {
+                ALT: () =>
+                  this.SUBRULE(this.pathScopeLine, { LABEL: "elemScopeLine" }),
+              },
+              {
+                ALT: () =>
+                  this.SUBRULE(this.scopeSpreadLine, {
+                    LABEL: "elemSpreadLine",
+                  }),
+              },
+            ]),
           );
           this.CONSUME(RCurly);
         },
@@ -787,12 +800,25 @@ class BridgeParser extends CstParser {
                   this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }),
               },
               { ALT: () => this.SUBRULE(this.pathScopeLine) },
+              { ALT: () => this.SUBRULE(this.scopeSpreadLine) },
             ]),
           );
           this.CONSUME(RCurly);
         },
       },
     ]);
+  });
+
+  /**
+   * Spread line inside a path scope block:
+   *   ...sourceExpr
+   *
+   * Wires all fields of the source to the current scope target path.
+   * Equivalent to writing `target <- sourceExpr` at the outer level.
+   */
+  public scopeSpreadLine = this.RULE("scopeSpreadLine", () => {
+    this.CONSUME(Spread);
+    this.SUBRULE(this.sourceExpr, { LABEL: "spreadSource" });
   });
 
   /** A coalesce alternative: either a JSON literal or a source expression */
@@ -2172,8 +2198,25 @@ function processElementLines(
       wires.push(...nullishFallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     } else if (elemC.elemScopeBlock) {
-      // ── Path scope block inside array mapping: .field { .sub <- ... } ──
+      // ── Path scope block inside array mapping: .field { lines: .sub <- ..., ...source } ──
       const scopeLines = subs(elemLine, "elemScopeLine");
+      // Process spread lines at the top level of this scope block
+      const spreadLines = subs(elemLine, "elemSpreadLine");
+      for (const spreadLine of spreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        wires.push({
+          from: fromRef,
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemToPath,
+          },
+        });
+      }
       processElementScopeLines(
         scopeLines,
         elemToPath,
@@ -2291,7 +2334,29 @@ function processElementScopeLines(
 
     // ── Nested scope: .field { ... } ──
     const nestedScopeLines = subs(scopeLine, "pathScopeLine");
-    if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+    const nestedSpreadLines = subs(scopeLine, "scopeSpreadLine");
+    if (
+      (nestedScopeLines.length > 0 || nestedSpreadLines.length > 0) &&
+      !sc.scopeEquals &&
+      !sc.scopeArrow
+    ) {
+      // Process spread lines inside this nested scope block: ...sourceExpr
+      const spreadToPath = [...arrayToPath, ...fullSegs];
+      for (const spreadLine of nestedSpreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        wires.push({
+          from: fromRef,
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: spreadToPath,
+          },
+        });
+      }
       processElementScopeLines(
         nestedScopeLines,
         arrayToPath,
@@ -4097,7 +4162,12 @@ function buildBridgeBody(
 
       // ── Nested scope: .field { ... } ──
       const nestedScopeLines = subs(scopeLine, "pathScopeLine");
-      if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+      const nestedSpreadLines = subs(scopeLine, "scopeSpreadLine");
+      if (
+        (nestedScopeLines.length > 0 || nestedSpreadLines.length > 0) &&
+        !sc.scopeEquals &&
+        !sc.scopeArrow
+      ) {
         // Process alias declarations inside the nested scope block first
         const scopeAliases = subs(scopeLine, "scopeAlias");
         for (const aliasNode of scopeAliases) {
@@ -4130,6 +4200,21 @@ function buildBridgeBody(
             from: sourceRef,
             to: localToRef,
             ...(aliasSafe ? { safe: true as const } : {}),
+          });
+        }
+        // Process spread lines inside this nested scope block: ...sourceExpr
+        const nestedToRef = resolveAddress(targetRoot, fullSegs, scopeLineNum);
+        for (const spreadLine of nestedSpreadLines) {
+          const spreadLineNum = line(findFirstToken(spreadLine));
+          const sourceNode = sub(spreadLine, "spreadSource")!;
+          const { ref: fromRef, safe: spreadSafe } = buildSourceExprSafe(
+            sourceNode,
+            spreadLineNum,
+          );
+          wires.push({
+            from: fromRef,
+            to: nestedToRef,
+            ...(spreadSafe ? { safe: true as const } : {}),
           });
         }
         processScopeLines(nestedScopeLines, targetRoot, fullSegs);
@@ -4769,6 +4854,21 @@ function buildBridgeBody(
         });
       }
       const scopeLines = subs(wireNode, "pathScopeLine");
+      // Process spread lines inside the scope block: ...sourceExpr
+      const spreadLines = subs(wireNode, "scopeSpreadLine");
+      for (const spreadLine of spreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const { ref: fromRef, safe: spreadSafe } = buildSourceExprSafe(
+          sourceNode,
+          spreadLineNum,
+        );
+        wires.push({
+          from: fromRef,
+          to: toRef,
+          ...(spreadSafe ? { safe: true as const } : {}),
+        });
+      }
       processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;
     }
