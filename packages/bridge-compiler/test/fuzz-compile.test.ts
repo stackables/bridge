@@ -434,9 +434,10 @@ describe("compileBridge fuzzing", () => {
           let reparsed: BridgeDocument;
           try {
             reparsed = parseBridgeFormat(serialized);
-          } catch {
-            fc.pre(false);
-            return;
+          } catch (error) {
+            assert.fail(
+              `serializeBridge produced unparsable output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- SERIALIZED ---\n${serialized}`,
+            );
           }
 
           const runtime = await executeRuntime({
