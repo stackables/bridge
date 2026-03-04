@@ -69,4 +69,8 @@ export type {
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 export { parsePath } from "./utils.ts";
+export {
+  matchesRequestedFields,
+  filterOutputFields,
+} from "./requested-fields.ts";
 

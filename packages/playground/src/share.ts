@@ -5,11 +5,20 @@
  * the deployed Cloudflare Worker serve the /api/share endpoints.
  */
 
+export type PlaygroundMode = "graphql" | "standalone";
+
 export interface SharePayload {
+  mode?: PlaygroundMode;
   schema: string;
   bridge: string;
   queries: { name: string; query: string }[];
   context: string;
+  /** Standalone-mode per-query state (parallel array to queries). */
+  standaloneQueries?: {
+    operation: string;
+    outputFields: string;
+    inputJson: string;
+  }[];
 }
 
 export async function saveShare(payload: SharePayload): Promise<string> {

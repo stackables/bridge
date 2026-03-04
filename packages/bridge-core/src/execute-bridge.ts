@@ -59,6 +59,19 @@ export type ExecuteBridgeOptions = {
    * Default: 30. Increase for deeply nested array mappings.
    */
   maxDepth?: number;
+  /**
+   * Sparse fieldset filter.
+   *
+   * When provided, only the listed output fields (and their transitive
+   * dependencies) are resolved.  Tools that feed exclusively into
+   * unrequested fields are never called.
+   *
+   * Supports dot-separated paths and a trailing wildcard:
+   *   `["id", "price", "legs.*"]`
+   *
+   * Omit or pass an empty array to resolve all fields (the default).
+   */
+  requestedFields?: string[];
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
@@ -134,7 +147,7 @@ export async function executeBridge<T = unknown>(
     tree.tracer = new TraceCollector(traceLevel);
   }
 
-  const data = await tree.run(input);
+  const data = await tree.run(input, options.requestedFields);
 
   return { data: data as T, traces: tree.getTraces() };
 }

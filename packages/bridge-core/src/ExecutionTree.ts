@@ -46,6 +46,10 @@ import type {
   Wire,
 } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
+import {
+  filterOutputFields,
+  matchesRequestedFields,
+} from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 
 export class ExecutionTree implements TreeContext {
@@ -104,6 +108,8 @@ export class ExecutionTree implements TreeContext {
   private depth: number;
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
   private elementTrunkKey: string;
+  /** Sparse fieldset filter — set by `run()` when requestedFields is provided. */
+  requestedFields: string[] | undefined;
 
   constructor(
     public trunk: Trunk,
@@ -657,9 +663,19 @@ export class ExecutionTree implements TreeContext {
     }
     if (subFields.size === 0) return undefined;
 
+    // Apply sparse fieldset filter at nested level
+    const prefixStr = prefix.join(".");
+    const activeSubFields = this.requestedFields
+      ? [...subFields].filter((sub) => {
+          const fullPath = prefixStr ? `${prefixStr}.${sub}` : sub;
+          return matchesRequestedFields(fullPath, this.requestedFields);
+        })
+      : [...subFields];
+    if (activeSubFields.length === 0) return undefined;
+
     const obj: Record<string, unknown> = {};
     await Promise.all(
-      [...subFields].map(async (sub) => {
+      activeSubFields.map(async (sub) => {
         obj[sub] = await this.resolveNestedField([...prefix, sub]);
       }),
     );
@@ -753,9 +769,16 @@ export class ExecutionTree implements TreeContext {
    * and materialises every output field into a plain JS object (or array of
    * objects for array-mapped bridges).
    *
+   * When `requestedFields` is provided, only matching output fields are
+   * resolved — unneeded tools are never called because the pull-based
+   * engine never reaches them.
+   *
    * This is the single entry-point used by `executeBridge()`.
    */
-  async run(input: Record<string, unknown>): Promise<unknown> {
+  async run(
+    input: Record<string, unknown>,
+    requestedFields?: string[],
+  ): Promise<unknown> {
     const bridge = this.bridge;
     if (!bridge) {
       throw new Error(
@@ -764,6 +787,7 @@ export class ExecutionTree implements TreeContext {
     }
 
     this.push(input);
+    this.requestedFields = requestedFields;
     const forcePromises = this.executeForced();
 
     const { type, field } = this.trunk;
@@ -832,10 +856,13 @@ export class ExecutionTree implements TreeContext {
       );
     }
 
+    // Apply sparse fieldset filter
+    const activeFields = filterOutputFields(outputFields, requestedFields);
+
     const result: Record<string, unknown> = {};
 
     await Promise.all([
-      ...[...outputFields].map(async (name) => {
+      ...[...activeFields].map(async (name) => {
         result[name] = await this.resolveNestedField([name]);
       }),
       ...forcePromises,

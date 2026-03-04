@@ -32,7 +32,14 @@ function hasContext(context: string): boolean {
   return context.trim().length > 0 && context.trim() !== "{}";
 }
 
-export function ShareDialog({ schema, bridge, queries, context }: Props) {
+export function ShareDialog({
+  mode,
+  schema,
+  bridge,
+  queries,
+  context,
+  standaloneQueries,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [url, setUrl] = useState("");
@@ -52,7 +59,14 @@ export function ShareDialog({ schema, bridge, queries, context }: Props) {
   async function handleCreate() {
     setPhase("loading");
     try {
-      const id = await saveShare({ schema, bridge, queries, context });
+      const id = await saveShare({
+        mode,
+        schema,
+        bridge,
+        queries,
+        context,
+        standaloneQueries,
+      });
       setUrl(shareUrl(id));
       setPhase("done");
     } catch (err) {

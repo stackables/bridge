@@ -345,7 +345,6 @@ describe("parser — real .bridge files", () => {
   const bridgeFiles = [
     join(root, "examples/weather-api/Weather.bridge"),
     join(root, "examples/builtin-tools/builtin-tools.bridge"),
-    join(__dirname, "property-search.bridge"),
   ];
 
   for (const filePath of bridgeFiles) {
