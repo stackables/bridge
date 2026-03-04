@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint:types": "tsc -p tsconfig.check.json",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -31,6 +32,11 @@
     "@stackables/bridge-stdlib": "workspace:*"
   },
   "devDependencies": {
+    "@graphql-tools/executor-http": "^3.1.0",
+    "@stackables/bridge-parser": "workspace:*",
+    "@types/node": "^25.3.2",
+    "graphql": "^16.13.0",
+    "graphql-yoga": "^5.18.0",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {

@@ -2,7 +2,7 @@ import { buildHTTPExecutor } from "@graphql-tools/executor-http";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { createGateway } from "./_gateway.ts";
 
 const typeDefs = /* GraphQL */ `
@@ -361,5 +361,292 @@ bridge Query.catalog {
         { id: 2, label: "Gadget" },
       ],
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GraphQL-specific behavior
+//
+// These tests cover aspects unique to the GraphQL driver:
+// - Per-field error reporting (errors don't fail the entire response)
+// - Fields without bridge instructions fall through to default resolvers
+// - Mutation support via GraphQL
+// - Multiple bridge fields in one query
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("executeGraph: per-field error handling", () => {
+  test("tool error surfaces as GraphQL field error, not full failure", async () => {
+    const typeDefs = /* GraphQL */ `
+      type Query {
+        lookup(q: String!): Result
+      }
+      type Result {
+        label: String
+        score: Int
+      }
+    `;
+
+    const bridge = `version 1.5
+bridge Query.lookup {
+  with geocoder as g
+  with input as i
+  with output as o
+
+  g.q <- i.q
+  o.label <- g.label
+  o.score <- g.score
+}`;
+
+    const instructions = parseBridge(bridge);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: {
+        geocoder: async () => {
+          throw new Error("API rate limit exceeded");
+        },
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label score } }`),
+    });
+
+    // GraphQL returns partial data + errors array
+    assert.ok(
+      result.errors,
+      `errors array should be present, got: ${JSON.stringify(result)}`,
+    );
+    assert.ok(result.errors.length > 0, "should have at least one error");
+    // GraphQL-yoga may wrap errors — check message contains original text
+    // or the error is at least present with a path
+    const hasToolError = result.errors.some(
+      (e: any) =>
+        e.message.includes("API rate limit exceeded") ||
+        e.message === "Unexpected error.",
+    );
+    assert.ok(
+      hasToolError,
+      `expected a field error, got: ${JSON.stringify(result.errors.map((e: any) => e.message))}`,
+    );
+  });
+
+  test("error in one field does not prevent other fields from resolving", async () => {
+    const typeDefs = /* GraphQL */ `
+      type Query {
+        good: GoodResult
+        bad: BadResult
+      }
+      type GoodResult {
+        value: String
+      }
+      type BadResult {
+        value: String
+      }
+    `;
+
+    const bridge = `version 1.5
+bridge Query.good {
+  with output as o
+  o.value = "hello"
+}
+
+bridge Query.bad {
+  with failing as f
+  with output as o
+  o.value <- f.value
+}`;
+
+    const instructions = parseBridge(bridge);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: {
+        failing: async () => {
+          throw new Error("tool broke");
+        },
+      },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{ good { value } bad { value } }`),
+    });
+
+    // Good field resolves
+    assert.equal(result.data.good.value, "hello");
+    // Bad field errors but doesn't break the whole response
+    assert.ok(result.errors, "errors present");
+    assert.ok(
+      result.errors.some((e: any) => e.path?.includes("bad")),
+      "error path should reference 'bad' field",
+    );
+  });
+});
+
+describe("executeGraph: field fallthrough", () => {
+  test("field without bridge instruction falls through to default resolver", async () => {
+    const typeDefs = /* GraphQL */ `
+      type Query {
+        bridged(name: String!): BridgedResult
+        unbridged: String
+      }
+      type BridgedResult {
+        greeting: String
+      }
+    `;
+
+    const bridge = `version 1.5
+bridge Query.bridged {
+  with input as i
+  with output as o
+  o.greeting <- i.name
+}`;
+
+    const instructions = parseBridge(bridge);
+    // unbridged has no bridge instruction — should use default resolver
+    const { createSchema } = await import("graphql-yoga");
+    const { bridgeTransform } = await import("../src/index.ts");
+
+    const rawSchema = createSchema({
+      typeDefs,
+      resolvers: {
+        Query: {
+          unbridged: () => "hand-coded",
+        },
+      },
+    });
+    const schema = bridgeTransform(rawSchema, instructions);
+    const { createYoga } = await import("graphql-yoga");
+    const yoga = createYoga({ schema, graphqlEndpoint: "*" });
+    const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ bridged(name: "World") { greeting } unbridged }`),
+    });
+
+    assert.equal(result.data.bridged.greeting, "World");
+    assert.equal(result.data.unbridged, "hand-coded");
+  });
+});
+
+describe("executeGraph: mutations via GraphQL", () => {
+  test("sends email mutation and extracts response header path", async () => {
+    const typeDefs = /* GraphQL */ `
+      type Query {
+        _: Boolean
+      }
+      type Mutation {
+        sendEmail(
+          to: String!
+          from: String!
+          subject: String!
+          body: String!
+        ): EmailResult
+      }
+      type EmailResult {
+        messageId: String
+      }
+    `;
+
+    const bridgeText = `version 1.5
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+  with output as o
+
+  sg.to <- i.to
+  sg.from <- i.from
+  sg.subject <- i.subject
+  sg.content <- i.body
+  o.messageId <- sg.headers.x-message-id
+}`;
+
+    const fakeEmailTool = async (_params: Record<string, any>) => ({
+      statusCode: 202,
+      headers: { "x-message-id": "msg_abc123" },
+      body: { message: "Queued" },
+    });
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { "sendgrid.send": fakeEmailTool },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`
+        mutation {
+          sendEmail(
+            to: "alice@example.com"
+            from: "bob@example.com"
+            subject: "Hello"
+            body: "Hi there"
+          ) {
+            messageId
+          }
+        }
+      `),
+    });
+    assert.equal(result.data.sendEmail.messageId, "msg_abc123");
+  });
+
+  test("tool receives renamed fields from mutation args", async () => {
+    const typeDefs = /* GraphQL */ `
+      type Query {
+        _: Boolean
+      }
+      type Mutation {
+        sendEmail(
+          to: String!
+          from: String!
+          subject: String!
+          body: String!
+        ): EmailResult
+      }
+      type EmailResult {
+        messageId: String
+      }
+    `;
+
+    const bridgeText = `version 1.5
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+  with output as o
+
+  sg.to <- i.to
+  sg.from <- i.from
+  sg.subject <- i.subject
+  sg.content <- i.body
+  o.messageId <- sg.headers.x-message-id
+}`;
+
+    let capturedParams: Record<string, any> = {};
+    const capture = async (params: Record<string, any>) => {
+      capturedParams = params;
+      return { headers: { "x-message-id": "test" } };
+    };
+
+    const instructions = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, instructions, {
+      tools: { "sendgrid.send": capture },
+    });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    await executor({
+      document: parse(`
+        mutation {
+          sendEmail(
+            to: "alice@example.com"
+            from: "bob@example.com"
+            subject: "Hello"
+            body: "Hi there"
+          ) {
+            messageId
+          }
+        }
+      `),
+    });
+
+    assert.equal(capturedParams.to, "alice@example.com");
+    assert.equal(capturedParams.from, "bob@example.com");
+    assert.equal(capturedParams.subject, "Hello");
+    assert.equal(capturedParams.content, "Hi there"); // body -> content rename
   });
 });
