@@ -5237,13 +5237,18 @@ function buildBridgeBody(
 
     let falsyFallback: string | undefined;
     let falsyControl: ControlFlowInstruction | undefined;
+    let hasTruthyLiteralFallback = false;
     for (const alt of subs(wireNode, "nullAlt")) {
+      if (hasTruthyLiteralFallback) continue;
       const altResult = extractCoalesceAlt(alt, lineNum);
       if ("literal" in altResult) {
         falsyFallback = altResult.literal;
+        hasTruthyLiteralFallback = Boolean(JSON.parse(altResult.literal));
       } else if ("control" in altResult) {
+        falsyFallback = undefined;
         falsyControl = altResult.control;
       } else {
+        falsyFallback = undefined;
         sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
       }
     }
