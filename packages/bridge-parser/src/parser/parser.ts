@@ -5239,7 +5239,7 @@ function buildBridgeBody(
     let falsyControl: ControlFlowInstruction | undefined;
     let hasTruthyLiteralFallback = false;
     for (const alt of subs(wireNode, "nullAlt")) {
-      if (hasTruthyLiteralFallback) continue;
+      if (hasTruthyLiteralFallback) break;
       const altResult = extractCoalesceAlt(alt, lineNum);
       if ("literal" in altResult) {
         falsyFallback = altResult.literal;
