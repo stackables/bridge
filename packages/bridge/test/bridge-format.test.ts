@@ -1289,8 +1289,8 @@ describe("parser diagnostics and serializer edge cases", () => {
     const result = parseBridgeDiagnostics("version 1.5\nbridge Query.x {\n  with output as o\n  o.x = \"ok\"\n}\n§");
     assert.ok(result.diagnostics.length > 0);
     assert.equal(result.diagnostics[0]?.severity, "error");
-    assert.ok(result.diagnostics[0]?.range.start.line != null);
-    assert.ok(result.diagnostics[0]?.range.start.character != null);
+    assert.equal(result.diagnostics[0]?.range.start.line, 5);
+    assert.equal(result.diagnostics[0]?.range.start.character, 0);
   });
 
   test("reserved source identifier is rejected as const name", () => {

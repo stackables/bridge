@@ -48,6 +48,7 @@ describe("ExecutionTree edge cases", () => {
     tree.logger = { warn: (msg: string) => (warning = msg) };
 
     assert.equal((tree as any).applyPath([{ x: 1 }], ref(["x"])), undefined);
+    assert.equal((tree as any).applyPath([{ x: 1 }], ref(["0", "x"])), 1);
     assert.match(warning, /Accessing "\.x" on an array/);
   });
 });
