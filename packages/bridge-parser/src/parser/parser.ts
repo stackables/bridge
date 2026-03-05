@@ -2221,6 +2221,7 @@ function processElementLines(
             element: true,
             path: elemToPath,
           },
+          spread: true as const,
           ...(spreadSafe ? { safe: true as const } : {}),
         });
       }
@@ -2368,6 +2369,7 @@ function processElementScopeLines(
             element: true,
             path: spreadToPath,
           },
+          spread: true as const,
           ...(spreadSafe ? { safe: true as const } : {}),
         });
       }
@@ -4228,6 +4230,7 @@ function buildBridgeBody(
           wires.push({
             from: fromRef,
             to: nestedToRef,
+            spread: true as const,
             ...(spreadSafe ? { safe: true as const } : {}),
           });
         }
@@ -4880,6 +4883,7 @@ function buildBridgeBody(
         wires.push({
           from: fromRef,
           to: toRef,
+          spread: true as const,
           ...(spreadSafe ? { safe: true as const } : {}),
         });
       }

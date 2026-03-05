@@ -618,7 +618,16 @@ export class ExecutionTree implements TreeContext {
         w.to.field === field &&
         pathEquals(w.to.path, prefix),
     );
-    if (exactWires.length > 0) {
+
+    // Separate spread wires from regular wires
+    const spreadWires = exactWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread,
+    );
+    const regularWires = exactWires.filter(
+      (w) => !("from" in w && "spread" in w && w.spread),
+    );
+
+    if (regularWires.length > 0) {
       // Check for array mapping: exact wires (the array source) PLUS
       // element-level wires deeper than prefix (the field mappings).
       // E.g. `o.entries <- src[] as x { .id <- x.item_id }` produces
@@ -639,15 +648,16 @@ export class ExecutionTree implements TreeContext {
       if (hasElementWires) {
         // Array mapping on a sub-field: resolve the array source,
         // create shadow trees, and materialise with field mappings.
-        const resolved = await this.resolveWires(exactWires);
+        const resolved = await this.resolveWires(regularWires);
         if (!Array.isArray(resolved)) return resolved;
         const shadows = this.createShadowArray(resolved);
         return this.materializeShadows(shadows, prefix);
       }
 
-      return this.resolveWires(exactWires);
+      return this.resolveWires(regularWires);
     }
 
+    // Collect sub-fields from deeper wires
     const subFields = new Set<string>();
     for (const wire of bridge.wires) {
       const p = wire.to.path;
@@ -661,6 +671,37 @@ export class ExecutionTree implements TreeContext {
         subFields.add(p[prefix.length]!);
       }
     }
+
+    // Spread wires: resolve and merge, then overlay sub-field wires
+    if (spreadWires.length > 0) {
+      const result: Record<string, unknown> = {};
+
+      // First resolve spread sources (in order)
+      for (const wire of spreadWires) {
+        const spreadValue = await this.resolveWires([wire]);
+        if (spreadValue != null && typeof spreadValue === "object") {
+          Object.assign(result, spreadValue);
+        }
+      }
+
+      // Then resolve sub-fields and overlay on spread result
+      const prefixStr = prefix.join(".");
+      const activeSubFields = this.requestedFields
+        ? [...subFields].filter((sub) => {
+            const fullPath = prefixStr ? `${prefixStr}.${sub}` : sub;
+            return matchesRequestedFields(fullPath, this.requestedFields);
+          })
+        : [...subFields];
+
+      await Promise.all(
+        activeSubFields.map(async (sub) => {
+          result[sub] = await this.resolveNestedField([...prefix, sub]);
+        }),
+      );
+
+      return result;
+    }
+
     if (subFields.size === 0) return undefined;
 
     // Apply sparse fieldset filter at nested level
@@ -792,8 +833,8 @@ export class ExecutionTree implements TreeContext {
 
     const { type, field } = this.trunk;
 
-    // Is there a root-level wire targeting the output with path []?
-    const hasRootWire = bridge.wires.some(
+    // Separate root-level wires into passthrough vs spread
+    const rootWires = bridge.wires.filter(
       (w) =>
         "from" in w &&
         w.to.module === SELF_MODULE &&
@@ -801,6 +842,18 @@ export class ExecutionTree implements TreeContext {
         w.to.field === field &&
         w.to.path.length === 0,
     );
+
+    // Passthrough wire: root wire without spread flag
+    const hasPassthroughWire = rootWires.some(
+      (w) => "from" in w && !("spread" in w && w.spread),
+    );
+
+    // Spread wires: root wires with spread flag
+    const spreadWires = rootWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread,
+    );
+
+    const hasRootWire = rootWires.length > 0;
 
     // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
     // AND element-level wires (from.element === true).  A plain passthrough
@@ -827,8 +880,8 @@ export class ExecutionTree implements TreeContext {
       return this.materializeShadows(shadows, []);
     }
 
-    // Whole-object passthrough: `o <- api.user`
-    if (hasRootWire) {
+    // Whole-object passthrough: `o <- api.user` (non-spread root wire)
+    if (hasPassthroughWire) {
       const [result] = await Promise.all([
         this.pullOutputField([]),
         ...forcePromises,
@@ -849,7 +902,11 @@ export class ExecutionTree implements TreeContext {
       }
     }
 
-    if (outputFields.size === 0) {
+    // Spread wires: resolve and merge source objects
+    // Later field wires will override spread properties
+    const hasSpreadWires = spreadWires.length > 0;
+
+    if (outputFields.size === 0 && !hasSpreadWires) {
       throw new Error(
         `Bridge "${type}.${field}" has no output wires. ` +
           `Ensure at least one wire targets the output (e.g. \`o.field <- ...\`).`,
@@ -861,6 +918,16 @@ export class ExecutionTree implements TreeContext {
 
     const result: Record<string, unknown> = {};
 
+    // First resolve spread wires (in order) to build base object
+    // Each spread source's properties are merged into result
+    for (const wire of spreadWires) {
+      const spreadValue = await this.resolveWires([wire]);
+      if (spreadValue != null && typeof spreadValue === "object") {
+        Object.assign(result, spreadValue);
+      }
+    }
+
+    // Then resolve explicit field wires - these override spread properties
     await Promise.all([
       ...[...activeFields].map(async (name) => {
         result[name] = await this.resolveNestedField([name]);
