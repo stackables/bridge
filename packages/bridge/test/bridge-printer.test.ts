@@ -220,3 +220,61 @@ describe("formatBridge - edge cases", () => {
     assert.equal(formatBridge(input), expected);
   });
 });
+
+describe("formatBridge - line splitting and joining", () => {
+  test("content after '{' moves to new indented line", () => {
+    const input = `bridge Query.greet {
+  with output as o
+
+  o {.message <- i.name
+    .upper <- uc:i.name
+  }
+}`;
+    const expected = `bridge Query.greet {
+  with output as o
+
+  o {
+    .message <- i.name
+    .upper <- uc:i.name
+  }
+}
+`;
+    assert.equal(formatBridge(input), expected);
+  });
+
+  test("standalone 'as', identifier, and '{' merge with previous line", () => {
+    const input = `bridge Query.test {
+  with output as o
+
+  o <- api.items[]
+   as
+  c
+  {
+    .id <- c.id
+  }
+}`;
+    const expected = `bridge Query.test {
+  with output as o
+
+  o <- api.items[] as c {
+    .id <- c.id
+  }
+}
+`;
+    assert.equal(formatBridge(input), expected);
+  });
+
+  test("'as' in 'with' declaration is not merged incorrectly", () => {
+    // with lines should stay separate
+    const input = `bridge Query.test {
+  with input as i
+  with output as o
+}`;
+    const expected = `bridge Query.test {
+  with input as i
+  with output as o
+}
+`;
+    assert.equal(formatBridge(input), expected);
+  });
+});

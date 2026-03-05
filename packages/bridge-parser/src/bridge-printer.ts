@@ -197,18 +197,47 @@ export function formatBridge(source: string): string {
     lineGroups.push({ tokens: currentGroup, originalLine: currentLine });
   }
 
+  // Merge continuation lines (standalone `as`, identifier, or `{` that continue previous line)
+  const mergedGroups: { tokens: IToken[]; originalLine: number }[] = [];
+  for (let i = 0; i < lineGroups.length; i++) {
+    const group = lineGroups[i];
+    const firstType = group.tokens[0]?.tokenType.name;
+
+    // Check if this is a continuation line that should merge with previous
+    const isContinuation =
+      mergedGroups.length > 0 && // Line is just `as` keyword (not part of 'with')
+      ((firstType === "AsKw" && group.tokens.length <= 2) ||
+        // Line is just an identifier (alias name)
+        (firstType === "Identifier" && group.tokens.length === 1) ||
+        // Line is just `{`
+        (firstType === "LCurly" && group.tokens.length === 1));
+
+    if (isContinuation) {
+      // Merge with previous group
+      const prev = mergedGroups[mergedGroups.length - 1];
+      prev.tokens.push(...group.tokens);
+    } else {
+      mergedGroups.push({
+        tokens: [...group.tokens],
+        originalLine: group.originalLine,
+      });
+    }
+  }
+
   const output: string[] = [];
   let depth = 0;
   let lastOutputLine = 0; // Track which original line we last output
   let lastWasWithLine = false; // Track if previous line was a 'with' declaration
   let lastWasOpenBrace = false; // Track if previous output was an opening brace
 
-  for (let gi = 0; gi < lineGroups.length; gi++) {
-    const { tokens: group, originalLine } = lineGroups[gi];
+  for (let gi = 0; gi < mergedGroups.length; gi++) {
+    const { tokens: group, originalLine } = mergedGroups[gi];
     const firstToken = group[0];
 
     // Track depth at start of line for proper indentation
     const lineStartDepth = depth;
+    // Current indentation for output (may change mid-line)
+    let currentIndent = lineStartDepth;
 
     // Classify current line
     const currentIsWithLine = isWithLine(group);
@@ -248,7 +277,7 @@ export function formatBridge(source: string): string {
 
     // Add blank line after version declaration
     if (gi > 0) {
-      const prevGroup = lineGroups[gi - 1];
+      const prevGroup = mergedGroups[gi - 1];
       const prevFirstType = prevGroup.tokens[0]?.tokenType.name;
       if (prevFirstType === "VersionKw" && output.length > 0) {
         // Check if we already have a blank line
@@ -316,6 +345,20 @@ export function formatBridge(source: string): string {
         const tokenAttached = commentMap.get(token.startOffset);
         if (tokenAttached?.trailing) {
           lineOutput += " " + tokenAttached.trailing.image;
+        }
+
+        // If there are more tokens after the brace (and they aren't just RCurly),
+        // emit the line now so content goes on a new line
+        const remainingTokens = group.slice(ti + 1);
+        const hasContentAfter = remainingTokens.some(
+          (t) => t.tokenType.name !== "RCurly",
+        );
+        if (hasContentAfter && lineOutput.length > 0) {
+          // Emit the line with the brace, content will continue on next iteration
+          output.push(INDENT.repeat(currentIndent) + lineOutput + "\n");
+          lineOutput = "";
+          lastType = null;
+          currentIndent = depth; // Update indentation for remaining content
         }
         continue;
       }
@@ -399,7 +442,7 @@ export function formatBridge(source: string): string {
 
     // Emit the line
     if (lineOutput.length > 0) {
-      output.push(INDENT.repeat(lineStartDepth) + lineOutput + "\n");
+      output.push(INDENT.repeat(currentIndent) + lineOutput + "\n");
     }
 
     lastOutputLine = originalLine;
