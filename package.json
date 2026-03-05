@@ -10,7 +10,7 @@
     "smoke": "node scripts/smoke-test-packages.mjs",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
-    "ci:publish": "pnpm publish -r --filter '@stackables/*'",
+    "ci:publish": "changeset tag && pnpm publish -r --filter '@stackables/*'",
     "test:coverage": "pnpm -r test:coverage",
     "bench": "pnpm -r bench",
     "profile:cpu": "node scripts/profile-cpu.mjs",
