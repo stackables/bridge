@@ -1,3 +1,28 @@
+@layer theme, base, starlight, catppuccin, components, utilities;
+@import "tailwindcss";
+/* Source playground components for Tailwind to detect their classes */
+/* @source "../../../playground/src"; */
+@source "../components";
+
+@theme {
+  /* Monospace font stack for code editors - same as playground */
+  --font-mono:
+    "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+
+  /* Custom accent colors from playground */
+  --color-sky-badge: #164e63;
+  --color-sky-trace: #1e3a5f;
+}
+
+/* Override Tailwind's base layer to prevent it breaking Starlight's layout */
+@layer base {
+  html,
+  body {
+    /* Reset to auto to let Starlight control layout */
+    height: auto;
+  }
+}
+
 /* Widen the default content column (Starlight default: 45rem / 720px) */
 /* :root {
   --sl-content-width: 55rem;

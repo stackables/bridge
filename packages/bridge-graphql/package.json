@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-graphql",
-  "version": "1.1.1",
+  "version": "1.1.4",
   "description": "Bridge GraphQL adapter — wire bridges into a GraphQL schema",
   "main": "./build/index.js",
   "type": "module",
@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint:types": "tsc -p tsconfig.check.json",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -31,11 +32,16 @@
     "@stackables/bridge-stdlib": "workspace:*"
   },
   "devDependencies": {
+    "@graphql-tools/executor-http": "^3.1.0",
+    "@stackables/bridge-parser": "workspace:*",
+    "@types/node": "^25.3.3",
+    "graphql": "^16.13.1",
+    "graphql-yoga": "^5.18.0",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "graphql": "^16",
-    "@graphql-tools/utils": "^11"
+    "@graphql-tools/utils": "^11",
+    "graphql": "^16"
   },
   "publishConfig": {
     "access": "public"

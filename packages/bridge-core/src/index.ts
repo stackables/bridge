@@ -64,9 +64,14 @@ export type {
   ToolWire,
   VersionDecl,
   Wire,
+  WireFallback,
 } from "./types.ts";
 
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 export { parsePath } from "./utils.ts";
+export {
+  matchesRequestedFields,
+  filterOutputFields,
+} from "./requested-fields.ts";
 

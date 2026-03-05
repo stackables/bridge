@@ -42,6 +42,7 @@ import {
   LSquare,
   RSquare,
   Equals,
+  Spread,
   Dot,
   Colon,
   Comma,
@@ -79,6 +80,7 @@ import type {
   ToolDep,
   ToolWire,
   Wire,
+  WireFallback,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 
@@ -370,15 +372,9 @@ class BridgeParser extends CstParser {
         },
       },
     ]);
-    // || coalesce chain
+    // || / ?? coalesce chain (mixed order)
     this.MANY(() => {
-      this.CONSUME(NullCoalesce);
-      this.SUBRULE(this.coalesceAlternative, { LABEL: "aliasNullAlt" });
-    });
-    // ?? nullish fallback
-    this.OPTION(() => {
-      this.CONSUME(ErrorCoalesce);
-      this.SUBRULE2(this.coalesceAlternative, { LABEL: "aliasNullishAlt" });
+      this.SUBRULE4(this.coalesceChainItem, { LABEL: "aliasCoalesceItem" });
     });
     // catch error fallback
     this.OPTION2(() => {
@@ -529,15 +525,9 @@ class BridgeParser extends CstParser {
           ]);
           // Optional array mapping: [] as <iter> { ... }
           this.OPTION(() => this.SUBRULE(this.arrayMapping));
-          // || coalesce chain
+          // || / ?? coalesce chain (mixed order)
           this.MANY(() => {
-            this.CONSUME(NullCoalesce);
-            this.SUBRULE(this.coalesceAlternative, { LABEL: "nullAlt" });
-          });
-          // ?? nullish fallback
-          this.OPTION2(() => {
-            this.CONSUME(ErrorCoalesce);
-            this.SUBRULE2(this.coalesceAlternative, { LABEL: "nullishAlt" });
+            this.SUBRULE(this.coalesceChainItem, { LABEL: "coalesceItem" });
           });
           // catch error fallback
           this.OPTION5(() => {
@@ -547,7 +537,7 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scoping block: target { .field <- source | .field = value | .field { ... } | alias ... as ... }
+        // Path scoping block: target { lines: .field <- source, .field = value, .field { ... }, alias ... as ..., ...source }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "scopeBlock" });
           this.MANY3(() =>
@@ -557,6 +547,7 @@ class BridgeParser extends CstParser {
                   this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }),
               },
               { ALT: () => this.SUBRULE(this.pathScopeLine) },
+              { ALT: () => this.SUBRULE(this.scopeSpreadLine) },
             ]),
           );
           this.CONSUME(RCurly);
@@ -661,16 +652,10 @@ class BridgeParser extends CstParser {
           this.OPTION2(() =>
             this.SUBRULE(this.arrayMapping, { LABEL: "nestedArrayMapping" }),
           );
-          // || coalesce chain (only when no nested array mapping)
+          // || / ?? coalesce chain (mixed order, only when no nested array mapping)
           this.MANY(() => {
-            this.CONSUME(NullCoalesce);
-            this.SUBRULE(this.coalesceAlternative, { LABEL: "elemNullAlt" });
-          });
-          // ?? nullish fallback
-          this.OPTION(() => {
-            this.CONSUME(ErrorCoalesce);
-            this.SUBRULE2(this.coalesceAlternative, {
-              LABEL: "elemNullishAlt",
+            this.SUBRULE2(this.coalesceChainItem, {
+              LABEL: "elemCoalesceItem",
             });
           });
           // catch error fallback
@@ -681,11 +666,22 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scope block: .field { .subField <- source | .subField = value | ... }
+        // Path scope block: .field { lines: .subField <- source, ...source, .subField = value, ... }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "elemScopeBlock" });
           this.MANY3(() =>
-            this.SUBRULE(this.pathScopeLine, { LABEL: "elemScopeLine" }),
+            this.OR3([
+              {
+                ALT: () =>
+                  this.SUBRULE(this.pathScopeLine, { LABEL: "elemScopeLine" }),
+              },
+              {
+                ALT: () =>
+                  this.SUBRULE(this.scopeSpreadLine, {
+                    LABEL: "elemSpreadLine",
+                  }),
+              },
+            ]),
           );
           this.CONSUME(RCurly);
         },
@@ -757,16 +753,10 @@ class BridgeParser extends CstParser {
               },
             },
           ]);
-          // || coalesce chain
+          // || / ?? coalesce chain (mixed order)
           this.MANY2(() => {
-            this.CONSUME(NullCoalesce);
-            this.SUBRULE(this.coalesceAlternative, { LABEL: "scopeNullAlt" });
-          });
-          // ?? nullish fallback
-          this.OPTION2(() => {
-            this.CONSUME(ErrorCoalesce);
-            this.SUBRULE2(this.coalesceAlternative, {
-              LABEL: "scopeNullishAlt",
+            this.SUBRULE3(this.coalesceChainItem, {
+              LABEL: "scopeCoalesceItem",
             });
           });
           // catch error fallback
@@ -787,12 +777,25 @@ class BridgeParser extends CstParser {
                   this.SUBRULE(this.bridgeNodeAlias, { LABEL: "scopeAlias" }),
               },
               { ALT: () => this.SUBRULE(this.pathScopeLine) },
+              { ALT: () => this.SUBRULE(this.scopeSpreadLine) },
             ]),
           );
           this.CONSUME(RCurly);
         },
       },
     ]);
+  });
+
+  /**
+   * Spread line inside a path scope block:
+   *   ...sourceExpr
+   *
+   * Wires all fields of the source to the current scope target path.
+   * Equivalent to writing `target <- sourceExpr` at the outer level.
+   */
+  public scopeSpreadLine = this.RULE("scopeSpreadLine", () => {
+    this.CONSUME(Spread);
+    this.SUBRULE(this.sourceExpr, { LABEL: "spreadSource" });
   });
 
   /** A coalesce alternative: either a JSON literal or a source expression */
@@ -834,6 +837,19 @@ class BridgeParser extends CstParser {
       },
       { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceAlt" }) },
     ]);
+  });
+
+  /**
+   * A single item in a coalesce chain: either `|| alt` or `?? alt`.
+   * Grouping both operators into one rule preserves their relative order
+   * when mixing `||` and `??` in a single wire.
+   */
+  public coalesceChainItem = this.RULE("coalesceChainItem", () => {
+    this.OR([
+      { ALT: () => this.CONSUME(NullCoalesce, { LABEL: "falsyOp" }) },
+      { ALT: () => this.CONSUME(ErrorCoalesce, { LABEL: "nullishOp" }) },
+    ]);
+    this.SUBRULE(this.coalesceAlternative, { LABEL: "altValue" });
   });
 
   // ── Define block ───────────────────────────────────────────────────────
@@ -1729,37 +1745,20 @@ function processElementLines(
         };
 
         // Process coalesce modifiers
-        let falsyFallback: string | undefined;
-        let falsyControl: ControlFlowInstruction | undefined;
-        const nullAltRefs: NodeRef[] = [];
-        for (const alt of subs(elemLine, "elemNullAlt")) {
-          const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
-          if ("literal" in altResult) {
-            falsyFallback = altResult.literal;
-          } else if ("control" in altResult) {
-            falsyControl = altResult.control;
-          } else {
-            nullAltRefs.push(altResult.sourceRef);
-          }
-        }
-        let nullishFallback: string | undefined;
-        let nullishControl: ControlFlowInstruction | undefined;
-        let nullishFallbackRef: NodeRef | undefined;
-        let nullishFallbackInternalWires: Wire[] = [];
-        const nullishAlt = sub(elemLine, "elemNullishAlt");
-        if (nullishAlt) {
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(elemLine, "elemCoalesceItem")) {
+          const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+          const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(
-            nullishAlt,
-            elemLineNum,
-          );
+          const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
           if ("literal" in altResult) {
-            nullishFallback = altResult.literal;
+            fallbacks.push({ type, value: altResult.literal });
           } else if ("control" in altResult) {
-            nullishControl = altResult.control;
+            fallbacks.push({ type, control: altResult.control });
           } else {
-            nullishFallbackRef = altResult.sourceRef;
-            nullishFallbackInternalWires = wires.splice(preLen);
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
@@ -1781,12 +1780,7 @@ function processElementLines(
         }
 
         const lastAttrs = {
-          ...(nullAltRefs.length > 0 ? { falsyFallbackRefs: nullAltRefs } : {}),
-          ...(falsyFallback ? { falsyFallback } : {}),
-          ...(falsyControl ? { falsyControl } : {}),
-          ...(nullishFallback ? { nullishFallback } : {}),
-          ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-          ...(nullishControl ? { nullishControl } : {}),
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
           ...(catchFallback ? { catchFallback } : {}),
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
@@ -1808,7 +1802,7 @@ function processElementLines(
         } else {
           wires.push({ value: raw, to: elemToRef, ...lastAttrs });
         }
-        wires.push(...nullishFallbackInternalWires);
+        wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
         continue;
       }
@@ -2001,40 +1995,21 @@ function processElementLines(
           iterName,
         );
 
-        // Process || null-coalesce alternatives.
-        let elemFalsyFallback: string | undefined;
-        let elemFalsyControl: ControlFlowInstruction | undefined;
-        const elemNullAltRefs: NodeRef[] = [];
-        for (const alt of subs(elemLine, "elemNullAlt")) {
-          const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
-          if ("literal" in altResult) {
-            elemFalsyFallback = altResult.literal;
-          } else if ("control" in altResult) {
-            elemFalsyControl = altResult.control;
-          } else {
-            elemNullAltRefs.push(altResult.sourceRef);
-          }
-        }
-
-        // Process ?? nullish fallback.
-        let elemNullishFallback: string | undefined;
-        let elemNullishControl: ControlFlowInstruction | undefined;
-        let elemNullishFallbackRef: NodeRef | undefined;
-        let elemNullishFallbackInternalWires: Wire[] = [];
-        const elemNullishAlt = sub(elemLine, "elemNullishAlt");
-        if (elemNullishAlt) {
+        // Process coalesce alternatives.
+        const elemFallbacks: WireFallback[] = [];
+        const elemFallbackInternalWires: Wire[] = [];
+        for (const item of subs(elemLine, "elemCoalesceItem")) {
+          const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+          const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(
-            elemNullishAlt,
-            elemLineNum,
-          );
+          const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
           if ("literal" in altResult) {
-            elemNullishFallback = altResult.literal;
+            elemFallbacks.push({ type, value: altResult.literal });
           } else if ("control" in altResult) {
-            elemNullishControl = altResult.control;
+            elemFallbacks.push({ type, control: altResult.control });
           } else {
-            elemNullishFallbackRef = altResult.sourceRef;
-            elemNullishFallbackInternalWires = wires.splice(preLen);
+            elemFallbacks.push({ type, ref: altResult.sourceRef });
+            elemFallbackInternalWires.push(...wires.splice(preLen));
           }
         }
 
@@ -2068,20 +2043,7 @@ function processElementLines(
           ...(elseBranch.kind === "ref"
             ? { elseRef: elseBranch.ref }
             : { elseValue: elseBranch.value }),
-          ...(elemNullAltRefs.length > 0
-            ? { falsyFallbackRefs: elemNullAltRefs }
-            : {}),
-          ...(elemFalsyFallback !== undefined
-            ? { falsyFallback: elemFalsyFallback }
-            : {}),
-          ...(elemFalsyControl ? { falsyControl: elemFalsyControl } : {}),
-          ...(elemNullishFallback !== undefined
-            ? { nullishFallback: elemNullishFallback }
-            : {}),
-          ...(elemNullishFallbackRef !== undefined
-            ? { nullishFallbackRef: elemNullishFallbackRef }
-            : {}),
-          ...(elemNullishControl ? { nullishControl: elemNullishControl } : {}),
+          ...(elemFallbacks.length > 0 ? { fallbacks: elemFallbacks } : {}),
           ...(elemCatchFallback !== undefined
             ? { catchFallback: elemCatchFallback }
             : {}),
@@ -2091,43 +2053,28 @@ function processElementLines(
           ...(elemCatchControl ? { catchControl: elemCatchControl } : {}),
           to: elemToRef,
         });
-        wires.push(...elemNullishFallbackInternalWires);
+        wires.push(...elemFallbackInternalWires);
         wires.push(...elemCatchFallbackInternalWires);
         continue;
       }
 
       sourceParts.push({ ref: elemCondRef, isPipeFork: elemCondIsPipeFork });
 
-      // || alternatives
-      let falsyFallback: string | undefined;
-      let falsyControl: ControlFlowInstruction | undefined;
-      for (const alt of subs(elemLine, "elemNullAlt")) {
-        const altResult = extractCoalesceAltIterAware(alt, elemLineNum);
-        if ("literal" in altResult) {
-          falsyFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          falsyControl = altResult.control;
-        } else {
-          sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
-        }
-      }
-
-      // ?? nullish fallback
-      let nullishFallback: string | undefined;
-      let nullishControl: ControlFlowInstruction | undefined;
-      let nullishFallbackRef: NodeRef | undefined;
-      let nullishFallbackInternalWires: Wire[] = [];
-      const nullishAlt = sub(elemLine, "elemNullishAlt");
-      if (nullishAlt) {
+      // Coalesce alternatives (|| and ??)
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      for (const item of subs(elemLine, "elemCoalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAltIterAware(nullishAlt, elemLineNum);
+        const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
         if ("literal" in altResult) {
-          nullishFallback = altResult.literal;
+          fallbacks.push({ type, value: altResult.literal });
         } else if ("control" in altResult) {
-          nullishControl = altResult.control;
+          fallbacks.push({ type, control: altResult.control });
         } else {
-          nullishFallbackRef = altResult.sourceRef;
-          nullishFallbackInternalWires = wires.splice(preLen);
+          fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
 
@@ -2152,28 +2099,44 @@ function processElementLines(
 
       // Emit wire
       const { ref: fromRef, isPipeFork } = sourceParts[0];
-      const fallbackRefs =
-        sourceParts.length > 1
-          ? sourceParts.slice(1).map((p) => p.ref)
-          : undefined;
       const wireAttrs = {
         ...(isPipeFork ? { pipe: true as const } : {}),
-        ...(fallbackRefs ? { falsyFallbackRefs: fallbackRefs } : {}),
-        ...(falsyFallback ? { falsyFallback } : {}),
-        ...(falsyControl ? { falsyControl } : {}),
-        ...(nullishFallback ? { nullishFallback } : {}),
-        ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-        ...(nullishControl ? { nullishControl } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
         ...(catchFallback ? { catchFallback } : {}),
         ...(catchFallbackRef ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
       wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
-      wires.push(...nullishFallbackInternalWires);
+      wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     } else if (elemC.elemScopeBlock) {
-      // ── Path scope block inside array mapping: .field { .sub <- ... } ──
+      // ── Path scope block inside array mapping: .field { lines: .sub <- ..., ...source } ──
       const scopeLines = subs(elemLine, "elemScopeLine");
+      // Process spread lines at the top level of this scope block
+      const spreadLines = subs(elemLine, "elemSpreadLine");
+      for (const spreadLine of spreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        // Propagate safe navigation (?.) flag from source expression
+        const headNode = sub(sourceNode, "head")!;
+        const pipeNodes = subs(sourceNode, "pipeSegment");
+        const actualNode =
+          pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
+        const { safe: spreadSafe } = extractAddressPath(actualNode);
+        wires.push({
+          from: fromRef,
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: elemToPath,
+          },
+          spread: true as const,
+          ...(spreadSafe ? { safe: true as const } : {}),
+        });
+      }
       processElementScopeLines(
         scopeLines,
         elemToPath,
@@ -2291,7 +2254,37 @@ function processElementScopeLines(
 
     // ── Nested scope: .field { ... } ──
     const nestedScopeLines = subs(scopeLine, "pathScopeLine");
-    if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+    const nestedSpreadLines = subs(scopeLine, "scopeSpreadLine");
+    if (
+      (nestedScopeLines.length > 0 || nestedSpreadLines.length > 0) &&
+      !sc.scopeEquals &&
+      !sc.scopeArrow
+    ) {
+      // Process spread lines inside this nested scope block: ...sourceExpr
+      const spreadToPath = [...arrayToPath, ...fullSegs];
+      for (const spreadLine of nestedSpreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        // Propagate safe navigation (?.) flag from source expression
+        const headNode = sub(sourceNode, "head")!;
+        const pipeNodes = subs(sourceNode, "pipeSegment");
+        const actualNode =
+          pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
+        const { safe: spreadSafe } = extractAddressPath(actualNode);
+        wires.push({
+          from: fromRef,
+          to: {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            path: spreadToPath,
+          },
+          spread: true as const,
+          ...(spreadSafe ? { safe: true as const } : {}),
+        });
+      }
       processElementScopeLines(
         nestedScopeLines,
         arrayToPath,
@@ -2346,31 +2339,20 @@ function processElementScopeLines(
         const raw = stringSourceToken.image.slice(1, -1);
         const segs = parseTemplateString(raw);
 
-        let falsyFallback: string | undefined;
-        let falsyControl: ControlFlowInstruction | undefined;
-        const nullAltRefs: NodeRef[] = [];
-        for (const alt of subs(scopeLine, "scopeNullAlt")) {
-          const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
-          if ("literal" in altResult) falsyFallback = altResult.literal;
-          else if ("control" in altResult) falsyControl = altResult.control;
-          else nullAltRefs.push(altResult.sourceRef);
-        }
-        let nullishFallback: string | undefined;
-        let nullishControl: ControlFlowInstruction | undefined;
-        let nullishFallbackRef: NodeRef | undefined;
-        let nullishFallbackInternalWires: Wire[] = [];
-        const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-        if (nullishAlt) {
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+          const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+          const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(
-            nullishAlt,
-            scopeLineNum,
-          );
-          if ("literal" in altResult) nullishFallback = altResult.literal;
-          else if ("control" in altResult) nullishControl = altResult.control;
-          else {
-            nullishFallbackRef = altResult.sourceRef;
-            nullishFallbackInternalWires = wires.splice(preLen);
+          const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
+          if ("literal" in altResult) {
+            fallbacks.push({ type, value: altResult.literal });
+          } else if ("control" in altResult) {
+            fallbacks.push({ type, control: altResult.control });
+          } else {
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
@@ -2389,12 +2371,7 @@ function processElementScopeLines(
           }
         }
         const lastAttrs = {
-          ...(nullAltRefs.length > 0 ? { falsyFallbackRefs: nullAltRefs } : {}),
-          ...(falsyFallback ? { falsyFallback } : {}),
-          ...(falsyControl ? { falsyControl } : {}),
-          ...(nullishFallback ? { nullishFallback } : {}),
-          ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-          ...(nullishControl ? { nullishControl } : {}),
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
           ...(catchFallback ? { catchFallback } : {}),
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
@@ -2414,7 +2391,7 @@ function processElementScopeLines(
         } else {
           wires.push({ value: raw, to: elemToRef, ...lastAttrs });
         }
-        wires.push(...nullishFallbackInternalWires);
+        wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
         continue;
       }
@@ -2522,31 +2499,20 @@ function processElementScopeLines(
           iterName,
         );
 
-        let falsyFallback: string | undefined;
-        let falsyControl: ControlFlowInstruction | undefined;
-        const nullAltRefs: NodeRef[] = [];
-        for (const alt of subs(scopeLine, "scopeNullAlt")) {
-          const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
-          if ("literal" in altResult) falsyFallback = altResult.literal;
-          else if ("control" in altResult) falsyControl = altResult.control;
-          else nullAltRefs.push(altResult.sourceRef);
-        }
-        let nullishFallback: string | undefined;
-        let nullishControl: ControlFlowInstruction | undefined;
-        let nullishFallbackRef: NodeRef | undefined;
-        let nullishFallbackInternalWires: Wire[] = [];
-        const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-        if (nullishAlt) {
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+          const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+          const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
-          const altResult = extractCoalesceAltIterAware(
-            nullishAlt,
-            scopeLineNum,
-          );
-          if ("literal" in altResult) nullishFallback = altResult.literal;
-          else if ("control" in altResult) nullishControl = altResult.control;
-          else {
-            nullishFallbackRef = altResult.sourceRef;
-            nullishFallbackInternalWires = wires.splice(preLen);
+          const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
+          if ("literal" in altResult) {
+            fallbacks.push({ type, value: altResult.literal });
+          } else if ("control" in altResult) {
+            fallbacks.push({ type, control: altResult.control });
+          } else {
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
@@ -2572,18 +2538,13 @@ function processElementScopeLines(
           ...(elseBranch.kind === "ref"
             ? { elseRef: elseBranch.ref }
             : { elseValue: elseBranch.value }),
-          ...(nullAltRefs.length > 0 ? { falsyFallbackRefs: nullAltRefs } : {}),
-          ...(falsyFallback !== undefined ? { falsyFallback } : {}),
-          ...(falsyControl ? { falsyControl } : {}),
-          ...(nullishFallback !== undefined ? { nullishFallback } : {}),
-          ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
-          ...(nullishControl ? { nullishControl } : {}),
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
           ...(catchFallback !== undefined ? { catchFallback } : {}),
           ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
           to: elemToRef,
         });
-        wires.push(...nullishFallbackInternalWires);
+        wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
         continue;
       }
@@ -2591,28 +2552,21 @@ function processElementScopeLines(
       const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
       sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
-      let falsyFallback: string | undefined;
-      let falsyControl: ControlFlowInstruction | undefined;
-      for (const alt of subs(scopeLine, "scopeNullAlt")) {
-        const altResult = extractCoalesceAltIterAware(alt, scopeLineNum);
-        if ("literal" in altResult) falsyFallback = altResult.literal;
-        else if ("control" in altResult) falsyControl = altResult.control;
-        else sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
-      }
-
-      let nullishFallback: string | undefined;
-      let nullishControl: ControlFlowInstruction | undefined;
-      let nullishFallbackRef: NodeRef | undefined;
-      let nullishFallbackInternalWires: Wire[] = [];
-      const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-      if (nullishAlt) {
+      // Coalesce alternatives (|| and ??)
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAltIterAware(nullishAlt, scopeLineNum);
-        if ("literal" in altResult) nullishFallback = altResult.literal;
-        else if ("control" in altResult) nullishControl = altResult.control;
-        else {
-          nullishFallbackRef = altResult.sourceRef;
-          nullishFallbackInternalWires = wires.splice(preLen);
+        const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
+        if ("literal" in altResult) {
+          fallbacks.push({ type, value: altResult.literal });
+        } else if ("control" in altResult) {
+          fallbacks.push({ type, control: altResult.control });
+        } else {
+          fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
 
@@ -2633,24 +2587,15 @@ function processElementScopeLines(
       }
 
       const { ref: fromRef, isPipeFork: isPipe } = sourceParts[0];
-      const fallbackRefs =
-        sourceParts.length > 1
-          ? sourceParts.slice(1).map((p) => p.ref)
-          : undefined;
       const wireAttrs = {
         ...(isPipe ? { pipe: true as const } : {}),
-        ...(fallbackRefs ? { falsyFallbackRefs: fallbackRefs } : {}),
-        ...(falsyFallback ? { falsyFallback } : {}),
-        ...(falsyControl ? { falsyControl } : {}),
-        ...(nullishFallback ? { nullishFallback } : {}),
-        ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-        ...(nullishControl ? { nullishControl } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
         ...(catchFallback ? { catchFallback } : {}),
         ...(catchFallbackRef ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
       wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
-      wires.push(...nullishFallbackInternalWires);
+      wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     }
   }
@@ -4097,7 +4042,12 @@ function buildBridgeBody(
 
       // ── Nested scope: .field { ... } ──
       const nestedScopeLines = subs(scopeLine, "pathScopeLine");
-      if (nestedScopeLines.length > 0 && !sc.scopeEquals && !sc.scopeArrow) {
+      const nestedSpreadLines = subs(scopeLine, "scopeSpreadLine");
+      if (
+        (nestedScopeLines.length > 0 || nestedSpreadLines.length > 0) &&
+        !sc.scopeEquals &&
+        !sc.scopeArrow
+      ) {
         // Process alias declarations inside the nested scope block first
         const scopeAliases = subs(scopeLine, "scopeAlias");
         for (const aliasNode of scopeAliases) {
@@ -4132,6 +4082,22 @@ function buildBridgeBody(
             ...(aliasSafe ? { safe: true as const } : {}),
           });
         }
+        // Process spread lines inside this nested scope block: ...sourceExpr
+        const nestedToRef = resolveAddress(targetRoot, fullSegs, scopeLineNum);
+        for (const spreadLine of nestedSpreadLines) {
+          const spreadLineNum = line(findFirstToken(spreadLine));
+          const sourceNode = sub(spreadLine, "spreadSource")!;
+          const { ref: fromRef, safe: spreadSafe } = buildSourceExprSafe(
+            sourceNode,
+            spreadLineNum,
+          );
+          wires.push({
+            from: fromRef,
+            to: nestedToRef,
+            spread: true as const,
+            ...(spreadSafe ? { safe: true as const } : {}),
+          });
+        }
         processScopeLines(nestedScopeLines, targetRoot, fullSegs);
         continue;
       }
@@ -4156,28 +4122,20 @@ function buildBridgeBody(
           const raw = stringSourceToken.image.slice(1, -1);
           const segs = parseTemplateString(raw);
 
-          let falsyFallback: string | undefined;
-          let falsyControl: ControlFlowInstruction | undefined;
-          const nullAltRefs: NodeRef[] = [];
-          for (const alt of subs(scopeLine, "scopeNullAlt")) {
-            const altResult = extractCoalesceAlt(alt, scopeLineNum);
-            if ("literal" in altResult) falsyFallback = altResult.literal;
-            else if ("control" in altResult) falsyControl = altResult.control;
-            else nullAltRefs.push(altResult.sourceRef);
-          }
-          let nullishFallback: string | undefined;
-          let nullishControl: ControlFlowInstruction | undefined;
-          let nullishFallbackRef: NodeRef | undefined;
-          let nullishFallbackInternalWires: Wire[] = [];
-          const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-          if (nullishAlt) {
+          const fallbacks: WireFallback[] = [];
+          const fallbackInternalWires: Wire[] = [];
+          for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+            const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+            const altNode = sub(item, "altValue")!;
             const preLen = wires.length;
-            const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
-            if ("literal" in altResult) nullishFallback = altResult.literal;
-            else if ("control" in altResult) nullishControl = altResult.control;
-            else {
-              nullishFallbackRef = altResult.sourceRef;
-              nullishFallbackInternalWires = wires.splice(preLen);
+            const altResult = extractCoalesceAlt(altNode, scopeLineNum);
+            if ("literal" in altResult) {
+              fallbacks.push({ type, value: altResult.literal });
+            } else if ("control" in altResult) {
+              fallbacks.push({ type, control: altResult.control });
+            } else {
+              fallbacks.push({ type, ref: altResult.sourceRef });
+              fallbackInternalWires.push(...wires.splice(preLen));
             }
           }
           let catchFallback: string | undefined;
@@ -4196,14 +4154,7 @@ function buildBridgeBody(
             }
           }
           const lastAttrs = {
-            ...(nullAltRefs.length > 0
-              ? { falsyFallbackRefs: nullAltRefs }
-              : {}),
-            ...(falsyFallback ? { falsyFallback } : {}),
-            ...(falsyControl ? { falsyControl } : {}),
-            ...(nullishFallback ? { nullishFallback } : {}),
-            ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-            ...(nullishControl ? { nullishControl } : {}),
+            ...(fallbacks.length > 0 ? { fallbacks } : {}),
             ...(catchFallback ? { catchFallback } : {}),
             ...(catchFallbackRef ? { catchFallbackRef } : {}),
             ...(catchControl ? { catchControl } : {}),
@@ -4219,7 +4170,7 @@ function buildBridgeBody(
           } else {
             wires.push({ value: raw, to: toRef, ...lastAttrs });
           }
-          wires.push(...nullishFallbackInternalWires);
+          wires.push(...fallbackInternalWires);
           wires.push(...catchFallbackInternalWires);
           continue;
         }
@@ -4300,28 +4251,20 @@ function buildBridgeBody(
           const elseNode = sub(scopeLine, "scopeElseBranch")!;
           const thenBranch = extractTernaryBranch(thenNode, scopeLineNum);
           const elseBranch = extractTernaryBranch(elseNode, scopeLineNum);
-          let falsyFallback: string | undefined;
-          let falsyControl: ControlFlowInstruction | undefined;
-          const nullAltRefs: NodeRef[] = [];
-          for (const alt of subs(scopeLine, "scopeNullAlt")) {
-            const altResult = extractCoalesceAlt(alt, scopeLineNum);
-            if ("literal" in altResult) falsyFallback = altResult.literal;
-            else if ("control" in altResult) falsyControl = altResult.control;
-            else nullAltRefs.push(altResult.sourceRef);
-          }
-          let nullishFallback: string | undefined;
-          let nullishControl: ControlFlowInstruction | undefined;
-          let nullishFallbackRef: NodeRef | undefined;
-          let nullishFallbackInternalWires: Wire[] = [];
-          const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-          if (nullishAlt) {
+          const fallbacks: WireFallback[] = [];
+          const fallbackInternalWires: Wire[] = [];
+          for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+            const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+            const altNode = sub(item, "altValue")!;
             const preLen = wires.length;
-            const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
-            if ("literal" in altResult) nullishFallback = altResult.literal;
-            else if ("control" in altResult) nullishControl = altResult.control;
-            else {
-              nullishFallbackRef = altResult.sourceRef;
-              nullishFallbackInternalWires = wires.splice(preLen);
+            const altResult = extractCoalesceAlt(altNode, scopeLineNum);
+            if ("literal" in altResult) {
+              fallbacks.push({ type, value: altResult.literal });
+            } else if ("control" in altResult) {
+              fallbacks.push({ type, control: altResult.control });
+            } else {
+              fallbacks.push({ type, ref: altResult.sourceRef });
+              fallbackInternalWires.push(...wires.splice(preLen));
             }
           }
           let catchFallback: string | undefined;
@@ -4347,49 +4290,34 @@ function buildBridgeBody(
             ...(elseBranch.kind === "ref"
               ? { elseRef: elseBranch.ref }
               : { elseValue: elseBranch.value }),
-            ...(nullAltRefs.length > 0
-              ? { falsyFallbackRefs: nullAltRefs }
-              : {}),
-            ...(falsyFallback !== undefined ? { falsyFallback } : {}),
-            ...(falsyControl ? { falsyControl } : {}),
-            ...(nullishFallback !== undefined ? { nullishFallback } : {}),
-            ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
-            ...(nullishControl ? { nullishControl } : {}),
+            ...(fallbacks.length > 0 ? { fallbacks } : {}),
             ...(catchFallback !== undefined ? { catchFallback } : {}),
             ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
             ...(catchControl ? { catchControl } : {}),
             to: toRef,
           });
-          wires.push(...nullishFallbackInternalWires);
+          wires.push(...fallbackInternalWires);
           wires.push(...catchFallbackInternalWires);
           continue;
         }
 
         sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
-        let falsyFallback: string | undefined;
-        let falsyControl: ControlFlowInstruction | undefined;
-        for (const alt of subs(scopeLine, "scopeNullAlt")) {
-          const altResult = extractCoalesceAlt(alt, scopeLineNum);
-          if ("literal" in altResult) falsyFallback = altResult.literal;
-          else if ("control" in altResult) falsyControl = altResult.control;
-          else
-            sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
-        }
-
-        let nullishFallback: string | undefined;
-        let nullishControl: ControlFlowInstruction | undefined;
-        let nullishFallbackRef: NodeRef | undefined;
-        let nullishFallbackInternalWires: Wire[] = [];
-        const nullishAlt = sub(scopeLine, "scopeNullishAlt");
-        if (nullishAlt) {
+        // Coalesce alternatives (|| and ??)
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+          const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+          const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
-          const altResult = extractCoalesceAlt(nullishAlt, scopeLineNum);
-          if ("literal" in altResult) nullishFallback = altResult.literal;
-          else if ("control" in altResult) nullishControl = altResult.control;
-          else {
-            nullishFallbackRef = altResult.sourceRef;
-            nullishFallbackInternalWires = wires.splice(preLen);
+          const altResult = extractCoalesceAlt(altNode, scopeLineNum);
+          if ("literal" in altResult) {
+            fallbacks.push({ type, value: altResult.literal });
+          } else if ("control" in altResult) {
+            fallbacks.push({ type, control: altResult.control });
+          } else {
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
 
@@ -4410,24 +4338,15 @@ function buildBridgeBody(
         }
 
         const { ref: fromRef, isPipeFork: isPipe } = sourceParts[0];
-        const fallbackRefs =
-          sourceParts.length > 1
-            ? sourceParts.slice(1).map((p) => p.ref)
-            : undefined;
         const wireAttrs = {
           ...(isPipe ? { pipe: true as const } : {}),
-          ...(fallbackRefs ? { falsyFallbackRefs: fallbackRefs } : {}),
-          ...(falsyFallback ? { falsyFallback } : {}),
-          ...(falsyControl ? { falsyControl } : {}),
-          ...(nullishFallback ? { nullishFallback } : {}),
-          ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-          ...(nullishControl ? { nullishControl } : {}),
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
           ...(catchFallback ? { catchFallback } : {}),
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
         wires.push({ from: fromRef, to: toRef, ...wireAttrs });
-        wires.push(...nullishFallbackInternalWires);
+        wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
       }
     }
@@ -4452,34 +4371,20 @@ function buildBridgeBody(
       }
 
       // ── Extract coalesce modifiers FIRST (shared by ternary + pull paths) ──
-      let aliasFalsyFallback: string | undefined;
-      let aliasFalsyControl: ControlFlowInstruction | undefined;
-      const aliasNullAltRefs: NodeRef[] = [];
-      for (const alt of subs(nodeAliasNode, "aliasNullAlt")) {
-        const altResult = extractCoalesceAlt(alt, lineNum);
-        if ("literal" in altResult) {
-          aliasFalsyFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          aliasFalsyControl = altResult.control;
-        } else {
-          aliasNullAltRefs.push(altResult.sourceRef);
-        }
-      }
-      let aliasNullishFallback: string | undefined;
-      let aliasNullishControl: ControlFlowInstruction | undefined;
-      let aliasNullishFallbackRef: NodeRef | undefined;
-      let aliasNullishFallbackInternalWires: Wire[] = [];
-      const aliasNullishAlt = sub(nodeAliasNode, "aliasNullishAlt");
-      if (aliasNullishAlt) {
+      const aliasFallbacks: WireFallback[] = [];
+      const aliasFallbackInternalWires: Wire[] = [];
+      for (const item of subs(nodeAliasNode, "aliasCoalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAlt(aliasNullishAlt, lineNum);
+        const altResult = extractCoalesceAlt(altNode, lineNum);
         if ("literal" in altResult) {
-          aliasNullishFallback = altResult.literal;
+          aliasFallbacks.push({ type, value: altResult.literal });
         } else if ("control" in altResult) {
-          aliasNullishControl = altResult.control;
+          aliasFallbacks.push({ type, control: altResult.control });
         } else {
-          aliasNullishFallbackRef = altResult.sourceRef;
-          aliasNullishFallbackInternalWires = wires.splice(preLen);
+          aliasFallbacks.push({ type, ref: altResult.sourceRef });
+          aliasFallbackInternalWires.push(...wires.splice(preLen));
         }
       }
       let aliasCatchFallback: string | undefined;
@@ -4500,18 +4405,7 @@ function buildBridgeBody(
         }
       }
       const modifierAttrs = {
-        ...(aliasNullAltRefs.length > 0
-          ? { falsyFallbackRefs: aliasNullAltRefs }
-          : {}),
-        ...(aliasFalsyFallback ? { falsyFallback: aliasFalsyFallback } : {}),
-        ...(aliasFalsyControl ? { falsyControl: aliasFalsyControl } : {}),
-        ...(aliasNullishFallback
-          ? { nullishFallback: aliasNullishFallback }
-          : {}),
-        ...(aliasNullishFallbackRef
-          ? { nullishFallbackRef: aliasNullishFallbackRef }
-          : {}),
-        ...(aliasNullishControl ? { nullishControl: aliasNullishControl } : {}),
+        ...(aliasFallbacks.length > 0 ? { fallbacks: aliasFallbacks } : {}),
         ...(aliasCatchFallback ? { catchFallback: aliasCatchFallback } : {}),
         ...(aliasCatchFallbackRef
           ? { catchFallbackRef: aliasCatchFallbackRef }
@@ -4577,7 +4471,7 @@ function buildBridgeBody(
             ...modifierAttrs,
             to: ternaryToRef,
           });
-          wires.push(...aliasNullishFallbackInternalWires);
+          wires.push(...aliasFallbackInternalWires);
           wires.push(...aliasCatchFallbackInternalWires);
           continue;
         }
@@ -4670,7 +4564,7 @@ function buildBridgeBody(
             ...modifierAttrs,
             to: ternaryToRef,
           });
-          wires.push(...aliasNullishFallbackInternalWires);
+          wires.push(...aliasFallbackInternalWires);
           wires.push(...aliasCatchFallbackInternalWires);
           continue;
         }
@@ -4699,7 +4593,7 @@ function buildBridgeBody(
         ...modifierAttrs,
       };
       wires.push({ from: sourceRef, to: localToRef, ...aliasAttrs });
-      wires.push(...aliasNullishFallbackInternalWires);
+      wires.push(...aliasFallbackInternalWires);
       wires.push(...aliasCatchFallbackInternalWires);
     }
   }
@@ -4769,6 +4663,22 @@ function buildBridgeBody(
         });
       }
       const scopeLines = subs(wireNode, "pathScopeLine");
+      // Process spread lines inside the scope block: ...sourceExpr
+      const spreadLines = subs(wireNode, "scopeSpreadLine");
+      for (const spreadLine of spreadLines) {
+        const spreadLineNum = line(findFirstToken(spreadLine));
+        const sourceNode = sub(spreadLine, "spreadSource")!;
+        const { ref: fromRef, safe: spreadSafe } = buildSourceExprSafe(
+          sourceNode,
+          spreadLineNum,
+        );
+        wires.push({
+          from: fromRef,
+          to: toRef,
+          spread: true as const,
+          ...(spreadSafe ? { safe: true as const } : {}),
+        });
+      }
       processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;
     }
@@ -4782,34 +4692,20 @@ function buildBridgeBody(
       const segs = parseTemplateString(raw);
 
       // Process coalesce modifiers
-      let falsyFallback: string | undefined;
-      let falsyControl: ControlFlowInstruction | undefined;
-      const nullAltRefs: NodeRef[] = [];
-      for (const alt of subs(wireNode, "nullAlt")) {
-        const altResult = extractCoalesceAlt(alt, lineNum);
-        if ("literal" in altResult) {
-          falsyFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          falsyControl = altResult.control;
-        } else {
-          nullAltRefs.push(altResult.sourceRef);
-        }
-      }
-      let nullishFallback: string | undefined;
-      let nullishControl: ControlFlowInstruction | undefined;
-      let nullishFallbackRef: NodeRef | undefined;
-      let nullishFallbackInternalWires: Wire[] = [];
-      const nullishAlt = sub(wireNode, "nullishAlt");
-      if (nullishAlt) {
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      for (const item of subs(wireNode, "coalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAlt(nullishAlt, lineNum);
+        const altResult = extractCoalesceAlt(altNode, lineNum);
         if ("literal" in altResult) {
-          nullishFallback = altResult.literal;
+          fallbacks.push({ type, value: altResult.literal });
         } else if ("control" in altResult) {
-          nullishControl = altResult.control;
+          fallbacks.push({ type, control: altResult.control });
         } else {
-          nullishFallbackRef = altResult.sourceRef;
-          nullishFallbackInternalWires = wires.splice(preLen);
+          fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
       let catchFallback: string | undefined;
@@ -4831,11 +4727,7 @@ function buildBridgeBody(
       }
 
       const lastAttrs = {
-        ...(falsyFallback ? { falsyFallback } : {}),
-        ...(falsyControl ? { falsyControl } : {}),
-        ...(nullishFallback ? { nullishFallback } : {}),
-        ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-        ...(nullishControl ? { nullishControl } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
         ...(catchFallback ? { catchFallback } : {}),
         ...(catchFallbackRef ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
@@ -4849,10 +4741,7 @@ function buildBridgeBody(
         // Plain string without interpolation — emit constant wire
         wires.push({ value: raw, to: toRef, ...lastAttrs });
       }
-      for (const ref of nullAltRefs) {
-        wires.push({ from: ref, to: toRef });
-      }
-      wires.push(...nullishFallbackInternalWires);
+      wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
       continue;
     }
@@ -4867,34 +4756,20 @@ function buildBridgeBody(
         : buildSourceExpr(firstSourceNode!, lineNum);
 
       // Process coalesce modifiers on the array wire (same as plain pull wires)
-      let arrayFalsyFallback: string | undefined;
-      let arrayFalsyControl: ControlFlowInstruction | undefined;
-      const arrayNullAltRefs: NodeRef[] = [];
-      for (const alt of subs(wireNode, "nullAlt")) {
-        const altResult = extractCoalesceAlt(alt, lineNum);
-        if ("literal" in altResult) {
-          arrayFalsyFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          arrayFalsyControl = altResult.control;
-        } else {
-          arrayNullAltRefs.push(altResult.sourceRef);
-        }
-      }
-      let arrayNullishFallback: string | undefined;
-      let arrayNullishControl: ControlFlowInstruction | undefined;
-      let arrayNullishFallbackRef: NodeRef | undefined;
-      let arrayNullishFallbackInternalWires: Wire[] = [];
-      const arrayNullishAlt = sub(wireNode, "nullishAlt");
-      if (arrayNullishAlt) {
+      const arrayFallbacks: WireFallback[] = [];
+      const arrayFallbackInternalWires: Wire[] = [];
+      for (const item of subs(wireNode, "coalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAlt(arrayNullishAlt, lineNum);
+        const altResult = extractCoalesceAlt(altNode, lineNum);
         if ("literal" in altResult) {
-          arrayNullishFallback = altResult.literal;
+          arrayFallbacks.push({ type, value: altResult.literal });
         } else if ("control" in altResult) {
-          arrayNullishControl = altResult.control;
+          arrayFallbacks.push({ type, control: altResult.control });
         } else {
-          arrayNullishFallbackRef = altResult.sourceRef;
-          arrayNullishFallbackInternalWires = wires.splice(preLen);
+          arrayFallbacks.push({ type, ref: altResult.sourceRef });
+          arrayFallbackInternalWires.push(...wires.splice(preLen));
         }
       }
       let arrayCatchFallback: string | undefined;
@@ -4915,15 +4790,7 @@ function buildBridgeBody(
         }
       }
       const arrayWireAttrs = {
-        ...(arrayFalsyFallback ? { falsyFallback: arrayFalsyFallback } : {}),
-        ...(arrayFalsyControl ? { falsyControl: arrayFalsyControl } : {}),
-        ...(arrayNullishFallback
-          ? { nullishFallback: arrayNullishFallback }
-          : {}),
-        ...(arrayNullishFallbackRef
-          ? { nullishFallbackRef: arrayNullishFallbackRef }
-          : {}),
-        ...(arrayNullishControl ? { nullishControl: arrayNullishControl } : {}),
+        ...(arrayFallbacks.length > 0 ? { fallbacks: arrayFallbacks } : {}),
         ...(arrayCatchFallback ? { catchFallback: arrayCatchFallback } : {}),
         ...(arrayCatchFallbackRef
           ? { catchFallbackRef: arrayCatchFallbackRef }
@@ -4931,10 +4798,7 @@ function buildBridgeBody(
         ...(arrayCatchControl ? { catchControl: arrayCatchControl } : {}),
       };
       wires.push({ from: srcRef, to: toRef, ...arrayWireAttrs });
-      for (const ref of arrayNullAltRefs) {
-        wires.push({ from: ref, to: toRef });
-      }
-      wires.push(...arrayNullishFallbackInternalWires);
+      wires.push(...arrayFallbackInternalWires);
       wires.push(...arrayCatchFallbackInternalWires);
 
       const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
@@ -5037,38 +4901,21 @@ function buildBridgeBody(
       const thenBranch = extractTernaryBranch(thenNode, lineNum);
       const elseBranch = extractTernaryBranch(elseNode, lineNum);
 
-      // Process || null-coalesce alternatives.
-      // Literals → stored on the ternary wire; source refs → sibling pull wires.
-      let falsyFallback: string | undefined;
-      let falsyControl: ControlFlowInstruction | undefined;
-      const nullAltRefs: NodeRef[] = [];
-      for (const alt of subs(wireNode, "nullAlt")) {
-        const altResult = extractCoalesceAlt(alt, lineNum);
-        if ("literal" in altResult) {
-          falsyFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          falsyControl = altResult.control;
-        } else {
-          nullAltRefs.push(altResult.sourceRef);
-        }
-      }
-
-      // Process ?? nullish fallback.
-      let nullishFallback: string | undefined;
-      let nullishControl: ControlFlowInstruction | undefined;
-      let nullishFallbackRef: NodeRef | undefined;
-      let nullishFallbackInternalWires: Wire[] = [];
-      const nullishAlt = sub(wireNode, "nullishAlt");
-      if (nullishAlt) {
+      // Process coalesce alternatives.
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      for (const item of subs(wireNode, "coalesceItem")) {
+        const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+        const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
-        const altResult = extractCoalesceAlt(nullishAlt, lineNum);
+        const altResult = extractCoalesceAlt(altNode, lineNum);
         if ("literal" in altResult) {
-          nullishFallback = altResult.literal;
+          fallbacks.push({ type, value: altResult.literal });
         } else if ("control" in altResult) {
-          nullishControl = altResult.control;
+          fallbacks.push({ type, control: altResult.control });
         } else {
-          nullishFallbackRef = altResult.sourceRef;
-          nullishFallbackInternalWires = wires.splice(preLen);
+          fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
 
@@ -5099,52 +4946,38 @@ function buildBridgeBody(
         ...(elseBranch.kind === "ref"
           ? { elseRef: elseBranch.ref }
           : { elseValue: elseBranch.value }),
-        ...(nullAltRefs.length > 0 ? { falsyFallbackRefs: nullAltRefs } : {}),
-        ...(falsyFallback !== undefined ? { falsyFallback } : {}),
-        ...(falsyControl ? { falsyControl } : {}),
-        ...(nullishFallback !== undefined ? { nullishFallback } : {}),
-        ...(nullishFallbackRef !== undefined ? { nullishFallbackRef } : {}),
-        ...(nullishControl ? { nullishControl } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
         ...(catchFallback !== undefined ? { catchFallback } : {}),
         ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
         to: toRef,
       });
-      wires.push(...nullishFallbackInternalWires);
+      wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
       continue;
     }
 
     sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
-    let falsyFallback: string | undefined;
-    let falsyControl: ControlFlowInstruction | undefined;
-    for (const alt of subs(wireNode, "nullAlt")) {
-      const altResult = extractCoalesceAlt(alt, lineNum);
-      if ("literal" in altResult) {
-        falsyFallback = altResult.literal;
-      } else if ("control" in altResult) {
-        falsyControl = altResult.control;
-      } else {
-        sourceParts.push({ ref: altResult.sourceRef, isPipeFork: false });
-      }
-    }
-
-    let nullishFallback: string | undefined;
-    let nullishControl: ControlFlowInstruction | undefined;
-    let nullishFallbackRef: NodeRef | undefined;
-    let nullishFallbackInternalWires: Wire[] = [];
-    const nullishAlt = sub(wireNode, "nullishAlt");
-    if (nullishAlt) {
+    const fallbacks: WireFallback[] = [];
+    const fallbackInternalWires: Wire[] = [];
+    let hasTruthyLiteralFallback = false;
+    for (const item of subs(wireNode, "coalesceItem")) {
+      const type = tok(item, "falsyOp") ? "falsy" as const : "nullish" as const;
+      if (type === "falsy" && hasTruthyLiteralFallback) break;
+      const altNode = sub(item, "altValue")!;
       const preLen = wires.length;
-      const altResult = extractCoalesceAlt(nullishAlt, lineNum);
+      const altResult = extractCoalesceAlt(altNode, lineNum);
       if ("literal" in altResult) {
-        nullishFallback = altResult.literal;
+        fallbacks.push({ type, value: altResult.literal });
+        if (type === "falsy") {
+          hasTruthyLiteralFallback = Boolean(JSON.parse(altResult.literal));
+        }
       } else if ("control" in altResult) {
-        nullishControl = altResult.control;
+        fallbacks.push({ type, control: altResult.control });
       } else {
-        nullishFallbackRef = altResult.sourceRef;
-        nullishFallbackInternalWires = wires.splice(preLen);
+        fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbackInternalWires.push(...wires.splice(preLen));
       }
     }
 
@@ -5167,25 +5000,16 @@ function buildBridgeBody(
     }
 
     const { ref: fromRef, isPipeFork: isPipe } = sourceParts[0];
-    const fallbackRefs =
-      sourceParts.length > 1
-        ? sourceParts.slice(1).map((p) => p.ref)
-        : undefined;
     const wireAttrs = {
       ...(isSafe ? { safe: true as const } : {}),
       ...(isPipe ? { pipe: true as const } : {}),
-      ...(fallbackRefs ? { falsyFallbackRefs: fallbackRefs } : {}),
-      ...(falsyFallback ? { falsyFallback } : {}),
-      ...(falsyControl ? { falsyControl } : {}),
-      ...(nullishFallback ? { nullishFallback } : {}),
-      ...(nullishFallbackRef ? { nullishFallbackRef } : {}),
-      ...(nullishControl ? { nullishControl } : {}),
+      ...(fallbacks.length > 0 ? { fallbacks } : {}),
       ...(catchFallback ? { catchFallback } : {}),
       ...(catchFallbackRef ? { catchFallbackRef } : {}),
       ...(catchControl ? { catchControl } : {}),
     };
     wires.push({ from: fromRef, to: toRef, ...wireAttrs });
-    wires.push(...nullishFallbackInternalWires);
+    wires.push(...fallbackInternalWires);
     wires.push(...catchFallbackInternalWires);
   }
 
@@ -5309,11 +5133,9 @@ function inlineDefine(
         wire.to = { ...wire.to, module: inModule };
       if (wire.from.module === genericModule)
         wire.from = { ...wire.from, module: outModule };
-      if (wire.nullishFallbackRef?.module === genericModule)
-        wire.nullishFallbackRef = {
-          ...wire.nullishFallbackRef,
-          module: outModule,
-        };
+      if (wire.fallbacks) {
+        wire.fallbacks = wire.fallbacks.map(f => f.ref && f.ref.module === genericModule ? { ...f, ref: { ...f.ref, module: outModule } } : f);
+      }
       if (wire.catchFallbackRef?.module === genericModule)
         wire.catchFallbackRef = { ...wire.catchFallbackRef, module: outModule };
     }
@@ -5361,8 +5183,9 @@ function inlineDefine(
     if ("from" in cloned) {
       cloned.from = remapRef(cloned.from, "from");
       cloned.to = remapRef(cloned.to, "to");
-      if (cloned.nullishFallbackRef)
-        cloned.nullishFallbackRef = remapRef(cloned.nullishFallbackRef, "from");
+      if (cloned.fallbacks) {
+        cloned.fallbacks = cloned.fallbacks.map(f => f.ref ? { ...f, ref: remapRef(f.ref, "from") } : f);
+      }
       if (cloned.catchFallbackRef)
         cloned.catchFallbackRef = remapRef(cloned.catchFallbackRef, "from");
     } else {

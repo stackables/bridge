@@ -1,10 +1,19 @@
+import type { PlaygroundMode } from "./share";
+
 export type Example = {
   name: string;
   description: string;
+  mode?: PlaygroundMode;
   schema: string;
   bridge: string;
   queries: { name: string; query: string }[];
   context: string;
+  /** Standalone-mode per-query state (parallel array to queries). */
+  standaloneQueries?: {
+    operation: string;
+    outputFields: string;
+    input: Record<string, unknown>;
+  }[];
 };
 
 export const examples: Example[] = [
@@ -45,6 +54,13 @@ bridge Query.greet {
     lower
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.greet",
+        outputFields: "",
+        input: { name: "Hello Bridge" },
       },
     ],
     context: `{}`,
@@ -121,6 +137,13 @@ bridge Query.profile {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.profile",
+        outputFields: "",
+        input: {},
+      },
+    ],
     context: `{
   "user": {
     "id": "usr_42",
@@ -169,6 +192,13 @@ bridge Query.location {
     lon
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.location",
+        outputFields: "",
+        input: { city: "Berlin" },
       },
     ],
     context: `{}`,
@@ -292,6 +322,18 @@ bridge Query.searchTrains {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.searchTrains",
+        outputFields: "",
+        input: { from: "Bern", to: "Zürich" },
+      },
+      {
+        operation: "Query.searchTrains",
+        outputFields: "departureTime,arrivalTime,transfers",
+        input: { from: "Zürich", to: "Genève" },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -326,6 +368,13 @@ bridge Query.echo {
     count
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.echo",
+        outputFields: "",
+        input: { text: "Hello Bridge!", count: 42 },
       },
     ],
     context: `{}`,
@@ -365,6 +414,13 @@ bridge Query.pricing {
     eligible
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.pricing",
+        outputFields: "",
+        input: { dollars: 9.99, quantity: 3 },
       },
     ],
     context: `{}`,
@@ -413,6 +469,13 @@ bridge Query.pricing {
     discount
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.pricing",
+        outputFields: "",
+        input: { isPro: true, proPrice: 49.99, basicPrice: 9.99 },
       },
     ],
     context: `{}`,
@@ -476,6 +539,13 @@ bridge Mutation.submitFeedback {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Mutation.submitFeedback",
+        outputFields: "",
+        input: { text: "Great product!", rating: 5 },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -518,6 +588,9 @@ bridge Query.profile {
   # 3. Nullish fallback — only override if value is strictly null/undefined
   alias api.website ?? "https://example.com" as site
 
+  # 4. Mixed chain — ?? then || in any order
+  alias api.nickname ?? api.username || "Guest" as greeting
+
   # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
   alias uc:api.name catch "UNKNOWN" as upperName
 
@@ -542,6 +615,13 @@ bridge Query.profile {
     isPremium
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.profile",
+        outputFields: "",
+        input: { userId: "1" },
       },
     ],
     context: `{}`,
@@ -595,6 +675,18 @@ bridge Query.userProfile {
     badge
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.userProfile",
+        outputFields: "",
+        input: { firstName: "Alice", lastName: "Smith", id: "42" },
+      },
+      {
+        operation: "Query.userProfile",
+        outputFields: "",
+        input: { firstName: "Bob", lastName: "Johnson", id: "99" },
       },
     ],
     context: `{}`,
@@ -698,6 +790,23 @@ bridge Query.createPayload {
 }`,
       },
     ],
+    standaloneQueries: [
+      {
+        operation: "Query.createPayload",
+        outputFields: "",
+        input: {
+          name: "Alice",
+          email: "alice@example.com",
+          theme: "dark",
+          isPro: true,
+        },
+      },
+      {
+        operation: "Query.createPayload",
+        outputFields: "",
+        input: { name: "Bob", email: "bob@example.com", isPro: false },
+      },
+    ],
     context: `{}`,
   },
   {
@@ -741,6 +850,18 @@ bridge Query.evaluate {
     requireMFA
   }
 }`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.evaluate",
+        outputFields: "",
+        input: { age: 25, verified: true, role: "USER" },
+      },
+      {
+        operation: "Query.evaluate",
+        outputFields: "",
+        input: { age: 15, verified: false, role: "ADMIN" },
       },
     ],
     context: `{}`,

@@ -821,7 +821,7 @@ o.name <- i.name || "World"
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
-    assert.equal(wire.falsyFallback, '"World"');
+    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '"World"' }]);
     assert.equal(wire.catchFallback, undefined);
   });
 
@@ -839,7 +839,7 @@ o.name <- i.name || "World" catch "Error"
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
-    assert.equal(wire.falsyFallback, '"World"');
+    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '"World"' }]);
     assert.equal(wire.catchFallback, '"Error"');
   });
 
@@ -861,10 +861,10 @@ o.result <- a.data || {"lat":0,"lon":0}
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).from.path[0] === "data",
     ) as Extract<Wire, { from: NodeRef }>;
-    assert.equal(wire.falsyFallback, '{"lat":0,"lon":0}');
+    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '{"lat":0,"lon":0}' }]);
   });
 
-  test("wire without || has no falsyFallback", () => {
+  test("wire without || has no fallbacks", () => {
     const doc = parseBridge(`version 1.5
 
 bridge Query.greet {
@@ -878,7 +878,7 @@ o.name <- i.name
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
-    assert.equal(wire.falsyFallback, undefined);
+    assert.equal(wire.fallbacks, undefined);
   });
 
   test("pipe wire with || falsy-fallback", () => {
@@ -895,12 +895,12 @@ o.result <- up:i.text || "N/A"
     const bridge = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    // Terminal pipe wire (from fork root to result) carries the falsyFallback
+    // Terminal pipe wire (from fork root to result) carries the fallbacks
     const terminalWire = bridge.wires.find(
       (w) =>
         "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
     ) as Extract<Wire, { from: NodeRef }>;
-    assert.equal(terminalWire?.falsyFallback, '"N/A"');
+    assert.deepStrictEqual(terminalWire?.fallbacks, [{ type: "falsy", value: '"N/A"' }]);
   });
 });
 
@@ -1169,7 +1169,7 @@ o.textPart <- i.htmlBody || "empty"
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("parseBridge: || source references", () => {
-  test("|| source produces one wire with falsyFallbackRefs", () => {
+  test("|| source produces one wire with fallbacks", () => {
     const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
@@ -1190,14 +1190,14 @@ o.label <- p.label || b.label
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1, "should be one wire, not two");
-    assert.ok(labelWires[0].falsyFallbackRefs, "should have falsyFallbackRefs");
-    assert.equal(labelWires[0].falsyFallbackRefs!.length, 1);
-    assert.deepEqual(labelWires[0].falsyFallbackRefs![0].path, ["label"]);
-    assert.equal(labelWires[0].falsyFallback, undefined);
+    assert.ok(labelWires[0].fallbacks, "should have fallbacks");
+    assert.equal(labelWires[0].fallbacks!.length, 1);
+    assert.equal(labelWires[0].fallbacks![0].type, "falsy");
+    assert.deepEqual(labelWires[0].fallbacks![0].ref!.path, ["label"]);
     assert.equal(labelWires[0].catchFallback, undefined);
   });
 
-  test("|| source || literal — one wire with falsyFallbackRefs + falsyFallback", () => {
+  test("|| source || literal — one wire with fallbacks", () => {
     const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
@@ -1218,9 +1218,12 @@ o.label <- a.label || b.label || "default"
       (w) => "from" in w && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1);
-    assert.ok(labelWires[0].falsyFallbackRefs, "should have falsyFallbackRefs");
-    assert.equal(labelWires[0].falsyFallbackRefs!.length, 1);
-    assert.equal(labelWires[0].falsyFallback, '"default"');
+    assert.ok(labelWires[0].fallbacks, "should have fallbacks");
+    assert.equal(labelWires[0].fallbacks!.length, 2);
+    assert.equal(labelWires[0].fallbacks![0].type, "falsy");
+    assert.ok(labelWires[0].fallbacks![0].ref);
+    assert.equal(labelWires[0].fallbacks![1].type, "falsy");
+    assert.equal(labelWires[0].fallbacks![1].value, '"default"');
   });
 });
 
@@ -1281,7 +1284,7 @@ o.label <- api.label catch up:i.errorDefault
     );
   });
 
-  test("full chain: A || B || literal catch source — one wire with falsyFallbackRefs + catchFallbackRef", () => {
+  test("full chain: A || B || literal catch source — one wire with fallbacks + catchFallbackRef", () => {
     const doc = parseBridge(`version 1.5
 
 bridge Query.lookup {
@@ -1302,9 +1305,12 @@ o.label <- p.label || b.label || "default" catch i.errorLabel
       (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
     ) as Extract<Wire, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1);
-    assert.ok(labelWires[0].falsyFallbackRefs, "should have falsyFallbackRefs");
-    assert.equal(labelWires[0].falsyFallbackRefs!.length, 1);
-    assert.equal(labelWires[0].falsyFallback, '"default"');
+    assert.ok(labelWires[0].fallbacks, "should have fallbacks");
+    assert.equal(labelWires[0].fallbacks!.length, 2);
+    assert.equal(labelWires[0].fallbacks![0].type, "falsy");
+    assert.ok(labelWires[0].fallbacks![0].ref);
+    assert.equal(labelWires[0].fallbacks![1].type, "falsy");
+    assert.equal(labelWires[0].fallbacks![1].value, '"default"');
     assert.ok(
       labelWires[0].catchFallbackRef,
       "wire should have catchFallbackRef",

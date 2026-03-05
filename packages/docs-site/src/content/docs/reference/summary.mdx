@@ -1,0 +1,87 @@
+---
+title: Summary
+description: An overview of the key features and capabilities of the Bridge language, organized by category.
+---
+
+### 1. Data Routing & Logic
+
+_The core primitives for mapping data from tools to the output._
+
+| Feature                       | Example                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| **Pull wires** (`<-`)         | `out.name <- api.name`                                                                       |
+| **Constant wires** (`=`)      | `api.method = "GET"`                                                                         |
+| **Nullish coalescing** (`??`) | `out.x <- api.x ?? "default"`                                                                |
+| **Falsy fallback** (`\|\|`)   | `out.x <- api.x \|\| backup.x`                                                               |
+| **Conditional (Ternary)**     | `api.mode <- i.premium ? "full" : "basic"`                                                   |
+| **Lazy Evaluation**           | Only the chosen branch in a ternary is executed                                              |
+| **Overdefinition**            | Multiple wires to the same target (`o.x <- a` and `o.x <- b`) resolve as first non-null wins |
+| **Root passthrough**          | `o <- api` (maps the entire object)                                                          |
+| **Context access**            | `api.token <- ctx.apiKey`                                                                    |
+| **Path scoping** (`{}`)       | `out.user { .name <- api.name }` (Groups nested paths)                                       |
+| **Spreading objects** (`...`) | `out.user { ...api.profile }` (Merges object fields)                                         |
+
+### 2. Variables & Expressions
+
+_Tools for data manipulation and code organization._
+
+| Feature                      | Example                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| **`alias` declarations**     | `alias api.result.data as d`                             |
+| **Safe-exec aliases** (`?.`) | `alias api?.value as safeVal`                            |
+| **Alias fallbacks**          | `alias (expr) ? val : null ?? panic "msg" as x`          |
+| **Math / Comparison**        | `o.total <- i.price * i.qty`, `o.isAdult <- i.age >= 18` |
+| **String interpolation**     | `o.msg <- "Hello, {i.name}!"`                            |
+| **Pipe operators**           | `o.loud <- tu:i.text`                                    |
+| **`const` blocks**           | `const geo = { "lat": 0 }` (Inlined at compile time)     |
+| **`define` blocks**          | `define profile { ... }` (Virtual containers)            |
+
+### 3. Array Processing
+
+_Zero-allocation iteration using native JavaScript loops._
+
+| Feature                     | Example                                               |
+| --------------------------- | ----------------------------------------------------- |
+| **Array mapping**           | `out.items <- api.list[] as el { .id <- el.id }`      |
+| **Root array output**       | `o <- api.list[] as el { ... }`                       |
+| **Nested arrays**           | `o <- items[] as i { .sub <- i.list[] as j { ... } }` |
+| **Array Control Flow**      | `item.name ?? break`, `item.name ?? continue`         |
+| **Nested Control Flow**     | `break 1`/`continue 2` scopes correctly in sub-arrays |
+| **Interpolation in arrays** | `o <- items[] as it { .url <- "/items/{it.id}" }`     |
+| **Null array preservation** | If source is `null`, output is `null` (not `[]`)      |
+
+### 4. Error Handling & Control Flow
+
+_Granular control over tool failures and execution halting._
+
+| Feature                     | Example                                                    |
+| --------------------------- | ---------------------------------------------------------- |
+| **`catch` fallbacks**       | `out.data <- api.result catch "fallback"`                  |
+| **`catch` ref fallbacks**   | `out.data <- primary.val catch backup.val`                 |
+| **`throw`**                 | `o.name <- i.name \|\| throw "name is required"`           |
+| **`panic` (Fatal)**         | `o.name <- i.name ?? panic "fatal error"` (Bypasses catch) |
+| **`force` (Critical tool)** | `force audit` (Execution halts if tool fails)              |
+| **`force catch null`**      | `force ping catch null` (Fire-and-forget execution)        |
+
+### 5. Tool Composition (`ToolDef`)
+
+_Reusable tool configurations defined in the schema._
+
+| Feature                    | Example                                          |
+| -------------------------- | ------------------------------------------------ |
+| **Pre-wired Inputs**       | `tool api from httpCall { .method = "GET" }`     |
+| **Tool inheritance**       | `tool childApi from parentApi { .path = "/v2" }` |
+| **Centralized `on error`** | `tool api from httpCall { on error = {...} }`    |
+| **Override mechanics**     | Bridge wires override ToolDef wires by key       |
+
+### 6. Compiler & Runtime Guarantees
+
+_Under-the-hood engine features that ensure stability and performance._
+
+| Feature                   | Description                                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Dead-Code Elimination** | Unrequested GraphQL/Sparse fields are pruned; unneeded tools are mathematically excluded from the JIT compilation. |
+| **Tool Timeouts**         | Automatic `Promise.race` with memory-leak prevention (`clearTimeout`) based on `toolTimeoutMs`.                    |
+| **Cycle Detection**       | Compile-time detection of circular tool dependencies (Kahn's algorithm) throws an immediate initialization error.  |
+| **Abort Signals**         | Pre-tool `signal.aborted` checks throw `BridgeAbortError`, which safely bypasses standard `catch` blocks.          |
+| **Telemetry Injection**   | Automatically passes `{ logger, signal }` via `ctx` to custom tool functions.                                      |

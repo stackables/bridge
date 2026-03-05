@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/Playground.tsx",
+    ".": "./src/index.ts",
     "./style.css": "./src/index.css"
   },
   "scripts": {
@@ -12,15 +12,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@codemirror/autocomplete": "^6.20.0",
+    "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.2",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.12.2",
-    "@codemirror/lint": "^6.9.4",
+    "@codemirror/lint": "^6.9.5",
     "@codemirror/state": "^6.5.4",
-    "@codemirror/view": "^6.39.15",
+    "@codemirror/view": "^6.39.16",
     "@lezer/highlight": "^1.2.3",
     "@radix-ui/react-dialog": "1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-select": "2.2.6",
     "@radix-ui/react-slot": "1.2.4",
     "@stackables/bridge": "workspace:*",
@@ -28,16 +29,16 @@
     "clsx": "2.1.1",
     "cm6-graphql": "^0.2.1",
     "codemirror": "^6.0.2",
-    "graphql": "^16.13.0",
-    "lucide-react": "0.575.0",
+    "graphql": "^16.13.1",
+    "lucide-react": "0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-resizable-panels": "4.6.5",
+    "react-resizable-panels": "4.7.1",
     "tailwind-merge": "3.5.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.25.6",
-    "@cloudflare/workers-types": "^4.20260305.0",
+    "@cloudflare/vite-plugin": "^1.26.0",
+    "@cloudflare/workers-types": "^4.20260305.1",
     "@tailwindcss/vite": "4.2.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -45,6 +46,6 @@
     "tailwindcss": "4.2.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "wrangler": "^4.69.0"
+    "wrangler": "^4.70.0"
   }
 }

@@ -1,5 +1,45 @@
 # @stackables/bridge
 
+## 2.2.0
+
+### Minor Changes
+
+- [#96](https://github.com/stackables/bridge/pull/96) [`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f) Thanks [@aarne](https://github.com/aarne)! - Migrate wire shape from separate `falsyFallback*`/`nullishFallback*` properties to a unified `fallbacks: WireFallback[]` array, enabling mixed `||` and `??` chains in any order (e.g. `A ?? B || C ?? D`).
+
+### Patch Changes
+
+- [#94](https://github.com/stackables/bridge/pull/94) [`93bbb94`](https://github.com/stackables/bridge/commit/93bbb9453d4f8babbcdeed352a37a92d8ef8aa7e) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Fix chained `||` literal fallback parsing so authored left-to-right short-circuiting is preserved after safe pulls (`?.`), and add regression coverage for mixed `||` + `??` chains.
+
+- Updated dependencies [[`93bbb94`](https://github.com/stackables/bridge/commit/93bbb9453d4f8babbcdeed352a37a92d8ef8aa7e), [`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f)]:
+  - @stackables/bridge-parser@1.3.0
+  - @stackables/bridge-core@1.4.0
+  - @stackables/bridge-graphql@1.1.4
+
+## 2.1.4
+
+### Patch Changes
+
+- Updated dependencies [[`fc3d8ed`](https://github.com/stackables/bridge/commit/fc3d8ed392c3dd8181c2eef124585a2e43ea0499)]:
+  - @stackables/bridge-parser@1.2.0
+  - @stackables/bridge-core@1.3.0
+  - @stackables/bridge-graphql@1.1.3
+
+## 2.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`837ec1c`](https://github.com/stackables/bridge/commit/837ec1cc74c0a76e205d818b94c33b4c28e3628d), [`cf5cd2e`](https://github.com/stackables/bridge/commit/cf5cd2e40e6339fb3e896e05dbdbe66b0b5d77a9)]:
+  - @stackables/bridge-parser@1.1.1
+  - @stackables/bridge-core@1.2.0
+  - @stackables/bridge-graphql@1.1.2
+
+## 2.1.2
+
+### Patch Changes
+
+- Updated dependencies [[`ce6cb8a`](https://github.com/stackables/bridge/commit/ce6cb8a8e6e8288e8ab73f7ce44d14b205c70c91)]:
+  - @stackables/bridge-parser@1.1.0
+
 ## 2.1.1
 
 ### Patch Changes

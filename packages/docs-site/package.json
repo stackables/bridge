@@ -24,11 +24,11 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
-    "@types/node": "^25.3.2",
+    "@types/node": "^25.3.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@yeskunall/astro-umami": "^0.0.7",
     "typescript": "^5.9.3",
-    "wrangler": "^4.69.0"
+    "wrangler": "^4.70.0"
   }
 }

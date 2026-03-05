@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
+  parseBridgeDiagnostics,
   parsePath,
   serializeBridge,
 } from "../src/index.ts";
@@ -1264,5 +1265,62 @@ bridge Query.test {
       serialized.startsWith("version 1.5\n"),
       `expected 'version 1.5' header, got: ${serialized.slice(0, 30)}`,
     );
+  });
+});
+
+describe("serializeBridge string keyword quoting", () => {
+  test("keeps reserved-word strings quoted in constant wires", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.value = "const"
+}`;
+
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes('o.value = "const"'), serialized);
+    assert.doesNotThrow(() => parseBridge(serialized));
+  });
+});
+
+describe("parser diagnostics and serializer edge cases", () => {
+  test("parseBridgeDiagnostics reports lexer errors with a range", () => {
+    const result = parseBridgeDiagnostics("version 1.5\nbridge Query.x {\n  with output as o\n  o.x = \"ok\"\n}\n§");
+    assert.ok(result.diagnostics.length > 0);
+    assert.equal(result.diagnostics[0]?.severity, "error");
+    assert.equal(result.diagnostics[0]?.range.start.line, 5);
+    assert.equal(result.diagnostics[0]?.range.start.character, 0);
+  });
+
+  test("reserved source identifier is rejected as const name", () => {
+    assert.throws(
+      () => parseBridge('version 1.5\nconst input = "x"'),
+      /reserved source identifier.*const name/i,
+    );
+  });
+
+  test("serializeBridge keeps passthrough shorthand", () => {
+    const src = "version 1.5\nbridge Query.upper with std.str.toUpperCase";
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(
+      serialized.includes("bridge Query.upper with std.str.toUpperCase"),
+      serialized,
+    );
+  });
+
+  test("serializeBridge uses compact default handle bindings", () => {
+    const src = `version 1.5
+bridge Query.defaults {
+  with input
+  with output
+  with const
+
+  output.value <- input.name
+}`;
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes("  with input\n"), serialized);
+    assert.ok(serialized.includes("  with output\n"), serialized);
+    assert.ok(serialized.includes("  with const\n"), serialized);
   });
 });

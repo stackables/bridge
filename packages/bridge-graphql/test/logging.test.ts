@@ -3,9 +3,9 @@ import { createSchema, createYoga } from "graphql-yoga";
 import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { bridgeTransform } from "../src/index.ts";
-import type { Logger } from "../src/index.ts";
+import type { Logger } from "@stackables/bridge-core";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Logging

@@ -57,6 +57,20 @@ export type ExecuteBridgeOptions = {
    * - `"full"` — everything including input and output
    */
   trace?: TraceLevel;
+  /**
+   * Sparse fieldset filter.
+   *
+   * When provided, only the listed output fields (and their transitive
+   * dependencies) are compiled and executed.  Tools that feed exclusively
+   * into unrequested fields are eliminated by the compiler's dead-code
+   * analysis (Kahn's algorithm).
+   *
+   * Supports dot-separated paths and a trailing wildcard:
+   *   `["id", "price", "legs.*"]`
+   *
+   * Omit or pass an empty array to resolve all fields (the default).
+   */
+  requestedFields?: string[];
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
@@ -91,20 +105,37 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
   .constructor as typeof Function;
 
 /**
- * Cache: one compiled function per (document identity × operation).
+ * Cache: one compiled function per (document identity × operation × requestedFields).
  * Uses a WeakMap keyed on the document object so entries are GC'd when
  * the document is no longer referenced.
  */
 const fnCache = new WeakMap<BridgeDocument, Map<string, BridgeFn>>();
 
-function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
+/** Build a cache key that includes the sorted requestedFields. */
+function cacheKey(
+  operation: string,
+  requestedFields?: string[],
+): string {
+  if (!requestedFields || requestedFields.length === 0) return operation;
+  return `${operation}:${[...requestedFields].sort().join(",")}`;
+}
+
+function getOrCompile(
+  document: BridgeDocument,
+  operation: string,
+  requestedFields?: string[],
+): BridgeFn {
+  const key = cacheKey(operation, requestedFields);
   let opMap = fnCache.get(document);
   if (opMap) {
-    const cached = opMap.get(operation);
+    const cached = opMap.get(key);
     if (cached) return cached;
   }
 
-  const { functionBody } = compileBridge(document, { operation });
+  const { functionBody } = compileBridge(document, {
+    operation,
+    requestedFields,
+  });
 
   let fn: BridgeFn;
   try {
@@ -133,7 +164,7 @@ function getOrCompile(document: BridgeDocument, operation: string): BridgeFn {
     opMap = new Map();
     fnCache.set(document, opMap);
   }
-  opMap.set(operation, fn);
+  opMap.set(key, fn);
   return fn;
 }
 
@@ -202,7 +233,7 @@ export async function executeBridge<T = unknown>(
     logger,
   } = options;
 
-  const fn = getOrCompile(document, operation);
+  const fn = getOrCompile(document, operation, options.requestedFields);
 
   // Merge built-in std namespace with user-provided tools, then flatten
   // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].

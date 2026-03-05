@@ -649,6 +649,50 @@ bridge Query.lookup {
     assert.equal(data.label, "fallback");
   });
 
+  test("?. with chained || literals short-circuits at first truthy literal", async () => {
+    const doc = parseBridge(`version 1.5
+const lorem = {
+  "ipsum":"dolor sit amet",
+  "consetetur":8.9
+}
+
+bridge Query.lookup {
+  with const
+  with output as o
+
+  o.label <- const.lorem.ipsums?.kala || "A" || "B"
+}`);
+    const gateway = createGateway(typeDefs, doc, { tools: {} });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
+    assert.equal(result.data.lookup.label, "A");
+  });
+
+  test("mixed || and ?? remains left-to-right with first truthy || winner", async () => {
+    const doc = parseBridge(`version 1.5
+const lorem = {
+  "ipsum": "dolor sit amet",
+  "consetetur": 8.9
+}
+
+bridge Query.lookup {
+  with const
+  with output as o
+
+  o.label <- const.lorem.kala || const.lorem.ipsums?.mees || "B" ?? "C"
+}`);
+    const gateway = createGateway(typeDefs, doc, { tools: {} });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
+    assert.equal(result.data.lookup.label, "B");
+  });
+
   test("?. passes through value when tool succeeds", async () => {
     const { data } = await run(
       `version 1.5
@@ -692,5 +736,174 @@ bridge Query.lookup {
       (w) => "from" in w && "safe" in w && w.safe,
     );
     assert.ok(safePull, "round-tripped wire has safe: true");
+  });
+});
+
+// ── Mixed || and ?? chains ──────────────────────────────────────────────────
+
+describe("mixed || and ?? chains", () => {
+  test("A ?? B || C — nullish gate then falsy gate", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with primary as p
+  with backup as b
+  with input as i
+  with output as o
+
+  p.q <- i.q
+  b.q <- i.q
+  o.label <- p.label ?? b.label || "fallback"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "primary": async () => ({ label: null }),
+        "backup": async () => ({ label: "" }),
+      },
+    );
+    // p.label is null → ?? gate opens → b.label is "" (non-nullish, gate closes)
+    // b.label is "" → || gate opens → "fallback"
+    assert.equal(data.label, "fallback");
+  });
+
+  test("A || B ?? C — falsy gate then nullish gate", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with primary as p
+  with backup as b
+  with input as i
+  with output as o
+
+  p.q <- i.q
+  b.q <- i.q
+  o.label <- p.label || b.label ?? "default"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "primary": async () => ({ label: "" }),
+        "backup": async () => ({ label: null }),
+      },
+    );
+    // p.label is "" → || gate opens → b.label is null (still falsy)
+    // b.label is null → ?? gate opens → "default"
+    assert.equal(data.label, "default");
+  });
+
+  test("A ?? B || C ?? D — four-item mixed chain", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with a as a
+  with b as b
+  with c as c
+  with input as i
+  with output as o
+
+  a.q <- i.q
+  b.q <- i.q
+  c.q <- i.q
+  o.label <- a.label ?? b.label || c.label ?? "last"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "a": async () => ({ label: null }),
+        "b": async () => ({ label: 0 }),
+        "c": async () => ({ label: null }),
+      },
+    );
+    // a.label null → ?? opens → b.label is 0 (non-nullish, ?? closes)
+    // 0 is falsy → || opens → c.label is null (still falsy)
+    // null → ?? opens → "last"
+    assert.equal(data.label, "last");
+  });
+
+  test("mixed chain short-circuits when value becomes truthy", async () => {
+    const { data } = await run(
+      `version 1.5
+bridge Query.lookup {
+  with a as a
+  with b as b
+  with input as i
+  with output as o
+
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label ?? b.label || "unused"
+}`,
+      "Query.lookup",
+      { q: "test" },
+      {
+        "a": async () => ({ label: null }),
+        "b": async () => ({ label: "found" }),
+      },
+    );
+    // a.label null → ?? opens → b.label is "found" (truthy)
+    // "found" is truthy → || gate closed → "unused" skipped
+    assert.equal(data.label, "found");
+  });
+
+  test("mixed chain round-trips through serializer", () => {
+    const src = `version 1.5
+
+bridge Query.lookup {
+  with a as a
+  with b as b
+  with input as i
+  with output as o
+
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label ?? b.label || "fallback"
+
+}`;
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
+    const reparsed = parseBridge(serialized);
+    assert.deepStrictEqual(reparsed, doc);
+  });
+
+  test("?? then || with literals round-trips", () => {
+    const src = `version 1.5
+
+bridge Query.lookup {
+  with input as i
+  with output as o
+
+  o.label <- i.label ?? "nullish-default" || "falsy-default"
+
+}`;
+    const doc = parseBridge(src);
+    const serialized = serializeBridge(doc);
+    const reparsed = parseBridge(serialized);
+    assert.deepStrictEqual(reparsed, doc);
+  });
+
+  test("parser produces correct fallbacks array for mixed chain", () => {
+    const doc = parseBridge(`version 1.5
+
+bridge Query.lookup {
+  with a as a
+  with b as b
+  with input as i
+  with output as o
+
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label ?? b.label || "default"
+}`);
+    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
+    const wire = bridge.wires.find(
+      (w) => "from" in w && (w as any).to.path[0] === "label" && !("pipe" in w),
+    ) as Extract<import("../src/index.ts").Wire, { from: any }>;
+    assert.ok(wire.fallbacks, "wire should have fallbacks");
+    assert.equal(wire.fallbacks!.length, 2);
+    assert.equal(wire.fallbacks![0].type, "nullish");
+    assert.ok(wire.fallbacks![0].ref, "first fallback should be a ref");
+    assert.equal(wire.fallbacks![1].type, "falsy");
+    assert.equal(wire.fallbacks![1].value, '"default"');
   });
 });

@@ -39,6 +39,8 @@ interface SharedTestCase {
   aotSupported?: boolean;
   /** Whether to expect an error (message pattern) instead of a result */
   expectedError?: RegExp;
+  /** Sparse fieldset filter — only resolve listed fields */
+  requestedFields?: string[];
 }
 
 // ── Runners ─────────────────────────────────────────────────────────────────
@@ -53,6 +55,7 @@ async function runRuntime(c: SharedTestCase): Promise<unknown> {
     input: c.input ?? {},
     tools: c.tools ?? {},
     context: c.context,
+    requestedFields: c.requestedFields,
   });
   return data;
 }
@@ -65,6 +68,7 @@ async function runAot(c: SharedTestCase): Promise<unknown> {
     input: c.input ?? {},
     tools: c.tools ?? {},
     context: c.context,
+    requestedFields: c.requestedFields,
   });
   return data;
 }
@@ -1340,3 +1344,350 @@ bridge Query.test {
 ];
 
 runSharedSuite("Shared: break/continue", breakContinueCases);
+
+// ── Sparse Fieldsets (requestedFields) ──────────────────────────────────────
+
+const sparseFieldsetCases: SharedTestCase[] = [
+  // ── 1. Basic filtering — request only a subset of fields ──────────────
+  {
+    name: "only requested fields are returned, unrequested tool is not called",
+    bridgeText: `version 1.5
+bridge Query.data {
+  with input as i
+  with expensive as exp
+  with cheap as ch
+  with output as o
+
+  exp.x <- i.x
+  ch.y <- i.y
+
+  o.a <- exp.result
+  o.b <- ch.result
+}`,
+    operation: "Query.data",
+    input: { x: 1, y: 2 },
+    tools: {
+      expensive: () => {
+        throw new Error("expensive tool should not be called");
+      },
+      cheap: (p: any) => ({ result: p.y * 10 }),
+    },
+    requestedFields: ["b"],
+    expected: { b: 20 },
+  },
+
+  // ── 2. No filter — all fields returned (backward-compat) ─────────────
+  {
+    name: "no requestedFields returns all fields",
+    bridgeText: `version 1.5
+bridge Query.data {
+  with input as i
+  with toolA as a
+  with toolB as b
+  with output as o
+
+  a.x <- i.x
+  b.y <- i.y
+
+  o.first <- a.result
+  o.second <- b.result
+}`,
+    operation: "Query.data",
+    input: { x: 1, y: 2 },
+    tools: {
+      toolA: (p: any) => ({ result: p.x + 100 }),
+      toolB: (p: any) => ({ result: p.y + 200 }),
+    },
+    expected: { first: 101, second: 202 },
+  },
+
+  // ── 3. Wildcard matching — legs.* ────────────────────────────────────
+  {
+    name: "wildcard legs.* matches all immediate children",
+    bridgeText: `version 1.5
+bridge Query.trip {
+  with input as i
+  with api as a
+  with output as o
+
+  a.id <- i.id
+
+  o.id <- a.id
+  o.legs {
+    .duration <- a.duration
+    .distance <- a.distance
+  }
+  o.price <- a.price
+}`,
+    operation: "Query.trip",
+    input: { id: 42 },
+    tools: {
+      api: (p: any) => ({ id: p.id, duration: "2h", distance: 150, price: 99 }),
+    },
+    requestedFields: ["id", "legs.*"],
+    expected: { id: 42, legs: { duration: "2h", distance: 150 } },
+  },
+
+  // ── 4. Fallback chain (A || B → C) with requestedFields ──────────────
+  //
+  // Setup:
+  //   - toolA  feeds  o.fromA   (independently wired)
+  //   - toolB  feeds  o.fromB   (with falsy fallback to toolC)
+  //   - toolC  feeds  the fallback of o.fromB  AND  depends on toolB
+  //
+  // When we request only ["fromA"], toolB and toolC should NOT be called.
+  // When we request only ["fromB"], toolA should NOT be called.
+  {
+    name: "A||B→C: requesting only 'fromA' skips B and C",
+    bridgeText: `version 1.5
+bridge Query.chain {
+  with input as i
+  with toolA as a
+  with toolB as b
+  with toolC as c
+  with output as o
+
+  a.x <- i.x
+  b.y <- i.y
+  c.z <- b.partial
+
+  o.fromA <- a.result
+  o.fromB <- b.result || c.result
+}`,
+    operation: "Query.chain",
+    input: { x: 10, y: 20 },
+    tools: {
+      toolA: (p: any) => ({ result: p.x * 2 }),
+      toolB: () => {
+        throw new Error("toolB should not be called");
+      },
+      toolC: () => {
+        throw new Error("toolC should not be called");
+      },
+    },
+    requestedFields: ["fromA"],
+    expected: { fromA: 20 },
+  },
+  {
+    name: "A||B→C: requesting only 'fromB' skips A, calls B and fallback C",
+    bridgeText: `version 1.5
+bridge Query.chain {
+  with input as i
+  with toolA as a
+  with toolB as b
+  with toolC as c
+  with output as o
+
+  a.x <- i.x
+  b.y <- i.y
+  c.z <- b.partial
+
+  o.fromA <- a.result
+  o.fromB <- b.result || c.result
+}`,
+    operation: "Query.chain",
+    input: { x: 10, y: 20 },
+    tools: {
+      toolA: () => {
+        throw new Error("toolA should not be called");
+      },
+      toolB: (p: any) => ({ result: null, partial: p.y }),
+      toolC: (p: any) => ({ result: p.z + 5 }),
+    },
+    requestedFields: ["fromB"],
+    expected: { fromB: 25 },
+  },
+
+  // ── 5. Multiple fields requested ─────────────────────────────────────
+  {
+    name: "requesting multiple fields returns only those",
+    bridgeText: `version 1.5
+bridge Query.multi {
+  with input as i
+  with output as o
+
+  o.a <- i.a
+  o.b <- i.b
+  o.c <- i.c
+}`,
+    operation: "Query.multi",
+    input: { a: 1, b: 2, c: 3 },
+    requestedFields: ["a", "c"],
+    expected: { a: 1, c: 3 },
+  },
+
+  // ── 6. Nested field path request ─────────────────────────────────────
+  {
+    name: "requesting nested path includes parent and specified children",
+    bridgeText: `version 1.5
+bridge Query.nested {
+  with input as i
+  with api as a
+  with output as o
+
+  a.id <- i.id
+
+  o.id <- i.id
+  o.detail {
+    .name <- a.name
+    .age <- a.age
+  }
+}`,
+    operation: "Query.nested",
+    input: { id: 1 },
+    tools: {
+      api: (_p: any) => ({ name: "Alice", age: 30 }),
+    },
+    requestedFields: ["detail.name"],
+    expected: { detail: { name: "Alice" } },
+    // The AOT compiler emits a static object tree — individual nested
+    // fields inside a scope block can't be independently pruned in the
+    // current codegen.  Runtime handles this via resolveNestedField.
+    aotSupported: false,
+  },
+
+  // ── 7. Array-mapped output with requestedFields ──────────────────────
+  {
+    name: "array-mapped output filters top-level fields via requestedFields",
+    bridgeText: `version 1.5
+bridge Query.trips {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+  a.to <- i.to
+
+  o <- a.items[] as item {
+    .id <- item.id
+    .provider <- item.provider
+    .price <- item.price
+    .legs <- item.legs
+  }
+}`,
+    operation: "Query.trips",
+    input: { from: "A", to: "B" },
+    tools: {
+      api: () => ({
+        items: [
+          { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+          { id: 2, provider: "Y", price: 80, legs: [{ name: "L2" }] },
+        ],
+      }),
+    },
+    requestedFields: ["id", "legs"],
+    expected: [
+      { id: 1, legs: [{ name: "L1" }] },
+      { id: 2, legs: [{ name: "L2" }] },
+    ],
+    // AOT doesn't support per-element sparse fieldsets yet.
+    aotSupported: false,
+  },
+
+  // ── 8. Array-mapped output: nested path filters within elements ──────
+  {
+    name: "array-mapped output with nested requestedFields path",
+    bridgeText: `version 1.5
+bridge Query.trains {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+  a.to <- i.to
+
+  o <- a.connections[] as c {
+    .id <- c.id
+    .provider = "SBB"
+    .departureTime <- c.departure
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.name
+      .destination <- s.dest
+    }
+  }
+}`,
+    operation: "Query.trains",
+    input: { from: "Bern", to: "Zürich" },
+    tools: {
+      api: () => ({
+        connections: [
+          {
+            id: 1,
+            departure: "08:00",
+            sections: [
+              { name: "IC1", dest: "Zürich" },
+              { name: "IC2", dest: "Basel" },
+            ],
+          },
+        ],
+      }),
+    },
+    requestedFields: ["legs.destination"],
+    expected: [
+      {
+        legs: [{ destination: "Zürich" }, { destination: "Basel" }],
+      },
+    ],
+    aotSupported: false,
+  },
+
+  // ── 9. Deeply nested path inside array-mapped output ─────────────────
+  {
+    name: "array-mapped output: deep nested path filters sub-fields",
+    bridgeText: `version 1.5
+bridge Query.trains {
+  with input as i
+  with api as a
+  with output as o
+
+  a.from <- i.from
+
+  o <- a.connections[] as c {
+    .id <- c.id
+    .provider = "SBB"
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.name
+
+      .destination.station.name <- s.arrStation
+      .destination.plannedTime <- s.arrTime
+      .destination.actualTime <- s.arrActual
+      .destination.platform <- s.arrPlatform
+    }
+  }
+}`,
+    operation: "Query.trains",
+    input: { from: "Bern" },
+    tools: {
+      api: () => ({
+        connections: [
+          {
+            id: 1,
+            sections: [
+              {
+                name: "IC1",
+                arrStation: "Zürich",
+                arrTime: "08:30",
+                arrActual: "08:32",
+                arrPlatform: "3",
+              },
+            ],
+          },
+        ],
+      }),
+    },
+    requestedFields: ["legs.destination.actualTime"],
+    expected: [
+      {
+        legs: [{ destination: { actualTime: "08:32" } }],
+      },
+    ],
+    aotSupported: false,
+  },
+];
+
+runSharedSuite(
+  "Shared: sparse fieldsets (requestedFields)",
+  sparseFieldsetCases,
+);

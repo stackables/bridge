@@ -1,0 +1,123 @@
+---
+title: Sparse Fieldsets
+description: Request only the output fields you need — skip unnecessary tool calls and reduce payload size.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+When a client only needs a subset of a bridge's output, **Sparse Fieldsets**
+let you tell the engine exactly which fields to resolve. Tools that feed
+exclusively into unrequested fields are never called, saving time and
+upstream bandwidth.
+
+<Aside type="tip">
+  Because Bridge uses a **pull-based** engine, dropping an output field
+  automatically orphans every tool that only feeds into it — no extra
+  configuration required.
+</Aside>
+
+## The `requestedFields` option
+
+Both the interpreter (`@stackables/bridge-core`) and the compiler
+(`@stackables/bridge-compiler`) accept an optional `requestedFields` array
+in `ExecuteBridgeOptions`:
+
+```ts
+import { executeBridge, parseBridge } from "@stackables/bridge";
+
+const document = parseBridge(bridgeText);
+
+const { data } = await executeBridge({
+  document,
+  operation: "Query.searchTrains",
+  input: { from: "Bern", to: "Zürich" },
+  requestedFields: ["id", "status", "legs.*"],
+  tools: { /* ... */ },
+});
+
+```
+
+When `requestedFields` is omitted (or empty), every output field is resolved
+— the default behavior.
+
+## Pattern syntax
+
+Patterns are **dot-separated paths** with an optional trailing wildcard:
+
+| Pattern | Matches |
+| --- | --- |
+| `"id"` | The top-level `id` field |
+| `"legs"` | The entire `legs` object (all children included) |
+| `"legs.duration"` | Only `legs.duration` — other `legs` children are skipped |
+| `"legs.*"` | Every immediate child of `legs` (e.g. `legs.duration`, `legs.distance`) |
+
+A field is included if **any** pattern matches it. Ancestor fields are
+included automatically when a deeper path is requested (e.g., requesting
+`"legs.duration"` ensures the `legs` object exists in the output).
+
+## Example: REST / RPC endpoint
+
+Sparse fieldsets are especially useful when mapping HTTP query parameters
+to bridge execution, allowing mobile apps to request lightweight payloads
+while desktop apps fetch richer data from the same `.bridge` file:
+
+```ts
+// Express / Fastify handler
+app.get("/api/trains", async (req, res) => {
+  const raw = req.query.fields; // e.g. "id,status,legs.duration"
+  const fields = typeof raw === "string"
+    ? raw.split(",").filter((f) => /^[\w.*]+$/.test(f))
+    : undefined;
+
+  const { data } = await executeBridge({
+    document,
+    operation: "Query.searchTrains",
+    input: req.query,
+    requestedFields: fields,
+    tools: { /* ... */ },
+  });
+
+  res.json(data);
+});
+
+```
+
+```text
+GET /api/trains?from=Bern&to=Zürich&fields=id,status,legs.duration
+
+```
+
+## Example: GraphQL Adapter
+
+If you are using the `@stackables/bridge-graphql` adapter, you do not need to use the `requestedFields` option at all. 
+
+Because the adapter hooks directly into the native GraphQL execution engine, sparse fieldsets are handled **automatically and implicitly**. If a client omits a field from their GraphQL query, the GraphQL engine simply never calls the resolver for that field. Because Bridge's interpreter executes lazily based on those resolver calls, any tools that feed exclusively into that unrequested field are never pulled. 
+
+You get perfect, pull-based efficiency out of the box, while retaining GraphQL's standard per-field error handling (Partial Success).
+
+## How it works
+
+### Interpreter (bridge-core)
+
+The interpreter filters the set of output fields collected from output wires
+**before** beginning the pull loop. Because execution is pull-based, dropping
+an output field means the engine never traces backward to the tools that
+feed it — they are simply never scheduled.
+
+### Compiler (bridge-compiler)
+
+The compiler filters output wires at code-generation time. A backward
+reachability analysis then eliminates all tools that are no longer
+transitively referenced by any remaining output wire. The generated
+JavaScript function contains only the code paths needed for the requested
+fields.
+
+Different `requestedFields` shapes produce different compiled functions.
+Each shape is cached independently so subsequent calls with the same
+field set reuse the optimally-sized function.
+
+<Aside type="note">
+Forced handles (`force`) are **always** executed regardless of
+`requestedFields`, because they represent side-effects that must run
+unconditionally.
+</Aside>

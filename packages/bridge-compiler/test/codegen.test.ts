@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge } from "@stackables/bridge-core";
+import type { BridgeDocument } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -304,6 +305,55 @@ bridge Query.refFallback {
     );
     assert.deepEqual(data, { value: "from-backup" });
   });
+
+  test("nullish fallback to null matches runtime overdefinition semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "nullishProbe",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              from: {
+                module: "_",
+                type: "Query",
+                field: "nullishProbe",
+                path: ["m"],
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "nullishProbe",
+                path: ["k"],
+              },
+              fallbacks: [{ type: "nullish", value: "null" }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.nullishProbe",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.nullishProbe",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: undefined });
+  });
 });
 
 // ── Phase 3: Array mapping ───────────────────────────────────────────────────
@@ -428,6 +478,51 @@ bridge Query.det {
   });
 });
 
+describe("AOT codegen: requestedFields matching", () => {
+  const bridgeText = `version 1.5
+bridge Query.profile {
+  with input as i
+  with output as o
+
+  o.name <- i.name
+  o.meta.age <- i.age
+  o.meta.deep.city <- i.city
+}`;
+
+  test("parent field pattern includes nested child fields", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37, deep: { city: "Tallinn" } } });
+  });
+
+  test("nested field pattern keeps required parent container path", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta.age"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37 } });
+  });
+
+  test("star wildcard only includes one level under the prefix", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta.*"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37 } });
+  });
+});
+
 // ── Ternary / conditional wires ──────────────────────────────────────────────
 
 describe("AOT codegen: conditional wires", () => {
@@ -465,6 +560,108 @@ bridge Query.conditional {
       tools,
     );
     assert.equal(capturedInput.mode, "basic");
+  });
+
+  test("condAnd parity — matches runtime boolean semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "probe",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              condAnd: {
+                leftRef: {
+                  module: "_",
+                  type: "Query",
+                  field: "probe",
+                  path: ["m"],
+                },
+                rightValue: "null",
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "probe",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.probe",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.probe",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: false });
+  });
+
+  test("condOr parity — matches runtime boolean semantics", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "probeOr",
+          handles: [
+            { kind: "input", handle: "i" },
+            { kind: "output", handle: "o" },
+          ],
+          wires: [
+            {
+              condOr: {
+                leftRef: {
+                  module: "_",
+                  type: "Query",
+                  field: "probeOr",
+                  path: ["m"],
+                },
+                rightValue: "null",
+              },
+              to: {
+                module: "_",
+                type: "Query",
+                field: "probeOr",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.probeOr",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.probeOr",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: false });
   });
 });
 
@@ -1225,6 +1422,55 @@ bridge Query.test {
     assert.deepStrictEqual(aotNoCache.data, rtNoCache.data);
   });
 
+  test("constant overdefinition parity — first constant remains terminal", async () => {
+    const document: BridgeDocument = {
+      instructions: [
+        {
+          kind: "bridge",
+          type: "Query",
+          field: "constantOverdef",
+          handles: [{ kind: "output", handle: "o" }],
+          wires: [
+            {
+              value: "null",
+              to: {
+                module: "_",
+                type: "Query",
+                field: "constantOverdef",
+                path: ["k"],
+              },
+            },
+            {
+              value: "false",
+              to: {
+                module: "_",
+                type: "Query",
+                field: "constantOverdef",
+                path: ["k"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const runtime = await executeBridge({
+      document,
+      operation: "Query.constantOverdef",
+      input: {},
+      tools: {},
+    });
+    const aot = await executeAot({
+      document,
+      operation: "Query.constantOverdef",
+      input: {},
+      tools: {},
+    });
+
+    assert.deepStrictEqual(aot.data, runtime.data);
+    assert.deepStrictEqual(aot.data, { k: null });
+  });
+
   test("generated code contains conditional wrapping", () => {
     const code = compileOnly(
       `version 1.5
@@ -1423,5 +1669,217 @@ bridge Query.dashboard {
       allCount >= 2,
       `Expected at least 2 Promise.all calls (layer1 + layer2), got ${allCount}. Code:\n${code}`,
     );
+  });
+});
+
+// ── Async array mapping bugs ─────────────────────────────────────────────────
+
+describe("AOT codegen: async array mapping", () => {
+  test("catch fallback inside array mapping does not generate await in .map()", async () => {
+    // Bug 1: catch on element ref generates await (async () => { try ... })()
+    // inside a synchronous .map() callback → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.catchElem {
+  with api
+  with output as o
+
+  o.items <- api.results[] as item {
+    .name <- item.name catch "unknown"
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.catchElem");
+    // The generated code must be valid JS — try building & running it
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      { api: () => ({ results: [{ name: "Alice" }, { name: "Bob" }] }) },
+      {},
+    );
+    assert.deepEqual(result, {
+      items: [{ name: "Alice" }, { name: "Bob" }],
+    });
+  });
+
+  test("continue control flow with element-scoped tool uses async loop", async () => {
+    // Bug 2: ?? continue triggers flatMap, but element-scoped tool generates
+    // await __call() inside the non-async flatMap callback → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.contTool {
+  with api
+  with enricher
+  with output as o
+
+  o.items <- api.results[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.contTool");
+    // Must produce valid JS
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          results: [
+            { name: "Alice", itemId: 1 },
+            { name: null, itemId: 2 },
+            { name: "Carol", itemId: 3 },
+          ],
+        }),
+        enricher: (input: any) => ({
+          data: `enriched-${input.in?.itemId ?? "?"}`,
+        }),
+      },
+      {},
+    );
+    // item with null name is skipped by continue
+    assert.equal(result.items.length, 2);
+    assert.equal(result.items[0].name, "Alice");
+    assert.equal(result.items[1].name, "Carol");
+  });
+
+  test("nested sub-array with catch does not generate await in .map()", async () => {
+    // Bug 3: inner sub-array uses .map() but catch generates await inside it
+    const bridgeText = `version 1.5
+bridge Query.nestedCatch {
+  with api
+  with output as o
+
+  o <- api.groups[] as g {
+    .label <- g.name
+    .items <- g.items[] as sub {
+      .value <- sub.val catch "default"
+    }
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.nestedCatch");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          groups: [
+            {
+              name: "G1",
+              items: [{ val: "a" }, { val: "b" }],
+            },
+          ],
+        }),
+      },
+      {},
+    );
+    assert.deepEqual(result, [
+      {
+        label: "G1",
+        items: [{ value: "a" }, { value: "b" }],
+      },
+    ]);
+  });
+
+  test("nested sub-array with element-scoped tool uses async loop", async () => {
+    // Bug 3 variant: inner sub-array has element-scoped tool that generates
+    // await __call() inside synchronous .map() → SyntaxError
+    const bridgeText = `version 1.5
+bridge Query.nestedTool {
+  with api
+  with enricher
+  with output as o
+
+  o <- api.groups[] as g {
+    .label <- g.name
+    .items <- g.items[] as sub {
+      alias enricher:sub as e
+      .value <- e.data
+    }
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.nestedTool");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          groups: [
+            {
+              name: "G1",
+              items: [{ id: 1 }, { id: 2 }],
+            },
+          ],
+        }),
+        enricher: (input: any) => ({ data: `val-${input.in?.id ?? "?"}` }),
+      },
+      {},
+    );
+    assert.equal(result[0].label, "G1");
+    assert.equal(result[0].items.length, 2);
+  });
+
+  test("continue control flow with catch inside array uses async loop", async () => {
+    // Bug 1+2 combined: continue + catch fallback
+    const bridgeText = `version 1.5
+bridge Query.contCatch {
+  with api
+  with enricher
+  with output as o
+
+  o.items <- api.results[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data catch "n/a"
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.contCatch");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          results: [{ name: "Alice" }, { name: null }, { name: "Carol" }],
+        }),
+        enricher: (_input: any) => ({ data: "ok" }),
+      },
+      {},
+    );
+    assert.equal(result.items.length, 2);
+  });
+
+  test("non-root array field with continue and element-scoped tool uses async loop", async () => {
+    // Bug 2 for non-root arrays: the same flatMap issue in the sub-array codepath
+    const bridgeText = `version 1.5
+bridge Query.subContTool {
+  with api
+  with enricher
+  with output as o
+
+  o.title <- api.title
+  o.items <- api.items[] as item {
+    alias enricher:item as e
+    .name <- item.name ?? continue
+    .extra <- e.data
+  }
+}`;
+
+    const code = compileOnly(bridgeText, "Query.subContTool");
+    const fn = buildAotFn(code);
+    const result = await fn(
+      {},
+      {
+        api: () => ({
+          title: "Test",
+          items: [{ name: "Alice" }, { name: null }, { name: "Carol" }],
+        }),
+        enricher: (_input: any) => ({ data: "ok" }),
+      },
+      {},
+    );
+    assert.equal(result.title, "Test");
+    assert.equal(result.items.length, 2);
   });
 });

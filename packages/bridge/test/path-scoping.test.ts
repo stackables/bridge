@@ -163,7 +163,7 @@ bridge Query.test {
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
-    assert.equal(nameWire.falsyFallback, '"anonymous"');
+    assert.deepStrictEqual(nameWire.fallbacks, [{ type: "falsy", value: '"anonymous"' }]);
 
     const valueWire = pullWires.find(
       (w) => w.to.path.join(".") === "data.value",
@@ -712,6 +712,368 @@ bridge Query.test {
       { level1: { level2: { name: "Alice", fixed: "ok" } } },
       { level1: { level2: { name: "Bob", fixed: "ok" } } },
     ]);
+  });
+});
+
+// ── Spread in scope blocks ───────────────────────────────────────────────────
+
+describe("path scoping – spread syntax parser", () => {
+  test("spread in top-level scope block produces root pull wire", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i
+  }
+
+  o.result <- t
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const spreadWire = pullWires.find((w) => w.to.path.length === 0);
+    assert.ok(spreadWire, "spread wire targeting tool root should exist");
+    assert.deepStrictEqual(spreadWire.from.path, []);
+  });
+
+  test("spread combined with constant wires in scope block", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i
+    .extra = "added"
+  }
+
+  o.result <- t
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const constWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { value: string }> => "value" in w,
+    );
+    assert.ok(
+      pullWires.find((w) => w.to.path.length === 0),
+      "spread wire to tool root should exist",
+    );
+    assert.ok(
+      constWires.find((w) => w.to.path.join(".") === "extra"),
+      "constant wire for .extra should exist",
+    );
+  });
+
+  test("spread with sub-path source in scope block", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i.profile
+  }
+
+  o.result <- t
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const spreadWire = pullWires.find((w) => w.to.path.length === 0);
+    assert.ok(spreadWire, "spread wire should exist");
+    assert.deepStrictEqual(spreadWire.from.path, ["profile"]);
+  });
+
+  test("spread in nested scope block produces wire to nested path", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.wrapper {
+    ...i
+    .flag = "true"
+  }
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const spreadWire = pullWires.find(
+      (w) => w.to.path.join(".") === "wrapper" && w.from.path.length === 0,
+    );
+    assert.ok(spreadWire, "spread wire to o.wrapper should exist");
+  });
+
+  test("spread in deeply nested scope block", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t.nested {
+    ...i
+  }
+
+  o.result <- t
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = bridge.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");
+    assert.ok(spreadWire, "spread wire to tool.nested should exist");
+    assert.deepStrictEqual(spreadWire.from.path, []);
+  });
+});
+
+forEachEngine("path scoping – spread execution", (run, _ctx) => {
+  test("spread in scope block passes all input fields to tool", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i
+  }
+
+  o.result <- t
+}`;
+    const result = await run(
+      bridge,
+      "Query.test",
+      { name: "Alice", age: 30 },
+      {
+        myTool: async (input: any) => ({ received: input }),
+      },
+    );
+    assert.deepStrictEqual(result.data, {
+      result: { received: { name: "Alice", age: 30 } },
+    });
+  });
+
+  test("spread combined with constant field override", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i
+    .extra = "added"
+  }
+
+  o.result <- t
+}`;
+    const result = await run(
+      bridge,
+      "Query.test",
+      { name: "Alice", age: 30 },
+      {
+        myTool: async (input: any) => ({ received: input }),
+      },
+    );
+    assert.deepStrictEqual(result.data, {
+      result: { received: { name: "Alice", age: 30, extra: "added" } },
+    });
+  });
+
+  test("spread with sub-path source", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with myTool as t
+  with output as o
+
+  t {
+    ...i.profile
+  }
+
+  o.result <- t
+}`;
+    const result = await run(
+      bridge,
+      "Query.test",
+      { profile: { name: "Bob", email: "bob@test.com" } },
+      {
+        myTool: async (input: any) => ({ received: input }),
+      },
+    );
+    assert.deepStrictEqual(result.data, {
+      result: { received: { name: "Bob", email: "bob@test.com" } },
+    });
+  });
+});
+
+// ── Spread into output ────────────────────────────────────────────────────────
+
+forEachEngine("path scoping – spread into output", (run, _ctx) => {
+  test("basic spread of input into output", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, { name: "Hello Bridge" });
+  });
+
+  test("spread with explicit field overrides", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .message <- i.name
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, {
+      name: "Hello Bridge",
+      message: "Hello Bridge",
+    });
+  });
+
+  test("spread with multiple sources in order", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i.first
+    ...i.second
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      first: { a: 1, b: 2 },
+      second: { b: 3, c: 4 },
+    });
+    // second should override b from first
+    assert.deepStrictEqual(result.data, { a: 1, b: 3, c: 4 });
+  });
+
+  test("spread with explicit override taking precedence", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .name = "overridden"
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      name: "original",
+      age: 30,
+    });
+    // explicit .name should override spread
+    assert.deepStrictEqual(result.data, { name: "overridden", age: 30 });
+  });
+
+  test("spread with deep path source", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i.user.profile
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      user: { profile: { email: "test@test.com", verified: true } },
+    });
+    assert.deepStrictEqual(result.data, {
+      email: "test@test.com",
+      verified: true,
+    });
+  });
+
+  test("spread combined with pipe operators", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with std.str.toUpperCase as uc
+  with std.str.toLowerCase as lc
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .upper <- uc:i.name
+    .lower <- lc:i.name
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, {
+      name: "Hello Bridge",
+      upper: "HELLO BRIDGE",
+      lower: "hello bridge",
+    });
+  });
+
+  test("spread into nested output scope", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result {
+    ...i.data
+    .extra = "added"
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      data: { x: 1, y: 2 },
+    });
+    assert.deepStrictEqual(result.data, {
+      result: { x: 1, y: 2, extra: "added" },
+    });
   });
 });
 

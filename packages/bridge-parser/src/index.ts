@@ -23,6 +23,10 @@ export {
   serializeBridge,
 } from "./bridge-format.ts";
 
+// ── Formatter ───────────────────────────────────────────────────────────────
+
+export { formatBridge } from "./bridge-printer.ts";
+
 // ── Language service ────────────────────────────────────────────────────────
 
 export { BridgeLanguageService } from "./language-service.ts";

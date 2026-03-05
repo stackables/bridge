@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-compiler",
-  "version": "1.0.6",
+  "version": "2.3.0",
   "description": "Compiles a BridgeDocument into highly optimized JavaScript code",
   "main": "./build/index.js",
   "type": "module",
@@ -27,7 +27,8 @@
   },
   "devDependencies": {
     "@stackables/bridge-parser": "workspace:*",
-    "@types/node": "^25.3.2",
+    "@types/node": "^25.3.3",
+    "fast-check": "^4.5.3",
     "typescript": "^5.9.3"
   },
   "repository": {

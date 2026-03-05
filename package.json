@@ -5,14 +5,12 @@
   "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
   "scripts": {
     "test": "pnpm -r test",
-    "build": "pnpm -r build",
-    "lint:types": "pnpm -r --filter './packages/*' lint:types",
-    "lint:eslint": "eslint .",
-    "check:exports": "node scripts/check-exports.mjs",
+    "build": "pnpm -r --filter './packages/*' lint:types",
+    "lint": "eslint .",
     "smoke": "node scripts/smoke-test-packages.mjs",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
-    "ci:publish": "pnpm publish -r --filter '@stackables/*'",
+    "ci:publish": "changeset tag && pnpm publish -r --filter '@stackables/*'",
     "test:coverage": "pnpm -r test:coverage",
     "bench": "pnpm -r bench",
     "profile:cpu": "node scripts/profile-cpu.mjs",
@@ -23,7 +21,8 @@
     "bench:compare": "node scripts/bench-compare.mjs"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.8",
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
     "@eslint/js": "^10.0.1",
     "@tsconfig/node24": "^24.0.4",
     "eslint": "^10.0.2",

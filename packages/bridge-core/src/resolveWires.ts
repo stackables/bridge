@@ -14,6 +14,16 @@ import type { MaybePromise, TreeContext } from "./tree-types.ts";
 import { isFatalError, isPromise, applyControlFlow, BridgeAbortError } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
+// ── Wire type helpers ────────────────────────────────────────────────────────
+
+/**
+ * A non-constant wire — any Wire variant that carries gate modifiers
+ * (`fallbacks`, `catchFallback`, etc.).
+ * Excludes the `{ value: string; to: NodeRef }` constant wire which has no
+ * modifier slots.
+ */
+type WireWithGates = Exclude<Wire, { value: string }>;
+
 // ── Public entry point ──────────────────────────────────────────────────────
 
 /**
@@ -21,19 +31,20 @@ import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
  *
  * Architecture: two distinct resolution axes —
  *
- *  **Falsy Gate** (`||`, within a wire): `falsyFallbackRefs` + `falsyFallback`
- *    → truthy check — falsy values (0, "", false) trigger fallback chain.
+ *  **Fallback Gates** (`||` / `??`, within a wire): unified `fallbacks` array
+ *    → falsy gates trigger on falsy values (0, "", false, null, undefined)
+ *    → nullish gates trigger only on null/undefined
+ *    → gates are processed left-to-right, allowing mixed `||` and `??` chains
  *
  *  **Overdefinition** (across wires): multiple wires target the same path
  *    → nullish check — only null/undefined falls through to the next wire.
  *
  * Per-wire layers:
  *   Layer 1  — Execution (pullSingle + safe modifier)
- *   Layer 2a — Falsy Gate   (falsyFallbackRefs → falsyFallback / falsyControl)
- *   Layer 2b — Nullish Gate  (nullishFallbackRef / nullishFallback / nullishControl)
+ *   Layer 2  — Fallback Gates (unified fallbacks array: || and ?? in order)
  *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
  *
- * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
+ * After layers 1–2, the overdefinition boundary (`!= null`) decides whether
  * to return or continue to the next wire.
  *
  * ---
@@ -66,8 +77,8 @@ async function resolveWiresAsync(
   ctx: TreeContext,
   wires: Wire[],
   pullChain?: Set<string>,
-): Promise<any> {
-  let lastError: any;
+): Promise<unknown> {
+  let lastError: unknown;
 
   for (const w of wires) {
     // Abort discipline — yield immediately if client disconnected
@@ -77,50 +88,83 @@ async function resolveWiresAsync(
     if ("value" in w) return coerceConstant(w.value);
 
     try {
-      // --- Layer 1: Execution ---
-      let resolvedValue = await evaluateWireSource(ctx, w, pullChain);
+      // Layer 1: Execution
+      let value = await evaluateWireSource(ctx, w, pullChain);
 
-      // --- Layer 2a: Falsy Gate (||) ---
-      if (!resolvedValue && w.falsyFallbackRefs?.length) {
-        for (const ref of w.falsyFallbackRefs) {
-          resolvedValue = await ctx.pullSingle(ref, pullChain);
-          if (resolvedValue) break;
-        }
-      }
+      // Layer 2: Fallback Gates (unified || and ?? chain)
+      value = await applyFallbackGates(ctx, w, value, pullChain);
 
-      if (!resolvedValue) {
-        if (w.falsyControl) {
-          resolvedValue = applyControlFlow(w.falsyControl);
-        } else if (w.falsyFallback != null) {
-          resolvedValue = coerceConstant(w.falsyFallback);
-        }
-      }
-
-      // --- Layer 2b: Nullish Gate (??) ---
-      if (resolvedValue == null) {
-        if (w.nullishControl) {
-          resolvedValue = applyControlFlow(w.nullishControl);
-        } else if (w.nullishFallbackRef) {
-          resolvedValue = await ctx.pullSingle(w.nullishFallbackRef, pullChain);
-        } else if (w.nullishFallback != null) {
-          resolvedValue = coerceConstant(w.nullishFallback);
-        }
-      }
-
-      // --- Overdefinition Boundary ---
-      if (resolvedValue != null) return resolvedValue;
-    } catch (err: any) {
-      // --- Layer 3: Catch ---
+      // Overdefinition Boundary
+      if (value != null) return value;
+    } catch (err: unknown) {
+      // Layer 3: Catch Gate
       if (isFatalError(err)) throw err;
-      if (w.catchControl) return applyControlFlow(w.catchControl);
-      if (w.catchFallbackRef)
-        return ctx.pullSingle(w.catchFallbackRef, pullChain);
-      if (w.catchFallback != null) return coerceConstant(w.catchFallback);
+
+      const recoveredValue = await applyCatchGate(ctx, w, pullChain);
+      if (recoveredValue != null) return recoveredValue;
+
       lastError = err;
     }
   }
 
   if (lastError) throw lastError;
+  return undefined;
+}
+
+// ── Layer 2: Fallback Gates (unified || and ??) ─────────────────────────────
+
+/**
+ * Apply the unified Fallback Gates (Layer 2) to a resolved value.
+ *
+ * Walks the `fallbacks` array in order.  Each entry is either a falsy gate
+ * (`||`) or a nullish gate (`??`).  A falsy gate opens when `!value`;
+ * a nullish gate opens when `value == null`.  When a gate is open, the
+ * fallback is applied (control flow, ref pull, or constant coercion) and
+ * the result replaces `value` for subsequent gates.
+ */
+export async function applyFallbackGates(
+  ctx: TreeContext,
+  w: WireWithGates,
+  value: unknown,
+  pullChain?: Set<string>,
+): Promise<unknown> {
+  if (!w.fallbacks?.length) return value;
+
+  for (const fallback of w.fallbacks) {
+    const isFalsyGateOpen = fallback.type === "falsy" && !value;
+    const isNullishGateOpen = fallback.type === "nullish" && value == null;
+
+    if (isFalsyGateOpen || isNullishGateOpen) {
+      if (fallback.control) return applyControlFlow(fallback.control);
+      if (fallback.ref) {
+        value = await ctx.pullSingle(fallback.ref, pullChain);
+      } else if (fallback.value !== undefined) {
+        value = coerceConstant(fallback.value);
+      }
+    }
+  }
+
+  return value;
+}
+
+// ── Layer 3: Catch Gate ──────────────────────────────────────────────────────
+
+/**
+ * Apply the Catch Gate (Layer 3) after an error has been thrown by the
+ * execution layer.
+ *
+ * Returns the recovered value if the wire supplies a catch handler, or
+ * `undefined` if the error should be stored as `lastError` so the loop can
+ * continue to the next wire.
+ */
+export async function applyCatchGate(
+  ctx: TreeContext,
+  w: WireWithGates,
+  pullChain?: Set<string>,
+): Promise<unknown> {
+  if (w.catchControl) return applyControlFlow(w.catchControl);
+  if (w.catchFallbackRef) return ctx.pullSingle(w.catchFallbackRef, pullChain);
+  if (w.catchFallback != null) return coerceConstant(w.catchFallback);
   return undefined;
 }
 

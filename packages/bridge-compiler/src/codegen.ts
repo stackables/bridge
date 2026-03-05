@@ -33,11 +33,43 @@ import type {
 
 const SELF_MODULE = "_";
 
+function matchesRequestedFields(
+  fieldPath: string,
+  requestedFields: string[] | undefined,
+): boolean {
+  if (!requestedFields || requestedFields.length === 0) return true;
+
+  for (const pattern of requestedFields) {
+    if (pattern === fieldPath) return true;
+
+    if (fieldPath.startsWith(pattern + ".")) return true;
+
+    if (pattern.startsWith(fieldPath + ".")) return true;
+
+    if (pattern.endsWith(".*")) {
+      const prefix = pattern.slice(0, -2);
+      if (fieldPath.startsWith(prefix + ".")) {
+        const rest = fieldPath.slice(prefix.length + 1);
+        if (!rest.includes(".")) return true;
+      }
+      if (fieldPath === prefix) return true;
+    }
+  }
+
+  return false;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export interface CompileOptions {
   /** The operation to compile, e.g. "Query.livingStandard" */
   operation: string;
+  /**
+   * Sparse fieldset filter — only emit code for the listed output fields.
+   * Supports dot-separated paths and a trailing `*` wildcard.
+   * Omit or pass an empty array to compile all output fields.
+   */
+  requestedFields?: string[];
 }
 
 export interface CompileResult {
@@ -88,7 +120,12 @@ export function compileBridge(
     (i): i is ToolDef => i.kind === "tool",
   );
 
-  const ctx = new CodegenContext(bridge, constDefs, toolDefs);
+  const ctx = new CodegenContext(
+    bridge,
+    constDefs,
+    toolDefs,
+    options.requestedFields,
+  );
   return ctx.compile();
 }
 
@@ -107,11 +144,10 @@ function detectControlFlow(
   wires: Wire[],
 ): "break" | "continue" | "throw" | "panic" | null {
   for (const w of wires) {
-    if ("nullishControl" in w && w.nullishControl) {
-      return w.nullishControl.kind as "break" | "continue" | "throw" | "panic";
-    }
-    if ("falsyControl" in w && w.falsyControl) {
-      return w.falsyControl.kind as "break" | "continue" | "throw" | "panic";
+    if ("fallbacks" in w && w.fallbacks) {
+      for (const fb of w.fallbacks) {
+        if (fb.control) return fb.control.kind as "break" | "continue" | "throw" | "panic";
+      }
     }
     if ("catchControl" in w && w.catchControl) {
       return w.catchControl.kind as "break" | "continue" | "throw" | "panic";
@@ -231,16 +267,22 @@ class CodegenContext {
   /** Map from ToolDef dependency tool name to its emitted variable name.
    *  Populated lazily by emitToolDeps to avoid duplicating calls. */
   private toolDepVars = new Map<string, string>();
+  /** Sparse fieldset filter for output wire pruning. */
+  private requestedFields: string[] | undefined;
 
   constructor(
     bridge: Bridge,
     constDefs: Map<string, string>,
     toolDefs: ToolDef[],
+    requestedFields?: string[],
   ) {
     this.bridge = bridge;
     this.constDefs = constDefs;
     this.toolDefs = toolDefs;
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
+    this.requestedFields = requestedFields?.length
+      ? requestedFields
+      : undefined;
 
     for (const h of bridge.handles) {
       switch (h.kind) {
@@ -452,7 +494,7 @@ class CodegenContext {
     }
 
     // Separate wires into tool inputs, define containers, and output
-    const outputWires: Wire[] = [];
+    const allOutputWires: Wire[] = [];
     const toolWires = new Map<string, Wire[]>();
     const defineWires = new Map<string, Wire[]>();
 
@@ -465,7 +507,7 @@ class CodegenContext {
         ? `${w.to.module}:${w.to.type}:${w.to.field}`
         : toKey;
       if (toTrunkNoElement === this.selfTrunkKey) {
-        outputWires.push(w);
+        allOutputWires.push(w);
       } else if (this.defineContainers.has(toKey)) {
         // Wire targets a define-in/out container
         const arr = defineWires.get(toKey) ?? [];
@@ -477,6 +519,19 @@ class CodegenContext {
         toolWires.set(toKey, arr);
       }
     }
+
+    // ── Sparse fieldset filtering ──────────────────────────────────────
+    // When requestedFields is provided, drop output wires for fields that
+    // weren't requested.  Kahn's algorithm will then naturally eliminate
+    // tools that only feed into those dropped wires.
+    const outputWires = this.requestedFields
+      ? allOutputWires.filter((w) => {
+          // Root wires (path length 0) and element wires are always included
+          if (w.to.path.length === 0) return true;
+          const fieldPath = w.to.path.join(".");
+          return matchesRequestedFields(fieldPath, this.requestedFields);
+        })
+      : allOutputWires;
 
     // Ensure force-only tools (no wires targeting them from output) are
     // still included in the tool map for scheduling
@@ -618,38 +673,67 @@ class CodegenContext {
     lines.push(`  }`);
 
     // ── Dead tool detection ────────────────────────────────────────────
-    // Detect tools whose output is never referenced by any output wire,
-    // other tool wire, or define container wire. These are dead code
-    // (e.g. a pipe-only handle whose forks are all element-scoped).
-    const referencedToolKeys = new Set<string>();
-    const allWireSources = [...outputWires, ...bridge.wires];
-    for (const w of allWireSources) {
-      if ("from" in w) referencedToolKeys.add(refTrunkKey(w.from));
-      if ("cond" in w) {
-        referencedToolKeys.add(refTrunkKey(w.cond));
-        if (w.thenRef) referencedToolKeys.add(refTrunkKey(w.thenRef));
-        if (w.elseRef) referencedToolKeys.add(refTrunkKey(w.elseRef));
+    // Detect which tools are reachable from the (possibly filtered) output
+    // wires.  Uses a backward reachability analysis: start from tools
+    // referenced in output wires, then transitively follow tool-input
+    // wires to discover all upstream dependencies.  Tools not in the
+    // reachable set are dead code and can be skipped.
+
+    /**
+     * Extract all tool trunk keys referenced as **sources** in a set of
+     * wires.  A "source key" is the trunk key of a node that feeds data
+     * into a wire (the right-hand side of `target <- source`).  This
+     * includes pull refs, ternary branches, condAnd/condOr operands,
+     * and all fallback refs.  Used by the backward reachability analysis
+     * to discover which tools are transitively needed by the output.
+     */
+    const collectSourceKeys = (wires: Wire[]): Set<string> => {
+      const keys = new Set<string>();
+      for (const w of wires) {
+        if ("from" in w) keys.add(refTrunkKey(w.from));
+        if ("cond" in w) {
+          keys.add(refTrunkKey(w.cond));
+          if (w.thenRef) keys.add(refTrunkKey(w.thenRef));
+          if (w.elseRef) keys.add(refTrunkKey(w.elseRef));
+        }
+        if ("condAnd" in w) {
+          keys.add(refTrunkKey(w.condAnd.leftRef));
+          if (w.condAnd.rightRef) keys.add(refTrunkKey(w.condAnd.rightRef));
+        }
+        if ("condOr" in w) {
+          keys.add(refTrunkKey(w.condOr.leftRef));
+          if (w.condOr.rightRef) keys.add(refTrunkKey(w.condOr.rightRef));
+        }
+        if ("fallbacks" in w && w.fallbacks) {
+          for (const fb of w.fallbacks) {
+            if (fb.ref) keys.add(refTrunkKey(fb.ref));
+          }
+        }
+        if ("catchFallbackRef" in w && w.catchFallbackRef) {
+          keys.add(refTrunkKey(w.catchFallbackRef));
+        }
       }
-      if ("condAnd" in w) {
-        referencedToolKeys.add(refTrunkKey(w.condAnd.leftRef));
-        if (w.condAnd.rightRef)
-          referencedToolKeys.add(refTrunkKey(w.condAnd.rightRef));
-      }
-      if ("condOr" in w) {
-        referencedToolKeys.add(refTrunkKey(w.condOr.leftRef));
-        if (w.condOr.rightRef)
-          referencedToolKeys.add(refTrunkKey(w.condOr.rightRef));
-      }
-      // Also count falsy/nullish/catch fallback refs
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
-        for (const ref of w.falsyFallbackRefs)
-          referencedToolKeys.add(refTrunkKey(ref));
-      }
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-        referencedToolKeys.add(refTrunkKey(w.nullishFallbackRef));
-      }
-      if ("catchFallbackRef" in w && w.catchFallbackRef) {
-        referencedToolKeys.add(refTrunkKey(w.catchFallbackRef));
+      return keys;
+    };
+
+    // Seed: tools directly referenced by output wires + forced tools
+    const referencedToolKeys = collectSourceKeys(outputWires);
+    for (const tk of forceMap.keys()) referencedToolKeys.add(tk);
+
+    // Transitive closure: walk backward through tool input wires
+    const visited = new Set<string>();
+    const queue = [...referencedToolKeys];
+    while (queue.length > 0) {
+      const tk = queue.pop()!;
+      if (visited.has(tk)) continue;
+      visited.add(tk);
+      const deps = toolWires.get(tk);
+      if (!deps) continue;
+      for (const key of collectSourceKeys(deps)) {
+        if (!visited.has(key)) {
+          referencedToolKeys.add(key);
+          queue.push(key);
+        }
       }
     }
 
@@ -875,9 +959,13 @@ class CodegenContext {
     }
 
     // Bridge wires override ToolDef wires
+    let spreadExprForToolDef: string | undefined;
     for (const bw of bridgeWires) {
       const path = bw.to.path;
-      if (path.length >= 1) {
+      if (path.length === 0) {
+        // Spread wire: ...sourceExpr — captures all fields from source
+        spreadExprForToolDef = this.wireToExpr(bw);
+      } else if (path.length >= 1) {
         const key = path[0]!;
         inputEntries.set(
           key,
@@ -888,8 +976,16 @@ class CodegenContext {
 
     const inputParts = [...inputEntries.values()];
 
-    const inputObj =
-      inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
+    let inputObj: string;
+    if (spreadExprForToolDef !== undefined) {
+      // Spread wire present: { ...spreadExpr, field1: ..., field2: ... }
+      const spreadEntry = `    ...${spreadExprForToolDef}`;
+      const allParts = [spreadEntry, ...inputParts];
+      inputObj = `{\n${allParts.join(",\n")},\n  }`;
+    } else {
+      inputObj =
+        inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
+    }
 
     if (onErrorWire) {
       // Wrap in try/catch for onError
@@ -1250,12 +1346,23 @@ class CodegenContext {
     const arrayIterators = this.bridge.arrayIterators ?? {};
     const isRootArray = "" in arrayIterators;
 
-    // Check for root passthrough (wire with empty path) — but not if it's a root array source
-    const rootWire = outputWires.find((w) => w.to.path.length === 0);
-    if (rootWire && !isRootArray) {
-      lines.push(`  return ${this.wireToExpr(rootWire)};`);
+    // Separate root wires into passthrough vs spread
+    const rootWires = outputWires.filter((w) => w.to.path.length === 0);
+    const spreadRootWires = rootWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread,
+    );
+    const passthroughRootWire = rootWires.find(
+      (w) => !("from" in w && "spread" in w && w.spread),
+    );
+
+    // Passthrough (non-spread root wire) — return directly
+    if (passthroughRootWire && !isRootArray) {
+      lines.push(`  return ${this.wireToExpr(passthroughRootWire)};`);
       return;
     }
+
+    // Check for root passthrough (wire with empty path) — but not if it's a root array source
+    const rootWire = rootWires[0]; // for backwards compat with array handling below
 
     // Handle root array output (o <- src.items[] as item { ... })
     if (isRootArray && rootWire) {
@@ -1275,8 +1382,36 @@ class CodegenContext {
       // Only check control flow on direct element wires, not sub-array element wires
       const directElemWires = elemWires.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directElemWires);
-      if (cf === "continue") {
-        // Use flatMap — skip elements that trigger continue
+      // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
+      const needsAsync = elemWires.some((w) => this.wireNeedsAwait(w));
+
+      if (needsAsync) {
+        // ALL async processing must use for...of loop
+        const preambleLines: string[] = [];
+        this.elementLocalVars.clear();
+        this.collectElementPreamble(elemWires, "_el0", preambleLines);
+
+        const body = cf
+          ? this.buildElementBodyWithControlFlow(
+              elemWires,
+              arrayIterators,
+              0,
+              4,
+              cf === "continue" ? "for-continue" : "break",
+            )
+          : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
+
+        lines.push(`  const _result = [];`);
+        lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+        for (const pl of preambleLines) {
+          lines.push(`    ${pl}`);
+        }
+        lines.push(body);
+        lines.push(`  }`);
+        lines.push(`  return _result;`);
+        this.elementLocalVars.clear();
+      } else if (cf === "continue") {
+        // Use flatMap — skip elements that trigger continue (sync only)
         const body = this.buildElementBodyWithControlFlow(
           elemWires,
           arrayIterators,
@@ -1288,7 +1423,7 @@ class CodegenContext {
         lines.push(body);
         lines.push(`  });`);
       } else if (cf === "break") {
-        // Use a loop with early break
+        // Use a loop with early break (sync)
         const body = this.buildElementBodyWithControlFlow(
           elemWires,
           arrayIterators,
@@ -1303,44 +1438,7 @@ class CodegenContext {
         lines.push(`  return _result;`);
       } else {
         const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-        // Check if any element wire references an element-scoped non-internal tool (requires await)
-        const needsAsync = elemWires.some((w) => {
-          if ("from" in w && !w.from.element) {
-            const srcKey = refTrunkKey(w.from);
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              !this.internalToolKeys.has(srcKey)
-            )
-              return true;
-            // Check transitive: if the source is a define container that depends on an async element-scoped tool
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              this.defineContainers.has(srcKey)
-            ) {
-              return this.hasAsyncElementDeps(srcKey);
-            }
-          }
-          return false;
-        });
-        if (needsAsync) {
-          // Collect element-scoped real tool calls and define containers that need
-          // per-element computation. Emit them as loop-local variables.
-          const preambleLines: string[] = [];
-          this.elementLocalVars.clear();
-          this.collectElementPreamble(elemWires, "_el0", preambleLines);
-          const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-          lines.push(`  const _result = [];`);
-          lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
-          for (const pl of preambleLines) {
-            lines.push(`    ${pl}`);
-          }
-          lines.push(`    _result.push(${body});`);
-          lines.push(`  }`);
-          lines.push(`  return _result;`);
-          this.elementLocalVars.clear();
-        } else {
-          lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
-        }
+        lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
       }
       return;
     }
@@ -1372,6 +1470,13 @@ class CodegenContext {
       } else if (arrayFields.has(topField) && w.to.path.length === 1) {
         // Root wire for an array field
         arraySourceWires.set(topField, w);
+      } else if (
+        "from" in w &&
+        "spread" in w &&
+        w.spread &&
+        w.to.path.length === 0
+      ) {
+        // Spread root wire — handled separately via spreadRootWires
       } else {
         scalarWires.push(w);
       }
@@ -1380,11 +1485,43 @@ class CodegenContext {
     // Build a nested tree from scalar wires using their full output path
     interface TreeNode {
       expr?: string;
+      terminal?: boolean;
+      spreadExprs?: string[];
       children: Map<string, TreeNode>;
     }
     const tree: TreeNode = { children: new Map() };
 
-    for (const w of scalarWires) {
+    // First pass: handle nested spread wires (spread with path.length > 0)
+    const nestedSpreadWires = scalarWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread && w.to.path.length > 0,
+    );
+    const normalScalarWires = scalarWires.filter(
+      (w) => !("from" in w && "spread" in w && w.spread),
+    );
+
+    // Add nested spread expressions to tree nodes
+    for (const w of nestedSpreadWires) {
+      const path = w.to.path;
+      let current = tree;
+      // Navigate to parent of the target
+      for (let i = 0; i < path.length - 1; i++) {
+        const seg = path[i]!;
+        if (!current.children.has(seg)) {
+          current.children.set(seg, { children: new Map() });
+        }
+        current = current.children.get(seg)!;
+      }
+      const lastSeg = path[path.length - 1]!;
+      if (!current.children.has(lastSeg)) {
+        current.children.set(lastSeg, { children: new Map() });
+      }
+      const node = current.children.get(lastSeg)!;
+      // Add spread expression to this node
+      if (!node.spreadExprs) node.spreadExprs = [];
+      node.spreadExprs.push(this.wireToExpr(w));
+    }
+
+    for (const w of normalScalarWires) {
       const path = w.to.path;
       let current = tree;
       for (let i = 0; i < path.length - 1; i++) {
@@ -1399,12 +1536,7 @@ class CodegenContext {
         current.children.set(lastSeg, { children: new Map() });
       }
       const node = current.children.get(lastSeg)!;
-      if (node.expr != null) {
-        // Overdefinition: combine with ?? — first non-null wins
-        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
-      } else {
-        node.expr = this.wireToExpr(w);
-      }
+      this.mergeOverdefinedExpr(node, w);
     }
 
     // Emit array-mapped fields into the tree as well
@@ -1424,8 +1556,29 @@ class CodegenContext {
       // Only check control flow on direct element wires (not sub-array element wires)
       const directShifted = shifted.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directShifted);
+      // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
+      const needsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
-      if (cf === "continue") {
+      if (needsAsync) {
+        // ALL async processing must use for...of inside an async IIFE
+        const preambleLines: string[] = [];
+        this.elementLocalVars.clear();
+        this.collectElementPreamble(shifted, "_el0", preambleLines);
+
+        const asyncBody = cf
+          ? this.buildElementBodyWithControlFlow(
+              shifted,
+              arrayIterators,
+              0,
+              8,
+              cf === "continue" ? "for-continue" : "break",
+            )
+          : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+
+        const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
+        mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
+        this.elementLocalVars.clear();
+      } else if (cf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1445,40 +1598,7 @@ class CodegenContext {
         mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${cfBody}\n      } return _result; })()`;
       } else {
         const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
-        // Check if any element wire references an element-scoped non-internal tool (requires await)
-        const needsAsync = shifted.some((w) => {
-          if ("from" in w && !w.from.element) {
-            const srcKey = refTrunkKey(w.from);
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              !this.internalToolKeys.has(srcKey)
-            )
-              return true;
-            if (
-              this.elementScopedTools.has(srcKey) &&
-              this.defineContainers.has(srcKey)
-            ) {
-              return this.hasAsyncElementDeps(srcKey);
-            }
-          }
-          return false;
-        });
-        if (needsAsync) {
-          const preambleLines: string[] = [];
-          this.elementLocalVars.clear();
-          this.collectElementPreamble(shifted, "_el0", preambleLines);
-          const asyncBody = this.buildElementBody(
-            shifted,
-            arrayIterators,
-            0,
-            8,
-          );
-          const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-          mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _r = []; for (const _el0 of _src) {\n${preamble}\n      _r.push(${asyncBody});\n    } return _r; })()`;
-          this.elementLocalVars.clear();
-        } else {
-          mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
-        }
+        mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
       }
 
       if (!tree.children.has(arrayField)) {
@@ -1488,7 +1608,9 @@ class CodegenContext {
     }
 
     // Serialize the tree to a return statement
-    const objStr = this.serializeOutputTree(tree, 4);
+    // Include spread expressions at the start if present
+    const spreadExprs = spreadRootWires.map((w) => this.wireToExpr(w));
+    const objStr = this.serializeOutputTree(tree, 4, spreadExprs);
     lines.push(`  return ${objStr};`);
   }
 
@@ -1498,15 +1620,37 @@ class CodegenContext {
       children: Map<string, { expr?: string; children: Map<string, any> }>;
     },
     indent: number,
+    spreadExprs?: string[],
   ): string {
     const pad = " ".repeat(indent);
     const entries: string[] = [];
 
+    // Add spread expressions first (they come before field overrides)
+    if (spreadExprs) {
+      for (const expr of spreadExprs) {
+        entries.push(`${pad}...${expr}`);
+      }
+    }
+
     for (const [key, child] of node.children) {
-      if (child.expr != null && child.children.size === 0) {
+      // Check if child has spread expressions
+      const childSpreadExprs = (child as { spreadExprs?: string[] })
+        .spreadExprs;
+
+      if (
+        child.expr != null &&
+        child.children.size === 0 &&
+        !childSpreadExprs
+      ) {
+        // Simple leaf with just an expression
         entries.push(`${pad}${JSON.stringify(key)}: ${child.expr}`);
-      } else if (child.children.size > 0 && child.expr == null) {
-        const nested = this.serializeOutputTree(child, indent + 2);
+      } else if (childSpreadExprs || child.children.size > 0) {
+        // Nested object: may have spreads, children, or both
+        const nested = this.serializeOutputTree(
+          child,
+          indent + 2,
+          childSpreadExprs,
+        );
         entries.push(`${pad}${JSON.stringify(key)}: ${nested}`);
       } else {
         // Has both expr and children — use expr (children override handled elsewhere)
@@ -1593,8 +1737,22 @@ class CodegenContext {
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
       const innerElVar = `_el${depth + 1}`;
       const innerCf = detectControlFlow(shifted);
+      // Check if inner loop needs async (element-scoped tools or catch fallbacks)
+      const innerNeedsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
-      if (innerCf === "continue") {
+      if (innerNeedsAsync) {
+        // Inner async loop must use for...of inside an async IIFE
+        const innerBody = innerCf
+          ? this.buildElementBodyWithControlFlow(
+              shifted,
+              arrayIterators,
+              depth + 1,
+              indent + 4,
+              innerCf === "continue" ? "for-continue" : "break",
+            )
+          : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
+        mapExpr = `await (async () => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; for (const ${innerElVar} of _src) {\n${innerBody}\n${" ".repeat(indent + 2)}} return _result; })()`;
+      } else if (innerCf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1642,7 +1800,7 @@ class CodegenContext {
     arrayIterators: Record<string, string>,
     depth: number,
     indent: number,
-    mode: "break" | "continue",
+    mode: "break" | "continue" | "for-continue",
   ): string {
     const elVar = `_el${depth}`;
     const pad = " ".repeat(indent);
@@ -1652,8 +1810,7 @@ class CodegenContext {
     const controlWire = elemWires.find(
       (w) =>
         w.to.path.length === 1 &&
-        (("nullishControl" in w && w.nullishControl != null) ||
-          ("falsyControl" in w && w.falsyControl != null) ||
+        (("fallbacks" in w && w.fallbacks?.some(fb => fb.control != null)) ||
           ("catchControl" in w && w.catchControl != null)),
     );
 
@@ -1676,14 +1833,22 @@ class CodegenContext {
 
     // Determine the check type
     const isNullish =
-      "nullishControl" in controlWire && controlWire.nullishControl != null;
+      controlWire.fallbacks?.some(fb => fb.type === "nullish" && fb.control != null) ?? false;
 
     if (mode === "continue") {
       if (isNullish) {
         return `${pad}  if (${checkExpr} == null) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
       }
-      // falsyControl
+      // falsy fallback control
       return `${pad}  if (!${checkExpr}) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
+    }
+
+    // mode === "for-continue" — same as break but uses native 'continue' keyword
+    if (mode === "for-continue") {
+      if (isNullish) {
+        return `${pad}  if (${checkExpr} == null) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      }
+      return `${pad}  if (!${checkExpr}) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
     }
 
     // mode === "break"
@@ -1732,9 +1897,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condAnd;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} && ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) && Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} && ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -1745,9 +1911,10 @@ class CodegenContext {
       const { leftRef, rightRef, rightValue } = w.condOr;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef) expr = `(${left} || ${this.refToExpr(rightRef)})`;
+      if (rightRef)
+        expr = `(Boolean(${left}) || Boolean(${this.refToExpr(rightRef)}))`;
       else if (rightValue !== undefined)
-        expr = `(${left} || ${emitCoerced(rightValue)})`;
+        expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -1964,6 +2131,35 @@ class CodegenContext {
     return `await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
   }
 
+  /**
+   * Check if a wire's generated expression would contain `await`.
+   * Used to determine whether array loops must be async (for...of) instead of .map()/.flatMap().
+   */
+  private wireNeedsAwait(w: Wire): boolean {
+    // Element-scoped non-internal tool reference generates await __call()
+    if ("from" in w && !w.from.element) {
+      const srcKey = refTrunkKey(w.from);
+      if (
+        this.elementScopedTools.has(srcKey) &&
+        !this.internalToolKeys.has(srcKey)
+      )
+        return true;
+      if (
+        this.elementScopedTools.has(srcKey) &&
+        this.defineContainers.has(srcKey)
+      ) {
+        return this.hasAsyncElementDeps(srcKey);
+      }
+    }
+    // Catch fallback/control without errFlag → applyFallbacks generates await (async () => ...)()
+    if (
+      (hasCatchFallback(w) || hasCatchControl(w)) &&
+      !this.getSourceErrorFlag(w)
+    )
+      return true;
+    return false;
+  }
+
   /** Check if an element-scoped tool has transitive async dependencies. */
   private hasAsyncElementDeps(trunkKey: string): boolean {
     const wires = this.bridge.wires.filter(
@@ -2118,38 +2314,36 @@ class CodegenContext {
 
   /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */
   private applyFallbacks(w: Wire, expr: string): string {
-    // Falsy fallback chain (||)
-    if ("falsyFallbackRefs" in w && w.falsyFallbackRefs?.length) {
-      for (const ref of w.falsyFallbackRefs) {
-        expr = `(${expr} || ${this.refToExpr(ref)})`; // lgtm [js/code-injection]
-      }
-    }
-    if ("falsyFallback" in w && w.falsyFallback != null) {
-      expr = `(${expr} || ${emitCoerced(w.falsyFallback)})`; // lgtm [js/code-injection]
-    }
-    // Falsy control flow (throw/panic on || gate)
-    if ("falsyControl" in w && w.falsyControl) {
-      const ctrl = w.falsyControl;
-      if (ctrl.kind === "throw") {
-        expr = `(${expr} || (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      } else if (ctrl.kind === "panic") {
-        expr = `(${expr} || (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      }
-    }
-
-    // Nullish coalescing (??)
-    if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-      expr = `(${expr} ?? ${this.refToExpr(w.nullishFallbackRef)})`; // lgtm [js/code-injection]
-    } else if ("nullishFallback" in w && w.nullishFallback != null) {
-      expr = `(${expr} ?? ${emitCoerced(w.nullishFallback)})`; // lgtm [js/code-injection]
-    }
-    // Nullish control flow (throw/panic on ?? gate)
-    if ("nullishControl" in w && w.nullishControl) {
-      const ctrl = w.nullishControl;
-      if (ctrl.kind === "throw") {
-        expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      } else if (ctrl.kind === "panic") {
-        expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+    if ("fallbacks" in w && w.fallbacks) {
+      for (const fb of w.fallbacks) {
+        if (fb.type === "falsy") {
+          if (fb.ref) {
+            expr = `(${expr} || ${this.refToExpr(fb.ref)})`; // lgtm [js/code-injection]
+          } else if (fb.value != null) {
+            expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
+          } else if (fb.control) {
+            const ctrl = fb.control;
+            if (ctrl.kind === "throw") {
+              expr = `(${expr} || (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            } else if (ctrl.kind === "panic") {
+              expr = `(${expr} || (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            }
+          }
+        } else {
+          // nullish
+          if (fb.ref) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(fb.ref)}))`; // lgtm [js/code-injection]
+          } else if (fb.value != null) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
+          } else if (fb.control) {
+            const ctrl = fb.control;
+            if (ctrl.kind === "throw") {
+              expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            } else if (ctrl.kind === "panic") {
+              expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            }
+          }
+        }
       }
     }
 
@@ -2401,11 +2595,11 @@ class CodegenContext {
         if (w.condOr.rightRef) allRefs.add(refTrunkKey(w.condOr.rightRef));
       }
       // Fallback refs
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
-        for (const ref of w.falsyFallbackRefs) allRefs.add(refTrunkKey(ref));
+      if ("fallbacks" in w && w.fallbacks) {
+        for (const fb of w.fallbacks) {
+          if (fb.ref) allRefs.add(refTrunkKey(fb.ref));
+        }
       }
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef)
-        allRefs.add(refTrunkKey(w.nullishFallbackRef));
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         allRefs.add(refTrunkKey(w.catchFallbackRef));
     };
@@ -2435,6 +2629,30 @@ class CodegenContext {
 
   // ── Nested object literal builder ─────────────────────────────────────────
 
+  private mergeOverdefinedExpr(
+    node: { expr?: string; terminal?: boolean },
+    wire: Wire,
+  ): void {
+    const nextExpr = this.wireToExpr(wire);
+    const nextIsConstant = "value" in wire;
+
+    if (node.expr == null) {
+      node.expr = nextExpr;
+      node.terminal = nextIsConstant;
+      return;
+    }
+
+    if (node.terminal) return;
+
+    if (nextIsConstant) {
+      node.expr = `((__v) => (__v != null ? __v : ${nextExpr}))(${node.expr})`;
+      node.terminal = true;
+      return;
+    }
+
+    node.expr = `(${node.expr} ?? ${nextExpr})`;
+  }
+
   /**
    * Build a JavaScript object literal from a set of wires.
    * Handles nested paths by creating nested object literals.
@@ -2446,16 +2664,34 @@ class CodegenContext {
   ): string {
     if (wires.length === 0) return "{}";
 
-    // Build tree
+    // Separate root wire (path=[]) from field-specific wires
+    let rootExpr: string | undefined;
+    const fieldWires: Wire[] = [];
+
+    for (const w of wires) {
+      const path = getPath(w);
+      if (path.length === 0) {
+        rootExpr = this.wireToExpr(w);
+      } else {
+        fieldWires.push(w);
+      }
+    }
+
+    // Only a root wire — simple passthrough expression
+    if (rootExpr !== undefined && fieldWires.length === 0) {
+      return rootExpr;
+    }
+
+    // Build tree from field-specific wires
     interface TreeNode {
       expr?: string;
+      terminal?: boolean;
       children: Map<string, TreeNode>;
     }
     const root: TreeNode = { children: new Map() };
 
-    for (const w of wires) {
+    for (const w of fieldWires) {
       const path = getPath(w);
-      if (path.length === 0) return this.wireToExpr(w);
       let current = root;
       for (let i = 0; i < path.length - 1; i++) {
         const seg = path[i]!;
@@ -2469,14 +2705,11 @@ class CodegenContext {
         current.children.set(lastSeg, { children: new Map() });
       }
       const node = current.children.get(lastSeg)!;
-      if (node.expr != null) {
-        node.expr = `(${node.expr} ?? ${this.wireToExpr(w)})`;
-      } else {
-        node.expr = this.wireToExpr(w);
-      }
+      this.mergeOverdefinedExpr(node, w);
     }
 
-    return this.serializeTreeNode(root, indent);
+    // Spread + field overrides: { ...rootExpr, field1: ..., field2: ... }
+    return this.serializeTreeNode(root, indent, rootExpr);
   }
 
   private serializeTreeNode(
@@ -2484,9 +2717,14 @@ class CodegenContext {
       children: Map<string, { expr?: string; children: Map<string, unknown> }>;
     },
     indent: number,
+    spreadExpr?: string,
   ): string {
     const pad = " ".repeat(indent);
     const entries: string[] = [];
+
+    if (spreadExpr !== undefined) {
+      entries.push(`${pad}...${spreadExpr}`);
+    }
 
     for (const [key, child] of node.children) {
       if (child.children.size === 0) {
@@ -2682,10 +2920,11 @@ class CodegenContext {
 
     if ("from" in w) {
       collectTrunk(w.from);
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs)
-        w.falsyFallbackRefs.forEach(collectTrunk);
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef)
-        collectTrunk(w.nullishFallbackRef);
+      if (w.fallbacks) {
+        for (const fb of w.fallbacks) {
+          if (fb.ref) collectTrunk(fb.ref);
+        }
+      }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         collectTrunk(w.catchFallbackRef);
     }

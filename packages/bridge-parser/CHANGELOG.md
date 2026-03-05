@@ -1,5 +1,52 @@
 # @stackables/bridge-parser
 
+## 1.3.0
+
+### Minor Changes
+
+- [#96](https://github.com/stackables/bridge/pull/96) [`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f) Thanks [@aarne](https://github.com/aarne)! - Migrate wire shape from separate `falsyFallback*`/`nullishFallback*` properties to a unified `fallbacks: WireFallback[]` array, enabling mixed `||` and `??` chains in any order (e.g. `A ?? B || C ?? D`).
+
+### Patch Changes
+
+- [#94](https://github.com/stackables/bridge/pull/94) [`93bbb94`](https://github.com/stackables/bridge/commit/93bbb9453d4f8babbcdeed352a37a92d8ef8aa7e) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Fix chained `||` literal fallback parsing so authored left-to-right short-circuiting is preserved after safe pulls (`?.`), and add regression coverage for mixed `||` + `??` chains.
+
+- Updated dependencies [[`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f)]:
+  - @stackables/bridge-core@1.4.0
+
+## 1.2.0
+
+### Minor Changes
+
+- [#86](https://github.com/stackables/bridge/pull/86) [`fc3d8ed`](https://github.com/stackables/bridge/commit/fc3d8ed392c3dd8181c2eef124585a2e43ea0499) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Support object spread in path-scoped scope blocks
+
+### Patch Changes
+
+- Updated dependencies [[`fc3d8ed`](https://github.com/stackables/bridge/commit/fc3d8ed392c3dd8181c2eef124585a2e43ea0499)]:
+  - @stackables/bridge-core@1.3.0
+
+## 1.1.1
+
+### Patch Changes
+
+- [#84](https://github.com/stackables/bridge/pull/84) [`837ec1c`](https://github.com/stackables/bridge/commit/837ec1cc74c0a76e205d818b94c33b4c28e3628d) Thanks [@aarne](https://github.com/aarne)! - Fix several AOT compiler/runtime parity bugs discovered via fuzzing:
+
+  - Fix `condAnd` and `condOr` code generation to match runtime boolean semantics.
+  - Fix nullish fallback chaining so `??` handling matches runtime overdefinition boundaries.
+  - Fix overdefinition precedence so the first constant wire remains terminal, matching runtime behavior.
+  - Fix `serializeBridge` quoting for empty-string and slash-only string constants so parse/serialize/parse round-trips remain valid.
+  - Add deterministic regression coverage for these parity cases to prevent regressions.
+
+- Updated dependencies [[`cf5cd2e`](https://github.com/stackables/bridge/commit/cf5cd2e40e6339fb3e896e05dbdbe66b0b5d77a9)]:
+  - @stackables/bridge-core@1.2.0
+
+## 1.1.0
+
+### Minor Changes
+
+- [#78](https://github.com/stackables/bridge/pull/78) [`ce6cb8a`](https://github.com/stackables/bridge/commit/ce6cb8a8e6e8288e8ab73f7ce44d14b205c70c91) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Rename `@stackables/bridge-compiler` to `@stackables/bridge-parser` (parser, serializer, language service). The new `@stackables/bridge-compiler` package compiles BridgeDocument into optimized JavaScript code with abort signal support, tool timeout, and full language feature parity.
+
+  bridge-parser first release will continue from current bridge-compiler version 1.0.6. New version of bridge-compiler will jump to 2.0.0 to mark a breaking change in the package purpose
+
 ## 1.0.6
 
 ### Patch Changes

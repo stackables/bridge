@@ -1,5 +1,29 @@
 # @stackables/bridge-core
 
+## 1.4.0
+
+### Minor Changes
+
+- [#96](https://github.com/stackables/bridge/pull/96) [`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f) Thanks [@aarne](https://github.com/aarne)! - Migrate wire shape from separate `falsyFallback*`/`nullishFallback*` properties to a unified `fallbacks: WireFallback[]` array, enabling mixed `||` and `??` chains in any order (e.g. `A ?? B || C ?? D`).
+
+## 1.3.0
+
+### Minor Changes
+
+- [#86](https://github.com/stackables/bridge/pull/86) [`fc3d8ed`](https://github.com/stackables/bridge/commit/fc3d8ed392c3dd8181c2eef124585a2e43ea0499) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Support object spread in path-scoped scope blocks
+
+## 1.2.0
+
+### Minor Changes
+
+- [#82](https://github.com/stackables/bridge/pull/82) [`cf5cd2e`](https://github.com/stackables/bridge/commit/cf5cd2e40e6339fb3e896e05dbdbe66b0b5d77a9) Thanks [@aarne](https://github.com/aarne)! - Add `requestedFields` option to `executeBridge()` for sparse fieldset filtering.
+
+  When provided, only the listed output fields (and their transitive tool dependencies) are resolved.
+  Tools that feed exclusively into unrequested fields are never called, reducing latency and upstream
+  bandwidth.
+
+  Supports dot-separated paths and a trailing wildcard (`["id", "price", "legs.*"]`).
+
 ## 1.1.1
 
 ### Patch Changes

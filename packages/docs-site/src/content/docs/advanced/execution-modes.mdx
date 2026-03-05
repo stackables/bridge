@@ -1,0 +1,58 @@
+---
+title: Execution Modes
+description: Understand the differences between the Bridge Compiler, Core Interpreter, and GraphQL Adapter.
+---
+
+Once you have parsed your `.bridge` files into a JSON AST (Abstract Syntax Tree), you need to execute them.
+
+Bridge provides three distinct execution engines to fit your exact architecture and error-handling requirements.
+
+## High-Level Comparison
+
+| Feature              | `@stackables/bridge-compiler` | `@stackables/bridge-core`           | `@stackables/bridge-graphql`      |
+| -------------------- | ----------------------------- | ----------------------------------- | --------------------------------- |
+| **Execution Method** | Native JavaScript (JIT/AOT)   | AST Interpreter (Dynamic)           | GraphQL Resolver Mapping          |
+| **Performance**      | 🚀 Maximum (Bare-metal JS)    | ⚡ Fast (Pull-based)                | ⏱️ Standard GraphQL speed         |
+| **Environment**      | Node.js, Bun, standard Deno   | **Any** (Including Edge/Cloudflare) | Any GraphQL Server                |
+| **Sparse Fieldsets** | Yes (Compile-time DCE)        | Yes (Runtime Pull-resolution)       | Yes (Implicit via lazy resolvers) |
+| **Error Model**      | **Strict** (All-or-nothing)   | **Strict** (All-or-nothing)         | **Partial Success** (Graceful)    |
+
+
+## 1. The Native Compiler
+#### @stackables/bridge-compiler
+
+**The Speed Demon.** This engine mathematically sorts your AST and generates a single, hyper-optimized JavaScript function in memory using `new AsyncFunction()`.
+
+- **Why use it:** It eliminates framework overhead, making it capable of handling massive Requests Per Second (RPS) with near-zero latency. Perfect for Node.js REST APIs.
+- **Dead-Code Elimination:** If you pass `requestedFields`, the compiler mathematically eliminates tools for unrequested data _before_ generating the JavaScript.
+- **The Error Model (Strict):** If a downstream tool fails and you didn't write a `catch` statement, the generated function throws a fatal error (HTTP 500).
+- **Limitations:** It **cannot** run in strict Edge V8 Isolates (like Cloudflare Workers) because it evaluates strings dynamically.
+
+## 2. The Core Interpreter
+#### @stackables/bridge-core
+
+**The Edge Native.** This engine dynamically walks the AST at runtime using a pull-based `ExecutionTree`.
+
+- **Why use it:** It runs absolutely anywhere. Because it doesn't use `eval()`, it is 100% compatible with strict CSPs and Edge runtimes.
+- **Dynamic Sparse Fieldsets:** It accepts a `requestedFields` array and simply drops the unneeded output wires dynamically at runtime.
+- **The Error Model (Strict):** Like the compiler, uncaught tool errors halt the execution tree and reject the request.
+
+## 3. The GraphQL Adapter
+#### @stackables/bridge-graphql
+
+**The Gateway.** This adapter hooks Bridge directly into standard GraphQL engines like Apollo or GraphQL Yoga.
+
+* **Why use it:** To give your frontend teams the ultimate flexibility and conform strictly to the GraphQL spec.
+* **Implicit Sparse Fieldsets:** You do not need to manually parse a `requestedFields` array here. Because the adapter hooks into the native GraphQL execution tree, sparse fieldsets happen automatically. If a client omits a field from their query, the GraphQL engine simply never calls that resolver, and the underlying Bridge interpreter never evaluates the unneeded tools.
+* **The Error Model (Partial Success):** This is the biggest difference. In GraphQL, if a client requests `user.name` and `user.billingProfile`, and the billing API goes down, the request **does not fail**. The adapter translates the error, nullifies the `billingProfile` field, and appends the error to the GraphQL `errors[]` array. The client still gets the `user.name`.
+
+---
+
+## Decision Guide: Which should I choose?
+
+1. **Are you deploying to Cloudflare Workers or an Edge environment?**
+👉 Use `@stackables/bridge-core`. (The compiler will be blocked by V8 security constraints).
+2. **Are you building a GraphQL API where clients expect partial success and standard `errors[]` arrays?**
+👉 Use `@stackables/bridge-graphql`. (It natively handles GraphQL's graceful error degradation).
+3. **Are you building internal REST microservices, webhooks, or RPC endpoints in Node.js/Bun?**
+👉 Use `@stackables/bridge-compiler`. (You want maximum throughput, strict HTTP 500 error boundaries, and compiled dead-code elimination).
