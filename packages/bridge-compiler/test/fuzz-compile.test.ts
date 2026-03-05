@@ -7,6 +7,7 @@ import type {
   BridgeDocument,
   NodeRef,
   Wire,
+  WireFallback,
 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
@@ -82,8 +83,13 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
       {
         from: fromArb,
         to: toArb,
-        falsyFallback: constantValueArb,
-        nullishFallback: constantValueArb,
+        fallbacks: fc.array(
+          fc.oneof(
+            fc.record({ type: fc.constant<"falsy">("falsy"), value: constantValueArb }),
+            fc.record({ type: fc.constant<"nullish">("nullish"), value: constantValueArb }),
+          ) as fc.Arbitrary<WireFallback>,
+          { minLength: 0, maxLength: 2 },
+        ),
         catchFallback: constantValueArb,
       },
       { requiredKeys: ["from", "to"] }, // Fallbacks are randomly omitted
@@ -263,8 +269,13 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
         fc.record({
           from: flatPathArb.map((path) => inputRef(type, field, path)),
           to: flatPathArb.map((path) => outputRef(type, field, path)),
-          falsyFallback: constantValueArb,
-          nullishFallback: constantValueArb,
+          fallbacks: fc.array(
+            fc.oneof(
+              fc.record({ type: fc.constant<"falsy">("falsy"), value: constantValueArb }),
+              fc.record({ type: fc.constant<"nullish">("nullish"), value: constantValueArb }),
+            ) as fc.Arbitrary<WireFallback>,
+            { minLength: 0, maxLength: 2 },
+          ),
           catchFallback: constantValueArb,
         }),
         {

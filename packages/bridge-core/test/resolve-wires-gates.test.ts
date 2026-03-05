@@ -11,7 +11,7 @@ import {
   applyCatchGate,
 } from "../src/resolveWires.ts";
 import type { TreeContext } from "../src/tree-types.ts";
-import type { Wire, WireFallback } from "../src/types.ts";
+import type { Wire } from "../src/types.ts";
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 

@@ -121,7 +121,7 @@ bridge Query.pricing {
     const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
     const condWire = bridge.wires.find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.falsyFallback, "0");
+    assert.deepStrictEqual(condWire.fallbacks, [{ type: "falsy", value: "0" }]);
   });
 
   test("catch literal fallback stored on conditional wire", () => {
