@@ -18,7 +18,7 @@ import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
 /**
  * A non-constant wire — any Wire variant that carries gate modifiers
- * (`falsyFallback`, `nullishFallbackRef`, `catchFallback`, etc.).
+ * (`falsyFallback`, `nullishFallbackRefs`, `catchFallback`, etc.).
  * Excludes the `{ value: string; to: NodeRef }` constant wire which has no
  * modifier slots.
  */
@@ -40,7 +40,7 @@ type WireWithGates = Exclude<Wire, { value: string }>;
  * Per-wire layers:
  *   Layer 1  — Execution (pullSingle + safe modifier)
  *   Layer 2a — Falsy Gate   (falsyFallbackRefs → falsyFallback / falsyControl)
- *   Layer 2b — Nullish Gate  (nullishFallbackRef / nullishFallback / nullishControl)
+ *   Layer 2b — Nullish Gate  (nullishFallbackRefs / nullishFallback / nullishControl)
  *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
  *
  * After layers 1–2b, the overdefinition boundary (`!= null`) decides whether
@@ -149,7 +149,7 @@ export async function applyFalsyGate(
  * Apply the Nullish Gate (Layer 2b) to a resolved value.
  *
  * If the value is non-nullish the gate is a no-op.  Otherwise `nullishControl`,
- * `nullishFallbackRef`, or `nullishFallback` is applied (in priority order).
+ * `nullishFallbackRefs`, or `nullishFallback` is applied (in priority order).
  */
 export async function applyNullishGate(
   ctx: TreeContext,
@@ -160,7 +160,12 @@ export async function applyNullishGate(
   if (value != null) return value; // non-nullish — gate is closed
 
   if (w.nullishControl) return applyControlFlow(w.nullishControl);
-  if (w.nullishFallbackRef) return ctx.pullSingle(w.nullishFallbackRef, pullChain);
+  if (w.nullishFallbackRefs?.length) {
+    for (const ref of w.nullishFallbackRefs) {
+      const fallback = await ctx.pullSingle(ref, pullChain);
+      if (fallback != null) return fallback;
+    }
+  }
   if (w.nullishFallback != null) return coerceConstant(w.nullishFallback);
   return value;
 }

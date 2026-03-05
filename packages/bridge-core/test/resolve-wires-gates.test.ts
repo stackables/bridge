@@ -136,9 +136,9 @@ describe("applyNullishGate", () => {
     assert.equal(await applyNullishGate(ctx, w, undefined), undefined);
   });
 
-  test("resolves nullishFallbackRef when value is null", async () => {
+  test("resolves nullishFallbackRefs when value is null", async () => {
     const ctx = makeCtx({ "m.fallback": "resolved" });
-    const w = fromWire({ nullishFallbackRef: ref("fallback") });
+    const w = fromWire({ nullishFallbackRefs: [ref("fallback")] });
     assert.equal(await applyNullishGate(ctx, w, null), "resolved");
   });
 
@@ -155,16 +155,16 @@ describe("applyNullishGate", () => {
     assert.equal(await applyNullishGate(ctx, w, null), CONTINUE_SYM);
   });
 
-  test("nullishControl takes priority over nullishFallbackRef", async () => {
+  test("nullishControl takes priority over nullishFallbackRefs", async () => {
     const ctx = makeCtx({ "m.f": "should-not-be-used" });
     const w = fromWire({
       nullishControl: { kind: "break" },
-      nullishFallbackRef: REF,
+      nullishFallbackRefs: [REF],
     });
     assert.equal(await applyNullishGate(ctx, w, null), BREAK_SYM);
   });
 
-  test("forwards pullChain to ctx.pullSingle for nullishFallbackRef", async () => {
+  test("forwards pullChain to ctx.pullSingle for nullishFallbackRefs", async () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
@@ -173,7 +173,7 @@ describe("applyNullishGate", () => {
       },
     };
     const chain = new Set(["some:key"]);
-    const w = fromWire({ nullishFallbackRef: REF });
+    const w = fromWire({ nullishFallbackRefs: [REF] });
     await applyNullishGate(ctx, w, null, chain);
     assert.equal(capturedChain, chain);
   });

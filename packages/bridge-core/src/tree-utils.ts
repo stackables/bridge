@@ -187,7 +187,7 @@ export function getSimplePullRef(w: Wire): NodeRef | null {
       w.falsyControl == null &&
       w.falsyFallback == null &&
       w.nullishControl == null &&
-      !w.nullishFallbackRef &&
+      !w.nullishFallbackRefs?.length &&
       w.nullishFallback == null &&
       !w.catchControl &&
       !w.catchFallbackRef &&

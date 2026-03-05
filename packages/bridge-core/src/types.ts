@@ -47,7 +47,7 @@ export type Wire =
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
+      nullishFallbackRefs?: NodeRef[];
       nullishControl?: ControlFlowInstruction;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -65,7 +65,7 @@ export type Wire =
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
+      nullishFallbackRefs?: NodeRef[];
       nullishControl?: ControlFlowInstruction;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -85,7 +85,7 @@ export type Wire =
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
+      nullishFallbackRefs?: NodeRef[];
       nullishControl?: ControlFlowInstruction;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -105,7 +105,7 @@ export type Wire =
       falsyFallback?: string;
       falsyControl?: ControlFlowInstruction;
       nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
+      nullishFallbackRefs?: NodeRef[];
       nullishControl?: ControlFlowInstruction;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;

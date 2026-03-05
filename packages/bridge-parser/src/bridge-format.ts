@@ -180,7 +180,7 @@ function serializeToolBlock(tool: ToolDef): string {
  * Otherwise delegates to `serializeRef`.
  *
  * This is used to emit `catch handle.path` or `catch pipe:source` for wire
- * `catchFallbackRef` values, or `?? ref` for `nullishFallbackRef`.
+ * `catchFallbackRef` values, or `?? ref` for `nullishFallbackRefs`.
  */
 function serializePipeOrRef(
   ref: NodeRef,
@@ -867,8 +867,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const nuf =
         "nullishControl" in ew && ew.nullishControl
           ? ` ?? ${serializeControl(ew.nullishControl)}`
-          : "nullishFallbackRef" in ew && ew.nullishFallbackRef
-            ? ` ?? ${sPipeOrRef(ew.nullishFallbackRef)}`
+          : "nullishFallbackRefs" in ew && ew.nullishFallbackRefs?.length
+            ? ew.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
             : "nullishFallback" in ew && ew.nullishFallback
               ? ` ?? ${ew.nullishFallback}`
               : "";
@@ -983,8 +983,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const nuf =
         "nullishControl" in w && w.nullishControl
           ? ` ?? ${serializeControl(w.nullishControl)}`
-          : w.nullishFallbackRef
-            ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+          : w.nullishFallbackRefs?.length
+            ? w.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
             : w.nullishFallback
               ? ` ?? ${w.nullishFallback}`
               : "";
@@ -1062,8 +1062,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
     const nuf =
       "nullishControl" in w && w.nullishControl
         ? ` ?? ${serializeControl(w.nullishControl)}`
-        : w.nullishFallbackRef
-          ? ` ?? ${sPipeOrRef(w.nullishFallbackRef)}`
+        : w.nullishFallbackRefs?.length
+            ? w.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
           : w.nullishFallback
             ? ` ?? ${w.nullishFallback}`
             : "";
@@ -1264,8 +1264,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const nuf =
           "nullishControl" in outWire && outWire.nullishControl
             ? ` ?? ${serializeControl(outWire.nullishControl)}`
-            : outWire.nullishFallbackRef
-              ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallbackRefs?.length
+            ? outWire.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
               : outWire.nullishFallback
                 ? ` ?? ${outWire.nullishFallback}`
                 : "";
@@ -1302,8 +1302,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const nuf =
           "nullishControl" in outWire && outWire.nullishControl
             ? ` ?? ${serializeControl(outWire.nullishControl)}`
-            : outWire.nullishFallbackRef
-              ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+            : outWire.nullishFallbackRefs?.length
+            ? outWire.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
               : outWire.nullishFallback
                 ? ` ?? ${outWire.nullishFallback}`
                 : "";
@@ -1359,8 +1359,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const nuf =
         "nullishControl" in outWire && outWire.nullishControl
           ? ` ?? ${serializeControl(outWire.nullishControl)}`
-          : outWire.nullishFallbackRef
-            ? ` ?? ${sPipeOrRef(outWire.nullishFallbackRef)}`
+          : outWire.nullishFallbackRefs?.length
+            ? outWire.nullishFallbackRefs.map(r => ` ?? ${sPipeOrRef(r)}`).join('')
             : outWire.nullishFallback
               ? ` ?? ${outWire.nullishFallback}`
               : "";

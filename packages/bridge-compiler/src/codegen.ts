@@ -708,8 +708,8 @@ class CodegenContext {
         if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
           for (const ref of w.falsyFallbackRefs) keys.add(refTrunkKey(ref));
         }
-        if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-          keys.add(refTrunkKey(w.nullishFallbackRef));
+        if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
+          for (const ref of w.nullishFallbackRefs) keys.add(refTrunkKey(ref));
         }
         if ("catchFallbackRef" in w && w.catchFallbackRef) {
           keys.add(refTrunkKey(w.catchFallbackRef));
@@ -2337,8 +2337,9 @@ class CodegenContext {
     }
 
     // Nullish coalescing (??)
-    if ("nullishFallbackRef" in w && w.nullishFallbackRef) {
-      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(w.nullishFallbackRef)}))`; // lgtm [js/code-injection]
+    if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
+      const refsExpr = w.nullishFallbackRefs.map(r => this.refToExpr(r)).join(' ?? ');
+      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${refsExpr}))`; // lgtm [js/code-injection]
     } else if ("nullishFallback" in w && w.nullishFallback != null) {
       expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(w.nullishFallback)}))`; // lgtm [js/code-injection]
     }
@@ -2603,8 +2604,9 @@ class CodegenContext {
       if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
         for (const ref of w.falsyFallbackRefs) allRefs.add(refTrunkKey(ref));
       }
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef)
-        allRefs.add(refTrunkKey(w.nullishFallbackRef));
+      if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
+        for (const ref of w.nullishFallbackRefs) allRefs.add(refTrunkKey(ref));
+      }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         allRefs.add(refTrunkKey(w.catchFallbackRef));
     };
@@ -2927,8 +2929,9 @@ class CodegenContext {
       collectTrunk(w.from);
       if ("falsyFallbackRefs" in w && w.falsyFallbackRefs)
         w.falsyFallbackRefs.forEach(collectTrunk);
-      if ("nullishFallbackRef" in w && w.nullishFallbackRef)
-        collectTrunk(w.nullishFallbackRef);
+      if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
+        w.nullishFallbackRefs.forEach(collectTrunk);
+      }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         collectTrunk(w.catchFallbackRef);
     }
