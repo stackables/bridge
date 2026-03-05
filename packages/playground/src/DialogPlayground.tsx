@@ -15,7 +15,7 @@ export type DialogPlaygroundProps = {
 function PlaygroundInner({ initialExample = 0 }: { initialExample?: number }) {
   const state = usePlaygroundState(initialExample);
   return (
-    <div className="bridge-playground-root h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
+    <div className="bridge-playground-root h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-auto">
       <Playground {...state} />
     </div>
   );
@@ -33,7 +33,17 @@ export function DialogPlayground({
       <DialogTrigger asChild>
         <Button variant="default">{label}</Button>
       </DialogTrigger>
-      <DialogContent className="max-w-[97vw] w-[97vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden">
+      <DialogContent
+        onInteractOutside={(e) => {
+          // react-resizable-panels handle clicks are sometimes erroneously interpreted
+          // as outside interactions by the dialog when mounted in certain ways (e.g. Shadow DOM)
+          const target = e.target;
+          if (target instanceof Element && target.closest("[data-separator]")) {
+            e.preventDefault();
+          }
+        }}
+        className="max-w-[97vw] w-[97vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden"
+      >
         {open && <PlaygroundInner initialExample={initialExample} />}
       </DialogContent>
     </Dialog>

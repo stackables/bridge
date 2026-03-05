@@ -41,7 +41,7 @@ export function App() {
   const isStandalone = mode === "standalone";
 
   return (
-    <div className="bridge-playground-root h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
+    <div className="h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       {/* ── Header ── */}
       <header className="shrink-0 border-b border-slate-800">
         {/* Row 1: logo + (desktop: example picker + info) + share */}

@@ -8,5 +8,11 @@ import "@stackables/bridge-playground/style.css";
  * Used in documentation to provide interactive examples.
  */
 export default function MiniPlaygroundModal() {
-  return <DialogPlayground />;
+  // not-content prevents Starlight's .sl-markdown-content styles (e.g. button
+  // height overrides, typography resets) from affecting the playground.
+  return (
+    <div className="not-content">
+      <DialogPlayground />
+    </div>
+  );
 }

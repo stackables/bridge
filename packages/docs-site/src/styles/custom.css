@@ -1,6 +1,7 @@
+@layer theme, base, starlight, catppuccin, components, utilities;
 @import "tailwindcss";
 /* Source playground components for Tailwind to detect their classes */
-@source "../../playground/src";
+/* @source "../../../playground/src"; */
 @source "../components";
 
 @theme {

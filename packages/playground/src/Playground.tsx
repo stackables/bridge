@@ -333,7 +333,7 @@ export function Playground({
   return (
     <>
       {/* ── Mobile layout: vertical scrollable stack ── */}
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 md:hidden">
+      <div className="flex-1 p-3 flex flex-col gap-3 md:hidden">
         {/* Schema panel — hidden in standalone mode, shows mode toggle */}
         {!isStandalone ? (
           <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
