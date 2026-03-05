@@ -29,10 +29,10 @@
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-stdlib": "workspace:*",
-    "chevrotain": "^11.1.2"
+    "chevrotain": "^11.2.0"
   },
   "devDependencies": {
-    "@types/node": "^25.3.2",
+    "@types/node": "^25.3.3",
     "typescript": "^5.9.3"
   },
   "publishConfig": {

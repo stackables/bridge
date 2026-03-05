@@ -16,7 +16,16 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
   ...args: string[]
 ) => (...args: unknown[]) => Promise<unknown>;
 
-const identifierArb = fc.stringMatching(/^[a-zA-Z_][a-zA-Z0-9_]{0,20}$/);
+const forbiddenPathSegments = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+]);
+
+const identifierArb = fc
+  .stringMatching(/^[a-zA-Z_][a-zA-Z0-9_]{0,20}$/)
+  // Runtime blocks unsafe traversal segments; fuzz should stay in valid domain.
+  .filter((segment) => !forbiddenPathSegments.has(segment));
 const canonicalIdentifierArb = fc.constantFrom(
   "a",
   "b",

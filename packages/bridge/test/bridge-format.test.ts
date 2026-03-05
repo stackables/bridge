@@ -1266,3 +1266,19 @@ bridge Query.test {
     );
   });
 });
+
+describe("serializeBridge string keyword quoting", () => {
+  test("keeps reserved-word strings quoted in constant wires", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.value = "const"
+}`;
+
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes('o.value = "const"'), serialized);
+    assert.doesNotThrow(() => parseBridge(serialized));
+  });
+});

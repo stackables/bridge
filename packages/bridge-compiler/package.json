@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@stackables/bridge-parser": "workspace:*",
-    "@types/node": "^25.3.2",
+    "@types/node": "^25.3.3",
     "fast-check": "^4.5.3",
     "typescript": "^5.9.3"
   },
