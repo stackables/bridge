@@ -2206,6 +2206,12 @@ function processElementLines(
         const spreadLineNum = line(findFirstToken(spreadLine));
         const sourceNode = sub(spreadLine, "spreadSource")!;
         const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        // Propagate safe navigation (?.) flag from source expression
+        const headNode = sub(sourceNode, "head")!;
+        const pipeNodes = subs(sourceNode, "pipeSegment");
+        const actualNode =
+          pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
+        const { safe: spreadSafe } = extractAddressPath(actualNode);
         wires.push({
           from: fromRef,
           to: {
@@ -2215,6 +2221,7 @@ function processElementLines(
             element: true,
             path: elemToPath,
           },
+          ...(spreadSafe ? { safe: true as const } : {}),
         });
       }
       processElementScopeLines(
@@ -2346,6 +2353,12 @@ function processElementScopeLines(
         const spreadLineNum = line(findFirstToken(spreadLine));
         const sourceNode = sub(spreadLine, "spreadSource")!;
         const fromRef = buildSourceExpr(sourceNode, spreadLineNum, iterName);
+        // Propagate safe navigation (?.) flag from source expression
+        const headNode = sub(sourceNode, "head")!;
+        const pipeNodes = subs(sourceNode, "pipeSegment");
+        const actualNode =
+          pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
+        const { safe: spreadSafe } = extractAddressPath(actualNode);
         wires.push({
           from: fromRef,
           to: {
@@ -2355,6 +2368,7 @@ function processElementScopeLines(
             element: true,
             path: spreadToPath,
           },
+          ...(spreadSafe ? { safe: true as const } : {}),
         });
       }
       processElementScopeLines(
