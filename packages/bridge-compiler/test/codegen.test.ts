@@ -478,6 +478,51 @@ bridge Query.det {
   });
 });
 
+describe("AOT codegen: requestedFields matching", () => {
+  const bridgeText = `version 1.5
+bridge Query.profile {
+  with input as i
+  with output as o
+
+  o.name <- i.name
+  o.meta.age <- i.age
+  o.meta.deep.city <- i.city
+}`;
+
+  test("parent field pattern includes nested child fields", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37, deep: { city: "Tallinn" } } });
+  });
+
+  test("nested field pattern keeps required parent container path", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta.age"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37 } });
+  });
+
+  test("star wildcard only includes one level under the prefix", async () => {
+    const document = parseBridgeFormat(bridgeText);
+    const { code } = compileBridge(document, {
+      operation: "Query.profile",
+      requestedFields: ["meta.*"],
+    });
+    const fn = buildAotFn(code);
+    const data = await fn({ name: "Ada", age: 37, city: "Tallinn" }, {}, {});
+    assert.deepEqual(data, { meta: { age: 37 } });
+  });
+});
+
 // ── Ternary / conditional wires ──────────────────────────────────────────────
 
 describe("AOT codegen: conditional wires", () => {
