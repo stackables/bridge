@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
+  parseBridgeDiagnostics,
   parsePath,
   serializeBridge,
 } from "../src/index.ts";
@@ -1280,5 +1281,46 @@ bridge Query.test {
     const serialized = serializeBridge(parseBridge(src));
     assert.ok(serialized.includes('o.value = "const"'), serialized);
     assert.doesNotThrow(() => parseBridge(serialized));
+  });
+});
+
+describe("parser diagnostics and serializer edge cases", () => {
+  test("parseBridgeDiagnostics reports lexer errors with a range", () => {
+    const result = parseBridgeDiagnostics("version 1.5\nbridge Query.x {\n  with output as o\n  o.x = \"ok\"\n}\n§");
+    assert.ok(result.diagnostics.length > 0);
+    assert.equal(result.diagnostics[0]?.severity, "error");
+    assert.ok(result.diagnostics[0]?.range.start.line != null);
+    assert.ok(result.diagnostics[0]?.range.start.character != null);
+  });
+
+  test("reserved source identifier is rejected as const name", () => {
+    assert.throws(
+      () => parseBridge('version 1.5\nconst input = "x"'),
+      /reserved source identifier.*const name/i,
+    );
+  });
+
+  test("serializeBridge keeps passthrough shorthand", () => {
+    const src = "version 1.5\nbridge Query.upper with std.str.toUpperCase";
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(
+      serialized.includes("bridge Query.upper with std.str.toUpperCase"),
+      serialized,
+    );
+  });
+
+  test("serializeBridge uses compact default handle bindings", () => {
+    const src = `version 1.5
+bridge Query.defaults {
+  with input
+  with output
+  with const
+
+  output.value <- input.name
+}`;
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes("  with input\n"), serialized);
+    assert.ok(serialized.includes("  with output\n"), serialized);
+    assert.ok(serialized.includes("  with const\n"), serialized);
   });
 });
