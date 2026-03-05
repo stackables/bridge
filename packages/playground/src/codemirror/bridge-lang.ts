@@ -353,6 +353,12 @@ function token(stream: StringStream, state: State): string | null {
     return "builtin";
   }
 
+  // ── Spread operator (...handle) ───────────────────────────────────────
+  if (stream.match(/^\.\.\./)) {
+    state.lineStart = false;
+    return "operator";
+  }
+
   // ── Dot-prefixed property — only when first token on the line ─────────
   //    .baseUrl = "..."   .headers.Authorization <- ctx.token
   if (state.lineStart && ch === ".") {

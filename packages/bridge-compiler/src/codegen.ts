@@ -1348,12 +1348,23 @@ class CodegenContext {
     const arrayIterators = this.bridge.arrayIterators ?? {};
     const isRootArray = "" in arrayIterators;
 
-    // Check for root passthrough (wire with empty path) — but not if it's a root array source
-    const rootWire = outputWires.find((w) => w.to.path.length === 0);
-    if (rootWire && !isRootArray) {
-      lines.push(`  return ${this.wireToExpr(rootWire)};`);
+    // Separate root wires into passthrough vs spread
+    const rootWires = outputWires.filter((w) => w.to.path.length === 0);
+    const spreadRootWires = rootWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread,
+    );
+    const passthroughRootWire = rootWires.find(
+      (w) => !("from" in w && "spread" in w && w.spread),
+    );
+
+    // Passthrough (non-spread root wire) — return directly
+    if (passthroughRootWire && !isRootArray) {
+      lines.push(`  return ${this.wireToExpr(passthroughRootWire)};`);
       return;
     }
+
+    // Check for root passthrough (wire with empty path) — but not if it's a root array source
+    const rootWire = rootWires[0]; // for backwards compat with array handling below
 
     // Handle root array output (o <- src.items[] as item { ... })
     if (isRootArray && rootWire) {
@@ -1461,6 +1472,13 @@ class CodegenContext {
       } else if (arrayFields.has(topField) && w.to.path.length === 1) {
         // Root wire for an array field
         arraySourceWires.set(topField, w);
+      } else if (
+        "from" in w &&
+        "spread" in w &&
+        w.spread &&
+        w.to.path.length === 0
+      ) {
+        // Spread root wire — handled separately via spreadRootWires
       } else {
         scalarWires.push(w);
       }
@@ -1470,11 +1488,42 @@ class CodegenContext {
     interface TreeNode {
       expr?: string;
       terminal?: boolean;
+      spreadExprs?: string[];
       children: Map<string, TreeNode>;
     }
     const tree: TreeNode = { children: new Map() };
 
-    for (const w of scalarWires) {
+    // First pass: handle nested spread wires (spread with path.length > 0)
+    const nestedSpreadWires = scalarWires.filter(
+      (w) => "from" in w && "spread" in w && w.spread && w.to.path.length > 0,
+    );
+    const normalScalarWires = scalarWires.filter(
+      (w) => !("from" in w && "spread" in w && w.spread),
+    );
+
+    // Add nested spread expressions to tree nodes
+    for (const w of nestedSpreadWires) {
+      const path = w.to.path;
+      let current = tree;
+      // Navigate to parent of the target
+      for (let i = 0; i < path.length - 1; i++) {
+        const seg = path[i]!;
+        if (!current.children.has(seg)) {
+          current.children.set(seg, { children: new Map() });
+        }
+        current = current.children.get(seg)!;
+      }
+      const lastSeg = path[path.length - 1]!;
+      if (!current.children.has(lastSeg)) {
+        current.children.set(lastSeg, { children: new Map() });
+      }
+      const node = current.children.get(lastSeg)!;
+      // Add spread expression to this node
+      if (!node.spreadExprs) node.spreadExprs = [];
+      node.spreadExprs.push(this.wireToExpr(w));
+    }
+
+    for (const w of normalScalarWires) {
       const path = w.to.path;
       let current = tree;
       for (let i = 0; i < path.length - 1; i++) {
@@ -1561,7 +1610,9 @@ class CodegenContext {
     }
 
     // Serialize the tree to a return statement
-    const objStr = this.serializeOutputTree(tree, 4);
+    // Include spread expressions at the start if present
+    const spreadExprs = spreadRootWires.map((w) => this.wireToExpr(w));
+    const objStr = this.serializeOutputTree(tree, 4, spreadExprs);
     lines.push(`  return ${objStr};`);
   }
 
@@ -1571,15 +1622,37 @@ class CodegenContext {
       children: Map<string, { expr?: string; children: Map<string, any> }>;
     },
     indent: number,
+    spreadExprs?: string[],
   ): string {
     const pad = " ".repeat(indent);
     const entries: string[] = [];
 
+    // Add spread expressions first (they come before field overrides)
+    if (spreadExprs) {
+      for (const expr of spreadExprs) {
+        entries.push(`${pad}...${expr}`);
+      }
+    }
+
     for (const [key, child] of node.children) {
-      if (child.expr != null && child.children.size === 0) {
+      // Check if child has spread expressions
+      const childSpreadExprs = (child as { spreadExprs?: string[] })
+        .spreadExprs;
+
+      if (
+        child.expr != null &&
+        child.children.size === 0 &&
+        !childSpreadExprs
+      ) {
+        // Simple leaf with just an expression
         entries.push(`${pad}${JSON.stringify(key)}: ${child.expr}`);
-      } else if (child.children.size > 0 && child.expr == null) {
-        const nested = this.serializeOutputTree(child, indent + 2);
+      } else if (childSpreadExprs || child.children.size > 0) {
+        // Nested object: may have spreads, children, or both
+        const nested = this.serializeOutputTree(
+          child,
+          indent + 2,
+          childSpreadExprs,
+        );
         entries.push(`${pad}${JSON.stringify(key)}: ${nested}`);
       } else {
         // Has both expr and children — use expr (children override handled elsewhere)

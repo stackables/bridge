@@ -936,6 +936,147 @@ bridge Query.test {
   });
 });
 
+// ── Spread into output ────────────────────────────────────────────────────────
+
+forEachEngine("path scoping – spread into output", (run, _ctx) => {
+  test("basic spread of input into output", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, { name: "Hello Bridge" });
+  });
+
+  test("spread with explicit field overrides", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .message <- i.name
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, {
+      name: "Hello Bridge",
+      message: "Hello Bridge",
+    });
+  });
+
+  test("spread with multiple sources in order", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i.first
+    ...i.second
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      first: { a: 1, b: 2 },
+      second: { b: 3, c: 4 },
+    });
+    // second should override b from first
+    assert.deepStrictEqual(result.data, { a: 1, b: 3, c: 4 });
+  });
+
+  test("spread with explicit override taking precedence", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .name = "overridden"
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      name: "original",
+      age: 30,
+    });
+    // explicit .name should override spread
+    assert.deepStrictEqual(result.data, { name: "overridden", age: 30 });
+  });
+
+  test("spread with deep path source", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o {
+    ...i.user.profile
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      user: { profile: { email: "test@test.com", verified: true } },
+    });
+    assert.deepStrictEqual(result.data, {
+      email: "test@test.com",
+      verified: true,
+    });
+  });
+
+  test("spread combined with pipe operators", async () => {
+    const bridge = `version 1.5
+
+bridge Query.greet {
+  with std.str.toUpperCase as uc
+  with std.str.toLowerCase as lc
+  with input as i
+  with output as o
+
+  o {
+    ...i
+    .upper <- uc:i.name
+    .lower <- lc:i.name
+  }
+}`;
+    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
+    assert.deepStrictEqual(result.data, {
+      name: "Hello Bridge",
+      upper: "HELLO BRIDGE",
+      lower: "hello bridge",
+    });
+  });
+
+  test("spread into nested output scope", async () => {
+    const bridge = `version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result {
+    ...i.data
+    .extra = "added"
+  }
+}`;
+    const result = await run(bridge, "Query.test", {
+      data: { x: 1, y: 2 },
+    });
+    assert.deepStrictEqual(result.data, {
+      result: { x: 1, y: 2, extra: "added" },
+    });
+  });
+});
+
 // ── Null intermediate path access ────────────────────────────────────────────
 
 forEachEngine("path traversal: null intermediate segment", (run, _ctx) => {
