@@ -1,0 +1,78 @@
+version 1.5
+
+# ── Dependency tools ──────────────────────────────────────────────────────
+
+tool fetchSimple from std.httpCall {
+  .baseUrl = "http://dependency:8080"
+  .method = GET
+  .path = /api/simple
+  .cache = 0
+}
+
+tool fetchList from std.httpCall {
+  .baseUrl = "http://dependency:8080"
+  .method = GET
+  .path = /api/list
+  .cache = 0
+}
+
+tool fetchCatalog from std.httpCall {
+  .baseUrl = "http://dependency:8080"
+  .method = GET
+  .path = /api/catalog
+  .cache = 0
+}
+
+# ── Simple: fetch one object, map fields ──────────────────────────────────
+
+bridge Query.simple {
+  with fetchSimple as emp
+  with output as o
+
+  o.id <- emp.id
+  o.firstName <- emp.first_name
+  o.lastName <- emp.last_name
+  o.email <- emp.email_address
+  o.role <- emp.role
+  o.department <- emp.department_info.name
+  o.building <- emp.department_info.building
+}
+
+# ── Array: fetch list, map 1000 items ────────────────────────────────────
+
+bridge Query.arrayMap {
+  with fetchList as list
+  with output as o
+
+  o.items <- list[] as item {
+    .id <- item.item_id
+    .name <- item.item_name
+    .category <- item.item_category
+    .price <- item.unit_price
+  }
+}
+
+# ── Complex: 3 parallel fetches + array mapping + multi-source merge ──────
+
+bridge Query.complex {
+  with fetchSimple as emp
+  with fetchList as list
+  with fetchCatalog as catalog
+  with output as o
+
+  # Flat fields from the simple endpoint
+  o.assignee <- emp.first_name
+  o.email <- emp.email_address
+  o.department <- emp.department_info.name
+
+  # Pull from list so the fetch isn't optimised out
+  o.topItem <- list[0].item_name
+
+  # Array mapping from catalog (1000 entries)
+  o.entries <- catalog[] as entry {
+    .entryId <- entry.entry_id
+    .variantId <- entry.variant_id
+    .quantity <- entry.quantity
+    .warehouse <- entry.warehouse
+  }
+}

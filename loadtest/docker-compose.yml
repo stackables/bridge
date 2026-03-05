@@ -31,6 +31,22 @@ services:
       retries: 10
       start_period: 5s
 
+  bridge-compiler:
+    build: ./bridge-compiler
+    ports: ["3004:3000"]
+    depends_on:
+      dependency: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://localhost:3000/health'').then(r=>{if(!r.ok)throw r.status})"',
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   handcoded:
     build: ./handcoded
     ports: ["3002:3000"]
@@ -77,6 +93,7 @@ services:
       STAGE_DURATION: "${STAGE_DURATION:-30s}"
     depends_on:
       bridge-standalone: { condition: service_healthy }
+      bridge-compiler: { condition: service_healthy }
       handcoded: { condition: service_healthy }
       bridge-graphql: { condition: service_healthy }
     profiles: [test]

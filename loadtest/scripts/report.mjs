@@ -120,11 +120,17 @@ const targets = [...new Set(allKeys.map((k) => k.split("/")[0]))];
 const TARGET_LABELS = {
   handcoded: "Hand-coded Node.js",
   "bridge-standalone": "Bridge (Standalone)",
+  "bridge-compiler": "Bridge (Compiler)",
   "bridge-graphql": "Bridge (GraphQL)",
 };
 
 // Preferred order: handcoded first (baseline), then bridge variants
-const TARGET_ORDER = ["handcoded", "bridge-standalone", "bridge-graphql"];
+const TARGET_ORDER = [
+  "handcoded",
+  "bridge-standalone",
+  "bridge-compiler",
+  "bridge-graphql",
+];
 const orderedTargets = TARGET_ORDER.filter((t) => targets.includes(t));
 
 // ── Detect environment ──────────────────────────────────────────────────

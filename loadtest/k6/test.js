@@ -28,13 +28,20 @@ import { Trend, Counter } from "k6/metrics";
 const TARGETS = {
   handcoded: "http://handcoded:3000",
   "bridge-standalone": "http://bridge-standalone:3000",
+  "bridge-compiler": "http://bridge-compiler:3000",
   "bridge-graphql": "http://bridge-graphql:3000",
 };
 
-const TARGET_KEYS = ["handcoded", "bridge_standalone", "bridge_graphql"];
+const TARGET_KEYS = [
+  "handcoded",
+  "bridge_standalone",
+  "bridge_compiler",
+  "bridge_graphql",
+];
 const TARGET_MAP = {
   handcoded: "handcoded",
   bridge_standalone: "bridge-standalone",
+  bridge_compiler: "bridge-compiler",
   bridge_graphql: "bridge-graphql",
 };
 
@@ -141,6 +148,10 @@ export function handcoded() {
 
 export function bridge_standalone() {
   hitTarget("bridge_standalone", __ENV.STAGE || "unknown");
+}
+
+export function bridge_compiler() {
+  hitTarget("bridge_compiler", __ENV.STAGE || "unknown");
 }
 
 export function bridge_graphql() {
