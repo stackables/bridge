@@ -331,7 +331,7 @@ bridge Query.refFallback {
                 field: "nullishProbe",
                 path: ["k"],
               },
-              nullishFallback: "null",
+              fallbacks: [{ type: "nullish", value: "null" }],
             },
           ],
         },

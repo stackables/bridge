@@ -26,10 +26,10 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.falsyControl, {
-      kind: "throw",
-      message: "name is required",
-    });
+    assert.deepStrictEqual(pullWire.fallbacks, [{
+      type: "falsy",
+      control: { kind: "throw", message: "name is required" },
+    }]);
   });
 
   test("panic on ?? gate", () => {
@@ -45,10 +45,10 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.nullishControl, {
-      kind: "panic",
-      message: "fatal: name cannot be null",
-    });
+    assert.deepStrictEqual(pullWire.fallbacks, [{
+      type: "nullish",
+      control: { kind: "panic", message: "fatal: name cannot be null" },
+    }]);
   });
 
   test("continue on ?? gate", () => {
@@ -69,7 +69,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
+    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "continue" } }]);
   });
 
   test("break on ?? gate", () => {
@@ -90,7 +90,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.nullishControl, { kind: "break" });
+    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "break" } }]);
   });
 
   test("throw on catch gate", () => {
@@ -160,10 +160,10 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.falsyControl, {
-      kind: "throw",
-      message: "name is required",
-    });
+    assert.deepStrictEqual(pullWire.fallbacks, [{
+      type: "falsy",
+      control: { kind: "throw", message: "name is required" },
+    }]);
   });
 
   test("panic on ?? gate round-trips", () => {
@@ -186,10 +186,10 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.nullishControl, {
-      kind: "panic",
-      message: "fatal",
-    });
+    assert.deepStrictEqual(pullWire.fallbacks, [{
+      type: "nullish",
+      control: { kind: "panic", message: "fatal" },
+    }]);
   });
 
   test("continue on ?? gate round-trips", () => {
@@ -217,7 +217,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.nullishControl, { kind: "continue" });
+    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "continue" } }]);
   });
 
   test("break on catch gate round-trips", () => {

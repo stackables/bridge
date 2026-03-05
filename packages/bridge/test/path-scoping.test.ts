@@ -163,7 +163,7 @@ bridge Query.test {
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
-    assert.equal(nameWire.falsyFallback, '"anonymous"');
+    assert.deepStrictEqual(nameWire.fallbacks, [{ type: "falsy", value: '"anonymous"' }]);
 
     const valueWire = pullWires.find(
       (w) => w.to.path.join(".") === "data.value",

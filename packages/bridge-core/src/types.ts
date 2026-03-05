@@ -25,6 +25,23 @@ export type NodeRef = {
 };
 
 /**
+ * A single entry in a wire's fallback chain.
+ *
+ * Each entry is either a falsy gate (`||`) or a nullish gate (`??`).
+ * The unified array allows mixing `||` and `??` in any order:
+ *
+ *   `o.x <- a.x || b.x ?? "default" || c.x`
+ *
+ * Exactly one of `ref`, `value`, or `control` should be set.
+ */
+export interface WireFallback {
+  type: "falsy" | "nullish";
+  ref?: NodeRef;
+  value?: string;
+  control?: ControlFlowInstruction;
+}
+
+/**
  * A wire connects a data source (from) to a data sink (to).
  * Execution is pull-based: when "to" is demanded, "from" is resolved.
  *
@@ -43,12 +60,7 @@ export type Wire =
       /** When true, this wire merges source properties into target (from `...source` syntax). */
       spread?: true;
       safe?: true;
-      falsyFallbackRefs?: NodeRef[];
-      falsyFallback?: string;
-      falsyControl?: ControlFlowInstruction;
-      nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
-      nullishControl?: ControlFlowInstruction;
+      fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -61,12 +73,7 @@ export type Wire =
       elseRef?: NodeRef;
       elseValue?: string;
       to: NodeRef;
-      falsyFallbackRefs?: NodeRef[];
-      falsyFallback?: string;
-      falsyControl?: ControlFlowInstruction;
-      nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
-      nullishControl?: ControlFlowInstruction;
+      fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -81,12 +88,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
-      falsyFallbackRefs?: NodeRef[];
-      falsyFallback?: string;
-      falsyControl?: ControlFlowInstruction;
-      nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
-      nullishControl?: ControlFlowInstruction;
+      fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -101,12 +103,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
-      falsyFallbackRefs?: NodeRef[];
-      falsyFallback?: string;
-      falsyControl?: ControlFlowInstruction;
-      nullishFallback?: string;
-      nullishFallbackRef?: NodeRef;
-      nullishControl?: ControlFlowInstruction;
+      fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;

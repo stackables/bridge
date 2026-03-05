@@ -7,8 +7,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BREAK_SYM, CONTINUE_SYM } from "../src/tree-types.ts";
 import {
-  applyFalsyGate,
-  applyNullishGate,
+  applyFallbackGates,
   applyCatchGate,
 } from "../src/resolveWires.ts";
 import type { TreeContext } from "../src/tree-types.ts";
@@ -43,66 +42,72 @@ function fromWire(overrides: Partial<TestWire> = {}): TestWire {
   return { from: REF, to: REF, ...overrides } as TestWire;
 }
 
-// ── applyFalsyGate ────────────────────────────────────────────────────────────
+// ── applyFallbackGates — falsy (||) ─────────────────────────────────────────
 
-describe("applyFalsyGate", () => {
+describe("applyFallbackGates — falsy (||)", () => {
   test("passes through a truthy value unchanged", async () => {
     const ctx = makeCtx();
     const w = fromWire();
-    assert.equal(await applyFalsyGate(ctx, w, "hello"), "hello");
-    assert.equal(await applyFalsyGate(ctx, w, 42), 42);
-    assert.equal(await applyFalsyGate(ctx, w, true), true);
-    assert.deepEqual(await applyFalsyGate(ctx, w, { x: 1 }), { x: 1 });
+    assert.equal(await applyFallbackGates(ctx, w, "hello"), "hello");
+    assert.equal(await applyFallbackGates(ctx, w, 42), 42);
+    assert.equal(await applyFallbackGates(ctx, w, true), true);
+    assert.deepEqual(await applyFallbackGates(ctx, w, { x: 1 }), { x: 1 });
   });
 
   test("returns falsy value when no fallback is configured", async () => {
     const ctx = makeCtx();
     const w = fromWire();
-    assert.equal(await applyFalsyGate(ctx, w, 0), 0);
-    assert.equal(await applyFalsyGate(ctx, w, ""), "");
-    assert.equal(await applyFalsyGate(ctx, w, false), false);
-    assert.equal(await applyFalsyGate(ctx, w, null), null);
+    assert.equal(await applyFallbackGates(ctx, w, 0), 0);
+    assert.equal(await applyFallbackGates(ctx, w, ""), "");
+    assert.equal(await applyFallbackGates(ctx, w, false), false);
+    assert.equal(await applyFallbackGates(ctx, w, null), null);
   });
 
-  test("returns first truthy ref from falsyFallbackRefs", async () => {
+  test("returns first truthy ref from falsy fallback refs", async () => {
     const ctx = makeCtx({ "m.a": null, "m.b": "found" });
-    const w = fromWire({ falsyFallbackRefs: [ref("a"), ref("b")] });
-    assert.equal(await applyFalsyGate(ctx, w, null), "found");
+    const w = fromWire({ fallbacks: [
+      { type: "falsy", ref: ref("a") },
+      { type: "falsy", ref: ref("b") },
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "found");
   });
 
-  test("skips falsy refs and falls through to falsyFallback constant", async () => {
+  test("skips falsy refs and falls through to falsy constant", async () => {
     const ctx = makeCtx({ "m.a": 0 });
-    const w = fromWire({ falsyFallbackRefs: [ref("a")], falsyFallback: "42" });
-    assert.equal(await applyFalsyGate(ctx, w, null), 42);
+    const w = fromWire({ fallbacks: [
+      { type: "falsy", ref: ref("a") },
+      { type: "falsy", value: "42" },
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), 42);
   });
 
-  test("applies falsyFallback constant when value is falsy and no refs given", async () => {
+  test("applies falsy constant when value is falsy and no refs given", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ falsyFallback: "default" });
-    assert.equal(await applyFalsyGate(ctx, w, null), "default");
-    assert.equal(await applyFalsyGate(ctx, w, false), "default");
-    assert.equal(await applyFalsyGate(ctx, w, ""), "default");
+    const w = fromWire({ fallbacks: [{ type: "falsy", value: "default" }] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "default");
+    assert.equal(await applyFallbackGates(ctx, w, false), "default");
+    assert.equal(await applyFallbackGates(ctx, w, ""), "default");
   });
 
-  test("applies falsyControl when value is falsy", async () => {
+  test("applies falsy control when value is falsy", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ falsyControl: { kind: "continue" } });
-    assert.equal(await applyFalsyGate(ctx, w, 0), CONTINUE_SYM);
+    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "continue" } }] });
+    assert.equal(await applyFallbackGates(ctx, w, 0), CONTINUE_SYM);
   });
 
-  test("falsyControl kind=break returns BREAK_SYM", async () => {
+  test("falsy control kind=break returns BREAK_SYM", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ falsyControl: { kind: "break" } });
-    assert.equal(await applyFalsyGate(ctx, w, false), BREAK_SYM);
+    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "break" } }] });
+    assert.equal(await applyFallbackGates(ctx, w, false), BREAK_SYM);
   });
 
-  test("falsyControl kind=throw throws an error", async () => {
+  test("falsy control kind=throw throws an error", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ falsyControl: { kind: "throw", message: "boom" } });
-    await assert.rejects(() => applyFalsyGate(ctx, w, null), /boom/);
+    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "throw", message: "boom" } }] });
+    await assert.rejects(() => applyFallbackGates(ctx, w, null), /boom/);
   });
 
-  test("forwards pullChain to ctx.pullSingle for falsyFallbackRefs", async () => {
+  test("forwards pullChain to ctx.pullSingle for falsy ref", async () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
@@ -111,60 +116,60 @@ describe("applyFalsyGate", () => {
       },
     };
     const chain = new Set(["some:key"]);
-    const w = fromWire({ falsyFallbackRefs: [ref("a")] });
-    await applyFalsyGate(ctx, w, null, chain);
+    const w = fromWire({ fallbacks: [{ type: "falsy", ref: ref("a") }] });
+    await applyFallbackGates(ctx, w, null, chain);
     assert.equal(capturedChain, chain);
   });
 });
 
-// ── applyNullishGate ──────────────────────────────────────────────────────────
+// ── applyFallbackGates — nullish (??) ────────────────────────────────────────
 
-describe("applyNullishGate", () => {
+describe("applyFallbackGates — nullish (??)", () => {
   test("passes through a non-nullish value unchanged", async () => {
     const ctx = makeCtx();
-    const w = fromWire();
-    assert.equal(await applyNullishGate(ctx, w, "hello"), "hello");
-    assert.equal(await applyNullishGate(ctx, w, 0), 0);
-    assert.equal(await applyNullishGate(ctx, w, false), false);
-    assert.equal(await applyNullishGate(ctx, w, ""), "");
+    const w = fromWire({ fallbacks: [{ type: "nullish", value: "99" }] });
+    assert.equal(await applyFallbackGates(ctx, w, "hello"), "hello");
+    assert.equal(await applyFallbackGates(ctx, w, 0), 0);
+    assert.equal(await applyFallbackGates(ctx, w, false), false);
+    assert.equal(await applyFallbackGates(ctx, w, ""), "");
   });
 
   test("returns null/undefined when no fallback is configured", async () => {
     const ctx = makeCtx();
     const w = fromWire();
-    assert.equal(await applyNullishGate(ctx, w, null), null);
-    assert.equal(await applyNullishGate(ctx, w, undefined), undefined);
+    assert.equal(await applyFallbackGates(ctx, w, null), null);
+    assert.equal(await applyFallbackGates(ctx, w, undefined), undefined);
   });
 
-  test("resolves nullishFallbackRef when value is null", async () => {
+  test("resolves nullish ref when value is null", async () => {
     const ctx = makeCtx({ "m.fallback": "resolved" });
-    const w = fromWire({ nullishFallbackRef: ref("fallback") });
-    assert.equal(await applyNullishGate(ctx, w, null), "resolved");
+    const w = fromWire({ fallbacks: [{ type: "nullish", ref: ref("fallback") }] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "resolved");
   });
 
-  test("applies nullishFallback constant when value is null", async () => {
+  test("applies nullish constant when value is null", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ nullishFallback: "99" });
-    assert.equal(await applyNullishGate(ctx, w, null), 99);
-    assert.equal(await applyNullishGate(ctx, w, undefined), 99);
+    const w = fromWire({ fallbacks: [{ type: "nullish", value: "99" }] });
+    assert.equal(await applyFallbackGates(ctx, w, null), 99);
+    assert.equal(await applyFallbackGates(ctx, w, undefined), 99);
   });
 
-  test("applies nullishControl when value is null", async () => {
+  test("applies nullish control when value is null", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ nullishControl: { kind: "continue" } });
-    assert.equal(await applyNullishGate(ctx, w, null), CONTINUE_SYM);
+    const w = fromWire({ fallbacks: [{ type: "nullish", control: { kind: "continue" } }] });
+    assert.equal(await applyFallbackGates(ctx, w, null), CONTINUE_SYM);
   });
 
-  test("nullishControl takes priority over nullishFallbackRef", async () => {
+  test("nullish control takes priority (returns immediately)", async () => {
     const ctx = makeCtx({ "m.f": "should-not-be-used" });
-    const w = fromWire({
-      nullishControl: { kind: "break" },
-      nullishFallbackRef: REF,
-    });
-    assert.equal(await applyNullishGate(ctx, w, null), BREAK_SYM);
+    const w = fromWire({ fallbacks: [
+      { type: "nullish", control: { kind: "break" } },
+      { type: "nullish", ref: REF },
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), BREAK_SYM);
   });
 
-  test("forwards pullChain to ctx.pullSingle for nullishFallbackRef", async () => {
+  test("forwards pullChain to ctx.pullSingle for nullish ref", async () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
@@ -173,9 +178,59 @@ describe("applyNullishGate", () => {
       },
     };
     const chain = new Set(["some:key"]);
-    const w = fromWire({ nullishFallbackRef: REF });
-    await applyNullishGate(ctx, w, null, chain);
+    const w = fromWire({ fallbacks: [{ type: "nullish", ref: REF }] });
+    await applyFallbackGates(ctx, w, null, chain);
     assert.equal(capturedChain, chain);
+  });
+});
+
+// ── applyFallbackGates — mixed chains ────────────────────────────────────────
+
+describe("applyFallbackGates — mixed || and ??", () => {
+  test("A ?? B || C — nullish then falsy", async () => {
+    const ctx = makeCtx({ "m.b": 0, "m.c": "found" });
+    const w = fromWire({ fallbacks: [
+      { type: "nullish", ref: ref("b") },   // ?? B  → 0 (non-nullish, stops ?? but falsy)
+      { type: "falsy", ref: ref("c") },     // || C  → "found"
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "found");
+  });
+
+  test("A || B ?? C — falsy then nullish", async () => {
+    const ctx = makeCtx({ "m.b": null, "m.c": "fallback" });
+    const w = fromWire({ fallbacks: [
+      { type: "falsy", ref: ref("b") },     // || B  → null (still falsy)
+      { type: "nullish", ref: ref("c") },   // ?? C  → "fallback"
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, ""), "fallback");
+  });
+
+  test("A ?? B || C ?? D — four-item chain", async () => {
+    const ctx = makeCtx({ "m.b": null, "m.c": null });
+    const w = fromWire({ fallbacks: [
+      { type: "nullish", ref: ref("b") },   // ?? B  → null (still nullish)
+      { type: "falsy", ref: ref("c") },     // || C  → null (still falsy)
+      { type: "nullish", value: "final" },   // ?? D  → "final"
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "final");
+  });
+
+  test("mixed chain stops when value becomes truthy and non-nullish", async () => {
+    const ctx = makeCtx({ "m.b": "good" });
+    const w = fromWire({ fallbacks: [
+      { type: "nullish", ref: ref("b") },   // ?? B  → "good"
+      { type: "falsy", value: "unused" },    // || ... gate closed, value is truthy
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, null), "good");
+  });
+
+  test("falsy gate open but nullish gate closed for 0", async () => {
+    const ctx = makeCtx();
+    const w = fromWire({ fallbacks: [
+      { type: "nullish", value: "unused" },  // ?? gate closed: 0 != null
+      { type: "falsy", value: "fallback" },  // || gate open: !0 is true
+    ] });
+    assert.equal(await applyFallbackGates(ctx, w, 0), "fallback");
   });
 });
 
