@@ -1,5 +1,11 @@
 # @stackables/bridge-core
 
+## 1.3.0
+
+### Minor Changes
+
+- [#86](https://github.com/stackables/bridge/pull/86) [`fc3d8ed`](https://github.com/stackables/bridge/commit/fc3d8ed392c3dd8181c2eef124585a2e43ea0499) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Support object spread in path-scoped scope blocks
+
 ## 1.2.0
 
 ### Minor Changes
