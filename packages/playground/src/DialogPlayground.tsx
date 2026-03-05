@@ -23,7 +23,7 @@ function PlaygroundInner({
 }) {
   const state = usePlaygroundState(initialExample, hideGqlSwitch);
   return (
-    <div className="bridge-playground-root h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-auto">
+    <div className="bridge-playground-root h-full rounded-xl bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden">
       <Playground {...state} hideGqlSwitch={hideGqlSwitch} />
     </div>
   );
@@ -51,7 +51,7 @@ export function DialogPlayground({
             e.preventDefault();
           }
         }}
-        className="max-w-[97vw] w-[97vw] h-[95vh] max-h-[95vh] p-0 overflow-hidden"
+        className="max-w-[97vw] w-[97vw] h-[95vh] max-h-[95vh] p-0"
       >
         {open && <PlaygroundInner initialExample={initialExample} />}
       </DialogContent>
