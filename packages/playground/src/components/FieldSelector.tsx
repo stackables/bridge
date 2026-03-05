@@ -63,7 +63,7 @@ export function FieldSelector({ availableFields, value, onChange }: Props) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="All fields (or: name, price, legs.*)"
-        className="flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300 outline-none focus:border-sky-400 placeholder:text-slate-600"
+        className="flex flex-1 min-w-0 h-8 items-center rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-400"
       />
     );
   }
@@ -73,15 +73,15 @@ export function FieldSelector({ availableFields, value, onChange }: Props) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex flex-1 min-w-0 items-center justify-between gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300 outline-none hover:border-slate-600 focus:border-sky-400 cursor-pointer"
+          className="flex flex-1 min-w-0 h-8 items-center justify-between gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-400 cursor-pointer"
         >
           <span className="truncate">{triggerLabel}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-slate-500" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="max-h-64 overflow-y-auto min-w-48"
+        className="max-h-64 overflow-y-auto w-(--radix-dropdown-menu-trigger-width)"
       >
         <DropdownMenuCheckboxItem
           checked={isAllSelected}

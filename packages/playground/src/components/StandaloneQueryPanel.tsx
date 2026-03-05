@@ -1,6 +1,13 @@
 import { Editor } from "./Editor";
 import { FieldSelector } from "./FieldSelector";
 import type { BridgeOperation, OutputFieldNode } from "../engine";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 type Props = {
   /** All bridge operations parsed from the current bridge text. */
@@ -36,28 +43,28 @@ export function StandaloneQueryPanel({
       {/* Bridge selector + output fields */}
       <div className="shrink-0 space-y-2 px-0.5">
         {/* Bridge operation dropdown */}
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 shrink-0 w-16">
-            Bridge
-          </label>
-          <select
-            value={operation}
-            onChange={(e) => onOperationChange(e.target.value)}
-            className="flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200 outline-none focus:border-sky-400 cursor-pointer"
-          >
-            {operations.length === 0 && (
-              <option value="">No bridges found</option>
-            )}
-            {operations.map((op) => (
-              <option key={op.label} value={op.label}>
-                {op.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {operations.length > 1 && (
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 shrink-0 w-16">
+              Bridge
+            </label>
+            <Select value={operation} onValueChange={onOperationChange}>
+              <SelectTrigger className="w-full text-xs h-8">
+                <SelectValue placeholder="Select bridge" />
+              </SelectTrigger>
+              <SelectContent>
+                {operations.map((op) => (
+                  <SelectItem key={op.label} value={op.label}>
+                    {op.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {/* Output fields dropdown */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pb-1">
           <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 shrink-0 w-16">
             Fields
           </label>

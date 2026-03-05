@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/Playground.tsx",
+    ".": "./src/index.ts",
     "./style.css": "./src/index.css"
   },
   "scripts": {

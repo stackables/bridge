@@ -38,7 +38,7 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogClose className="absolute right-4 top-4 rounded-sm text-slate-500 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400">
+      <DialogClose className="absolute -right-2.5 -top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 border border-slate-700 text-slate-400 hover:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400 shadow-md z-50">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </DialogClose>
@@ -47,8 +47,17 @@ const DialogContent = React.forwardRef<
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
-const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex items-center justify-between px-5 py-3.5 border-b border-slate-700 shrink-0", className)} {...props} />
+const DialogHeader = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={cn(
+      "flex items-center justify-between px-5 py-3.5 border-b border-slate-700 shrink-0",
+      className,
+    )}
+    {...props}
+  />
 );
 DialogHeader.displayName = "DialogHeader";
 
