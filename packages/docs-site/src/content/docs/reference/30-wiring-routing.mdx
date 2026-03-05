@@ -62,7 +62,30 @@ api.body.user {
 
 ```
 
-## 3. The Universal `alias`
+## 3. Spreading Objects (`...`)
+
+If you want to map an entire object into a specific target without writing out every single field, you can use the spread operator (`...`) inside a Path Scoping Block.
+
+This works exactly like the JavaScript spread operator. It unpacks all fields from the source and applies them to the current target path.
+
+```bridge
+bridge Query.getUser {
+  with api.fetchProfile as profile
+  with output as o
+
+  o.user {
+    # Spreads all fields from the profile (name, email, age, etc.) into o.user
+    ...profile
+
+    # You can explicitly override specific fields after spreading
+    .id <- profile.internalId
+    .status = "ACTIVE"
+  }
+}
+
+```
+
+## 4. The Universal `alias`
 
 The `alias` keyword allows you to declare a temporary, reusable node in your graph.
 
@@ -104,7 +127,7 @@ o.total <- total
 
 ```
 
-## 4. Forcing Execution (`force`)
+## 5. Forcing Execution (`force`)
 
 Because The Bridge uses a lazy, pull-based execution engine, **a tool is never called unless a GraphQL output field actively demands its data.**
 

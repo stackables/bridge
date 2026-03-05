@@ -188,6 +188,7 @@ export const RCurly = createToken({ name: "RCurly", pattern: /\}/ });
 export const LSquare = createToken({ name: "LSquare", pattern: /\[/ });
 export const RSquare = createToken({ name: "RSquare", pattern: /\]/ });
 export const Equals = createToken({ name: "Equals", pattern: /=/ });
+export const Spread = createToken({ name: "Spread", pattern: /\.\.\./ });
 export const Dot = createToken({ name: "Dot", pattern: /\./ });
 export const Colon = createToken({ name: "Colon", pattern: /:/ });
 export const Comma = createToken({ name: "Comma", pattern: /,/ });
@@ -258,6 +259,7 @@ export const allTokens = [
   LSquare,
   RSquare,
   Equals,
+  Spread,
   Dot,
   Colon,
   Comma,
