@@ -21,6 +21,29 @@ export function parseBridge(text: string): BridgeDocument {
 
 const BRIDGE_VERSION = "1.5";
 
+const RESERVED_BARE_VALUE_KEYWORDS = new Set([
+  "version",
+  "bridge",
+  "tool",
+  "define",
+  "with",
+  "input",
+  "output",
+  "context",
+  "const",
+  "from",
+  "as",
+  "alias",
+  "on",
+  "error",
+  "continue",
+  "break",
+  "throw",
+  "panic",
+  "if",
+  "pipe",
+]);
+
 /** Serialize a ControlFlowInstruction to its textual form. */
 function serializeControl(ctrl: ControlFlowInstruction): string {
   if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
@@ -77,7 +100,9 @@ function needsQuoting(v: string): boolean {
   if (v === "true" || v === "false" || v === "null") return false;
   if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(v)) return false; // number
   if (/^\/[\w./-]+$/.test(v)) return false; // /path
-  if (/^[a-zA-Z_][\w-]*$/.test(v)) return false; // identifier / keyword
+  if (/^[a-zA-Z_][\w-]*$/.test(v)) {
+    return RESERVED_BARE_VALUE_KEYWORDS.has(v);
+  }
   return true;
 }
 
