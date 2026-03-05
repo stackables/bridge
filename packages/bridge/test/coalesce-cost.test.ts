@@ -649,6 +649,50 @@ bridge Query.lookup {
     assert.equal(data.label, "fallback");
   });
 
+  test("?. with chained || literals short-circuits at first truthy literal", async () => {
+    const doc = parseBridge(`version 1.5
+const lorem = {
+  "ipsum":"dolor sit amet",
+  "consetetur":8.9
+}
+
+bridge Query.lookup {
+  with const
+  with output as o
+
+  o.label <- const.lorem.ipsums?.kala || "A" || "B"
+}`);
+    const gateway = createGateway(typeDefs, doc, { tools: {} });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
+    assert.equal(result.data.lookup.label, "A");
+  });
+
+  test("mixed || and ?? remains left-to-right with first truthy || winner", async () => {
+    const doc = parseBridge(`version 1.5
+const lorem = {
+  "ipsum": "dolor sit amet",
+  "consetetur": 8.9
+}
+
+bridge Query.lookup {
+  with const
+  with output as o
+
+  o.label <- const.lorem.kala || const.lorem.ipsums?.mees || "B" ?? "C"
+}`);
+    const gateway = createGateway(typeDefs, doc, { tools: {} });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x") { label } }`),
+    });
+    assert.equal(result.data.lookup.label, "B");
+  });
+
   test("?. passes through value when tool succeeds", async () => {
     const { data } = await run(
       `version 1.5
