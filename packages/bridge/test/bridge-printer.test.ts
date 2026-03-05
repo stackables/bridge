@@ -277,4 +277,22 @@ describe("formatBridge - line splitting and joining", () => {
 `;
     assert.equal(formatBridge(input), expected);
   });
+
+  test("adjacent blocks on same line get separated with blank line", () => {
+    // }tool on same line should split into separate lines with blank line
+    const input = `tool a from std.httpCall {
+  .path = "/a"
+}tool b from std.httpCall {
+  .path = "/b"
+}`;
+    const expected = `tool a from std.httpCall {
+  .path = "/a"
+}
+
+tool b from std.httpCall {
+  .path = "/b"
+}
+`;
+    assert.equal(formatBridge(input), expected);
+  });
 });

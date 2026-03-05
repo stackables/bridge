@@ -176,14 +176,30 @@ export function formatBridge(source: string): string {
 
   const commentMap = attachComments(tokens, comments);
 
+  // Tokens that start new logical lines even if on the same source line
+  const LINE_STARTERS = new Set([
+    "ToolKw",
+    "BridgeKw",
+    "DefineKw",
+    "VersionKw",
+  ]);
+
   // Group tokens by original source line, tracking original line numbers
+  // Also split when a top-level block starter appears mid-line
   const lineGroups: { tokens: IToken[]; originalLine: number }[] = [];
   let currentLine = -1;
   let currentGroup: IToken[] = [];
 
   for (const token of tokens) {
     const line = token.startLine ?? 1;
-    if (line !== currentLine) {
+    const tokenType = token.tokenType.name;
+
+    // Split on new line OR on top-level block starter (like }tool on same line)
+    const isLineStarter = LINE_STARTERS.has(tokenType);
+    const shouldSplit =
+      line !== currentLine || (isLineStarter && currentGroup.length > 0);
+
+    if (shouldSplit) {
       if (currentGroup.length > 0) {
         lineGroups.push({ tokens: currentGroup, originalLine: currentLine });
       }
