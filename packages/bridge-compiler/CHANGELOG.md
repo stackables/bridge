@@ -1,5 +1,16 @@
 # @stackables/bridge-compiler
 
+## 2.3.0
+
+### Minor Changes
+
+- [#96](https://github.com/stackables/bridge/pull/96) [`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f) Thanks [@aarne](https://github.com/aarne)! - Migrate wire shape from separate `falsyFallback*`/`nullishFallback*` properties to a unified `fallbacks: WireFallback[]` array, enabling mixed `||` and `??` chains in any order (e.g. `A ?? B || C ?? D`).
+
+### Patch Changes
+
+- Updated dependencies [[`7384d3f`](https://github.com/stackables/bridge/commit/7384d3f404197babbd5771ab7cd84f14d0cd392f)]:
+  - @stackables/bridge-core@1.4.0
+
 ## 2.2.0
 
 ### Minor Changes
