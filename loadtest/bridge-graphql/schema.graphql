@@ -1,0 +1,41 @@
+type Query {
+  simple: SimpleResult
+  arrayMap: ArrayResult
+  complex: ComplexResult
+}
+
+type SimpleResult {
+  id: Int
+  firstName: String
+  lastName: String
+  email: String
+  role: String
+  department: String
+  building: String
+}
+
+type ArrayResult {
+  items: [ArrayItem]
+}
+
+type ArrayItem {
+  id: Int
+  name: String
+  category: String
+  price: Float
+}
+
+type ComplexResult {
+  assignee: String
+  email: String
+  department: String
+  topItem: String
+  entries: [ComplexEntry]
+}
+
+type ComplexEntry {
+  entryId: Int
+  variantId: Int
+  quantity: Int
+  warehouse: String
+}

@@ -1,0 +1,9 @@
+{
+  "name": "bridge-loadtest-compiler",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@stackables/bridge": "^2.2.0",
+    "@stackables/bridge-compiler": "^2.3.0"
+  }
+}

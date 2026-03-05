@@ -1,0 +1,10 @@
+{
+  "name": "bridge-loadtest-graphql",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@stackables/bridge": "^2.1.1",
+    "graphql": "^16.13.0",
+    "graphql-yoga": "^5.18.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "bridge-loadtest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "data": "node scripts/generate-data.mjs",
+    "build": "docker compose build",
+    "up": "docker compose up -d --build",
+    "down": "docker compose down",
+    "test": "docker compose run --rm k6",
+    "test:quick": "PROFILE=quick docker compose run --rm k6",
+    "report": "node scripts/report.mjs --out report.md"
+  }
+}
