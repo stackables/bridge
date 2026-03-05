@@ -23,7 +23,7 @@ export const WS = createToken({
 export const Comment = createToken({
   name: "Comment",
   pattern: /#[^\r\n]*/,
-  group: Lexer.SKIPPED,
+  group: "comments",
 });
 
 // ── Identifiers (defined first — keywords reference via longer_alt) ────────

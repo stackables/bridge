@@ -7,6 +7,7 @@ import { diagnosticCount, lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
 import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
 import type { GraphQLSchema } from "graphql";
+import { Paintbrush } from "lucide-react";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { bridgeLinter } from "@/codemirror/bridge-lint";
 import { bridgeAutocomplete } from "@/codemirror/bridge-completion";
@@ -40,6 +41,8 @@ type Props = {
   autoHeight?: boolean;
   /** GraphQL schema for query editors — enables autocomplete & validation. */
   graphqlSchema?: GraphQLSchema;
+  /** Optional callback to format the code. When provided, shows a format button. */
+  onFormat?: () => void;
 };
 
 function languageExtension(
@@ -68,6 +71,7 @@ export function Editor({
   readOnly = false,
   autoHeight = false,
   graphqlSchema,
+  onFormat,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -147,18 +151,30 @@ export function Editor({
           {label}
         </div>
       )}
-      <div
-        ref={containerRef}
-        className={cn(
-          "w-full rounded-lg border bg-slate-950 transition-colors",
-          hasErrors
-            ? "border-red-400/70"
-            : "border-slate-800 focus-within:border-sky-400/70",
-          autoHeight
-            ? "[&_.cm-editor]:h-auto [&_.cm-scroller]:overflow-visible"
-            : "flex-1 min-h-0 overflow-y-auto [&_.cm-editor]:h-full",
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={containerRef}
+          className={cn(
+            "w-full h-full rounded-lg border bg-slate-950 transition-colors",
+            hasErrors
+              ? "border-red-400/70"
+              : "border-slate-800 focus-within:border-sky-400/70",
+            autoHeight
+              ? "[&_.cm-editor]:h-auto [&_.cm-scroller]:overflow-visible"
+              : "overflow-y-auto [&_.cm-editor]:h-full",
+          )}
+        />
+        {onFormat && (
+          <button
+            type="button"
+            onClick={onFormat}
+            title="Format code"
+            className="absolute top-2 right-2 p-1.5 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors z-10"
+          >
+            <Paintbrush className="w-4 h-4" />
+          </button>
         )}
-      />
+      </div>
     </div>
   );
 }

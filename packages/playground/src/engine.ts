@@ -8,7 +8,9 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
   executeBridge,
+  formatBridge,
 } from "@stackables/bridge";
+export { formatBridge };
 import type {
   BridgeDiagnostic,
   Bridge,
