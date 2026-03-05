@@ -172,7 +172,7 @@ export const SIMPLE_PULL_CACHE = Symbol.for("bridge.simplePull");
 
 /**
  * Returns the `from` NodeRef when a wire qualifies for the simple-pull fast
- * path (single `from` wire, no safe/falsy/nullish/catch modifiers).  Returns
+ * path (single `from` wire, no safe/fallbacks/catch modifiers).  Returns
  * `null` otherwise.  The result is cached on the wire via a Symbol key so
  * subsequent calls are a single property read without affecting V8 shapes.
  * See docs/performance.md (#11).
@@ -183,12 +183,7 @@ export function getSimplePullRef(w: Wire): NodeRef | null {
     if (cached !== undefined) return cached;
     const ref =
       !w.safe &&
-      !w.falsyFallbackRefs?.length &&
-      w.falsyControl == null &&
-      w.falsyFallback == null &&
-      w.nullishControl == null &&
-      !w.nullishFallbackRefs?.length &&
-      w.nullishFallback == null &&
+      !w.fallbacks?.length &&
       !w.catchControl &&
       !w.catchFallbackRef &&
       w.catchFallback == null
