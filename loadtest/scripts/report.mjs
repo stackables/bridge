@@ -8,10 +8,9 @@
  *   node scripts/report.mjs --out report.md       # write to file (default: stdout)
  */
 
-import { readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { writeFileSync, createReadStream } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
 import { createInterface } from "node:readline";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -106,14 +105,14 @@ function fmt(n) {
 // ── Discover dimensions ─────────────────────────────────────────────────
 
 const allKeys = Object.keys(buckets);
-const stages = [
-  ...new Set(allKeys.map((k) => k.split("/")[2])),
-].sort((a, b) => {
-  // Sort by VU number
-  const na = parseInt(a) || 0;
-  const nb = parseInt(b) || 0;
-  return na - nb;
-});
+const stages = [...new Set(allKeys.map((k) => k.split("/")[2]))].sort(
+  (a, b) => {
+    // Sort by VU number
+    const na = parseInt(a) || 0;
+    const nb = parseInt(b) || 0;
+    return na - nb;
+  },
+);
 const scenarios = [...new Set(allKeys.map((k) => k.split("/")[1]))];
 const targets = [...new Set(allKeys.map((k) => k.split("/")[0]))];
 
@@ -129,27 +128,6 @@ const TARGET_ORDER = ["handcoded", "bridge-standalone", "bridge-graphql"];
 const orderedTargets = TARGET_ORDER.filter((t) => targets.includes(t));
 
 // ── Detect environment ──────────────────────────────────────────────────
-
-let nodeVersion = "unknown";
-try {
-  nodeVersion = execSync("node --version", { encoding: "utf-8" }).trim();
-} catch {
-  /* ignore */
-}
-
-let arch = "unknown";
-try {
-  arch = execSync("uname -m", { encoding: "utf-8" }).trim();
-} catch {
-  /* ignore */
-}
-
-let os = "unknown";
-try {
-  os = execSync("uname -s", { encoding: "utf-8" }).trim();
-} catch {
-  /* ignore */
-}
 
 // ── Build markdown ──────────────────────────────────────────────────────
 
@@ -311,22 +289,28 @@ md.push("");
 
 md.push("## 4. Methodology");
 md.push("");
-md.push("All tests run inside Docker containers on the same host, communicating over a Docker bridge network.");
+md.push(
+  "All tests run inside Docker containers on the same host, communicating over a Docker bridge network.",
+);
 md.push("");
-md.push("Each target is tested **sequentially** \u2014 only one receives load at any time,");
-md.push("giving it 100% of available CPU and memory. This eliminates resource contention");
+md.push(
+  "Each target is tested **sequentially** \u2014 only one receives load at any time,",
+);
+md.push(
+  "giving it 100% of available CPU and memory. This eliminates resource contention",
+);
 md.push("between services and produces accurate, reproducible numbers.");
 md.push("");
 md.push(`- **Node.js:** xxx`);
 md.push(`- **OS / Arch:** xxx`);
 md.push("- **Load generator:** [k6](https://k6.io) (containerised)");
-md.push(
-  `- **Per-target warmup:** 10 s at 10 VUs (excluded from results)`,
-);
+md.push(`- **Per-target warmup:** 10 s at 10 VUs (excluded from results)`);
 md.push(
   `- **Stages:** ${stages.map((s) => s.replace("vu", " VUs")).join(" \u2192 ")} (${stages.length > 1 ? "30 s each per target" : "single run"})`,
 );
-md.push("- **Dependency:** nginx serving pre-generated static JSON (zero compute)");
+md.push(
+  "- **Dependency:** nginx serving pre-generated static JSON (zero compute)",
+);
 md.push("");
 
 // ── Output ──────────────────────────────────────────────────────────────
