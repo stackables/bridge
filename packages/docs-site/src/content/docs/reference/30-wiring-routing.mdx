@@ -33,7 +33,48 @@ o.country = "Germany"
 
 ```
 
-<MiniPlaygroundModal client:load />
+<MiniPlaygroundModal
+  client:load
+  bridge={`
+version 1.5
+
+const lorem = {
+"ipsum": "dolor sit amet",
+"consetetur": 8.9
+}
+
+bridge Query.greet {
+
+# witnout alias
+
+with const
+
+# with alias
+
+with input as inp
+with output as o
+
+# Pull value from input node
+
+o.nameFromInput <- inp.name
+
+# Constants
+
+o.constNumer = 7.7
+o.constString = "just a string"
+
+# Bridge variables also need pulling
+
+o.constFromConst <- const.lorem
+}
+`}
+
+inputJson={`{
+  "name": "Hello Bridge"
+}`}
+
+autoRun={true}
+/>
 
 ## 2. Path Scoping Blocks (Nested Objects)
 

@@ -43,9 +43,25 @@ function extractOperationName(query: string): string | null {
   return null;
 }
 
+function tryFormatJson(val?: string): string {
+  if (!val) return "{}";
+  try {
+    return JSON.stringify(JSON.parse(val), null, 2);
+  } catch {
+    return val;
+  }
+}
+
 export function usePlaygroundState(
   initialExampleIndex = 0,
   forceStandalone = false,
+  overrides?: {
+    bridge?: string;
+    contextStr?: string;
+    operation?: string;
+    inputJson?: string;
+    outputFields?: string;
+  },
 ) {
   const [exampleIndex, setExampleIndex] = useState(initialExampleIndex);
   const ex = examples[exampleIndex] ?? examples[0]!;
@@ -53,12 +69,40 @@ export function usePlaygroundState(
   const [mode, setMode] = useState<PlaygroundMode>(
     forceStandalone ? "standalone" : (ex.mode ?? "standalone"),
   );
+
+  // Format the default bridge if provided via overrides so it's not messy.
+  const initialBridge = overrides?.bridge
+    ? formatBridge(overrides.bridge)
+    : ex.bridge;
   const [schema, setSchema] = useState(ex.schema);
-  const [bridge, setBridge] = useState(ex.bridge);
-  const [context, setContext] = useState(ex.context);
+  const [bridge, setBridge] = useState(initialBridge);
+  const [context, setContext] = useState(overrides?.contextStr ?? ex.context);
 
   const queryCounterRef = useRef(ex.queries.length);
-  const [queries, setQueries] = useState<QueryTab[]>(() => buildQueryTabs(ex));
+  const [queries, setQueries] = useState<QueryTab[]>(() => {
+    if (overrides?.bridge) {
+      const ops = extractBridgeOperations(initialBridge);
+      const firstOp = ops[0]?.label ?? "";
+      const op = overrides.operation || firstOp;
+
+      let initialJson = overrides.inputJson;
+      if (!initialJson || initialJson === "{}") {
+        initialJson = extractInputSkeleton(initialBridge, op);
+      }
+
+      return [
+        {
+          id: crypto.randomUUID(),
+          name: "Query 1",
+          query: "",
+          operation: op,
+          outputFields: overrides.outputFields ?? "",
+          inputJson: tryFormatJson(initialJson),
+        },
+      ];
+    }
+    return buildQueryTabs(ex);
+  });
   const [activeTabId, setActiveTabId] = useState<string>(
     () => queries[0]?.id ?? "context",
   );
