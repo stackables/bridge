@@ -84,12 +84,12 @@ function QueryTabBar({
   );
 
   return (
-    <div className="flex items-center shrink-0 gap-px overflow-x-auto scrollbar-none">
+    <div className="flex items-center shrink-0 gap-px">
       {/* Context tab — always first */}
       <button
         onClick={() => onSelectTab("context")}
         className={cn(
-          "shrink-0 uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+          "shrink-0 uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
           activeTabId === "context"
             ? "border-sky-400 text-slate-200"
             : "border-transparent text-slate-500 hover:text-slate-300",
@@ -210,37 +210,43 @@ function BridgeDslHeader() {
 function SchemaHeader({
   mode,
   onModeChange,
+  hideGqlSwitch,
 }: {
   mode: PlaygroundMode;
   onModeChange: (m: PlaygroundMode) => void;
+  hideGqlSwitch?: boolean;
 }) {
   return (
     <div className="content-center shrink-0 px-5 h-10 pt-1.5 pb-1.5 flex items-center justify-between">
       <span className="text-[11px] font-bold text-slate-200 uppercase tracking-widest">
         GraphQL Schema
       </span>
-      <button
-        onClick={() =>
-          onModeChange(mode === "graphql" ? "standalone" : "graphql")
-        }
-        className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 hover:text-slate-300 transition-colors"
-        title={
-          mode === "graphql"
-            ? "Switch to standalone mode (no GraphQL)"
-            : "Switch to GraphQL mode"
-        }
-      >
-        <span className={mode === "graphql" ? "text-sky-400" : ""}>GQL</span>
-        <span className="relative inline-flex h-4 w-7 items-center rounded-full border border-slate-600 bg-slate-900 transition-colors">
-          <span
-            className={cn(
-              "inline-block h-2.5 w-2.5 rounded-full bg-sky-400 transition-transform",
-              mode === "standalone" ? "translate-x-3.5" : "translate-x-0.5",
-            )}
-          />
-        </span>
-        <span className={mode === "standalone" ? "text-sky-400" : ""}>CLI</span>
-      </button>
+      {!hideGqlSwitch && (
+        <button
+          onClick={() =>
+            onModeChange(mode === "graphql" ? "standalone" : "graphql")
+          }
+          className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 hover:text-slate-300 transition-colors"
+          title={
+            mode === "graphql"
+              ? "Switch to standalone mode (no GraphQL)"
+              : "Switch to GraphQL mode"
+          }
+        >
+          <span className={mode === "graphql" ? "text-sky-400" : ""}>GQL</span>
+          <span className="relative inline-flex h-4 w-7 items-center rounded-full border border-slate-600 bg-slate-900 transition-colors">
+            <span
+              className={cn(
+                "inline-block h-2.5 w-2.5 rounded-full bg-sky-400 transition-transform",
+                mode === "standalone" ? "translate-x-3.5" : "translate-x-0.5",
+              )}
+            />
+          </span>
+          <span className={mode === "standalone" ? "text-sky-400" : ""}>
+            CLI
+          </span>
+        </button>
+      )}
     </div>
   );
 }
@@ -257,7 +263,7 @@ function PanelBox({ children }: { children: React.ReactNode }) {
 // ── panel header label ─────────────────────────────────────────────────────────
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="content-center shrink-0 px-5 h-10 pt-1.5 pb-1.5 text-[11px] font-bold text-slate-200 uppercase tracking-widest">
+    <div className="content-center shrink-0 px-4 min-h-10 pt-1.5 pb-1.5 text-[11px] font-bold text-slate-200 uppercase tracking-widest">
       {children}
     </div>
   );
@@ -294,6 +300,7 @@ export type PlaygroundProps = {
   graphqlSchema?: GraphQLSchema;
   bridgeOperations: BridgeOperation[];
   availableOutputFields: OutputFieldNode[];
+  hideGqlSwitch?: boolean;
 };
 
 export function Playground({
@@ -322,6 +329,7 @@ export function Playground({
   graphqlSchema,
   bridgeOperations,
   availableOutputFields,
+  hideGqlSwitch,
 }: PlaygroundProps) {
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
   const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
@@ -337,7 +345,11 @@ export function Playground({
         {/* Schema panel — hidden in standalone mode, shows mode toggle */}
         {!isStandalone ? (
           <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-            <SchemaHeader mode={mode} onModeChange={onModeChange} />
+            <SchemaHeader
+              mode={mode}
+              onModeChange={onModeChange}
+              hideGqlSwitch={hideGqlSwitch}
+            />
             <div className="px-3 pb-3">
               <Editor
                 label=""
@@ -348,12 +360,16 @@ export function Playground({
               />
             </div>
           </div>
-        ) : (
-          /* When in standalone, show a collapsed "GraphQL Schema" bar with the toggle */
+        ) : !hideGqlSwitch ? (
+          /* When in standalone, show a collapsed "GraphQL Schema" bar with the toggle (if not hidden) */
           <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-            <SchemaHeader mode={mode} onModeChange={onModeChange} />
+            <SchemaHeader
+              mode={mode}
+              onModeChange={onModeChange}
+              hideGqlSwitch={hideGqlSwitch}
+            />
           </div>
-        )}
+        ) : null}
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
@@ -470,9 +486,15 @@ export function Playground({
             {isStandalone ? (
               /* Standalone: collapsed schema header + bridge fills left column */
               <div className="flex flex-col h-full gap-2">
-                <div className="shrink-0 bg-slate-800 rounded-xl overflow-hidden">
-                  <SchemaHeader mode={mode} onModeChange={onModeChange} />
-                </div>
+                {!hideGqlSwitch && (
+                  <div className="shrink-0 bg-slate-800 rounded-xl overflow-hidden">
+                    <SchemaHeader
+                      mode={mode}
+                      onModeChange={onModeChange}
+                      hideGqlSwitch={hideGqlSwitch}
+                    />
+                  </div>
+                )}
                 <PanelBox>
                   <BridgeDslHeader />
                   <div className="flex-1 min-h-0 px-3 pb-3">
@@ -497,7 +519,11 @@ export function Playground({
                 {/* Schema panel */}
                 <Panel defaultSize={35} minSize={15}>
                   <PanelBox>
-                    <SchemaHeader mode={mode} onModeChange={onModeChange} />
+                    <SchemaHeader
+                      mode={mode}
+                      onModeChange={onModeChange}
+                      hideGqlSwitch={hideGqlSwitch}
+                    />
                     <div className="flex-1 min-h-0 px-3 pb-3">
                       <Editor
                         label=""

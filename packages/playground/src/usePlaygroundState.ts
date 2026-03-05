@@ -43,11 +43,16 @@ function extractOperationName(query: string): string | null {
   return null;
 }
 
-export function usePlaygroundState(initialExampleIndex = 0) {
+export function usePlaygroundState(
+  initialExampleIndex = 0,
+  forceStandalone = false,
+) {
   const [exampleIndex, setExampleIndex] = useState(initialExampleIndex);
   const ex = examples[exampleIndex] ?? examples[0]!;
 
-  const [mode, setMode] = useState<PlaygroundMode>(ex.mode ?? "standalone");
+  const [mode, setMode] = useState<PlaygroundMode>(
+    forceStandalone ? "standalone" : (ex.mode ?? "standalone"),
+  );
   const [schema, setSchema] = useState(ex.schema);
   const [bridge, setBridge] = useState(ex.bridge);
   const [context, setContext] = useState(ex.context);
@@ -74,20 +79,24 @@ export function usePlaygroundState(initialExampleIndex = 0) {
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
 
-  const selectExample = useCallback((index: number) => {
-    const e = examples[index] ?? examples[0]!;
-    setExampleIndex(index);
-    if (e.mode) setMode(e.mode);
-    setSchema(e.schema);
-    setBridge(e.bridge);
-    queryCounterRef.current = e.queries.length;
-    const newQ = buildQueryTabs(e);
-    setQueries(newQ);
-    setContext(e.context);
-    setResults({});
-    setRunningIds(new Set());
-    setActiveTabId(newQ[0]?.id ?? "context");
-  }, []);
+  const selectExample = useCallback(
+    (index: number) => {
+      const e = examples[index] ?? examples[0]!;
+      setExampleIndex(index);
+      if (!forceStandalone && e.mode) setMode(e.mode);
+      else if (forceStandalone) setMode("standalone");
+      setSchema(e.schema);
+      setBridge(e.bridge);
+      queryCounterRef.current = e.queries.length;
+      const newQ = buildQueryTabs(e);
+      setQueries(newQ);
+      setContext(e.context);
+      setResults({});
+      setRunningIds(new Set());
+      setActiveTabId(newQ[0]?.id ?? "context");
+    },
+    [forceStandalone],
+  );
 
   const updateQuery = useCallback((id: string, text: string) => {
     setQueries((prev) =>

@@ -9,14 +9,22 @@ export type DialogPlaygroundProps = {
   label?: string;
   /** Index of the example to load initially (default: 0). */
   initialExample?: number;
+  /** Disables switching to GraphQL mode. */
+  hideGqlSwitch?: boolean;
 };
 
 // ── inner playground — mounts state only when dialog is opened ────────────────
-function PlaygroundInner({ initialExample = 0 }: { initialExample?: number }) {
-  const state = usePlaygroundState(initialExample);
+function PlaygroundInner({
+  initialExample = 0,
+  hideGqlSwitch = true, // By default, hide it in dialog
+}: {
+  initialExample?: number;
+  hideGqlSwitch?: boolean;
+}) {
+  const state = usePlaygroundState(initialExample, hideGqlSwitch);
   return (
     <div className="bridge-playground-root h-full bg-slate-950 text-slate-200 font-sans flex flex-col overflow-auto">
-      <Playground {...state} />
+      <Playground {...state} hideGqlSwitch={hideGqlSwitch} />
     </div>
   );
 }
@@ -25,6 +33,7 @@ function PlaygroundInner({ initialExample = 0 }: { initialExample?: number }) {
 export function DialogPlayground({
   label = "Open Playground",
   initialExample = 0,
+  hideGqlSwitch = true,
 }: DialogPlaygroundProps) {
   const [open, setOpen] = useState(false);
 
