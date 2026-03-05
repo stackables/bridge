@@ -64,6 +64,7 @@ export type {
   ToolWire,
   VersionDecl,
   Wire,
+  WireFallback,
 } from "./types.ts";
 
 // ── Utilities ───────────────────────────────────────────────────────────────

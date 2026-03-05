@@ -144,11 +144,10 @@ function detectControlFlow(
   wires: Wire[],
 ): "break" | "continue" | "throw" | "panic" | null {
   for (const w of wires) {
-    if ("nullishControl" in w && w.nullishControl) {
-      return w.nullishControl.kind as "break" | "continue" | "throw" | "panic";
-    }
-    if ("falsyControl" in w && w.falsyControl) {
-      return w.falsyControl.kind as "break" | "continue" | "throw" | "panic";
+    if ("fallbacks" in w && w.fallbacks) {
+      for (const fb of w.fallbacks) {
+        if (fb.control) return fb.control.kind as "break" | "continue" | "throw" | "panic";
+      }
     }
     if ("catchControl" in w && w.catchControl) {
       return w.catchControl.kind as "break" | "continue" | "throw" | "panic";
@@ -705,11 +704,10 @@ class CodegenContext {
           keys.add(refTrunkKey(w.condOr.leftRef));
           if (w.condOr.rightRef) keys.add(refTrunkKey(w.condOr.rightRef));
         }
-        if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
-          for (const ref of w.falsyFallbackRefs) keys.add(refTrunkKey(ref));
-        }
-        if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
-          for (const ref of w.nullishFallbackRefs) keys.add(refTrunkKey(ref));
+        if ("fallbacks" in w && w.fallbacks) {
+          for (const fb of w.fallbacks) {
+            if (fb.ref) keys.add(refTrunkKey(fb.ref));
+          }
         }
         if ("catchFallbackRef" in w && w.catchFallbackRef) {
           keys.add(refTrunkKey(w.catchFallbackRef));
@@ -1812,8 +1810,7 @@ class CodegenContext {
     const controlWire = elemWires.find(
       (w) =>
         w.to.path.length === 1 &&
-        (("nullishControl" in w && w.nullishControl != null) ||
-          ("falsyControl" in w && w.falsyControl != null) ||
+        (("fallbacks" in w && w.fallbacks?.some(fb => fb.control != null)) ||
           ("catchControl" in w && w.catchControl != null)),
     );
 
@@ -1836,13 +1833,13 @@ class CodegenContext {
 
     // Determine the check type
     const isNullish =
-      "nullishControl" in controlWire && controlWire.nullishControl != null;
+      controlWire.fallbacks?.some(fb => fb.type === "nullish" && fb.control != null) ?? false;
 
     if (mode === "continue") {
       if (isNullish) {
         return `${pad}  if (${checkExpr} == null) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
       }
-      // falsyControl
+      // falsy fallback control
       return `${pad}  if (!${checkExpr}) return [];\n${pad}  return [${this.buildElementBody(elemWires, arrayIterators, depth, indent)}];`;
     }
 
@@ -2317,39 +2314,36 @@ class CodegenContext {
 
   /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */
   private applyFallbacks(w: Wire, expr: string): string {
-    // Falsy fallback chain (||)
-    if ("falsyFallbackRefs" in w && w.falsyFallbackRefs?.length) {
-      for (const ref of w.falsyFallbackRefs) {
-        expr = `(${expr} || ${this.refToExpr(ref)})`; // lgtm [js/code-injection]
-      }
-    }
-    if ("falsyFallback" in w && w.falsyFallback != null) {
-      expr = `(${expr} || ${emitCoerced(w.falsyFallback)})`; // lgtm [js/code-injection]
-    }
-    // Falsy control flow (throw/panic on || gate)
-    if ("falsyControl" in w && w.falsyControl) {
-      const ctrl = w.falsyControl;
-      if (ctrl.kind === "throw") {
-        expr = `(${expr} || (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      } else if (ctrl.kind === "panic") {
-        expr = `(${expr} || (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      }
-    }
-
-    // Nullish coalescing (??)
-    if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
-      const refsExpr = w.nullishFallbackRefs.map(r => this.refToExpr(r)).join(' ?? ');
-      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${refsExpr}))`; // lgtm [js/code-injection]
-    } else if ("nullishFallback" in w && w.nullishFallback != null) {
-      expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(w.nullishFallback)}))`; // lgtm [js/code-injection]
-    }
-    // Nullish control flow (throw/panic on ?? gate)
-    if ("nullishControl" in w && w.nullishControl) {
-      const ctrl = w.nullishControl;
-      if (ctrl.kind === "throw") {
-        expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
-      } else if (ctrl.kind === "panic") {
-        expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+    if ("fallbacks" in w && w.fallbacks) {
+      for (const fb of w.fallbacks) {
+        if (fb.type === "falsy") {
+          if (fb.ref) {
+            expr = `(${expr} || ${this.refToExpr(fb.ref)})`; // lgtm [js/code-injection]
+          } else if (fb.value != null) {
+            expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
+          } else if (fb.control) {
+            const ctrl = fb.control;
+            if (ctrl.kind === "throw") {
+              expr = `(${expr} || (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            } else if (ctrl.kind === "panic") {
+              expr = `(${expr} || (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            }
+          }
+        } else {
+          // nullish
+          if (fb.ref) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(fb.ref)}))`; // lgtm [js/code-injection]
+          } else if (fb.value != null) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
+          } else if (fb.control) {
+            const ctrl = fb.control;
+            if (ctrl.kind === "throw") {
+              expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            } else if (ctrl.kind === "panic") {
+              expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+            }
+          }
+        }
       }
     }
 
@@ -2601,11 +2595,10 @@ class CodegenContext {
         if (w.condOr.rightRef) allRefs.add(refTrunkKey(w.condOr.rightRef));
       }
       // Fallback refs
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs) {
-        for (const ref of w.falsyFallbackRefs) allRefs.add(refTrunkKey(ref));
-      }
-      if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
-        for (const ref of w.nullishFallbackRefs) allRefs.add(refTrunkKey(ref));
+      if ("fallbacks" in w && w.fallbacks) {
+        for (const fb of w.fallbacks) {
+          if (fb.ref) allRefs.add(refTrunkKey(fb.ref));
+        }
       }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         allRefs.add(refTrunkKey(w.catchFallbackRef));
@@ -2927,10 +2920,10 @@ class CodegenContext {
 
     if ("from" in w) {
       collectTrunk(w.from);
-      if ("falsyFallbackRefs" in w && w.falsyFallbackRefs)
-        w.falsyFallbackRefs.forEach(collectTrunk);
-      if ("nullishFallbackRefs" in w && w.nullishFallbackRefs?.length) {
-        w.nullishFallbackRefs.forEach(collectTrunk);
+      if (w.fallbacks) {
+        for (const fb of w.fallbacks) {
+          if (fb.ref) collectTrunk(fb.ref);
+        }
       }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
         collectTrunk(w.catchFallbackRef);

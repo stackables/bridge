@@ -588,6 +588,9 @@ bridge Query.profile {
   # 3. Nullish fallback — only override if value is strictly null/undefined
   alias api.website ?? "https://example.com" as site
 
+  # 4. Mixed chain — ?? then || in any order
+  alias api.nickname ?? api.username || "Guest" as greeting
+
   # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
   alias uc:api.name catch "UNKNOWN" as upperName
 
