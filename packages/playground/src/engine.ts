@@ -8,7 +8,9 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
   executeBridge,
+  formatBridge,
 } from "@stackables/bridge";
+export { formatBridge };
 import type {
   BridgeDiagnostic,
   Bridge,
@@ -437,6 +439,9 @@ export function extractInputSkeleton(
  * Build a new skeleton and fill in values from the previous JSON where
  * keys match exactly.  Keys that no longer exist in the skeleton are dropped;
  * new skeleton keys get `""` placeholders.
+ *
+ * If the skeleton is empty `{}`, preserve the existing JSON unchanged to
+ * avoid losing user input when the DSL has a temporary syntax error.
  */
 export function mergeInputSkeleton(
   existingJson: string,
@@ -445,6 +450,11 @@ export function mergeInputSkeleton(
   try {
     const existing = JSON.parse(existingJson) as Record<string, unknown>;
     const skeleton = JSON.parse(skeletonJson) as Record<string, unknown>;
+
+    // If skeleton is empty, preserve existing input (DSL may have a typo)
+    if (Object.keys(skeleton).length === 0) {
+      return existingJson;
+    }
 
     function fill(
       skel: Record<string, unknown>,

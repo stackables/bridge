@@ -18,6 +18,7 @@ import {
   extractInputSkeleton,
   mergeInputSkeleton,
   clearHttpCache,
+  formatBridge,
 } from "./engine";
 import type { RunResult } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
@@ -507,6 +508,11 @@ export function App() {
     }
   }, [activeQuery, mode, schema, bridge, context]);
 
+  const handleFormatBridge = useCallback(() => {
+    const formatted = formatBridge(bridge);
+    setBridge(formatted);
+  }, [bridge]);
+
   const diagnostics = getDiagnostics(bridge).diagnostics;
   const hasErrors = diagnostics.some((d) => d.severity === "error");
   const isActiveRunning =
@@ -722,6 +728,7 @@ export function App() {
               onChange={setBridge}
               language="bridge"
               autoHeight
+              onFormat={handleFormatBridge}
             />
           </div>
         </div>
@@ -837,6 +844,7 @@ export function App() {
                       value={bridge}
                       onChange={setBridge}
                       language="bridge"
+                      onFormat={handleFormatBridge}
                     />
                   </div>
                 </PanelBox>
@@ -876,6 +884,7 @@ export function App() {
                         value={bridge}
                         onChange={setBridge}
                         language="bridge"
+                        onFormat={handleFormatBridge}
                       />
                     </div>
                   </PanelBox>
