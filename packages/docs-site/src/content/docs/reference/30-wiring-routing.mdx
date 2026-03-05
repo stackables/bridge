@@ -4,6 +4,7 @@ description: How to move data from sources to targets, build nested payloads, an
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 Wires are the fundamental building blocks of The Bridge. They define the exact paths data takes as it flows through your graph.
 
@@ -31,6 +32,8 @@ Constant wires assign a fixed, hardcoded value.
 o.country = "Germany"
 
 ```
+
+<MiniPlaygroundModal client:load />
 
 ## 2. Path Scoping Blocks (Nested Objects)
 
