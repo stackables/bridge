@@ -29,6 +29,23 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
   );
 }
 
+// ── helpers ─────────────────────────────────────────────────────────────────
+function contextIsFilled(context: string): boolean {
+  try {
+    const parsed = JSON.parse(context.trim());
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return Object.keys(parsed).length > 0;
+    }
+  } catch {
+    return true; // unparseable treated as non-empty
+  }
+  return false;
+}
+
 // ── query tab type ────────────────────────────────────────────────────────────
 export type QueryTab = {
   id: string;
@@ -55,6 +72,7 @@ type QueryTabBarProps = {
   runDisabled: boolean;
   running: boolean;
   showRunButton?: boolean;
+  contextFilled?: boolean;
 };
 
 function QueryTabBar({
@@ -68,6 +86,7 @@ function QueryTabBar({
   runDisabled,
   running,
   showRunButton = true,
+  contextFilled = false,
 }: QueryTabBarProps) {
   const isQueryTab = activeTabId !== "context";
   const canRemove = queries.length > 1;
@@ -89,13 +108,16 @@ function QueryTabBar({
       <button
         onClick={() => onSelectTab("context")}
         className={cn(
-          "shrink-0 uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
+          "shrink-0 relative uppercase px-3.5 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
           activeTabId === "context"
             ? "border-sky-400 text-slate-200"
             : "border-transparent text-slate-500 hover:text-slate-300",
         )}
       >
         Context
+        {contextFilled && activeTabId !== "context" && (
+          <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-orange-500" />
+        )}
       </button>
 
       {/* One tab per query */}
@@ -400,6 +422,7 @@ export function Playground({
               runDisabled={isActiveRunning || hasErrors}
               running={isActiveRunning}
               showRunButton={false}
+              contextFilled={contextIsFilled(context)}
             />
           </div>
           <div className="p-3 pt-2">
@@ -580,6 +603,7 @@ export function Playground({
                       onRun={onRun}
                       runDisabled={isActiveRunning || hasErrors}
                       running={isActiveRunning}
+                      contextFilled={contextIsFilled(context)}
                     />
                   </PanelLabel>
 
