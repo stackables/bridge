@@ -227,7 +227,11 @@ export function scheduleFinish(
     directFn = lookupToolFn(ctx, toolName);
   }
   if (directFn) {
-    return ctx.callTool(toolName, toolName, directFn, input);
+    // Check handle binding for memoize flag
+    const handleMemoize = ctx.bridge?.handles.some(
+      (h) => h.kind === "tool" && h.memoize && h.name === toolName,
+    );
+    return ctx.callTool(toolName, toolName, directFn, input, handleMemoize);
   }
 
   // Define pass-through: synthetic trunks created by define inlining
@@ -294,8 +298,13 @@ export async function scheduleToolDef(
 
   // on error: wrap the tool call with fallback from onError wire
   const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+  // Memoize if ToolDef or handle binding requests it
+  const handleMemoize = ctx.bridge?.handles.some(
+    (h) => h.kind === "tool" && h.memoize && h.name === toolName,
+  );
+  const shouldMemoize = toolDef.memoize || handleMemoize;
   try {
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+    return await ctx.callTool(toolName, toolDef.fn!, fn, input, shouldMemoize);
   } catch (err) {
     if (!onErrorWire) throw err;
     if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);

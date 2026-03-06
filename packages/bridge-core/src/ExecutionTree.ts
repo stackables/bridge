@@ -95,6 +95,13 @@ export class ExecutionTree implements TreeContext {
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
   /**
+   * Request-scoped memoization cache.
+   * Maps `fnName:cacheKey` → Promise to enable stampede protection.
+   * Shared across shadow trees (same reference) so concurrent array
+   * elements reuse in-flight Promises for identical inputs.
+   */
+  memoCache: Map<string, Promise<any>> = new Map();
+  /**
    * Hard timeout for tool calls in milliseconds.
    * When set, tool calls that exceed this duration throw a `BridgeTimeoutError`.
    * Default: 15_000 (15 seconds). Set to `0` to disable.
@@ -222,20 +229,61 @@ export class ExecutionTree implements TreeContext {
     fnName: string,
     fnImpl: (...args: any[]) => any,
     input: Record<string, any>,
+    memoize?: boolean,
   ): MaybePromise<any> {
     // Short-circuit before starting if externally aborted
     if (this.signal?.aborted) {
       throw new BridgeAbortError();
     }
+
+    const { sync: isSyncTool, doTrace, log, memoize: memoMeta } =
+      resolveToolMeta(fnImpl);
+
+    // ── Memoization: check request-scoped cache ──────────────────
+    // A tool is memoized if any layer requests it:
+    //   ToolMetadata (.bridge.memoize) || ToolDef (memoize) || HandleBinding (memoize)
+    // The `memoize` parameter carries the DSL-level flag from the scheduler.
+    const shouldMemoize = !!(memoMeta || memoize) && !isSyncTool;
+    if (shouldMemoize) {
+      const keyFn = memoMeta?.keyFn ?? JSON.stringify;
+      const cacheKey = `${fnName}:${keyFn(input)}`;
+      const cached = this.memoCache.get(cacheKey);
+      if (cached) return cached;
+      const result = this._callToolCore(
+        toolName, fnName, fnImpl, input, isSyncTool, doTrace, log,
+      );
+      if (isPromise(result)) {
+        this.memoCache.set(cacheKey, result);
+      }
+      return result;
+    }
+
+    return this._callToolCore(
+      toolName, fnName, fnImpl, input, isSyncTool, doTrace, log,
+    );
+  }
+
+  /**
+   * Core tool invocation with instrumentation.
+   * Separated from `callTool` so the memoization wrapper can delegate
+   * without duplicating the fast-path and instrumented-path logic.
+   */
+  private _callToolCore(
+    toolName: string,
+    fnName: string,
+    fnImpl: (...args: any[]) => any,
+    input: Record<string, any>,
+    isSyncTool: boolean,
+    doTrace: boolean,
+    log: { execution: false | "debug" | "info"; errors: false | "warn" | "error" },
+  ): MaybePromise<any> {
     const tracer = this.tracer;
     const logger = this.logger;
     const toolContext: ToolContext = {
       logger: logger ?? {},
       signal: this.signal,
     };
-
     const timeoutMs = this.toolTimeoutMs;
-    const { sync: isSyncTool, doTrace, log } = resolveToolMeta(fnImpl);
 
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
@@ -438,6 +486,8 @@ export class ExecutionTree implements TreeContext {
     child.tracer = this.tracer;
     child.logger = this.logger;
     child.signal = this.signal;
+    // Share the memoization cache across shadow trees (same request)
+    child.memoCache = this.memoCache;
     return child;
   }
 

@@ -251,6 +251,10 @@ export type ResolvedToolMeta = {
   /** Emit an OTel span for this call. Default: `true`. */
   doTrace: boolean;
   log: EffectiveToolLog;
+  /** Memoization config from ToolMetadata (function-level). */
+  memoize?: {
+    keyFn?: (input: Record<string, any>) => string;
+  };
 };
 
 function resolveToolLog(meta: ToolMetadata | undefined): EffectiveToolLog {
@@ -269,10 +273,18 @@ function resolveToolLog(meta: ToolMetadata | undefined): EffectiveToolLog {
 /** Read and normalise the `.bridge` metadata from a tool function. */
 export function resolveToolMeta(fn: (...args: any[]) => any): ResolvedToolMeta {
   const bridge = (fn as any).bridge as ToolMetadata | undefined;
+  // Resolve memoize: true → default keyFn, object → use as-is
+  let memoize: ResolvedToolMeta["memoize"];
+  if (bridge?.memoize === true) {
+    memoize = {};
+  } else if (bridge?.memoize && typeof bridge.memoize === "object") {
+    memoize = { keyFn: bridge.memoize.keyFn };
+  }
   return {
     sync: bridge?.sync === true,
     doTrace: bridge?.trace !== false,
     log: resolveToolLog(bridge),
+    ...(memoize ? { memoize } : {}),
   };
 }
 
