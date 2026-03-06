@@ -141,25 +141,28 @@ connection.onDocumentFormatting((params) => {
   const text = doc.getText();
 
   try {
-    parseBridgeCst(text);
+    const cst = parseBridgeCst(text);
+    const formatted = prettyPrintToSource(
+      { source: text, cst },
+      {
+        tabSize: params.options.tabSize,
+        insertSpaces: params.options.insertSpaces,
+      },
+    );
+
+    const range = Range.create(
+      { line: 0, character: 0 },
+      doc.positionAt(text.length),
+    );
+
+    return [TextEdit.replace(range, formatted)];
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     connection.console.warn(
-      `Bridge formatting aborted due to syntax errors: ${String((error as Error)?.message ?? error)}`,
+      `Bridge formatting aborted due to syntax errors: ${message}`,
     );
     return null;
   }
-
-  const formatted = prettyPrintToSource(text, {
-    tabSize: params.options.tabSize,
-    insertSpaces: params.options.insertSpaces,
-  });
-
-  const range = Range.create(
-    { line: 0, character: 0 },
-    doc.positionAt(text.length),
-  );
-
-  return [TextEdit.replace(range, formatted)];
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────

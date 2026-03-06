@@ -6,6 +6,7 @@
  * from the token stream, applying consistent formatting rules.
  */
 import type { IToken } from "chevrotain";
+import type { CstNode } from "chevrotain";
 import { BridgeLexer } from "./parser/lexer.ts";
 import { parseBridgeCst } from "./parser/parser.ts";
 
@@ -22,8 +23,10 @@ export type BridgeFormattingOptions = {
 function resolveFormattingOptions(
   options?: Partial<BridgeFormattingOptions>,
 ): BridgeFormattingOptions {
-  const tabSize = Number.isInteger(options?.tabSize)
-    ? Math.max(1, options?.tabSize ?? DEFAULT_FORMATTING_OPTIONS.tabSize)
+  const rawTabSize = options?.tabSize;
+  const tabSize =
+    typeof rawTabSize === "number" && Number.isInteger(rawTabSize)
+      ? Math.max(1, rawTabSize)
     : DEFAULT_FORMATTING_OPTIONS.tabSize;
 
   return {
@@ -167,11 +170,16 @@ function isTopLevelBlockStart(group: IToken[]): boolean {
  * @param source - The Bridge DSL source text to format
  * @returns Formatted source text, or the original if parsing fails
  */
+type PrettyPrintInput = string | { source: string; cst: CstNode };
+
 export function prettyPrintToSource(
-  source: string,
+  input: PrettyPrintInput,
   options?: Partial<BridgeFormattingOptions>,
 ): string {
-  parseBridgeCst(source);
+  const source = typeof input === "string" ? input : input.source;
+  if (typeof input === "string") {
+    parseBridgeCst(source);
+  }
   return formatBridgeInternal(source, options);
 }
 
