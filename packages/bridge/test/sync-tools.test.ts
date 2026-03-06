@@ -247,7 +247,7 @@ bridge Query.enriched {
     ]);
   });
 
-  test("async tool is not used with sync assertion", async () => {
+  test("async tool without sync flag works correctly", async () => {
     const bridgeText = `version 1.5
 bridge Query.normal {
   with api as a

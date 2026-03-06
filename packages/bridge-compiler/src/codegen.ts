@@ -1660,7 +1660,7 @@ class CodegenContext {
             0,
             6,
           );
-          const syncPre = syncPreamble.length > 0
+          const syncMapExpr = syncPreamble.length > 0
             ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; }) ?? null`
             : `(${arrayExpr})?.map((_el0) => (${syncBody})) ?? null`;
           this.elementLocalVars.clear();
@@ -1674,7 +1674,7 @@ class CodegenContext {
           const asyncExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
           this.elementLocalVars.clear();
 
-          mapExpr = `(${syncCheck}) ? ${syncPre} : ${asyncExpr}`;
+          mapExpr = `(${syncCheck}) ? ${syncMapExpr} : ${asyncExpr}`;
         } else {
           // Standard async path — for...of inside an async IIFE
           const preambleLines: string[] = [];
