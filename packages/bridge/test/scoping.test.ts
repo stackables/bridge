@@ -100,10 +100,18 @@ function runScopingSuite(suiteName: string, cases: ScopingTestCase[]) {
   describe(suiteName, () => {
     for (const c of cases) {
       describe(c.name, () => {
-        // Cases that document expected behavior not yet implemented
+        // Cases that document expected behavior not yet implemented.
+        // The body runs the full assertion so the test will auto-pass
+        // once the feature lands (node:test treats todo-pass as info).
         if (c.pending) {
-          test("runtime", { todo: c.pending }, () => {});
-          test("aot", { todo: c.pending }, () => {});
+          test("runtime", { todo: c.pending }, async () => {
+            const data = await runRuntime(c);
+            if (c.expected !== undefined) assert.deepEqual(data, c.expected);
+          });
+          test("aot", { todo: c.pending }, async () => {
+            const data = await runAot(c);
+            if (c.expected !== undefined) assert.deepEqual(data, c.expected);
+          });
           return;
         }
 
