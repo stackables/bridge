@@ -1231,7 +1231,7 @@ bridge Query.test {
           },
           toolTimeoutMs: 50,
         }),
-      /Tool timeout/,
+      /timed out/,
     );
   });
 });

@@ -11,7 +11,12 @@
 
 import type { NodeRef, Wire } from "./types.ts";
 import type { MaybePromise, TreeContext } from "./tree-types.ts";
-import { isFatalError, isPromise, applyControlFlow, BridgeAbortError } from "./tree-types.ts";
+import {
+  isFatalError,
+  isPromise,
+  applyControlFlow,
+  BridgeAbortError,
+} from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
 // ── Wire type helpers ────────────────────────────────────────────────────────
@@ -101,7 +106,7 @@ async function resolveWiresAsync(
       if (isFatalError(err)) throw err;
 
       const recoveredValue = await applyCatchGate(ctx, w, pullChain);
-      if (recoveredValue != null) return recoveredValue;
+      if (recoveredValue !== undefined) return recoveredValue;
 
       lastError = err;
     }

@@ -655,6 +655,9 @@ class CodegenContext {
     lines.push(
       `  const __BridgeAbortError = __opts?.__BridgeAbortError ?? class extends Error { constructor(m) { super(m ?? "Execution aborted by external signal"); this.name = "BridgeAbortError"; } };`,
     );
+    lines.push(
+      `  const __BridgeTimeoutError = __opts?.__BridgeTimeoutError ?? class extends Error { constructor(n, ms) { super('Tool "' + n + '" timed out after ' + ms + 'ms'); this.name = "BridgeTimeoutError"; } };`,
+    );
     lines.push(`  const __signal = __opts?.signal;`);
     lines.push(`  const __timeoutMs = __opts?.toolTimeoutMs ?? 0;`);
     lines.push(
@@ -675,7 +678,7 @@ class CodegenContext {
     lines.push(`      let result;`);
     lines.push(`      if (__timeoutMs > 0) {`);
     lines.push(
-      `        let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error("Tool timeout")), __timeoutMs); });`,
+      `        let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new __BridgeTimeoutError(toolName, __timeoutMs)), __timeoutMs); });`,
     );
     lines.push(
       `        try { result = await Promise.race([p, timeout]); } finally { clearTimeout(t); }`,
@@ -1633,7 +1636,7 @@ class CodegenContext {
           6,
           "continue",
         );
-        mapExpr = `(${arrayExpr})?.flatMap((_el0) => {\n${cfBody}\n    }) ?? null`;
+        mapExpr = `((__s) => Array.isArray(__s) ? __s.flatMap((_el0) => {\n${cfBody}\n    }) ?? null : null)(${arrayExpr})`;
       } else if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
         // Same rationale as root array handling above: nested multilevel
         // control requires for-loop + throw/catch propagation instead of map.
@@ -1646,10 +1649,10 @@ class CodegenContext {
               cf.kind === "continue" ? "for-continue" : "break",
             )
           : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
-        mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${loopBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n      } return _result; })()`;
+        mapExpr = `(() => { const _src = ${arrayExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${loopBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n      } return _result; })()`;
       } else {
         const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
-        mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
+        mapExpr = `((__s) => Array.isArray(__s) ? __s.map((_el0) => (${body})) ?? null : null)(${arrayExpr})`;
       }
 
       if (!tree.children.has(arrayField)) {
@@ -1802,7 +1805,7 @@ class CodegenContext {
               innerCf.kind === "continue" ? "for-continue" : "break",
             )
           : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
-        mapExpr = `await (async () => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${innerBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
+        mapExpr = `await (async () => { const _src = ${srcExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${innerBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
       } else if (innerCf?.kind === "continue" && innerCf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
@@ -1811,7 +1814,7 @@ class CodegenContext {
           indent + 2,
           "continue",
         );
-        mapExpr = `(${srcExpr})?.flatMap((${innerElVar}) => {\n${cfBody}\n${" ".repeat(indent + 2)}}) ?? null`;
+        mapExpr = `((__s) => Array.isArray(__s) ? __s.flatMap((${innerElVar}) => {\n${cfBody}\n${" ".repeat(indent + 2)}}) ?? null : null)(${srcExpr})`;
       } else if (innerCf?.kind === "break" || innerCf?.kind === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
@@ -1820,7 +1823,7 @@ class CodegenContext {
           indent + 4,
           innerCf.kind === "continue" ? "for-continue" : "break",
         );
-        mapExpr = `(() => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${cfBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
+        mapExpr = `(() => { const _src = ${srcExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${cfBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
       } else {
         const innerBody = this.buildElementBody(
           shifted,
@@ -1828,7 +1831,7 @@ class CodegenContext {
           depth + 1,
           indent + 2,
         );
-        mapExpr = `(${srcExpr})?.map((${innerElVar}) => (${innerBody})) ?? null`;
+        mapExpr = `((__s) => Array.isArray(__s) ? __s.map((${innerElVar}) => (${innerBody})) ?? null : null)(${srcExpr})`;
       }
 
       if (!tree.children.has(field)) {
@@ -1861,7 +1864,7 @@ class CodegenContext {
     const controlWire = elemWires.find(
       (w) =>
         w.to.path.length === 1 &&
-        (("fallbacks" in w && w.fallbacks?.some(fb => fb.control != null)) ||
+        (("fallbacks" in w && w.fallbacks?.some((fb) => fb.control != null)) ||
           ("catchControl" in w && w.catchControl != null)),
     );
 
@@ -1883,8 +1886,9 @@ class CodegenContext {
     const checkExpr = this.elementWireToExpr(controlWire, elVar);
 
     // Determine the check type
-    const isNullish =
-      controlWire.fallbacks?.some(fb => fb.type === "nullish" && fb.control != null) ?? false;
+    const isNullish = controlWire.fallbacks?.some(
+      (fb) => fb.type === "nullish" && fb.control != null,
+    ) ?? false;
     const ctrlFromFallback =
       controlWire.fallbacks?.find((fb) => fb.control != null)?.control;
     const ctrl = ctrlFromFallback ?? controlWire.catchControl;
@@ -2522,7 +2526,19 @@ class CodegenContext {
       !ref.element
     ) {
       if (ref.path.length === 0) return "input";
-      return "input" + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+      // Respect rootSafe / pathSafe flags, same as tool-result refs.
+      // A bare `.` access (no `?.`) on a null intermediate throws TypeError,
+      // matching the runtime's applyPath strict-null behaviour.
+      return (
+        "input" +
+        ref.path
+          .map((p, i) => {
+            const safe =
+              ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
+            return safe ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`;
+          })
+          .join("")
+      );
     }
 
     // Tool result reference

@@ -7,7 +7,9 @@ const syncUtility = {
 
 export function filter(opts: { in: any[]; [key: string]: any }) {
   const { in: arr, ...criteria } = opts;
+  if (!Array.isArray(arr)) return undefined;
   return arr.filter((obj) => {
+    if (obj == null || typeof obj !== "object") return false;
     for (const [key, value] of Object.entries(criteria)) {
       if (obj[key] !== value) {
         return false;
@@ -21,7 +23,9 @@ filter.bridge = syncUtility;
 
 export function find(opts: { in: any[]; [key: string]: any }) {
   const { in: arr, ...criteria } = opts;
+  if (!Array.isArray(arr)) return undefined;
   return arr.find((obj) => {
+    if (obj == null || typeof obj !== "object") return false;
     for (const [key, value] of Object.entries(criteria)) {
       if (obj[key] !== value) {
         return false;
