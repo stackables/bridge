@@ -246,6 +246,8 @@ export type EffectiveToolLog = {
 
 /** Normalised metadata resolved from the optional `.bridge` property. */
 export type ResolvedToolMeta = {
+  /** Whether the tool declares synchronous execution. */
+  sync: boolean;
   /** Emit an OTel span for this call. Default: `true`. */
   doTrace: boolean;
   log: EffectiveToolLog;
@@ -267,7 +269,11 @@ function resolveToolLog(meta: ToolMetadata | undefined): EffectiveToolLog {
 /** Read and normalise the `.bridge` metadata from a tool function. */
 export function resolveToolMeta(fn: (...args: any[]) => any): ResolvedToolMeta {
   const bridge = (fn as any).bridge as ToolMetadata | undefined;
-  return { doTrace: bridge?.trace !== false, log: resolveToolLog(bridge) };
+  return {
+    sync: bridge?.sync === true,
+    doTrace: bridge?.trace !== false,
+    log: resolveToolLog(bridge),
+  };
 }
 
 /** Log a successful tool invocation. No-ops when `level` is `false`. */

@@ -232,7 +232,7 @@ export class ExecutionTree implements TreeContext {
     };
 
     const timeoutMs = this.toolTimeoutMs;
-    const isSyncTool = (fnImpl as any).bridge?.sync === true;
+    const { sync: isSyncTool, doTrace, log } = resolveToolMeta(fnImpl);
 
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
@@ -268,7 +268,6 @@ export class ExecutionTree implements TreeContext {
     }
 
     // ── Instrumented path ─────────────────────────────────────────
-    const { doTrace, log } = resolveToolMeta(fnImpl);
     const traceStart = tracer?.now();
     const metricAttrs = {
       "bridge.tool.name": toolName,
