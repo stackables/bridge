@@ -2,7 +2,7 @@
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting, real-time diagnostics, and hover information for the Bridge declarative dataflow language",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "stackables",
   "icon": "logo128.png",
   "engines": {
@@ -47,11 +47,11 @@
     }
   },
   "scripts": {
-    "prebuild": "pnpm --filter @stackables/bridge build",
+    "prebuild": "pnpm --recursive --filter '@stackables/*' --filter '!@stackables/bridge-playground' build",
     "build": "node build.mjs",
     "lint:types": "tsc -p tsconfig.check.json",
     "watch": "node build.mjs --watch",
-    "prevscode:prepublish": "pnpm --filter @stackables/bridge build",
+    "prevscode:prepublish": "pnpm --recursive --filter '@stackables/*' --filter '!@stackables/bridge-playground' build",
     "vscode:prepublish": "node build.mjs"
   },
   "devDependencies": {
