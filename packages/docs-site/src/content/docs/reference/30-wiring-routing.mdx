@@ -39,39 +39,34 @@ o.country = "Germany"
 version 1.5
 
 const lorem = {
-"ipsum": "dolor sit amet",
-"consetetur": 8.9
+  "ipsum":"dolor sit amet",
+  "consetetur":8.9
 }
 
 bridge Query.greet {
+  # witnout alias
+  with const
+  # with alias
+  with input as inp
+  with output as o
 
-# witnout alias
+  # Pull value from input node
+  o.nameFromInput <- inp.name
 
-with const
+  # Constants
+  o.constNumer = 7.7
+  o.constString = "just a string"
 
-# with alias
-
-with input as inp
-with output as o
-
-# Pull value from input node
-
-o.nameFromInput <- inp.name
-
-# Constants
-
-o.constNumer = 7.7
-o.constString = "just a string"
-
-# Bridge variables also need pulling
-
-o.constFromConst <- const.lorem
+  # Bridge variables also need pulling
+  o.constFromConst <- const.lorem
 }
 `}
 
-inputJson={`{
+inputJson={`
+{
   "name": "Hello Bridge"
-}`}
+}
+`}
 
 autoRun={true}
 />
@@ -106,6 +101,47 @@ api.body.user {
 
 ```
 
+<MiniPlaygroundModal
+  client:load
+  bridge={`
+version 1.5
+
+bridge Query.createPayload {
+  with std.audit
+  with input as i
+  with output as o
+
+  audit.v1.value = 1
+  audit.v1.deep.isTrue = false
+  audit.v1.deep.input.first <- i.first
+  audit.v1.deep.input.last <- i.last
+
+  # Equal to the above
+  audit.v2 {
+    .value = 1
+    .deep {
+      .isTrue = false
+      .input {
+        .first <- i.first
+        .last <- i.last
+      }
+    }
+  }
+
+  o <- audit
+}
+`}
+
+inputJson={`
+{
+  "first": "Bob",
+  "last": "Bobik"
+}
+`}
+
+autoRun={true}
+/>
+
 ## 3. Spreading Objects (`...`)
 
 If you want to map an entire object into a specific target without writing out every single field, you can use the spread operator (`...`) inside a Path Scoping Block.
@@ -128,6 +164,37 @@ bridge Query.getUser {
 }
 
 ```
+<MiniPlaygroundModal
+  client:load
+  bridge={`
+version 1.5
+
+bridge Query.createPayload {
+  with std.audit
+  with input as i
+  with output as o
+
+  audit.v2 {
+    ...i
+    .last = "Overridden Last Name"
+    .deep {
+      .isTrue = false
+    }
+  }
+
+  o <- audit
+}
+`}
+
+inputJson={`
+{
+  "first": "Bob",
+  "last": "Bobik"
+}
+`}
+
+autoRun={true}
+/>
 
 ## 4. The Universal `alias`
 
@@ -170,6 +237,8 @@ o.pass <- isPassing
 o.total <- total
 
 ```
+<MiniPlaygroundModal client:load exampleId="alias" autoRun={true} />
+
 
 ## 5. Forcing Execution (`force`)
 

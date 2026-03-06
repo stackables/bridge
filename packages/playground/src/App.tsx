@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { Playground } from "./Playground";
 import { examples } from "./examples";
 import { usePlaygroundState } from "./usePlaygroundState";
@@ -26,17 +26,42 @@ export function App() {
     context,
   } = state;
 
-  // Load shared playground state from ?s=<id> on first mount
+  // Load shared playground state from ?s=<id> on first mount,
+  // or select built-in example from #example-id hash.
   useEffect(() => {
     const id = getShareIdFromUrl();
-    if (!id) return;
-    clearShareIdFromUrl();
-    loadShare(id)
-      .then((payload) => state.loadSharePayload(payload))
-      .catch(() => {
-        // silently ignore — invalid/expired share id
-      });
+    if (id) {
+      clearShareIdFromUrl();
+      // Clear the hash too — a custom share supersedes any example reference
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+      loadShare(id)
+        .then((payload) => state.loadSharePayload(payload))
+        .catch(() => {
+          // silently ignore — invalid/expired share id
+        });
+      return;
+    }
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const idx = examples.findIndex((e) => e.id === hash);
+      if (idx !== -1) selectExample(idx);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectExample = useCallback(
+    (index: number) => {
+      selectExample(index);
+      const ex = examples[index];
+      if (ex) {
+        window.history.replaceState(null, "", "#" + ex.id);
+      }
+    },
+    [selectExample],
+  );
 
   const isStandalone = mode === "standalone";
 
@@ -57,7 +82,7 @@ export function App() {
             <span className="text-xs text-slate-600">Example:</span>
             <Select
               value={String(exampleIndex)}
-              onValueChange={(v) => selectExample(Number(v))}
+              onValueChange={(v) => handleSelectExample(Number(v))}
             >
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -100,7 +125,7 @@ export function App() {
           <span className="text-xs text-slate-600">Example:</span>
           <Select
             value={String(exampleIndex)}
-            onValueChange={(v) => selectExample(Number(v))}
+            onValueChange={(v) => handleSelectExample(Number(v))}
           >
             <SelectTrigger className="w-full">
               <SelectValue />

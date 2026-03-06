@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Playground } from "./Playground";
 import { usePlaygroundState } from "./usePlaygroundState";
+import { examples } from "./examples";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
@@ -9,10 +10,12 @@ export type DialogPlaygroundProps = {
   label?: string;
   /** Index of the built-in example to load initially (default: 0). */
   initialExample?: number;
+  /** ID of a built-in example to load initially. Takes precedence over `initialExample`. */
+  exampleId?: string;
   /** Disables switching to GraphQL mode. */
   hideGqlSwitch?: boolean;
 
-  /** Optional custom bridge DSL. If provided, overrides `initialExample`. */
+  /** Optional custom bridge DSL. If provided, overrides `initialExample`/`exampleId`. */
   bridge?: string;
   /** Optional custom context JSON string. */
   contextStr?: string;
@@ -82,6 +85,7 @@ function PlaygroundInner({
 export function DialogPlayground({
   label = "Open Playground",
   initialExample = 0,
+  exampleId,
   hideGqlSwitch = true,
   bridge,
   contextStr,
@@ -90,6 +94,11 @@ export function DialogPlayground({
   outputFields,
   autoRun,
 }: DialogPlaygroundProps) {
+  const resolvedExample =
+    exampleId !== undefined
+      ? (examples.findIndex((e) => e.id === exampleId) ?? 0)
+      : initialExample;
+
   const [open, setOpen] = useState(false);
 
   return (
@@ -110,7 +119,7 @@ export function DialogPlayground({
       >
         {open && (
           <PlaygroundInner
-            initialExample={initialExample}
+            initialExample={resolvedExample}
             hideGqlSwitch={hideGqlSwitch}
             bridge={bridge}
             contextStr={contextStr}

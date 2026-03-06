@@ -1,6 +1,7 @@
 import type { PlaygroundMode } from "./share";
 
 export type Example = {
+  id: string;
   name: string;
   description: string;
   mode?: PlaygroundMode;
@@ -18,6 +19,7 @@ export type Example = {
 
 export const examples: Example[] = [
   {
+    id: "string-transform",
     name: "String Transform",
     description:
       "Use std.str.toUpperCase and std.str.toLowerCase to transform string fields using pipe syntax",
@@ -66,6 +68,7 @@ bridge Query.greet {
     context: `{}`,
   },
   {
+    id: "constants",
     name: "Constants",
     description:
       "Hardcode constant values directly in bridge files using the = assignment syntax",
@@ -104,6 +107,7 @@ bridge Query.config {
     context: `{}`,
   },
   {
+    id: "context",
     name: "Context",
     description:
       "Access the GraphQL context inside bridge files using 'with context'",
@@ -152,6 +156,7 @@ bridge Query.profile {
 }`,
   },
   {
+    id: "http-tool",
     name: "HTTP Tool",
     description:
       "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
@@ -204,6 +209,7 @@ bridge Query.location {
     context: `{}`,
   },
   {
+    id: "sbb-train-search",
     name: "SBB Train Search",
     description:
       "Query the Swiss public transport API to find train connections between two stations",
@@ -337,6 +343,7 @@ bridge Query.searchTrains {
     context: `{}`,
   },
   {
+    id: "passthrough",
     name: "Passthrough",
     description:
       "Pass input arguments directly to output fields with no transformation",
@@ -380,6 +387,7 @@ bridge Query.echo {
     context: `{}`,
   },
   {
+    id: "expressions",
     name: "Expressions",
     description:
       "Use inline math and comparison operators to transform values directly in wire assignments",
@@ -426,6 +434,7 @@ bridge Query.pricing {
     context: `{}`,
   },
   {
+    id: "ternary",
     name: "Conditional Wire (Ternary)",
     description:
       "Select between two sources based on a condition — only the chosen branch is evaluated",
@@ -481,6 +490,7 @@ bridge Query.pricing {
     context: `{}`,
   },
   {
+    id: "force",
     name: "Force (Side-Effects)",
     description:
       "Use 'force' to guarantee a tool executes as a side-effect even when no output fields come from it",
@@ -549,6 +559,7 @@ bridge Mutation.submitFeedback {
     context: `{}`,
   },
   {
+    id: "alias",
     name: "Alias (Rename & Cache)",
     description:
       "alias is a fully compatible wire — supports ?., ||, ??, catch, and full expression syntax (math, comparison, not, parentheses, ternary)",
@@ -627,6 +638,7 @@ bridge Query.profile {
     context: `{}`,
   },
   {
+    id: "string-interpolation",
     name: "String Interpolation",
     description:
       "Build strings from multiple sources using {…} template placeholders in pull wires",
@@ -692,6 +704,7 @@ bridge Query.userProfile {
     context: `{}`,
   },
   {
+    id: "path-scoping",
     name: "Path Scoping (Nested Objects)",
     description:
       "Group deeply nested wires with path scoping blocks — syntactic sugar that avoids repeating long target prefixes",
@@ -810,6 +823,7 @@ bridge Query.createPayload {
     context: `{}`,
   },
   {
+    id: "boolean-logic",
     name: "Boolean Logic",
     description:
       "Use `and`, `or`, and `not` keywords for clear, unambiguous boolean expressions in inline policy evaluation",
