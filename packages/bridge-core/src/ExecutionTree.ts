@@ -231,6 +231,7 @@ export class ExecutionTree implements TreeContext {
     };
 
     const timeoutMs = this.toolTimeoutMs;
+    const isSyncTool = (fnImpl as any).bridge?.sync === true;
 
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
@@ -240,6 +241,14 @@ export class ExecutionTree implements TreeContext {
     if (!tracer && !logger && !isOtelActive()) {
       try {
         const result = fnImpl(input, toolContext);
+        if (isSyncTool) {
+          if (isPromise(result)) {
+            throw new Error(
+              `Tool "${fnName}" declared {sync:true} but returned a Promise`,
+            );
+          }
+          return result;
+        }
         if (timeoutMs > 0 && isPromise(result)) {
           return raceTimeout(result, timeoutMs, toolName);
         }
@@ -264,6 +273,57 @@ export class ExecutionTree implements TreeContext {
       "bridge.tool.name": toolName,
       "bridge.tool.fn": fnName,
     };
+
+    // ── Sync-optimised instrumented path ─────────────────────────
+    // When the tool declares {sync: true}, avoid the async closure and
+    // the OTel span overhead (sync tools opt out of tracing by convention).
+    if (isSyncTool) {
+      const wallStart = performance.now();
+      try {
+        const result = fnImpl(input, toolContext);
+        if (isPromise(result)) {
+          throw new Error(
+            `Tool "${fnName}" declared {sync:true} but returned a Promise`,
+          );
+        }
+        const durationMs = roundMs(performance.now() - wallStart);
+        toolCallCounter.add(1, metricAttrs);
+        toolDurationHistogram.record(durationMs, metricAttrs);
+        if (tracer && traceStart != null) {
+          tracer.record(
+            tracer.entry({
+              tool: toolName,
+              fn: fnName,
+              input,
+              output: result,
+              durationMs: roundMs(tracer.now() - traceStart),
+              startedAt: traceStart,
+            }),
+          );
+        }
+        logToolSuccess(logger, log.execution, toolName, fnName, durationMs);
+        return result;
+      } catch (err) {
+        const durationMs = roundMs(performance.now() - wallStart);
+        toolCallCounter.add(1, metricAttrs);
+        toolDurationHistogram.record(durationMs, metricAttrs);
+        toolErrorCounter.add(1, metricAttrs);
+        if (tracer && traceStart != null) {
+          tracer.record(
+            tracer.entry({
+              tool: toolName,
+              fn: fnName,
+              input,
+              error: (err as Error).message,
+              durationMs: roundMs(tracer.now() - traceStart),
+              startedAt: traceStart,
+            }),
+          );
+        }
+        logToolError(logger, log.errors, toolName, fnName, err as Error);
+        throw err;
+      }
+    }
 
     return withSpan(
       doTrace,

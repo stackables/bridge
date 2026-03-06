@@ -644,6 +644,27 @@ class CodegenContext {
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
     lines.push(`  const __trace = __opts?.__trace;`);
+    // Sync tool caller — no await, no timeout, enforces no-promise return.
+    lines.push(`  function __callSync(fn, input, toolName) {`);
+    lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
+    lines.push(`    const start = __trace ? performance.now() : 0;`);
+    lines.push(`    try {`);
+    lines.push(`      const result = fn(input, __ctx);`);
+    lines.push(
+      `      if (result && typeof result.then === "function") throw new Error("Tool \\"" + toolName + "\\" declared {sync:true} but returned a Promise");`,
+    );
+    lines.push(
+      `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
+    );
+    lines.push(`      return result;`);
+    lines.push(`    } catch (err) {`);
+    lines.push(
+      `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
+    );
+    lines.push(`      throw err;`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    // Async tool caller — full promise handling with optional timeout.
     lines.push(`  async function __call(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
     lines.push(`    const start = __trace ? performance.now() : 0;`);
@@ -877,6 +898,26 @@ class CodegenContext {
   // ── Tool call emission ─────────────────────────────────────────────────────
 
   /**
+   * Generate a tool call expression that uses __callSync for sync tools at runtime,
+   * falling back to `await __call` for async tools. Used at individual call sites.
+   */
+  private syncAwareCall(fnName: string, inputObj: string): string {
+    const fn = `tools[${JSON.stringify(fnName)}]`;
+    const name = JSON.stringify(fnName);
+    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
+  }
+
+  /**
+   * Same as syncAwareCall but without await — for use inside Promise.all() and
+   * in sync array map bodies.  Returns a value for sync tools, a Promise for async.
+   */
+  private syncAwareCallNoAwait(fnName: string, inputObj: string): string {
+    const fn = `tools[${JSON.stringify(fnName)}]`;
+    const name = JSON.stringify(fnName);
+    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
+  }
+
+  /**
    * Emit a tool call with ToolDef wire merging and onError support.
    *
    * If a ToolDef exists for the tool:
@@ -908,18 +949,18 @@ class CodegenContext {
       );
       if (mode === "fire-and-forget") {
         lines.push(
-          `  try { await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)}); } catch (_e) {}`,
+          `  try { ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) {}`,
         );
         lines.push(`  const ${tool.varName} = undefined;`);
       } else if (mode === "catch-guarded") {
         // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
         lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
         lines.push(
-          `  try { ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)}); } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+          `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
         );
       } else {
         lines.push(
-          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)});`,
+          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)};`,
         );
       }
       return;
@@ -992,7 +1033,7 @@ class CodegenContext {
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
       lines.push(
-        `    ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)});`,
+        `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
       );
       lines.push(`  } catch (_e) {`);
       if ("value" in onErrorWire) {
@@ -1009,18 +1050,18 @@ class CodegenContext {
       lines.push(`  }`);
     } else if (mode === "fire-and-forget") {
       lines.push(
-        `  try { await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}); } catch (_e) {}`,
+        `  try { ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) {}`,
       );
       lines.push(`  const ${tool.varName} = undefined;`);
     } else if (mode === "catch-guarded") {
       // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
       lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
       lines.push(
-        `  try { ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}); } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+        `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
       );
     } else {
       lines.push(
-        `  const ${tool.varName} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)});`,
+        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
       );
     }
   }
@@ -1112,7 +1153,7 @@ class CodegenContext {
           4,
         );
         lines.push(
-          `  const ${tool.varName} = await __call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)});`,
+          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)};`,
         );
         return;
       }
@@ -1189,7 +1230,7 @@ class CodegenContext {
         inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n    }` : "{}";
 
       // Build call expression (without `const X = await`)
-      const callExpr = `__call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+      const callExpr = this.syncAwareCallNoAwait(fnName, inputObj);
 
       depCalls.push({ toolName: pd.toolName, varName, callExpr });
       this.toolDepVars.set(pd.toolName, varName);
@@ -1386,7 +1427,45 @@ class CodegenContext {
       const needsAsync = elemWires.some((w) => this.wireNeedsAwait(w));
 
       if (needsAsync) {
-        // ALL async processing must use for...of loop
+        // Check if async is only from element-scoped tools (no catch fallbacks).
+        // If so, generate a dual sync/async path with a runtime check.
+        const canDualPath = !cf && this.asyncOnlyFromTools(elemWires);
+        const toolRefs = canDualPath
+          ? this.collectElementToolRefs(elemWires)
+          : [];
+        const hasDualPath = canDualPath && toolRefs.length > 0;
+
+        if (hasDualPath) {
+          // ── Dual path: sync .map() when all element tools are sync ──
+          const syncCheck = toolRefs
+            .map((r) => `${r}.bridge?.sync`)
+            .join(" && ");
+
+          // Sync branch — .map() with __callSync
+          const syncPreamble: string[] = [];
+          this.elementLocalVars.clear();
+          this.collectElementPreamble(elemWires, "_el0", syncPreamble, true);
+          const syncBody = this.buildElementBody(
+            elemWires,
+            arrayIterators,
+            0,
+            6,
+          );
+          lines.push(`  if (${syncCheck}) {`);
+          if (syncPreamble.length > 0) {
+            lines.push(
+              `    return (${arrayExpr} ?? []).map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; });`,
+            );
+          } else {
+            lines.push(
+              `    return (${arrayExpr} ?? []).map((_el0) => (${syncBody}));`,
+            );
+          }
+          lines.push(`  }`);
+          this.elementLocalVars.clear();
+        }
+
+        // Async branch — for...of loop with await
         const preambleLines: string[] = [];
         this.elementLocalVars.clear();
         this.collectElementPreamble(elemWires, "_el0", preambleLines);
@@ -1560,24 +1639,62 @@ class CodegenContext {
       const needsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
       if (needsAsync) {
-        // ALL async processing must use for...of inside an async IIFE
-        const preambleLines: string[] = [];
-        this.elementLocalVars.clear();
-        this.collectElementPreamble(shifted, "_el0", preambleLines);
+        // Check if we can generate a dual sync/async path
+        const canDualPath = !cf && this.asyncOnlyFromTools(shifted);
+        const toolRefs = canDualPath
+          ? this.collectElementToolRefs(shifted)
+          : [];
+        const hasDualPath = canDualPath && toolRefs.length > 0;
 
-        const asyncBody = cf
-          ? this.buildElementBodyWithControlFlow(
-              shifted,
-              arrayIterators,
-              0,
-              8,
-              cf === "continue" ? "for-continue" : "break",
-            )
-          : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+        if (hasDualPath) {
+          // Sync branch — .map() with __callSync
+          const syncCheck = toolRefs
+            .map((r) => `${r}.bridge?.sync`)
+            .join(" && ");
+          const syncPreamble: string[] = [];
+          this.elementLocalVars.clear();
+          this.collectElementPreamble(shifted, "_el0", syncPreamble, true);
+          const syncBody = this.buildElementBody(
+            shifted,
+            arrayIterators,
+            0,
+            6,
+          );
+          const syncPre = syncPreamble.length > 0
+            ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; }) ?? null`
+            : `(${arrayExpr})?.map((_el0) => (${syncBody})) ?? null`;
+          this.elementLocalVars.clear();
 
-        const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-        mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
-        this.elementLocalVars.clear();
+          // Async branch — for...of inside an async IIFE
+          const preambleLines: string[] = [];
+          this.elementLocalVars.clear();
+          this.collectElementPreamble(shifted, "_el0", preambleLines);
+          const asyncBody = `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+          const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
+          const asyncExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
+          this.elementLocalVars.clear();
+
+          mapExpr = `(${syncCheck}) ? ${syncPre} : ${asyncExpr}`;
+        } else {
+          // Standard async path — for...of inside an async IIFE
+          const preambleLines: string[] = [];
+          this.elementLocalVars.clear();
+          this.collectElementPreamble(shifted, "_el0", preambleLines);
+
+          const asyncBody = cf
+            ? this.buildElementBodyWithControlFlow(
+                shifted,
+                arrayIterators,
+                0,
+                8,
+                cf === "continue" ? "for-continue" : "break",
+              )
+            : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+
+          const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
+          mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
+          this.elementLocalVars.clear();
+        }
       } else if (cf === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
@@ -2160,6 +2277,23 @@ class CodegenContext {
     return false;
   }
 
+  /**
+   * Returns true when all async needs in the given wires come ONLY from
+   * element-scoped tool calls (no catch fallback/control).
+   * When this is true, the array map can be made sync if all tools declare
+   * `{ sync: true }` — we generate a dual sync/async path at runtime.
+   */
+  private asyncOnlyFromTools(wires: Wire[]): boolean {
+    for (const w of wires) {
+      if (
+        (hasCatchFallback(w) || hasCatchControl(w)) &&
+        !this.getSourceErrorFlag(w)
+      )
+        return false;
+    }
+    return true;
+  }
+
   /** Check if an element-scoped tool has transitive async dependencies. */
   private hasAsyncElementDeps(trunkKey: string): boolean {
     const wires = this.bridge.wires.filter(
@@ -2196,11 +2330,15 @@ class CodegenContext {
   /**
    * Collect preamble lines for element-scoped tool calls that should be
    * computed once per element and stored in loop-local variables.
+   *
+   * @param syncOnly When true, emits `__callSync()` calls (no await) — used
+   *   inside the sync `.map()` branch of the dual-path array map optimisation.
    */
   private collectElementPreamble(
     elemWires: Wire[],
     elVar: string,
     lines: string[],
+    syncOnly = false,
   ): void {
     // Find all element-scoped non-internal tools referenced by element wires
     const needed = new Set<string>();
@@ -2283,7 +2421,7 @@ class CodegenContext {
           lines.push(`const ${vn} = { ${entries.join(", ")} };`);
         }
       } else {
-        // Real tool — emit await __call
+        // Real tool — emit tool call
         const tool = this.tools.get(tk);
         if (!tool) continue;
         const toolWires = this.bridge.wires.filter(
@@ -2291,11 +2429,75 @@ class CodegenContext {
         );
         const inputObj = this.buildElementToolInput(toolWires, elVar);
         const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
-        lines.push(
-          `const ${vn} = await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)});`,
-        );
+        if (syncOnly) {
+          const fn = `tools[${JSON.stringify(fnName)}]`;
+          lines.push(
+            `const ${vn} = __callSync(${fn}, ${inputObj}, ${JSON.stringify(fnName)});`,
+          );
+        } else {
+          lines.push(
+            `const ${vn} = ${this.syncAwareCall(fnName, inputObj)};`,
+          );
+        }
       }
     }
+  }
+
+  /**
+   * Collect the tool function references (as JS expressions) for all
+   * element-scoped non-internal tools used by the given element wires.
+   * Used to build runtime sync-check expressions for array map optimisation.
+   */
+  private collectElementToolRefs(elemWires: Wire[]): string[] {
+    const needed = new Set<string>();
+    const collectDeps = (tk: string) => {
+      if (needed.has(tk)) return;
+      needed.add(tk);
+      const depWires = this.bridge.wires.filter(
+        (w) => refTrunkKey(w.to) === tk,
+      );
+      for (const w of depWires) {
+        if ("from" in w && !w.from.element) {
+          const srcKey = refTrunkKey(w.from);
+          if (
+            this.elementScopedTools.has(srcKey) &&
+            !this.internalToolKeys.has(srcKey)
+          ) {
+            collectDeps(srcKey);
+          }
+        }
+        if ("from" in w && w.pipe) {
+          const srcKey = refTrunkKey(w.from);
+          if (
+            this.elementScopedTools.has(srcKey) &&
+            !this.internalToolKeys.has(srcKey)
+          ) {
+            collectDeps(srcKey);
+          }
+        }
+      }
+    };
+    for (const w of elemWires) {
+      if ("from" in w && !w.from.element) {
+        const srcKey = refTrunkKey(w.from);
+        if (
+          this.elementScopedTools.has(srcKey) &&
+          !this.internalToolKeys.has(srcKey)
+        ) {
+          collectDeps(srcKey);
+        }
+      }
+    }
+
+    const refs: string[] = [];
+    for (const tk of needed) {
+      if (this.defineContainers.has(tk)) continue;
+      const tool = this.tools.get(tk);
+      if (!tool) continue;
+      const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
+      refs.push(`tools[${JSON.stringify(fnName)}]`);
+    }
+    return refs;
   }
 
   /** Build an input object for a tool call inside an array map callback. */
@@ -2982,7 +3184,7 @@ class CodegenContext {
         (w) => w.to.path,
         4,
       );
-      return `__call(tools[${JSON.stringify(tool.toolName)}], ${inputObj}, ${JSON.stringify(tool.toolName)})`;
+      return this.syncAwareCallNoAwait(tool.toolName, inputObj);
     }
 
     const fnName = toolDef.fn ?? tool.toolName;
@@ -3017,7 +3219,7 @@ class CodegenContext {
     const inputParts = [...inputEntries.values()];
     const inputObj =
       inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
-    return `__call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+    return this.syncAwareCallNoAwait(fnName, inputObj);
   }
 
   private topologicalLayers(toolWires: Map<string, Wire[]>): string[][] {
