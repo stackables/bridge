@@ -320,3 +320,18 @@ export function withSpan<T>(
   if (!doTrace) return fn(undefined);
   return otelTracer.startActiveSpan(name, { attributes: attrs }, fn);
 }
+
+/**
+ * Synchronous variant of `withSpan` — runs `fn` inside an OTel span
+ * without introducing a Promise.  Used by the sync-tool instrumented
+ * path so that `{sync: true, trace: true}` tools still produce spans.
+ */
+export function withSyncSpan<T>(
+  doTrace: boolean,
+  name: string,
+  attrs: Record<string, string>,
+  fn: (span: Span | undefined) => T,
+): T {
+  if (!doTrace) return fn(undefined);
+  return otelTracer.startActiveSpan(name, { attributes: attrs }, fn);
+}
