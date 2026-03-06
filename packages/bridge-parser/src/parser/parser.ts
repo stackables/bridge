@@ -575,6 +575,7 @@ class BridgeParser extends CstParser {
       this.OR([
         { ALT: () => this.SUBRULE(this.elementWithDecl) },
         { ALT: () => this.SUBRULE(this.elementLine) },
+        { ALT: () => this.SUBRULE(this.elementToolWire) },
       ]),
     );
     this.CONSUME(RCurly);
@@ -605,6 +606,32 @@ class BridgeParser extends CstParser {
           this.OPTION(() => {
             this.CONSUME(MemoizeKw, { LABEL: "elemMemoizeKw" });
           });
+        },
+      },
+    ]);
+  });
+
+  /**
+   * Tool-input wire inside array mapping:
+   *   <handle>.<field> = value
+   *   <handle>.<field> <- source
+   * Used to set inputs on element-scoped tools declared via `with <tool> as <handle>`.
+   */
+  public elementToolWire = this.RULE("elementToolWire", () => {
+    this.SUBRULE(this.nameToken, { LABEL: "elemToolHandle" });
+    this.CONSUME(Dot);
+    this.SUBRULE(this.dottedPath, { LABEL: "elemToolTarget" });
+    this.OR2([
+      {
+        ALT: () => {
+          this.CONSUME(Equals, { LABEL: "elemToolEquals" });
+          this.SUBRULE(this.bareValue, { LABEL: "elemToolValue" });
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(Arrow, { LABEL: "elemToolArrow" });
+          this.SUBRULE(this.sourceExpr, { LABEL: "elemToolSource" });
         },
       },
     ]);
@@ -4963,6 +4990,45 @@ function buildBridgeBody(
       // Process element lines (supports nested array mappings recursively)
       const elemWithDecls = subs(arrayMappingNode, "elementWithDecl");
       const cleanup = processLocalBindings(elemWithDecls, iterName);
+
+      // Process element-scoped tool wires (e.g. `fetchItem.url <- item.id`)
+      const elemToolWires = subs(arrayMappingNode, "elementToolWire");
+      for (const tw of elemToolWires) {
+        const twLineNum = line(findFirstToken(tw));
+        const handle = extractNameToken(sub(tw, "elemToolHandle")!);
+        const targetPath = extractDottedPathStr(sub(tw, "elemToolTarget")!);
+
+        // Resolve handle to its trunk
+        const toRef = resolveAddress(handle, parsePath(targetPath), twLineNum);
+
+        if (tw.children.elemToolEquals) {
+          // Constant wire: handle.field = value
+          const value = extractBareValue(sub(tw, "elemToolValue")!);
+          wires.push({ value, to: toRef });
+        } else if (tw.children.elemToolArrow) {
+          // Pull wire: handle.field <- source
+          const srcNode = sub(tw, "elemToolSource")!;
+          const headNode = sub(srcNode, "head")!;
+          const { root: srcRoot, segments: srcSegs } =
+            extractAddressPath(headNode);
+          const pipeSegs = subs(srcNode, "pipeSegment");
+
+          let fromRef: NodeRef;
+          if (srcRoot === iterName && pipeSegs.length === 0) {
+            fromRef = {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: srcSegs,
+            };
+          } else {
+            fromRef = buildSourceExpr(srcNode, twLineNum, iterName);
+          }
+          wires.push({ from: fromRef, to: toRef });
+        }
+      }
+
       processElementLines(
         subs(arrayMappingNode, "elementLine"),
         arrayToPath,

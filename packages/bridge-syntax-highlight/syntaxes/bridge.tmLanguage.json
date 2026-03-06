@@ -100,13 +100,14 @@
           }
         },
         {
-          "comment": "tool <name> from <std.source>",
-          "match": "^\\s*(tool)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s+from\\s+)([A-Za-z_][A-Za-z0-9_.]*)",
+          "comment": "tool <name> from <std.source> [memoize]",
+          "match": "^\\s*(tool)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s+from\\s+)([A-Za-z_][A-Za-z0-9_.]*)(\\s+memoize)?",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
             "2": { "name": "variable.other.handle.bridge" },
             "3": { "name": "keyword.control.bridge" },
-            "4": { "name": "entity.name.function.bridge" }
+            "4": { "name": "entity.name.function.bridge" },
+            "5": { "name": "keyword.control.bridge" }
           }
         },
         {
@@ -118,13 +119,14 @@
           }
         },
         {
-          "comment": "with <tool> as <handle>  /  with input as i",
-          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "comment": "with <tool> as <handle> [memoize]  /  with input as i",
+          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)(\\s+memoize)?",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
             "2": { "name": "entity.name.function.bridge" },
             "3": { "name": "keyword.control.bridge" },
-            "4": { "name": "variable.other.handle.bridge" }
+            "4": { "name": "variable.other.handle.bridge" },
+            "5": { "name": "keyword.control.bridge" }
           }
         },
         {

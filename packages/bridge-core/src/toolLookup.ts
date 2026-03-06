@@ -177,6 +177,8 @@ export function resolveToolDefByName(
         else merged.wires.push(wire);
       }
     }
+    // Propagate memoize flag (any layer requesting it enables it)
+    if (def.memoize) merged.memoize = true;
   }
 
   ctx.toolDefCache.set(name, merged);
