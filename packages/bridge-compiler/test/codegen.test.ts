@@ -1883,3 +1883,94 @@ bridge Query.subContTool {
     assert.equal(result.items.length, 2);
   });
 });
+
+// ── Sync tool code generation ────────────────────────────────────────────────
+
+describe("AOT codegen: sync tool optimisation", () => {
+  test("generated code includes __callSync helper", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  a.q <- i.q
+  o.result <- a.answer
+}`,
+      "Query.test",
+    );
+    assert.ok(code.includes("__callSync"), "should define __callSync helper");
+    assert.ok(
+      code.includes("bridge?.sync"),
+      "should check bridge.sync at call sites",
+    );
+  });
+
+  test("sync tool call produces correct result", async () => {
+    const syncTool = (input: any) => ({
+      answer: input.q + "!",
+    });
+    syncTool.bridge = { sync: true };
+
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  a.q <- i.q
+  o.result <- a.answer
+}`,
+      "Query.test",
+      { q: "hello" },
+      { api: syncTool },
+    );
+    assert.deepEqual(result, { result: "hello!" });
+  });
+
+  test("sync tool rejects promise return", async () => {
+    const badTool = (input: any) => Promise.resolve({ answer: input.q });
+    badTool.bridge = { sync: true };
+
+    await assert.rejects(
+      () =>
+        compileAndRun(
+          `version 1.5
+bridge Query.test {
+  with api as a
+  with input as i
+  with output as o
+  a.q <- i.q
+  o.result <- a.answer
+}`,
+          "Query.test",
+          { q: "hello" },
+          { api: badTool },
+        ),
+      /sync.*Promise/i,
+    );
+  });
+
+  test("array map with sync pipe tool uses dual-path code", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.catalog {
+  with api as src
+  with enrich
+  with output as o
+
+  o <- src.items[] as it {
+    alias enrich:it as e
+    .id <- it.item_id
+    .label <- e.name
+  }
+}`,
+      "Query.catalog",
+    );
+    // The dual-path should check bridge?.sync
+    assert.ok(
+      code.includes("bridge?.sync"),
+      "array map should check tool sync flag",
+    );
+  });
+});
