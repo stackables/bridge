@@ -75,26 +75,8 @@ const chaosInputArb = fc.dictionary(identifierArb, chaosValueArb, {
 });
 
 // ── Ref helpers ─────────────────────────────────────────────────────────────
-// rootSafe: true mirrors the parser's `?.` safe-navigation semantics on input
-// refs: missing keys return undefined rather than throwing TypeError. This lets
-// us test value-coercion parity (NaN, Infinity, etc.) without hitting the
-// known unsafe-path-traversal divergence between AOT and runtime
-// (tracked separately as fuzz-regressions seeds 1798655022 / -481664925).
-
 function inputRef(type: string, field: string, path: string[]): NodeRef {
-  // rootSafe + pathSafe mirror full `?.` safe-navigation on all segments so
-  // missing keys return undefined rather than throwing TypeError. This lets
-  // us test value-coercion parity (NaN, Infinity, etc.) without hitting the
-  // known unsafe-path-traversal divergence between AOT and runtime
-  // (tracked separately as fuzz-regressions seeds 1798655022 / -481664925).
-  return {
-    module: "_",
-    type,
-    field,
-    path,
-    rootSafe: true,
-    pathSafe: Array(path.length).fill(true),
-  };
+  return { module: "_", type, field, path };
 }
 
 function outputRef(type: string, field: string, path: string[]): NodeRef {
