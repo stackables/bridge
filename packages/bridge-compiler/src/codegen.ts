@@ -145,14 +145,16 @@ type DetectedControlFlow = {
 };
 
 /** Check if any wire in a set has a control flow instruction (break/continue/throw/panic). */
-function detectControlFlow(
-  wires: Wire[],
-): DetectedControlFlow | null {
+function detectControlFlow(wires: Wire[]): DetectedControlFlow | null {
   for (const w of wires) {
     if ("fallbacks" in w && w.fallbacks) {
       for (const fb of w.fallbacks) {
         if (fb.control) {
-          const kind = fb.control.kind as "break" | "continue" | "throw" | "panic";
+          const kind = fb.control.kind as
+            | "break"
+            | "continue"
+            | "throw"
+            | "panic";
           const levels =
             kind === "break" || kind === "continue"
               ? Math.max(1, Number((fb.control as any).levels) || 1)
@@ -162,7 +164,11 @@ function detectControlFlow(
       }
     }
     if ("catchControl" in w && w.catchControl) {
-      const kind = w.catchControl.kind as "break" | "continue" | "throw" | "panic";
+      const kind = w.catchControl.kind as
+        | "break"
+        | "continue"
+        | "throw"
+        | "panic";
       const levels =
         kind === "break" || kind === "continue"
           ? Math.max(1, Number((w.catchControl as any).levels) || 1)
@@ -1457,7 +1463,11 @@ class CodegenContext {
         lines.push(`  return (${arrayExpr} ?? []).flatMap((_el0) => {`);
         lines.push(body);
         lines.push(`  });`);
-      } else if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+      } else if (
+        cf?.kind === "break" ||
+        cf?.kind === "continue" ||
+        requiresLabeledLoop
+      ) {
         // Use an explicit loop for:
         // - direct break/continue control
         // - nested multilevel control (e.g. break 2 / continue 2) that must
@@ -1637,7 +1647,11 @@ class CodegenContext {
           "continue",
         );
         mapExpr = `((__s) => Array.isArray(__s) ? __s.flatMap((_el0) => {\n${cfBody}\n    }) ?? null : null)(${arrayExpr})`;
-      } else if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+      } else if (
+        cf?.kind === "break" ||
+        cf?.kind === "continue" ||
+        requiresLabeledLoop
+      ) {
         // Same rationale as root array handling above: nested multilevel
         // control requires for-loop + throw/catch propagation instead of map.
         const loopBody = cf
@@ -1886,11 +1900,13 @@ class CodegenContext {
     const checkExpr = this.elementWireToExpr(controlWire, elVar);
 
     // Determine the check type
-    const isNullish = controlWire.fallbacks?.some(
-      (fb) => fb.type === "nullish" && fb.control != null,
-    ) ?? false;
-    const ctrlFromFallback =
-      controlWire.fallbacks?.find((fb) => fb.control != null)?.control;
+    const isNullish =
+      controlWire.fallbacks?.some(
+        (fb) => fb.type === "nullish" && fb.control != null,
+      ) ?? false;
+    const ctrlFromFallback = controlWire.fallbacks?.find(
+      (fb) => fb.control != null,
+    )?.control;
     const ctrl = ctrlFromFallback ?? controlWire.catchControl;
     const controlKind = ctrl?.kind === "continue" ? "continue" : "break";
     const controlLevels =

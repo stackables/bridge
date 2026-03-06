@@ -11,5 +11,6 @@ export {
   bridgeTransform,
   getBridgeTraces,
   useBridgeTracing,
+  BridgeGraphQLIncompatibleError,
 } from "./bridge-transform.ts";
 export type { BridgeOptions, DocumentSource } from "./bridge-transform.ts";

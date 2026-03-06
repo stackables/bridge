@@ -13,12 +13,14 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
-  executeBridge,
+  executeBridge as executeBridgeDefault,
   resolveStd,
   checkHandleVersions,
   type Logger,
   type ToolTrace,
   type TraceLevel,
+  type ExecuteBridgeOptions,
+  type ExecuteBridgeResult,
 } from "@stackables/bridge-core";
 import {
   std as bundledStd,
@@ -26,59 +28,13 @@ import {
 } from "@stackables/bridge-stdlib";
 import type { Bridge, BridgeDocument, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
+import {
+  assertBridgeGraphQLCompatible,
+  BridgeGraphQLIncompatibleError,
+} from "./bridge-asserts.ts";
 
 export type { Logger };
-
-/**
- * Returns the set of bridge operations ("Type.field") that use multilevel
- * break/continue (levels > 1) inside a nested array element wire
- * (to.path.length > 1). These cannot be executed correctly by the
- * field-by-field GraphQL resolver and must fall back to standalone execution.
- */
-function detectNestedMultilevelControlFlow(doc: BridgeDocument): Set<string> {
-  const incompatible = new Set<string>();
-  for (const instr of doc.instructions) {
-    if (instr.kind !== "bridge") continue;
-    const bridge = instr as Bridge;
-    outer: for (const wire of bridge.wires) {
-      if (wire.to.path.length <= 1) continue;
-      const fallbacks =
-        "from" in wire
-          ? wire.fallbacks
-          : "cond" in wire
-            ? wire.fallbacks
-            : "condAnd" in wire
-              ? wire.fallbacks
-              : "condOr" in wire
-                ? wire.fallbacks
-                : undefined;
-      const catchControl =
-        "from" in wire
-          ? wire.catchControl
-          : "cond" in wire
-            ? wire.catchControl
-            : "condAnd" in wire
-              ? wire.catchControl
-              : "condOr" in wire
-                ? wire.catchControl
-                : undefined;
-      const isMultilevel = (
-        ctrl: { kind: string; levels?: number } | undefined,
-      ) =>
-        ctrl &&
-        (ctrl.kind === "break" || ctrl.kind === "continue") &&
-        (ctrl.levels ?? 1) > 1;
-      if (
-        fallbacks?.some((fb) => isMultilevel(fb.control)) ||
-        isMultilevel(catchControl)
-      ) {
-        incompatible.add(`${bridge.type}.${bridge.field}`);
-        continue outer;
-      }
-    }
-  }
-  return incompatible;
-}
+export { BridgeGraphQLIncompatibleError } from "./bridge-asserts.ts";
 
 /**
  * Extract leaf-level field paths from a GraphQL resolve info's selection set.
@@ -160,6 +116,24 @@ export type BridgeOptions = {
    * Default: 30. Increase for deeply nested array mappings.
    */
   maxDepth?: number;
+  /**
+   * Override the standalone execution function.
+   *
+   * When provided, **all** bridge operations are executed through this function
+   * instead of the field-by-field GraphQL resolver. Operations that are
+   * incompatible with GraphQL execution (e.g. nested multilevel `break` /
+   * `continue`) also use this function as an automatic fallback.
+   *
+   * This allows plugging in the AOT compiler as the execution engine:
+   * ```ts
+   * import { executeBridge } from "@stackables/bridge-compiler";
+   * bridgeTransform(schema, doc, { executeBridge })
+   * ```
+   * Defaults to the interpreter `executeBridge` from `@stackables/bridge-core`.
+   */
+  executeBridge?: (
+    options: ExecuteBridgeOptions,
+  ) => Promise<ExecuteBridgeResult>;
 };
 
 /** Document can be a static BridgeDocument or a function that selects per-request */
@@ -176,46 +150,12 @@ export function bridgeTransform(
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
+  const executeBridgeFn = options?.executeBridge ?? executeBridgeDefault;
+  // When an explicit executeBridge is provided, all operations use standalone mode.
+  const forceStandalone = !!options?.executeBridge;
 
-  // For static documents: detect incompatible bridges at setup time and warn.
-  // For dynamic documents: detect per request (see dynamicStandaloneCache below).
-  const staticStandaloneOps =
-    typeof document !== "function"
-      ? detectNestedMultilevelControlFlow(document)
-      : null;
-
-  if (staticStandaloneOps) {
-    for (const op of staticStandaloneOps) {
-      logger.warn(
-        `[bridge] ${op}: uses nested multilevel break/continue which is not ` +
-          `compatible with field-by-field GraphQL execution. ` +
-          `Falling back to standalone execution mode for this operation. ` +
-          `In standalone mode all errors affect the entire field result ` +
-          `rather than individual sub-fields.`,
-      );
-    }
-  }
-
-  // Cache standalone-op detection results for dynamic documents.
-  const dynamicStandaloneCache = new WeakMap<BridgeDocument, Set<string>>();
-  const getStandaloneOps = (doc: BridgeDocument): Set<string> => {
-    if (staticStandaloneOps) return staticStandaloneOps;
-    let cached = dynamicStandaloneCache.get(doc);
-    if (!cached) {
-      cached = detectNestedMultilevelControlFlow(doc);
-      dynamicStandaloneCache.set(doc, cached);
-      for (const op of cached) {
-        logger.warn(
-          `[bridge] ${op}: uses nested multilevel break/continue which is not ` +
-            `compatible with field-by-field GraphQL execution. ` +
-            `Falling back to standalone execution mode for this operation. ` +
-            `In standalone mode all errors affect the entire field result ` +
-            `rather than individual sub-fields.`,
-        );
-      }
-    }
-    return cached;
-  };
+  // Cache for standalone-op detection on dynamic documents (keyed by doc instance).
+  const standaloneOpsCache = new WeakMap<BridgeDocument, Set<string>>();
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -236,6 +176,103 @@ export function bridgeTransform(
 
       const trunk = { module: SELF_MODULE, type: typeName, field: fieldName };
       const { resolve = defaultFieldResolver } = fieldConfig;
+
+      // For static documents (or forceStandalone), the standalone decision is fully
+      // known at setup time — precompute it as a plain boolean so the resolver just
+      // reads a variable. For dynamic documents (document is a function) the actual
+      // doc instance isn't available until request time; detectForDynamic() handles
+      // that path with a per-doc-instance WeakMap cache.
+      function precomputeStandalone() {
+        if (forceStandalone) return true;
+        if (typeof document === "function") return null; // deferred to request time
+        const bridge = document.instructions.find(
+          (i) =>
+            i.kind === "bridge" &&
+            (i as Bridge).type === typeName &&
+            (i as Bridge).field === fieldName,
+        ) as Bridge | undefined;
+        if (!bridge) return false;
+        try {
+          assertBridgeGraphQLCompatible(bridge);
+          return false;
+        } catch (e) {
+          if (e instanceof BridgeGraphQLIncompatibleError) {
+            logger.warn?.(
+              `${e.message} ` +
+                `Falling back to standalone execution mode. ` +
+                `In standalone mode errors affect the entire field result ` +
+                `rather than individual sub-fields.`,
+            );
+            return true;
+          }
+          throw e;
+        }
+      }
+
+      // Only used for dynamic documents (standalonePrecomputed === null).
+      function detectForDynamic(doc: BridgeDocument): boolean {
+        let ops = standaloneOpsCache.get(doc);
+        if (!ops) {
+          ops = new Set<string>();
+          for (const instr of doc.instructions) {
+            if (instr.kind !== "bridge") continue;
+            try {
+              assertBridgeGraphQLCompatible(instr as Bridge);
+            } catch (e) {
+              if (e instanceof BridgeGraphQLIncompatibleError) {
+                ops.add(e.operation);
+                logger.warn?.(
+                  `${e.message} ` +
+                    `Falling back to standalone execution mode. ` +
+                    `In standalone mode errors affect the entire field result ` +
+                    `rather than individual sub-fields.`,
+                );
+              } else {
+                throw e;
+              }
+            }
+          }
+          standaloneOpsCache.set(doc, ops);
+        }
+        return ops.has(`${typeName}.${fieldName}`);
+      }
+
+      // Standalone execution: runs the full bridge through executeBridge and
+      // returns the resolved data directly. GraphQL sub-field resolvers receive
+      // plain objects and fall through to the default field resolver.
+      // All errors surface as a single top-level field error rather than
+      // per-sub-field GraphQL errors.
+      async function resolveAsStandalone(
+        activeDoc: BridgeDocument,
+        bridgeContext: Record<string, unknown>,
+        args: Record<string, unknown>,
+        context: any,
+        info: GraphQLResolveInfo,
+      ): Promise<unknown> {
+        const requestedFields = collectRequestedFields(info);
+        const { data, traces } = await executeBridgeFn({
+          document: activeDoc,
+          operation: `${typeName}.${fieldName}`,
+          input: args,
+          context: bridgeContext,
+          tools: userTools,
+          ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
+          logger,
+          ...(options?.toolTimeoutMs !== undefined
+            ? { toolTimeoutMs: options.toolTimeoutMs }
+            : {}),
+          ...(options?.maxDepth !== undefined
+            ? { maxDepth: options.maxDepth }
+            : {}),
+          ...(requestedFields.length > 0 ? { requestedFields } : {}),
+        });
+        if (traceLevel !== "off") {
+          context.__bridgeTracer = { traces };
+        }
+        return data;
+      }
+
+      const standalonePrecomputed = precomputeStandalone();
 
       return {
         ...fieldConfig,
@@ -290,32 +327,20 @@ export function bridgeTransform(
               ? contextMapper(context)
               : (context ?? {});
 
-            // Standalone fallback for bridges with nested multilevel control flow.
-            const standaloneOps = getStandaloneOps(activeDoc);
-            if (standaloneOps.has(`${typeName}.${fieldName}`)) {
-              const requestedFields = collectRequestedFields(info);
-              const { data, traces } = await executeBridge({
-                document: activeDoc,
-                operation: `${typeName}.${fieldName}`,
-                input: args ?? {},
-                context: bridgeContext,
-                tools: userTools,
-                ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
-                logger,
-                ...(options?.toolTimeoutMs !== undefined
-                  ? { toolTimeoutMs: options.toolTimeoutMs }
-                  : {}),
-                ...(options?.maxDepth !== undefined
-                  ? { maxDepth: options.maxDepth }
-                  : {}),
-                ...(requestedFields.length > 0 ? { requestedFields } : {}),
-              });
-              if (traceLevel !== "off") {
-                context.__bridgeTracer = { traces };
-              }
-              return data;
+            // Standalone execution path — used when the operation is incompatible
+            // with field-by-field GraphQL resolution, or when an explicit
+            // executeBridge override has been provided.
+            if (standalonePrecomputed ?? detectForDynamic(activeDoc)) {
+              return resolveAsStandalone(
+                activeDoc,
+                bridgeContext,
+                args ?? {},
+                context,
+                info,
+              );
             }
 
+            // GraphQL field-by-field execution path via ExecutionTree.
             source = new ExecutionTree(
               trunk,
               activeDoc,
