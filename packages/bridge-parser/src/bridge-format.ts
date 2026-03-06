@@ -22,6 +22,7 @@ export function parseBridge(text: string): BridgeDocument {
 const BRIDGE_VERSION = "1.5";
 
 const RESERVED_BARE_VALUE_KEYWORDS = new Set([
+  // Declaration keywords
   "version",
   "bridge",
   "tool",
@@ -36,12 +37,19 @@ const RESERVED_BARE_VALUE_KEYWORDS = new Set([
   "alias",
   "on",
   "error",
+  "force",
+  "catch",
+  // Control flow
   "continue",
   "break",
   "throw",
   "panic",
   "if",
   "pipe",
+  // Boolean/logic operators
+  "and",
+  "or",
+  "not",
 ]);
 
 /** Serialize a ControlFlowInstruction to its textual form. */
@@ -49,7 +57,9 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
   if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
   if (ctrl.kind === "panic") return `panic ${JSON.stringify(ctrl.message)}`;
   if (ctrl.kind === "continue") {
-    return ctrl.levels && ctrl.levels > 1 ? `continue ${ctrl.levels}` : "continue";
+    return ctrl.levels && ctrl.levels > 1
+      ? `continue ${ctrl.levels}`
+      : "continue";
   }
   return ctrl.levels && ctrl.levels > 1 ? `break ${ctrl.levels}` : "break";
 }
@@ -857,12 +867,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const fieldPath = ew.to.path.slice(pathDepth);
       const elemTo = "." + serPath(fieldPath);
 
-      const fallbackStr = (ew.fallbacks ?? []).map(f => {
-        const op = f.type === "falsy" ? "||" : "??";
-        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-        return ` ${op} ${f.value}`;
-      }).join("");
+      const fallbackStr = (ew.fallbacks ?? [])
+        .map((f) => {
+          const op = f.type === "falsy" ? "||" : "??";
+          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+          return ` ${op} ${f.value}`;
+        })
+        .join("");
       const errf =
         "catchControl" in ew && ew.catchControl
           ? ` catch ${serializeControl(ew.catchControl)}`
@@ -962,12 +974,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const elseStr = w.elseRef
         ? sRef(w.elseRef, true)
         : (w.elseValue ?? "null");
-      const fallbackStr = (w.fallbacks ?? []).map(f => {
-        const op = f.type === "falsy" ? "||" : "??";
-        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-        return ` ${op} ${f.value}`;
-      }).join("");
+      const fallbackStr = (w.fallbacks ?? [])
+        .map((f) => {
+          const op = f.type === "falsy" ? "||" : "??";
+          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+          return ` ${op} ${f.value}`;
+        })
+        .join("");
       const errf =
         "catchControl" in w && w.catchControl
           ? ` catch ${serializeControl(w.catchControl)}`
@@ -1030,12 +1044,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
     const toStr = sRef(w.to, false);
-    const fallbackStr = (w.fallbacks ?? []).map(f => {
-      const op = f.type === "falsy" ? "||" : "??";
-      if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-      if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-      return ` ${op} ${f.value}`;
-    }).join("");
+    const fallbackStr = (w.fallbacks ?? [])
+      .map((f) => {
+        const op = f.type === "falsy" ? "||" : "??";
+        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+        return ` ${op} ${f.value}`;
+      })
+      .join("");
     const errf =
       "catchControl" in w && w.catchControl
         ? ` catch ${serializeControl(w.catchControl)}`
@@ -1219,12 +1235,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const exprStr = serializeExprTree(tk);
       if (exprStr) {
         const destStr = sRef(outWire.to, false);
-        const fallbackStr = (outWire.fallbacks ?? []).map(f => {
-          const op = f.type === "falsy" ? "||" : "??";
-          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-          return ` ${op} ${f.value}`;
-        }).join("");
+        const fallbackStr = (outWire.fallbacks ?? [])
+          .map((f) => {
+            const op = f.type === "falsy" ? "||" : "??";
+            if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+            if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+            return ` ${op} ${f.value}`;
+          })
+          .join("");
         const errf =
           "catchControl" in outWire && outWire.catchControl
             ? ` catch ${serializeControl(outWire.catchControl)}`
@@ -1244,12 +1262,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const templateStr = reconstructTemplateString(tk);
       if (templateStr) {
         const destStr = sRef(outWire.to, false);
-        const fallbackStr = (outWire.fallbacks ?? []).map(f => {
-          const op = f.type === "falsy" ? "||" : "??";
-          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-          return ` ${op} ${f.value}`;
-        }).join("");
+        const fallbackStr = (outWire.fallbacks ?? [])
+          .map((f) => {
+            const op = f.type === "falsy" ? "||" : "??";
+            if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+            if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+            return ` ${op} ${f.value}`;
+          })
+          .join("");
         const errf =
           "catchControl" in outWire && outWire.catchControl
             ? ` catch ${serializeControl(outWire.catchControl)}`
@@ -1288,12 +1308,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (actualSourceRef && handleChain.length > 0) {
       const sourceStr = sRef(actualSourceRef, true);
       const destStr = sRef(outWire.to, false);
-      const fallbackStr = (outWire.fallbacks ?? []).map(f => {
-        const op = f.type === "falsy" ? "||" : "??";
-        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
-        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
-        return ` ${op} ${f.value}`;
-      }).join("");
+      const fallbackStr = (outWire.fallbacks ?? [])
+        .map((f) => {
+          const op = f.type === "falsy" ? "||" : "??";
+          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+          return ` ${op} ${f.value}`;
+        })
+        .join("");
       const errf =
         "catchControl" in outWire && outWire.catchControl
           ? ` catch ${serializeControl(outWire.catchControl)}`
