@@ -293,7 +293,9 @@ export function resolveToolDep(
     // on error: wrap the tool call with fallback from onError wire
     const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
     try {
-      return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+      return await ctx.callTool(
+        toolName, toolDef.fn!, fn, input, toolDef.memoize,
+      );
     } catch (err) {
       if (!onErrorWire) throw err;
       if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
