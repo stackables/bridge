@@ -3,6 +3,9 @@ import {
   GraphQLList,
   GraphQLNonNull,
   type GraphQLSchema,
+  type GraphQLResolveInfo,
+  type SelectionNode,
+  Kind,
   defaultFieldResolver,
   getNamedType,
   isScalarType,
@@ -10,6 +13,7 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
+  executeBridge,
   resolveStd,
   checkHandleVersions,
   type Logger,
@@ -26,22 +30,17 @@ import { SELF_MODULE } from "@stackables/bridge-core";
 export type { Logger };
 
 /**
- * Detect whether a bridge uses multilevel break/continue (levels > 1) inside
- * a nested array element wire (to.path.length > 1 && to.element === true).
- *
- * The GraphQL runtime resolves arrays field-by-field via resolver callbacks.
- * This means a LoopControlSignal emitted deep inside an element field cannot
- * propagate back out to the already-committed outer shadow array — the signal
- * would simply be returned as a raw field value, silently producing wrong output.
- *
- * This pattern is only supported in standalone execution mode
- * (`executeBridge` / `@stackables/bridge-core`).
+ * Returns the set of bridge operations ("Type.field") that use multilevel
+ * break/continue (levels > 1) inside a nested array element wire
+ * (to.path.length > 1). These cannot be executed correctly by the
+ * field-by-field GraphQL resolver and must fall back to standalone execution.
  */
-function assertNoNestedMultilevelControlFlow(doc: BridgeDocument): void {
+function detectNestedMultilevelControlFlow(doc: BridgeDocument): Set<string> {
+  const incompatible = new Set<string>();
   for (const instr of doc.instructions) {
     if (instr.kind !== "bridge") continue;
     const bridge = instr as Bridge;
-    for (const wire of bridge.wires) {
+    outer: for (const wire of bridge.wires) {
       if (wire.to.path.length <= 1) continue;
       const fallbacks =
         "from" in wire
@@ -53,12 +52,6 @@ function assertNoNestedMultilevelControlFlow(doc: BridgeDocument): void {
               : "condOr" in wire
                 ? wire.fallbacks
                 : undefined;
-      const hasMultilevelFallback = fallbacks?.some(
-        (fb) =>
-          fb.control &&
-          (fb.control.kind === "break" || fb.control.kind === "continue") &&
-          (fb.control.levels ?? 1) > 1,
-      );
       const catchControl =
         "from" in wire
           ? wire.catchControl
@@ -69,25 +62,55 @@ function assertNoNestedMultilevelControlFlow(doc: BridgeDocument): void {
               : "condOr" in wire
                 ? wire.catchControl
                 : undefined;
-      const hasMultilevelCatch =
-        catchControl &&
-        (catchControl.kind === "break" || catchControl.kind === "continue") &&
-        (catchControl.levels ?? 1) > 1;
-      if (hasMultilevelFallback || hasMultilevelCatch) {
-        const loc = `${bridge.type}.${bridge.field}`;
-        const path = wire.to.path.join(".");
-        throw new Error(
-          `[bridge] ${loc}: 'break N' / 'continue N' with N > 1 inside a nested ` +
-            `array element (path: ${path}) is not supported in GraphQL execution mode. ` +
-            `Use standalone execution (executeBridge) instead, or restructure to ` +
-            `use single-level break/continue and filter at the outer loop.`,
-        );
+      const isMultilevel = (
+        ctrl: { kind: string; levels?: number } | undefined,
+      ) =>
+        ctrl &&
+        (ctrl.kind === "break" || ctrl.kind === "continue") &&
+        (ctrl.levels ?? 1) > 1;
+      if (
+        fallbacks?.some((fb) => isMultilevel(fb.control)) ||
+        isMultilevel(catchControl)
+      ) {
+        incompatible.add(`${bridge.type}.${bridge.field}`);
+        continue outer;
       }
     }
   }
+  return incompatible;
 }
 
-export type { Logger };
+/**
+ * Extract leaf-level field paths from a GraphQL resolve info's selection set.
+ * Used to build requestedFields for standalone executeBridge calls.
+ */
+function collectRequestedFields(info: GraphQLResolveInfo): string[] {
+  const paths: string[] = [];
+  function walk(selections: readonly SelectionNode[], prefix: string): void {
+    for (const sel of selections) {
+      if (sel.kind === Kind.FIELD) {
+        const name = sel.name.value;
+        if (name.startsWith("__")) continue;
+        const path = prefix ? `${prefix}.${name}` : name;
+        if (sel.selectionSet) {
+          walk(sel.selectionSet.selections, path);
+        } else {
+          paths.push(path);
+        }
+      } else if (sel.kind === Kind.INLINE_FRAGMENT) {
+        walk(sel.selectionSet.selections, prefix);
+      } else if (sel.kind === Kind.FRAGMENT_SPREAD) {
+        const frag = info.fragments[sel.name.value];
+        if (frag) walk(frag.selectionSet.selections, prefix);
+      }
+    }
+  }
+  const fieldNode = info.fieldNodes[0];
+  if (fieldNode?.selectionSet) {
+    walk(fieldNode.selectionSet.selections, "");
+  }
+  return paths;
+}
 
 const noop = () => {};
 const defaultLogger: Logger = {
@@ -152,13 +175,47 @@ export function bridgeTransform(
   const userTools = options?.tools ?? {};
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
-
-  // Static documents are validated at setup time to catch unsupported patterns
-  // early instead of producing silent wrong output at runtime.
-  if (typeof document !== "function") {
-    assertNoNestedMultilevelControlFlow(document);
-  }
   const logger = options?.logger ?? defaultLogger;
+
+  // For static documents: detect incompatible bridges at setup time and warn.
+  // For dynamic documents: detect per request (see dynamicStandaloneCache below).
+  const staticStandaloneOps =
+    typeof document !== "function"
+      ? detectNestedMultilevelControlFlow(document)
+      : null;
+
+  if (staticStandaloneOps) {
+    for (const op of staticStandaloneOps) {
+      logger.warn(
+        `[bridge] ${op}: uses nested multilevel break/continue which is not ` +
+          `compatible with field-by-field GraphQL execution. ` +
+          `Falling back to standalone execution mode for this operation. ` +
+          `In standalone mode all errors affect the entire field result ` +
+          `rather than individual sub-fields.`,
+      );
+    }
+  }
+
+  // Cache standalone-op detection results for dynamic documents.
+  const dynamicStandaloneCache = new WeakMap<BridgeDocument, Set<string>>();
+  const getStandaloneOps = (doc: BridgeDocument): Set<string> => {
+    if (staticStandaloneOps) return staticStandaloneOps;
+    let cached = dynamicStandaloneCache.get(doc);
+    if (!cached) {
+      cached = detectNestedMultilevelControlFlow(doc);
+      dynamicStandaloneCache.set(doc, cached);
+      for (const op of cached) {
+        logger.warn(
+          `[bridge] ${op}: uses nested multilevel break/continue which is not ` +
+            `compatible with field-by-field GraphQL execution. ` +
+            `Falling back to standalone execution mode for this operation. ` +
+            `In standalone mode all errors affect the entire field result ` +
+            `rather than individual sub-fields.`,
+        );
+      }
+    }
+    return cached;
+  };
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
@@ -232,6 +289,32 @@ export function bridgeTransform(
             const bridgeContext = contextMapper
               ? contextMapper(context)
               : (context ?? {});
+
+            // Standalone fallback for bridges with nested multilevel control flow.
+            const standaloneOps = getStandaloneOps(activeDoc);
+            if (standaloneOps.has(`${typeName}.${fieldName}`)) {
+              const requestedFields = collectRequestedFields(info);
+              const { data, traces } = await executeBridge({
+                document: activeDoc,
+                operation: `${typeName}.${fieldName}`,
+                input: args ?? {},
+                context: bridgeContext,
+                tools: userTools,
+                ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
+                logger,
+                ...(options?.toolTimeoutMs !== undefined
+                  ? { toolTimeoutMs: options.toolTimeoutMs }
+                  : {}),
+                ...(options?.maxDepth !== undefined
+                  ? { maxDepth: options.maxDepth }
+                  : {}),
+                ...(requestedFields.length > 0 ? { requestedFields } : {}),
+              });
+              if (traceLevel !== "off") {
+                context.__bridgeTracer = { traces };
+              }
+              return data;
+            }
 
             source = new ExecutionTree(
               trunk,
