@@ -7,7 +7,11 @@ import type {
   NodeRef,
   Wire,
 } from "@stackables/bridge-core";
-import { executeBridge as executeRuntime } from "@stackables/bridge-core";
+import {
+  BridgeTimeoutError,
+  executeBridge as executeRuntime,
+} from "@stackables/bridge-core";
+import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge as executeAot } from "../src/index.ts";
 
 // ── Shared infrastructure ───────────────────────────────────────────────────
@@ -225,4 +229,268 @@ describe("runtime parity fuzzing — deep paths + chaotic inputs", () => {
   // Note: parity testing of fallback chains with chaotic inputs is deferred —
   // the AOT compiler and runtime diverge on null-vs-undefined semantics when
   // fallback constants resolve to null. Tracked in fuzz-regressions.todo.test.ts.
+});
+
+// ── P2-1B-ext: Array mapping parity ───────────────────────────────────────
+//
+// Design note (re: Suggestion 2 / AST depth limits):
+// We generate valid .bridge TEXT rather than Bridge AST objects directly.
+// This avoids fc.letrec recursive-depth explosions during the shrinking phase:
+// fast-check shrinks text by removing tokens, not by exploring AST tree variants,
+// so there is no exponential blowup. Text is bounded by the token-count limit.
+
+const canonicalIdArb = fc.constantFrom("a", "b", "c", "d", "e", "f", "g", "h");
+
+// A single "leaf" value — safe for array element fields.
+const chaosLeafArb2 = fc.oneof(
+  { weight: 4, arbitrary: fc.string({ maxLength: 32 }) },
+  { weight: 3, arbitrary: fc.integer() },
+  { weight: 2, arbitrary: fc.boolean() },
+  { weight: 2, arbitrary: fc.constant(null) },
+  { weight: 1, arbitrary: fc.constant("") },
+  { weight: 1, arbitrary: fc.double({ noNaN: false }) }, // includes NaN
+);
+
+// A single array element object.
+// Note: null or primitive elements trigger a known null/undefined divergence —
+// the runtime throws TypeError when accessing `.field` on a null element (no
+// rootSafe on element refs from the parser), while AOT silently returns
+// undefined via `?.`. Tracked in fuzz-regressions.todo.test.ts.
+// We restrict to objects here so the test covers value-type parity, not the
+// null-element divergence.
+const chaosElementArb = fc.dictionary(canonicalIdArb, chaosLeafArb2, {
+  maxKeys: 4,
+});
+
+// Source value for the array field: one of several chaotic shapes.
+// undefined is excluded: AOT's `?.map(...) ?? null` returns null, runtime returns
+// undefined — the same null/undefined divergence tracked in fuzz-regressions.todo.test.ts.
+// Primitive (string/number) sources are excluded: AOT throws TypeError (.map is not
+// a function), while the runtime iterates strings character-by-character (strings
+// are iterable) or treats numbers as empty. Both tracked in regressions.
+const chaosArraySourceArb = fc.oneof(
+  { weight: 5, arbitrary: fc.array(chaosElementArb, { maxLength: 8 }) },
+  { weight: 2, arbitrary: fc.constant(null) },
+  { weight: 1, arbitrary: fc.constant([]) },
+);
+
+const arrayBridgeSpecArb = fc
+  .record({
+    type: canonicalIdArb,
+    field: canonicalIdArb,
+    // source field on the input (the array)
+    srcField: canonicalIdArb,
+    // output field for the mapped array
+    outField: canonicalIdArb,
+    // element fields to map inside the iterator block (max 3 to keep bridges concise)
+    elemFields: fc.uniqueArray(canonicalIdArb, { minLength: 1, maxLength: 3 }),
+  })
+  // Filter out cases where element field names overlap with srcField or outField.
+  // When elemField == srcField, the runtime resolver conflates the shadow-tree
+  // element wire with the outer input-array source wire (same trunk key),
+  // producing wrong values. Tracked in fuzz-regressions.todo.test.ts.
+  .filter(
+    (spec) =>
+      !spec.elemFields.includes(spec.srcField) &&
+      !spec.elemFields.includes(spec.outField) &&
+      spec.srcField !== spec.outField,
+  );
+
+function buildArrayBridgeText(spec: {
+  type: string;
+  field: string;
+  srcField: string;
+  outField: string;
+  elemFields: string[];
+}): string {
+  const lines = [
+    "version 1.5",
+    `bridge ${spec.type}.${spec.field} {`,
+    "  with input as i",
+    "  with output as o",
+    "",
+    `  o.${spec.outField} <- i.${spec.srcField}[] as el {`,
+  ];
+  for (const f of spec.elemFields) {
+    lines.push(`    .${f} <- el.${f}`);
+  }
+  lines.push("  }");
+  lines.push("}");
+  return lines.join("\n");
+}
+
+describe("runtime parity fuzzing — array mapping (P2-1B-ext)", () => {
+  test(
+    "AOT matches runtime on array-mapping bridges with chaotic inputs",
+    { timeout: 120_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          arrayBridgeSpecArb,
+          chaosArraySourceArb,
+          async (spec, sourceValue) => {
+            const bridgeText = buildArrayBridgeText(spec);
+            const document = parseBridgeFormat(bridgeText);
+            const operation = `${spec.type}.${spec.field}`;
+            const input = { [spec.srcField]: sourceValue };
+
+            let runtimeResult: { data: any } | undefined;
+            let runtimeError: unknown;
+            let aotResult: { data: any } | undefined;
+            let aotError: unknown;
+
+            try {
+              runtimeResult = await executeRuntime({
+                document,
+                operation,
+                input,
+                tools: {},
+              });
+            } catch (err) {
+              runtimeError = err;
+            }
+            try {
+              aotResult = await executeAot({
+                document,
+                operation,
+                input,
+                tools: {},
+              });
+            } catch (err) {
+              aotError = err;
+            }
+
+            if (runtimeError && !aotError) {
+              assert.fail(
+                `Runtime threw but AOT did not.\nBridge:\n${bridgeText}\nInput: ${JSON.stringify(input)}\nRuntime error: ${runtimeError}\nAOT data: ${JSON.stringify(aotResult?.data)}`,
+              );
+            }
+            if (!runtimeError && aotError) {
+              assert.fail(
+                `AOT threw but runtime did not.\nBridge:\n${bridgeText}\nInput: ${JSON.stringify(input)}\nAOT error: ${aotError}\nRuntime data: ${JSON.stringify(runtimeResult?.data)}`,
+              );
+            }
+            if (runtimeError && aotError) {
+              // Both threw — acceptable regardless of error class.
+              // Array mapping error-class divergence from mismatched input
+              // types (e.g. non-array values) is a known engine behaviour
+              // difference tracked separately.
+              return;
+            }
+
+            assert.deepEqual(aotResult!.data, runtimeResult!.data);
+          },
+        ),
+        { numRuns: 1_000, endOnFailure: true },
+      );
+    },
+  );
+});
+
+// ── P2-1C: Simulated tool call parity with timeout fuzzing ────────────────
+//
+// Tests that AOT and runtime agree on success/failure under varying tool delays
+// and timeout settings.
+//
+// Design note (re: Suggestion 1 / timeout fuzzing):
+// The original AOT preamble threw new Error("Tool timeout"), diverging from the
+// runtime's BridgeTimeoutError. This was fixed before this test was added — both
+// engines now throw BridgeTimeoutError with the same message format.
+//
+// We avoid flakiness by maintaining a 20ms safety margin around the timeout
+// boundary. Tests in the "grey zone" (|delay - timeout| < 20ms) are skipped.
+//
+// Promise leak concern: both engines clear their timer in try/finally (AOT) or
+// .finally() (runtime raceTimeout), so the timeout Promise itself never leaks.
+// The underlying tool function may still be pending but that is inherent to
+// JavaScript Promises with no native cancellation.
+
+const toolCallBridgeText = `version 1.5
+bridge Query.toolTest {
+  with mockTool as t
+  with output as o
+  o.value <- t.value
+}`;
+
+const toolCallDocument = parseBridgeFormat(toolCallBridgeText);
+
+const timeoutParityArb = fc.record({
+  toolDelayMs: fc.integer({ min: 0, max: 80 }),
+  toolTimeoutMs: fc.integer({ min: 10, max: 50 }),
+});
+
+describe("runtime parity fuzzing — tool call timeout (P2-1C)", () => {
+  test(
+    "AOT and runtime agree on success/failure for varying tool delays and timeouts",
+    { timeout: 120_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          timeoutParityArb,
+          async ({ toolDelayMs, toolTimeoutMs }) => {
+            // Skip timing-sensitive grey zone to avoid flakiness on slow CI.
+            const margin = 20;
+            const clearlyTimedOut = toolDelayMs > toolTimeoutMs + margin;
+            const clearlySucceeds = toolDelayMs < toolTimeoutMs - margin;
+            if (!clearlyTimedOut && !clearlySucceeds) return;
+
+            const mockTool = async () => {
+              await new Promise((r) => setTimeout(r, toolDelayMs));
+              return { value: "ok" };
+            };
+            const opts = {
+              document: toolCallDocument,
+              operation: "Query.toolTest",
+              input: {},
+              tools: { mockTool },
+              toolTimeoutMs,
+            };
+
+            let runtimeResult: { data: any } | undefined;
+            let runtimeError: unknown;
+            let aotResult: { data: any } | undefined;
+            let aotError: unknown;
+
+            try {
+              runtimeResult = await executeRuntime(opts);
+            } catch (err) {
+              runtimeError = err;
+            }
+            try {
+              aotResult = await executeAot(opts);
+            } catch (err) {
+              aotError = err;
+            }
+
+            if (clearlyTimedOut) {
+              // Both must throw BridgeTimeoutError.
+              assert.ok(
+                runtimeError instanceof BridgeTimeoutError,
+                `Runtime should throw BridgeTimeoutError (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms), got: ${runtimeError}`,
+              );
+              assert.equal(
+                (aotError as Error)?.name,
+                "BridgeTimeoutError",
+                `AOT should throw BridgeTimeoutError (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms), got: ${aotError}`,
+              );
+            } else {
+              // Both must succeed with the same data.
+              assert.equal(
+                runtimeError,
+                undefined,
+                `Runtime should not throw (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms): ${runtimeError}`,
+              );
+              assert.equal(
+                aotError,
+                undefined,
+                `AOT should not throw (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms): ${aotError}`,
+              );
+              assert.deepEqual(aotResult!.data, runtimeResult!.data);
+            }
+          },
+        ),
+        { numRuns: 500, endOnFailure: true },
+      );
+    },
+  );
 });

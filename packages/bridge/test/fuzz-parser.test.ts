@@ -124,8 +124,18 @@ function buildBridgeText(spec: {
     | { kind: "constant"; to: string; value: string }
   >;
 }): string {
+  return "version 1.5\n" + buildBridgeBlock(spec);
+}
+
+function buildBridgeBlock(spec: {
+  type: string;
+  field: string;
+  wires: Array<
+    | { kind: "pull"; to: string; from: string }
+    | { kind: "constant"; to: string; value: string }
+  >;
+}): string {
   const lines = [
-    "version 1.5",
     `bridge ${spec.type}.${spec.field} {`,
     "  with input as i",
     "  with output as o",
@@ -306,6 +316,120 @@ describe("parser fuzz — serializer round-trip", () => {
           numRuns: 2_000,
           endOnFailure: true,
         },
+      );
+    },
+  );
+});
+
+// ── P2-3B: prettyPrintToSource advanced stability — all block types ────────
+//
+// Design note (re: Suggestion 2 / depth limits):
+// We generate text directly using bounded arbitraries rather than recursive
+// AST objects. This is the same "text-first" strategy used throughout this
+// file. There is no fc.letrec here — every block type is generated with a
+// fixed small output size, and fast-check shrinks by reducing the string,
+// not by traversing a recursive data structure.
+
+const constBlockArb = fc
+  .record({
+    name: canonicalIdArb.map((n) => n.toUpperCase()),
+    value: textConstantValueArb,
+  })
+  .map(({ name, value }) => `const ${name} = ${value}`);
+
+const toolBlockArb = fc
+  .record({
+    name: canonicalIdArb,
+    // Use a limited set of real stdlib tools available in the parser's namespace
+    fn: fc.constantFrom(
+      "std.httpCall",
+      "std.str.toUpperCase",
+      "std.arr.filter",
+    ),
+    wireCount: fc.integer({ min: 0, max: 3 }),
+    wireKey: canonicalIdArb,
+    wireValue: textConstantValueArb,
+  })
+  .map(({ name, fn, wireCount, wireKey, wireValue }) => {
+    const lines = [`tool ${name} from ${fn} {`];
+    for (let i = 0; i < wireCount; i++) {
+      lines.push(`  .${wireKey}${i > 0 ? i : ""} = ${wireValue}`);
+    }
+    lines.push("}");
+    return lines.join("\n");
+  });
+
+// Extended document spec: optional const + optional tool + required bridge block.
+const extendedDocSpecArb = fc.record({
+  includeConst: fc.boolean(),
+  includeTool: fc.boolean(),
+  constBlock: constBlockArb,
+  toolBlock: toolBlockArb,
+  bridge: bridgeTextSpecArb,
+});
+
+function buildExtendedDocText(spec: {
+  includeConst: boolean;
+  includeTool: boolean;
+  constBlock: string;
+  toolBlock: string;
+  bridge: {
+    type: string;
+    field: string;
+    wires: Array<
+      | { kind: "pull"; to: string; from: string }
+      | { kind: "constant"; to: string; value: string }
+    >;
+  };
+}): string {
+  const parts: string[] = ["version 1.5"];
+  if (spec.includeConst) parts.push(spec.constBlock);
+  if (spec.includeTool) parts.push(spec.toolBlock);
+  parts.push(buildBridgeBlock(spec.bridge));
+  return parts.join("\n\n");
+}
+
+describe("parser fuzz — advanced formatter stability (P2-3B)", () => {
+  test(
+    "prettyPrintToSource is idempotent on documents with tool and const blocks",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(extendedDocSpecArb, (spec) => {
+          const sourceText = buildExtendedDocText(spec);
+          const formatted1 = prettyPrintToSource(sourceText);
+          const formatted2 = prettyPrintToSource(formatted1);
+          assert.equal(
+            formatted2,
+            formatted1,
+            "prettyPrintToSource must be idempotent\n--- FIRST ---\n" +
+              formatted1 +
+              "\n--- SECOND ---\n" +
+              formatted2,
+          );
+        }),
+        { numRuns: 1_000, endOnFailure: true },
+      );
+    },
+  );
+
+  test(
+    "prettyPrintToSource output is always parseable for documents with tool and const blocks",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(extendedDocSpecArb, (spec) => {
+          const sourceText = buildExtendedDocText(spec);
+          const formatted = prettyPrintToSource(sourceText);
+          try {
+            parseBridge(formatted);
+          } catch (error) {
+            assert.fail(
+              `prettyPrintToSource produced unparsable output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- FORMATTED ---\n${formatted}`,
+            );
+          }
+        }),
+        { numRuns: 1_000, endOnFailure: true },
       );
     },
   );

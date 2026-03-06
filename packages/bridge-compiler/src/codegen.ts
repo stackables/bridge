@@ -146,7 +146,8 @@ function detectControlFlow(
   for (const w of wires) {
     if ("fallbacks" in w && w.fallbacks) {
       for (const fb of w.fallbacks) {
-        if (fb.control) return fb.control.kind as "break" | "continue" | "throw" | "panic";
+        if (fb.control)
+          return fb.control.kind as "break" | "continue" | "throw" | "panic";
       }
     }
     if ("catchControl" in w && w.catchControl) {
@@ -638,6 +639,9 @@ class CodegenContext {
     lines.push(
       `  const __BridgeAbortError = __opts?.__BridgeAbortError ?? class extends Error { constructor(m) { super(m ?? "Execution aborted by external signal"); this.name = "BridgeAbortError"; } };`,
     );
+    lines.push(
+      `  const __BridgeTimeoutError = __opts?.__BridgeTimeoutError ?? class extends Error { constructor(n, ms) { super('Tool "' + n + '" timed out after ' + ms + 'ms'); this.name = "BridgeTimeoutError"; } };`,
+    );
     lines.push(`  const __signal = __opts?.signal;`);
     lines.push(`  const __timeoutMs = __opts?.toolTimeoutMs ?? 0;`);
     lines.push(
@@ -652,7 +656,7 @@ class CodegenContext {
     lines.push(`      let result;`);
     lines.push(`      if (__timeoutMs > 0) {`);
     lines.push(
-      `        let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error("Tool timeout")), __timeoutMs); });`,
+      `        let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new __BridgeTimeoutError(toolName, __timeoutMs)), __timeoutMs); });`,
     );
     lines.push(
       `        try { result = await Promise.race([p, timeout]); } finally { clearTimeout(t); }`,
@@ -1810,7 +1814,7 @@ class CodegenContext {
     const controlWire = elemWires.find(
       (w) =>
         w.to.path.length === 1 &&
-        (("fallbacks" in w && w.fallbacks?.some(fb => fb.control != null)) ||
+        (("fallbacks" in w && w.fallbacks?.some((fb) => fb.control != null)) ||
           ("catchControl" in w && w.catchControl != null)),
     );
 
@@ -1833,7 +1837,9 @@ class CodegenContext {
 
     // Determine the check type
     const isNullish =
-      controlWire.fallbacks?.some(fb => fb.type === "nullish" && fb.control != null) ?? false;
+      controlWire.fallbacks?.some(
+        (fb) => fb.type === "nullish" && fb.control != null,
+      ) ?? false;
 
     if (mode === "continue") {
       if (isNullish) {
