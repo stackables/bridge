@@ -280,6 +280,8 @@ class CodegenContext {
   private catchGuardedTools = new Set<string>();
   /** Trunk keys of tools whose inputs depend on element wires (must be inlined in map callbacks). */
   private elementScopedTools = new Set<string>();
+  /** Trunk keys of tools that should use memoized call wrapper (__callMemo). */
+  private memoizedTools = new Set<string>();
   /** Trunk keys of tools that are only referenced in ternary branches (can be lazily evaluated). */
   private ternaryOnlyTools = new Set<string>();
   /** Map from element-scoped non-internal tool trunk key to loop-local variable name.
@@ -365,6 +367,10 @@ class CodegenContext {
           const vn = `_t${++this.toolCounter}`;
           this.varMap.set(tk, vn);
           this.tools.set(tk, { trunkKey: tk, toolName: h.name, varName: vn });
+          // Mark memoized tools (from handle binding)
+          if (h.memoize) {
+            this.memoizedTools.add(tk);
+          }
           break;
         }
       }
@@ -396,6 +402,13 @@ class CodegenContext {
           });
           if (INTERNAL_TOOLS.has(field)) {
             this.internalToolKeys.add(tk);
+          }
+          // Mark memoized pipe handle tools (element-scoped with memoize)
+          const handleBinding = bridge.handles.find(
+            (h) => h.kind === "tool" && h.handle === ph.handle && h.memoize,
+          );
+          if (handleBinding) {
+            this.memoizedTools.add(tk);
           }
         }
       }
@@ -724,6 +737,24 @@ class CodegenContext {
     lines.push(`      throw err;`);
     lines.push(`    }`);
     lines.push(`  }`);
+    // Memoized call wrapper — caches the Promise by fnName + serialized input.
+    // Provides stampede protection: concurrent callers with identical keys
+    // attach to the same in-flight Promise.
+    lines.push(`  const __memoCache = new Map();`);
+    lines.push(
+      `  function __callMemo(fn, input, toolName, keyFn) {`,
+    );
+    lines.push(
+      `    const key = toolName + ":" + (keyFn ? keyFn(input) : JSON.stringify(input));`,
+    );
+    lines.push(`    const cached = __memoCache.get(key);`);
+    lines.push(`    if (cached) return cached;`);
+    lines.push(`    const p = __call(fn, input, toolName);`);
+    lines.push(
+      `    if (p && typeof p.then === "function") __memoCache.set(key, p);`,
+    );
+    lines.push(`    return p;`);
+    lines.push(`  }`);
 
     // ── Dead tool detection ────────────────────────────────────────────
     // Detect which tools are reachable from the (possibly filtered) output
@@ -931,22 +962,50 @@ class CodegenContext {
 
   /**
    * Generate a tool call expression that uses __callSync for sync tools at runtime,
-   * falling back to `await __call` for async tools. Used at individual call sites.
+   * falling back to `await __call` (or `await __callMemo` for memoized tools) for
+   * async tools. Used at individual call sites.
    */
-  private syncAwareCall(fnName: string, inputObj: string): string {
+  private syncAwareCall(
+    fnName: string,
+    inputObj: string,
+    trunkKey?: string,
+  ): string {
     const fn = `tools[${JSON.stringify(fnName)}]`;
     const name = JSON.stringify(fnName);
-    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
+    const isMemo = trunkKey ? this.isMemoized(trunkKey, fnName) : false;
+    const asyncCall = isMemo
+      ? `await __callMemo(${fn}, ${inputObj}, ${name})`
+      : `await __call(${fn}, ${inputObj}, ${name})`;
+    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : ${asyncCall})`;
   }
 
   /**
    * Same as syncAwareCall but without await — for use inside Promise.all() and
    * in sync array map bodies.  Returns a value for sync tools, a Promise for async.
    */
-  private syncAwareCallNoAwait(fnName: string, inputObj: string): string {
+  private syncAwareCallNoAwait(
+    fnName: string,
+    inputObj: string,
+    trunkKey?: string,
+  ): string {
     const fn = `tools[${JSON.stringify(fnName)}]`;
     const name = JSON.stringify(fnName);
-    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
+    const isMemo = trunkKey ? this.isMemoized(trunkKey, fnName) : false;
+    const asyncCall = isMemo
+      ? `__callMemo(${fn}, ${inputObj}, ${name})`
+      : `__call(${fn}, ${inputObj}, ${name})`;
+    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : ${asyncCall})`;
+  }
+
+  /** Check if a tool should use memoized calls based on handle binding, ToolDef, or metadata. */
+  private isMemoized(trunkKey: string, fnName?: string): boolean {
+    if (this.memoizedTools.has(trunkKey)) return true;
+    // Check ToolDef-level memoize
+    if (fnName) {
+      const toolDef = this.resolveToolDef(fnName);
+      if (toolDef?.memoize) return true;
+    }
+    return false;
   }
 
   /**
@@ -981,18 +1040,18 @@ class CodegenContext {
       );
       if (mode === "fire-and-forget") {
         lines.push(
-          `  try { ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) {}`,
+          `  try { ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)}; } catch (_e) {}`,
         );
         lines.push(`  const ${tool.varName} = undefined;`);
       } else if (mode === "catch-guarded") {
         // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
         lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
         lines.push(
-          `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+          `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
         );
       } else {
         lines.push(
-          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)};`,
+          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
         );
       }
       return;
@@ -1065,7 +1124,7 @@ class CodegenContext {
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
       lines.push(
-        `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
+        `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
       );
       lines.push(`  } catch (_e) {`);
       if ("value" in onErrorWire) {
@@ -1082,18 +1141,18 @@ class CodegenContext {
       lines.push(`  }`);
     } else if (mode === "fire-and-forget") {
       lines.push(
-        `  try { ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) {}`,
+        `  try { ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)}; } catch (_e) {}`,
       );
       lines.push(`  const ${tool.varName} = undefined;`);
     } else if (mode === "catch-guarded") {
       // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
       lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
       lines.push(
-        `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+        `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
       );
     } else {
       lines.push(
-        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
+        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
       );
     }
   }
