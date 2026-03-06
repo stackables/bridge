@@ -1,5 +1,59 @@
 # @stackables/bridge-core
 
+## 1.5.0
+
+### Minor Changes
+
+- [#104](https://github.com/stackables/bridge/pull/104) [`b213e9f`](https://github.com/stackables/bridge/commit/b213e9f49ed5da80e7d9a1b9e161586e59b3719c) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Multi-Level Control Flow (break N, continue N)
+
+  When working with deeply nested arrays (e.g., mapping categories that contain lists of products), you may want an error deep inside the inner array to skip the outer array element.
+
+  You can append a number to break or continue to specify how many loop levels the signal should pierce.
+
+- [#102](https://github.com/stackables/bridge/pull/102) [`2243c7e`](https://github.com/stackables/bridge/commit/2243c7e7fd23a37c30118e713ae348b833c523fe) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Sync tool optimisation — honour the `sync` flag in ToolMetadata
+
+  When a tool declares `{ sync: true }` in its `.bridge` metadata the engine
+  now enforces and optimises it:
+
+  1. **Enforcement** — if a sync-declared tool returns a Promise, both the
+     runtime and compiled engines throw immediately.
+  2. **Core optimisation** — `callTool()` skips timeout racing, the OTel span
+     wrapper, and all promise handling for sync tools.
+  3. **Compiler optimisation** — generated code uses a dedicated `__callSync()`
+     helper at every call-site, avoiding `await` overhead entirely.
+  4. **Array-map fast path** — when all per-element tools in an array map are
+     sync, the compiled engine generates a dual-path: a synchronous `.map()`
+     branch (no microtask ticks) with a runtime fallback to `for…of + await`
+     for async tools.
+
+  Benchmarks show up to ~50 % latency reduction for compiled array maps
+  with sync tools (100 elements).
+
+- [#100](https://github.com/stackables/bridge/pull/100) [`8e5b2e2`](https://github.com/stackables/bridge/commit/8e5b2e21796cfd7e9a9345225d94ceb8bfc39bac) Thanks [@aarne](https://github.com/aarne)! - Add `ToolMetadata` — per-tool observability controls
+
+  Tools can now attach a `.bridge` property to declare how the engine should
+  instrument them, imported as `ToolMetadata` from `@stackables/bridge`.
+
+  ```ts
+  import type { ToolMetadata } from "@stackables/bridge";
+
+  myTool.bridge = {
+    trace: false, // skip OTel span for this tool
+    log: {
+      execution: "info", // log successful calls at info level
+      errors: "error", // log failures at error level (default)
+    },
+  } satisfies ToolMetadata;
+  ```
+
+### Patch Changes
+
+- [#103](https://github.com/stackables/bridge/pull/103) [`fc6c619`](https://github.com/stackables/bridge/commit/fc6c6195dec524c880ac20f3057e776f76583f60) Thanks [@aarne](https://github.com/aarne)! - Fix AOT/runtime parity for null element traversal, catch-null recovery, and non-array source handling
+
+- Updated dependencies [[`fc6c619`](https://github.com/stackables/bridge/commit/fc6c6195dec524c880ac20f3057e776f76583f60), [`8e5b2e2`](https://github.com/stackables/bridge/commit/8e5b2e21796cfd7e9a9345225d94ceb8bfc39bac)]:
+  - @stackables/bridge-stdlib@1.5.2
+  - @stackables/bridge-types@1.1.0
+
 ## 1.4.0
 
 ### Minor Changes

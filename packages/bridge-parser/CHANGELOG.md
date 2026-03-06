@@ -1,5 +1,21 @@
 # @stackables/bridge-parser
 
+## 1.4.0
+
+### Minor Changes
+
+- [#104](https://github.com/stackables/bridge/pull/104) [`b213e9f`](https://github.com/stackables/bridge/commit/b213e9f49ed5da80e7d9a1b9e161586e59b3719c) Thanks [@copilot-swe-agent](https://github.com/apps/copilot-swe-agent)! - Multi-Level Control Flow (break N, continue N)
+
+  When working with deeply nested arrays (e.g., mapping categories that contain lists of products), you may want an error deep inside the inner array to skip the outer array element.
+
+  You can append a number to break or continue to specify how many loop levels the signal should pierce.
+
+### Patch Changes
+
+- Updated dependencies [[`b213e9f`](https://github.com/stackables/bridge/commit/b213e9f49ed5da80e7d9a1b9e161586e59b3719c), [`fc6c619`](https://github.com/stackables/bridge/commit/fc6c6195dec524c880ac20f3057e776f76583f60), [`fc6c619`](https://github.com/stackables/bridge/commit/fc6c6195dec524c880ac20f3057e776f76583f60), [`2243c7e`](https://github.com/stackables/bridge/commit/2243c7e7fd23a37c30118e713ae348b833c523fe), [`8e5b2e2`](https://github.com/stackables/bridge/commit/8e5b2e21796cfd7e9a9345225d94ceb8bfc39bac)]:
+  - @stackables/bridge-core@1.5.0
+  - @stackables/bridge-stdlib@1.5.2
+
 ## 1.3.0
 
 ### Minor Changes
