@@ -1,0 +1,312 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import fc from "fast-check";
+import {
+  parseBridgeFormat as parseBridge,
+  parseBridgeDiagnostics,
+  serializeBridge,
+  prettyPrintToSource,
+} from "../src/index.ts";
+import type { BridgeDocument } from "../src/index.ts";
+
+// ── Token-soup arbitrary ────────────────────────────────────────────────────
+// Generates strings composed of a weighted mix of Bridge-like tokens and noise.
+// The goal is to exercise the parser/lexer on inputs that are structurally
+// plausible but semantically invalid — the space where crashes lurk.
+
+const bridgeKeywords = [
+  "version",
+  "bridge",
+  "tool",
+  "define",
+  "const",
+  "with",
+  "input",
+  "output",
+  "context",
+  "as",
+  "from",
+  "force",
+  "catch",
+  "throw",
+  "panic",
+  "continue",
+  "break",
+  "on",
+  "error",
+  "null",
+  "true",
+  "false",
+];
+
+const bridgeOperators = [
+  "<-",
+  "=",
+  "||",
+  "??",
+  "?.",
+  ".",
+  ",",
+  "&&",
+  "?",
+  ":",
+  "+",
+  "-",
+  "*",
+  "/",
+  "==",
+  "!=",
+  ">",
+  ">=",
+  "<",
+  "<=",
+  "!",
+];
+
+const bridgeStructural = ["{", "}", "(", ")", "[", "]", "\n", "\n\n", "  "];
+
+const bridgeTokenArb = fc.oneof(
+  { weight: 5, arbitrary: fc.constantFrom(...bridgeKeywords) },
+  { weight: 3, arbitrary: fc.constantFrom(...bridgeOperators) },
+  { weight: 4, arbitrary: fc.constantFrom(...bridgeStructural) },
+  { weight: 3, arbitrary: fc.stringMatching(/^[a-zA-Z_]\w{0,12}$/) }, // identifiers
+  { weight: 2, arbitrary: fc.stringMatching(/^"[^"\\]{0,20}"$/) }, // string literals
+  { weight: 2, arbitrary: fc.integer({ min: -1000, max: 1000 }).map(String) }, // numbers
+  { weight: 1, arbitrary: fc.stringMatching(/^1\.\d$/) }, // version-like
+  { weight: 1, arbitrary: fc.string({ maxLength: 8 }) }, // random noise
+  { weight: 1, arbitrary: fc.constant("#") }, // comment start
+);
+
+const bridgeTokenSoupArb = fc
+  .array(bridgeTokenArb, { minLength: 1, maxLength: 60 })
+  .map((tokens) => tokens.join(" "));
+
+// ── Valid bridge text arbitrary ─────────────────────────────────────────────
+// Generates structurally valid .bridge text for round-trip testing.
+
+const canonicalIdArb = fc.constantFrom("a", "b", "c", "d", "e", "f", "g", "h");
+
+const textConstantValueArb = fc.oneof(
+  fc.boolean().map((v) => (v ? "true" : "false")),
+  fc.constant("null"),
+  fc.integer({ min: -1_000_000, max: 1_000_000 }).map(String),
+  fc.string({ maxLength: 32 }).map((v) => JSON.stringify(v)),
+);
+
+const wireSpecArb = fc.oneof(
+  fc.record({
+    kind: fc.constant<"pull">("pull"),
+    to: canonicalIdArb,
+    from: canonicalIdArb,
+  }),
+  fc.record({
+    kind: fc.constant<"constant">("constant"),
+    to: canonicalIdArb,
+    value: textConstantValueArb,
+  }),
+);
+
+const bridgeTextSpecArb = fc.record({
+  type: canonicalIdArb,
+  field: canonicalIdArb,
+  wires: fc.uniqueArray(wireSpecArb, {
+    minLength: 1,
+    maxLength: 8,
+    selector: (wire) => wire.to,
+  }),
+});
+
+function buildBridgeText(spec: {
+  type: string;
+  field: string;
+  wires: Array<
+    | { kind: "pull"; to: string; from: string }
+    | { kind: "constant"; to: string; value: string }
+  >;
+}): string {
+  const lines = [
+    "version 1.5",
+    `bridge ${spec.type}.${spec.field} {`,
+    "  with input as i",
+    "  with output as o",
+    "",
+  ];
+
+  for (const wire of spec.wires) {
+    if (wire.kind === "pull") {
+      lines.push(`  o.${wire.to} <- i.${wire.from}`);
+    } else {
+      lines.push(`  o.${wire.to} = ${wire.value}`);
+    }
+  }
+
+  lines.push("}");
+  return lines.join("\n");
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("parser fuzz — textual fuzzing", () => {
+  test(
+    "parseBridge never throws unstructured errors on random input",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(bridgeTokenSoupArb, (text) => {
+          try {
+            parseBridge(text);
+          } catch (err) {
+            // Structured Error is acceptable — the parser is allowed to reject
+            // invalid input by throwing an Error with a message.
+            if (err instanceof Error) {
+              assert.ok(
+                typeof err.message === "string" && err.message.length > 0,
+                `Error must have a non-empty message, got: ${String(err)}`,
+              );
+              return;
+            }
+            // Non-Error throws are a parser bug.
+            assert.fail(
+              `parseBridge threw a non-Error value: ${typeof err} — ${String(err)}`,
+            );
+          }
+        }),
+        {
+          numRuns: 5_000,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
+
+  test(
+    "parseBridgeDiagnostics never throws on random input",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(bridgeTokenSoupArb, (text) => {
+          // This function is used in the IDE/LSP — it must NEVER throw.
+          const result = parseBridgeDiagnostics(text);
+
+          assert.ok(
+            result !== null && result !== undefined,
+            "must return a result",
+          );
+          assert.ok("document" in result, "result must have a document");
+          assert.ok("diagnostics" in result, "result must have diagnostics");
+          assert.ok(
+            Array.isArray(result.diagnostics),
+            "diagnostics must be an array",
+          );
+        }),
+        {
+          numRuns: 5_000,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
+});
+
+describe("parser fuzz — serializer round-trip", () => {
+  test(
+    "serializeBridge output is always parseable for valid documents",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(bridgeTextSpecArb, (spec) => {
+          const sourceText = buildBridgeText(spec);
+          const parsed = parseBridge(sourceText);
+          const serialized = serializeBridge(parsed);
+
+          // The serialized output must parse without errors.
+          let reparsed: BridgeDocument;
+          try {
+            reparsed = parseBridge(serialized);
+          } catch (error) {
+            assert.fail(
+              `serializeBridge produced unparsable output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- SERIALIZED ---\n${serialized}`,
+            );
+          }
+
+          // The reparsed document must have the same number of instructions.
+          assert.equal(
+            reparsed.instructions.length,
+            parsed.instructions.length,
+            "instruction count must survive round-trip",
+          );
+
+          // Each bridge instruction must preserve its wires.
+          for (let i = 0; i < parsed.instructions.length; i++) {
+            const orig = parsed.instructions[i]!;
+            const rt = reparsed.instructions[i]!;
+            assert.equal(rt.kind, orig.kind, "instruction kind must match");
+            if (orig.kind === "bridge" && rt.kind === "bridge") {
+              assert.equal(
+                rt.wires.length,
+                orig.wires.length,
+                "wire count must match",
+              );
+            }
+          }
+        }),
+        {
+          numRuns: 2_000,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
+
+  test("prettyPrintToSource is idempotent", { timeout: 60_000 }, () => {
+    fc.assert(
+      fc.property(bridgeTextSpecArb, (spec) => {
+        const sourceText = buildBridgeText(spec);
+
+        // First format pass
+        const formatted1 = prettyPrintToSource(sourceText);
+        // Second format pass
+        const formatted2 = prettyPrintToSource(formatted1);
+
+        // Must be identical — formatting is idempotent.
+        assert.equal(
+          formatted2,
+          formatted1,
+          "prettyPrintToSource must be idempotent\n--- FIRST ---\n" +
+            formatted1 +
+            "\n--- SECOND ---\n" +
+            formatted2,
+        );
+      }),
+      {
+        numRuns: 2_000,
+        endOnFailure: true,
+      },
+    );
+  });
+
+  test(
+    "prettyPrintToSource output is always parseable",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(bridgeTextSpecArb, (spec) => {
+          const sourceText = buildBridgeText(spec);
+          const formatted = prettyPrintToSource(sourceText);
+
+          try {
+            parseBridge(formatted);
+          } catch (error) {
+            assert.fail(
+              `prettyPrintToSource produced unparsable output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- FORMATTED ---\n${formatted}`,
+            );
+          }
+        }),
+        {
+          numRuns: 2_000,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
+});
