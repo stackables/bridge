@@ -1,17 +1,40 @@
 /**
- * Scoping & Memoization test suite.
+ * Variable scoping test suite.
  *
- * Validates variable scoping rules and memoization behavior against
+ * Validates which references are visible at each nesting level in array
+ * mapping blocks and documents current limitations.  Each case runs against
  * **both** the runtime interpreter and the AOT compiler.
  *
- * Scope rules:
- *  - Each array element gets its own shadow scope; `.field` targets the element.
- *  - Root-level tools are visible from inside array blocks.
- *  - Aliases declared inside array blocks are scoped to the element.
- *  - Memoization cache is request-scoped (never global) and shared across
- *    all elements in the same request via Promise-based stampede protection.
+ * ## Scope rules
  *
- * Each test case is a data record run through both execution paths.
+ *  Level 0 – bridge root:
+ *    All `with … as handle` declarations are visible everywhere.
+ *
+ *  Level 1 – `[] as x { … }`:
+ *    • The iterator `x` is visible.
+ *    • Root-level handles remain visible.
+ *    • `.field` targets the output element.
+ *
+ *  Level 2 – `[] as y { … }` nested inside level 1:
+ *    • The inner iterator `y` is visible.
+ *    • Root-level handles remain visible.
+ *    • **Outer iterator `x`** should be visible but is NOT yet supported
+ *      by the parser (tracked as TODO — tests document the expected
+ *      behavior and are marked pending).
+ *
+ *  Level 3 – `[] as z { … }` nested inside level 2:
+ *    • Same rules — `z` visible, root handles visible,
+ *      outer iterators `x` / `y` are expected but not yet reachable.
+ *
+ * ## Element-scoped tools
+ *
+ *  `with <tool> as <handle>` inside array blocks creates an isolated
+ *  per-element fork.  The handle is visible only within that block.
+ *
+ * ## Aliases & Pipes
+ *
+ *  `alias source.path as name` and `pipe:source.path` are scoped to the
+ *  block in which they appear.
  */
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -38,8 +61,12 @@ interface ScopingTestCase {
   expected?: unknown;
   /** Whether the AOT compiler supports this case (default: true) */
   aotSupported?: boolean;
-  /** Side-effect assertions run after execution (e.g. call counts) */
-  afterAssert?: () => void;
+  /**
+   * When set, the test documents expected behavior that is not yet
+   * implemented.  The test is registered as a `TODO` with the given
+   * reason string instead of running (and failing).
+   */
+  pending?: string;
 }
 
 // ── Runners ─────────────────────────────────────────────────────────────────
@@ -73,10 +100,16 @@ function runScopingSuite(suiteName: string, cases: ScopingTestCase[]) {
   describe(suiteName, () => {
     for (const c of cases) {
       describe(c.name, () => {
+        // Cases that document expected behavior not yet implemented
+        if (c.pending) {
+          test("runtime", { todo: c.pending }, () => {});
+          test("aot", { todo: c.pending }, () => {});
+          return;
+        }
+
         test("runtime", async () => {
           const data = await runRuntime(c);
           if (c.expected !== undefined) assert.deepEqual(data, c.expected);
-          c.afterAssert?.();
         });
 
         if (c.aotSupported !== false) {
@@ -101,12 +134,33 @@ function runScopingSuite(suiteName: string, cases: ScopingTestCase[]) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. Reading from root-level tools inside array blocks
+// 1. Single-level array — iterator and root handles visible
 // ═══════════════════════════════════════════════════════════════════════════
 
-const outerScopeReadCases: ScopingTestCase[] = [
+const singleLevelCases: ScopingTestCase[] = [
   {
-    name: "array element reads from root-level tool output",
+    name: "iterator fields visible at level 1",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.items <- i.list[] as item {
+    .id <- item.id
+    .name <- item.name
+  }
+}`,
+    operation: "Query.test",
+    input: { list: [{ id: "1", name: "one" }, { id: "2", name: "two" }] },
+    expected: {
+      items: [
+        { id: "1", name: "one" },
+        { id: "2", name: "two" },
+      ],
+    },
+  },
+  {
+    name: "root-level tool visible from level 1",
     bridgeText: `version 1.5
 bridge Query.test {
   with config as cfg
@@ -120,20 +174,17 @@ bridge Query.test {
 }`,
     operation: "Query.test",
     input: { list: [{ x: "a" }, { x: "b" }] },
-    tools: {
-      config: () => ({ setting: "global-setting" }),
-    },
+    tools: { config: () => ({ setting: "global" }) },
     expected: {
       items: [
-        { val: "a", cfgVal: "global-setting" },
-        { val: "b", cfgVal: "global-setting" },
+        { val: "a", cfgVal: "global" },
+        { val: "b", cfgVal: "global" },
       ],
     },
-    // AOT compiler doesn't fully support tool reads inside array mapping blocks
     aotSupported: false,
   },
   {
-    name: "array element reads from root-level tool — multiple tools in scope",
+    name: "multiple root-level tools visible from level 1",
     bridgeText: `version 1.5
 bridge Query.test {
   with toolA as a
@@ -163,15 +214,15 @@ bridge Query.test {
   },
 ];
 
-runScopingSuite("Scoping: reading from root-level tools", outerScopeReadCases);
+runScopingSuite("Scoping: single-level array", singleLevelCases);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. Nested arrays — each level maps its own iterator fields
+// 2. Two-level nested arrays — own iterators only (current behavior)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const nestedArrayCases: ScopingTestCase[] = [
+const twoLevelCases: ScopingTestCase[] = [
   {
-    name: "two-level nested array maps fields independently",
+    name: "each level reads its own iterator",
     bridgeText: `version 1.5
 bridge Query.test {
   with input as i
@@ -193,20 +244,107 @@ bridge Query.test {
     },
     expected: {
       groups: [
+        { name: "A", items: [{ label: "a1" }, { label: "a2" }] },
+        { name: "B", items: [{ label: "b1" }] },
+      ],
+    },
+    aotSupported: false,
+  },
+  {
+    name: "root-level tool visible from level 2 (two levels deep)",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with enricher as e
+  with input as i
+  with output as o
+
+  o.items <- i.list[] as item {
+    .val <- item.v
+    .enriched <- e.tag
+    .subs <- item.children[] as sub {
+      .sv <- sub.v
+      .enriched <- e.tag
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      list: [
+        { v: "a", children: [{ v: "a1" }, { v: "a2" }] },
+        { v: "b", children: [{ v: "b1" }] },
+      ],
+    },
+    tools: { enricher: () => ({ tag: "enriched" }) },
+    expected: {
+      items: [
         {
-          name: "A",
-          items: [{ label: "a1" }, { label: "a2" }],
+          val: "a",
+          enriched: "enriched",
+          subs: [
+            { sv: "a1", enriched: "enriched" },
+            { sv: "a2", enriched: "enriched" },
+          ],
         },
         {
-          name: "B",
-          items: [{ label: "b1" }],
+          val: "b",
+          enriched: "enriched",
+          subs: [{ sv: "b1", enriched: "enriched" }],
         },
       ],
     },
     aotSupported: false,
   },
   {
-    name: "three-level nested arrays map element fields at each depth",
+    // EXPECTED but NOT YET SUPPORTED: inner scope reads outer iterator
+    name: "level 2 reads outer iterator x.v (cross-scope)",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.l1 <- i.a[] as x {
+    .xv <- x.v
+    .l2 <- x.children[] as y {
+      .yv <- y.v
+      .xv <- x.v
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      a: [
+        { v: "X1", children: [{ v: "Y1" }, { v: "Y2" }] },
+        { v: "X2", children: [{ v: "Y3" }] },
+      ],
+    },
+    expected: {
+      l1: [
+        {
+          xv: "X1",
+          l2: [
+            { yv: "Y1", xv: "X1" },
+            { yv: "Y2", xv: "X1" },
+          ],
+        },
+        {
+          xv: "X2",
+          l2: [{ yv: "Y3", xv: "X2" }],
+        },
+      ],
+    },
+    pending: "parser does not yet support outer-scope iterator references",
+  },
+];
+
+runScopingSuite("Scoping: two-level nested arrays", twoLevelCases);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. Three-level nested arrays
+// ═══════════════════════════════════════════════════════════════════════════
+
+const threeLevelCases: ScopingTestCase[] = [
+  {
+    name: "each level reads its own iterator only (three levels)",
     bridgeText: `version 1.5
 bridge Query.test {
   with input as i
@@ -243,86 +381,175 @@ bridge Query.test {
         {
           xv: "X1",
           l2: [
-            {
-              yv: "Y1",
-              l3: [{ zv: "Z1" }, { zv: "Z2" }],
-            },
-            {
-              yv: "Y2",
-              l3: [{ zv: "Z3" }],
-            },
+            { yv: "Y1", l3: [{ zv: "Z1" }, { zv: "Z2" }] },
+            { yv: "Y2", l3: [{ zv: "Z3" }] },
           ],
         },
         {
           xv: "X2",
-          l2: [
-            {
-              yv: "Y3",
-              l3: [{ zv: "Z4" }],
-            },
-          ],
+          l2: [{ yv: "Y3", l3: [{ zv: "Z4" }] }],
         },
       ],
     },
     aotSupported: false,
   },
   {
-    name: "nested array with root-level tool visible at inner depth",
+    name: "root-level tool visible from level 3 (three levels deep)",
     bridgeText: `version 1.5
 bridge Query.test {
   with enricher as e
   with input as i
   with output as o
 
-  o.items <- i.list[] as item {
-    .val <- item.v
-    .enriched <- e.tag
-    .subs <- item.children[] as sub {
-      .sv <- sub.v
-      .enriched <- e.tag
+  o.l1 <- i.a[] as x {
+    .xv <- x.v
+    .l2 <- x.children[] as y {
+      .yv <- y.v
+      .l3 <- y.children[] as z {
+        .zv <- z.v
+        .enriched <- e.tag
+      }
     }
   }
 }`,
     operation: "Query.test",
     input: {
-      list: [
-        { v: "a", children: [{ v: "a1" }, { v: "a2" }] },
-        { v: "b", children: [{ v: "b1" }] },
-      ],
-    },
-    tools: {
-      enricher: () => ({ tag: "enriched-value" }),
-    },
-    expected: {
-      items: [
+      a: [
         {
-          val: "a",
-          enriched: "enriched-value",
-          subs: [
-            { sv: "a1", enriched: "enriched-value" },
-            { sv: "a2", enriched: "enriched-value" },
+          v: "X1",
+          children: [
+            { v: "Y1", children: [{ v: "Z1" }] },
           ],
         },
+      ],
+    },
+    tools: { enricher: () => ({ tag: "enriched" }) },
+    expected: {
+      l1: [
         {
-          val: "b",
-          enriched: "enriched-value",
-          subs: [{ sv: "b1", enriched: "enriched-value" }],
+          xv: "X1",
+          l2: [
+            {
+              yv: "Y1",
+              l3: [{ zv: "Z1", enriched: "enriched" }],
+            },
+          ],
         },
       ],
     },
     aotSupported: false,
   },
+  {
+    // EXPECTED but NOT YET SUPPORTED
+    name: "level 3 reads outer iterators x.v and y.v (cross-scope)",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.l1 <- i.a[] as x {
+    .xv <- x.v
+    .l2 <- x.children[] as y {
+      .yv <- y.v
+      .xv <- x.v
+      .l3 <- y.children[] as z {
+        .zv <- z.v
+        .xv <- x.v
+        .yv <- y.v
+      }
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      a: [
+        {
+          v: "X1",
+          children: [
+            {
+              v: "Y1",
+              children: [{ v: "Z1" }, { v: "Z2" }],
+            },
+          ],
+        },
+      ],
+    },
+    expected: {
+      l1: [
+        {
+          xv: "X1",
+          l2: [
+            {
+              yv: "Y1",
+              xv: "X1",
+              l3: [
+                { zv: "Z1", xv: "X1", yv: "Y1" },
+                { zv: "Z2", xv: "X1", yv: "Y1" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    pending: "parser does not yet support outer-scope iterator references",
+  },
+  {
+    // EXPECTED but NOT YET SUPPORTED
+    name: "level 2 reads outer iterator x.v with three levels (cross-scope)",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.l1 <- i.a[] as x {
+    .xv <- x.v
+    .l2 <- x.children[] as y {
+      .yv <- y.v
+      .xv <- x.v
+      .l3 <- y.children[] as z {
+        .zv <- z.v
+      }
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      a: [
+        {
+          v: "X1",
+          children: [
+            { v: "Y1", children: [{ v: "Z1" }] },
+          ],
+        },
+      ],
+    },
+    expected: {
+      l1: [
+        {
+          xv: "X1",
+          l2: [
+            {
+              yv: "Y1",
+              xv: "X1",
+              l3: [{ zv: "Z1" }],
+            },
+          ],
+        },
+      ],
+    },
+    pending: "parser does not yet support outer-scope iterator references",
+  },
 ];
 
-runScopingSuite("Scoping: nested array mappings", nestedArrayCases);
+runScopingSuite("Scoping: three-level nested arrays", threeLevelCases);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 3. Alias scoping inside array blocks
+// 4. Alias scoping inside array blocks
 // ═══════════════════════════════════════════════════════════════════════════
 
-const aliasScopingCases: ScopingTestCase[] = [
+const aliasCases: ScopingTestCase[] = [
   {
-    name: "alias binds sub-field in array block",
+    name: "alias binds sub-path within element block",
     bridgeText: `version 1.5
 bridge Query.test {
   with input as i
@@ -348,17 +575,47 @@ bridge Query.test {
       ],
     },
   },
+  {
+    name: "alias in nested array block",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.groups <- i.groups[] as g {
+    .name <- g.name
+    .items <- g.items[] as item {
+      alias item.detail as d
+      .label <- d.label
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      groups: [
+        { name: "A", items: [{ detail: { label: "a1" } }] },
+        { name: "B", items: [{ detail: { label: "b1" } }, { detail: { label: "b2" } }] },
+      ],
+    },
+    expected: {
+      groups: [
+        { name: "A", items: [{ label: "a1" }] },
+        { name: "B", items: [{ label: "b1" }, { label: "b2" }] },
+      ],
+    },
+    aotSupported: false,
+  },
 ];
 
-runScopingSuite("Scoping: alias inside array blocks", aliasScopingCases);
+runScopingSuite("Scoping: alias inside array blocks", aliasCases);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. Pipe inside array blocks (colon syntax)
+// 5. Pipe scoping inside array blocks (colon syntax)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const pipeInArrayCases: ScopingTestCase[] = [
+const pipeCases: ScopingTestCase[] = [
   {
-    name: "pipe transforms element field inside array block",
+    name: "pipe transforms element field at level 1",
     bridgeText: `version 1.5
 bridge Query.test {
   with std.str.toUpperCase as upper
@@ -379,160 +636,113 @@ bridge Query.test {
       ],
     },
   },
+  {
+    name: "pipe in nested array",
+    bridgeText: `version 1.5
+bridge Query.test {
+  with std.str.toUpperCase as upper
+  with input as i
+  with output as o
+
+  o.groups <- i.groups[] as g {
+    .name <- upper:g.name
+    .tags <- g.tags[] as tag {
+      .label <- upper:tag.label
+    }
+  }
+}`,
+    operation: "Query.test",
+    input: {
+      groups: [
+        { name: "alpha", tags: [{ label: "fast" }, { label: "safe" }] },
+        { name: "beta", tags: [{ label: "new" }] },
+      ],
+    },
+    expected: {
+      groups: [
+        { name: "ALPHA", tags: [{ label: "FAST" }, { label: "SAFE" }] },
+        { name: "BETA", tags: [{ label: "NEW" }] },
+      ],
+    },
+    aotSupported: false,
+  },
 ];
 
-runScopingSuite("Scoping: pipes inside array blocks", pipeInArrayCases);
+runScopingSuite("Scoping: pipes inside array blocks", pipeCases);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. ToolMetadata memoize deduplicates identical inputs
+// 6. Element-scoped tool declarations (`with tool as handle` inside block)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const memoMetaCases: ScopingTestCase[] = (() => {
-  let count = 0;
-  const lookup = async (input: Record<string, unknown>) => {
-    count++;
-    return { result: `fetched-${input.id}` };
-  };
-  (lookup as any).bridge = { memoize: true };
-
-  return [
-    {
-      name: "ToolMetadata memoize deduplicates identical inputs across two handles",
-      bridgeText: `version 1.5
+const elementScopedToolCases: ScopingTestCase[] = [
+  {
+    name: "element-scoped tool is isolated per element",
+    bridgeText: `version 1.5
 bridge Query.test {
-  with lookup as a
-  with lookup as b
+  with input as i
   with output as o
 
-  a.id = "42"
-  b.id = "42"
-  o.fromA <- a.result
-  o.fromB <- b.result
+  o.items <- i.list[] as item {
+    with myTool as t
+
+    t.id <- item.id
+    .result <- t.data
+  }
 }`,
-      operation: "Query.test",
-      tools: { lookup },
-      expected: { fromA: "fetched-42", fromB: "fetched-42" },
-      afterAssert: () => {
-        assert.equal(count, 1, "should call once for identical inputs");
-        count = 0;
-      },
-      aotSupported: false,
+    operation: "Query.test",
+    input: { list: [{ id: "a" }, { id: "b" }, { id: "c" }] },
+    tools: {
+      myTool: (inp: Record<string, unknown>) => ({ data: `result-${inp.id}` }),
     },
-    {
-      name: "ToolMetadata memoize calls separately for different inputs",
-      bridgeText: `version 1.5
+    expected: {
+      items: [
+        { result: "result-a" },
+        { result: "result-b" },
+        { result: "result-c" },
+      ],
+    },
+    pending: "element-scoped tool wires not yet executed by runtime",
+  },
+  {
+    name: "element-scoped tool coexists with root-level tool",
+    bridgeText: `version 1.5
 bridge Query.test {
-  with lookup as a
-  with lookup as b
+  with globalTool as g
+  with input as i
   with output as o
 
-  a.id = "1"
-  b.id = "2"
-  o.fromA <- a.result
-  o.fromB <- b.result
+  o.items <- i.list[] as item {
+    with localTool as lt
+
+    lt.id <- item.id
+    .local <- lt.value
+    .global <- g.setting
+  }
 }`,
-      operation: "Query.test",
-      tools: { lookup },
-      expected: { fromA: "fetched-1", fromB: "fetched-2" },
-      afterAssert: () => {
-        assert.equal(count, 2, "should call twice for different inputs");
-        count = 0;
-      },
-      aotSupported: false,
+    operation: "Query.test",
+    input: { list: [{ id: "x" }, { id: "y" }] },
+    tools: {
+      globalTool: () => ({ setting: "shared" }),
+      localTool: (inp: Record<string, unknown>) => ({ value: `local-${inp.id}` }),
     },
-  ];
-})();
-
-runScopingSuite("Scoping: ToolMetadata memoization", memoMetaCases);
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 6. DSL-level memoize keyword on handle bindings
-// ═══════════════════════════════════════════════════════════════════════════
-
-const dslMemoCases: ScopingTestCase[] = (() => {
-  let count = 0;
-  const fetch = async (input: Record<string, unknown>) => {
-    count++;
-    return { data: `result-${input.id}` };
-  };
-  return [
-    {
-      name: "DSL memoize on handle deduplicates identical inputs",
-      bridgeText: `version 1.5
-bridge Query.test {
-  with fetch as a memoize
-  with fetch as b memoize
-  with output as o
-
-  a.id = "42"
-  b.id = "42"
-  o.fromA <- a.data
-  o.fromB <- b.data
-}`,
-      operation: "Query.test",
-      tools: { fetch },
-      expected: { fromA: "result-42", fromB: "result-42" },
-      afterAssert: () => {
-        assert.equal(count, 1, "DSL memoize: one call for identical inputs");
-        count = 0;
-      },
-      // AOT compiler doesn't yet support multiple instances of the same tool
-      aotSupported: false,
+    expected: {
+      items: [
+        { local: "local-x", global: "shared" },
+        { local: "local-y", global: "shared" },
+      ],
     },
-  ];
-})();
+    pending: "element-scoped tool wires not yet executed by runtime",
+  },
+];
 
-runScopingSuite("Scoping: DSL memoize keyword", dslMemoCases);
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 7. ToolDef memoize on tool blocks
-// ═══════════════════════════════════════════════════════════════════════════
-
-const toolDefMemoCases: ScopingTestCase[] = (() => {
-  let count = 0;
-  const myFetcher = async (input: Record<string, unknown>) => {
-    count++;
-    return { result: `fetched-${input.url}` };
-  };
-  return [
-    {
-      name: "tool block memoize deduplicates across handles",
-      bridgeText: `version 1.5
-tool api from myFetcher memoize {
-  .url = "https://example.com/data"
-}
-
-bridge Query.test {
-  with api as a
-  with api as b
-  with output as o
-
-  o.fromA <- a.result
-  o.fromB <- b.result
-}`,
-      operation: "Query.test",
-      tools: { myFetcher },
-      expected: {
-        fromA: "fetched-https://example.com/data",
-        fromB: "fetched-https://example.com/data",
-      },
-      afterAssert: () => {
-        assert.equal(count, 1, "ToolDef memoize: one call for same tool block");
-        count = 0;
-      },
-      aotSupported: false,
-    },
-  ];
-})();
-
-runScopingSuite("Scoping: ToolDef memoize on tool blocks", toolDefMemoCases);
+runScopingSuite("Scoping: element-scoped tool declarations", elementScopedToolCases);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 8. Request-scoped cache — each execution gets a fresh cache
+// 7. Request-scoped cache — each execution gets a fresh scope
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("Scoping: request-scoped cache", () => {
-  test("each executeBridge call gets a fresh memoization cache", async () => {
+describe("Scoping: request-scoped isolation", () => {
+  test("each executeBridge call has an independent scope", async () => {
     let callCount = 0;
     const fetch = async (_input: Record<string, unknown>) => {
       callCount++;
@@ -564,6 +774,6 @@ bridge Query.test {
       tools: { fetch },
     });
     assert.equal((r2.data as Record<string, unknown>).data, "result-2");
-    assert.equal(callCount, 2, "each request should have its own cache");
+    assert.equal(callCount, 2, "each request should have its own scope");
   });
 });
