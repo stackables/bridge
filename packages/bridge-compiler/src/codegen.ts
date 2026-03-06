@@ -742,6 +742,9 @@ class CodegenContext {
     // attach to the same in-flight Promise.
     lines.push(`  const __memoCache = new Map();`);
     lines.push(
+      `  /** @param {Function} fn Tool function @param {object} input @param {string} toolName @param {Function} [keyFn] Custom cache key */`,
+    );
+    lines.push(
       `  function __callMemo(fn, input, toolName, keyFn) {`,
     );
     lines.push(
