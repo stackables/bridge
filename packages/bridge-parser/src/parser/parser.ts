@@ -31,6 +31,7 @@ import {
   PanicKw,
   ContinueKw,
   BreakKw,
+  MemoizeKw,
   NullCoalesce,
   ErrorCoalesce,
   SafeNav,
@@ -100,6 +101,7 @@ const RESERVED_KEYWORDS = new Set([
   "panic",
   "continue",
   "break",
+  "memoize",
 ]);
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
@@ -156,6 +158,9 @@ class BridgeParser extends CstParser {
     this.SUBRULE(this.dottedName, { LABEL: "toolName" });
     this.CONSUME(FromKw);
     this.SUBRULE2(this.dottedName, { LABEL: "toolSource" });
+    this.OPTION2(() => {
+      this.CONSUME(MemoizeKw, { LABEL: "toolMemoizeKw" });
+    });
     this.OPTION(() => {
       this.CONSUME(LCurly);
       this.MANY(() => this.SUBRULE(this.toolBodyLine));
@@ -456,6 +461,9 @@ class BridgeParser extends CstParser {
             this.CONSUME5(AsKw);
             this.SUBRULE5(this.nameToken, { LABEL: "refAlias" });
           });
+          this.OPTION7(() => {
+            this.CONSUME(MemoizeKw, { LABEL: "memoizeKw" });
+          });
         },
       },
     ]);
@@ -575,13 +583,31 @@ class BridgeParser extends CstParser {
   /**
    * Block-scoped binding inside array mapping:
    *   alias <sourceExpr> as <name>
+   *   with <tool> as <handle> [memoize]
    * Evaluates the source once per element and binds the result to <name>.
    */
   public elementWithDecl = this.RULE("elementWithDecl", () => {
-    this.CONSUME(AliasKw);
-    this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
-    this.CONSUME(AsKw);
-    this.SUBRULE(this.nameToken, { LABEL: "elemWithAlias" });
+    this.OR([
+      {
+        ALT: () => {
+          this.CONSUME(AliasKw, { LABEL: "aliasKw" });
+          this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
+          this.CONSUME(AsKw);
+          this.SUBRULE(this.nameToken, { LABEL: "elemWithAlias" });
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(WithKw, { LABEL: "elemWithKw" });
+          this.SUBRULE(this.dottedName, { LABEL: "elemToolName" });
+          this.CONSUME2(AsKw);
+          this.SUBRULE2(this.nameToken, { LABEL: "elemToolAlias" });
+          this.OPTION(() => {
+            this.CONSUME(MemoizeKw, { LABEL: "elemMemoizeKw" });
+          });
+        },
+      },
+    ]);
   });
 
   /**
@@ -2858,6 +2884,8 @@ function buildToolDef(
     }
   }
 
+  const memoize = !!(node.children.toolMemoizeKw as IToken[] | undefined)?.length;
+
   return {
     kind: "tool",
     name: toolName,
@@ -2865,6 +2893,7 @@ function buildToolDef(
     extends: isKnownTool ? source : undefined,
     deps,
     wires,
+    ...(memoize ? { memoize } : {}),
   };
 }
 
@@ -3090,6 +3119,7 @@ function buildBridgeBody(
       const versionTag = (
         wc.refVersion as IToken[] | undefined
       )?.[0]?.image.slice(1);
+      const memoize = !!wc.memoizeKw;
       const lastDot = name.lastIndexOf(".");
       const defaultHandle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
       const handle = wc.refAlias
@@ -3122,6 +3152,7 @@ function buildBridgeBody(
           kind: "tool",
           name,
           ...(versionTag ? { version: versionTag } : {}),
+          ...(memoize ? { memoize } : {}),
         });
         handleRes.set(handle, {
           module: modulePart,
@@ -3138,6 +3169,7 @@ function buildBridgeBody(
           kind: "tool",
           name,
           ...(versionTag ? { version: versionTag } : {}),
+          ...(memoize ? { memoize } : {}),
         });
         handleRes.set(handle, {
           module: SELF_MODULE,
@@ -3204,6 +3236,81 @@ function buildBridgeBody(
     const addedAliases: string[] = [];
     for (const withDecl of withDecls) {
       const lineNum = line(findFirstToken(withDecl));
+
+      // ── New: `with <tool> as <handle> [memoize]` inside array blocks ──
+      const elemToolNameNode = sub(withDecl, "elemToolName");
+      if (elemToolNameNode) {
+        const toolName = extractDottedName(elemToolNameNode);
+        const alias = extractNameToken(sub(withDecl, "elemToolAlias")!);
+        const memoize = !!(withDecl.children.elemMemoizeKw as IToken[] | undefined)?.length;
+        assertNotReserved(alias, lineNum, "element-scoped tool handle");
+        if (handleRes.has(alias)) {
+          throw new Error(`Line ${lineNum}: Duplicate handle name "${alias}"`);
+        }
+
+        // Create element-scoped tool instance (unique instance ID like pipe forks)
+        const lastDot = toolName.lastIndexOf(".");
+        let res: HandleResolution;
+        if (lastDot !== -1) {
+          const modulePart = toolName.substring(0, lastDot);
+          const fieldPart = toolName.substring(lastDot + 1);
+          const forkInstance = 100000 + nextForkSeq++;
+          res = {
+            module: modulePart,
+            type: bridgeType,
+            field: fieldPart,
+            instance: forkInstance,
+          };
+          // Look up the base tool instance
+          const baseKey = `${modulePart}:${fieldPart}`;
+          const baseInstance = instanceCounters.get(baseKey) ?? 1;
+          pipeHandleEntries.push({
+            key: `${modulePart}:${bridgeType}:${fieldPart}:${forkInstance}`,
+            handle: alias,
+            baseTrunk: {
+              module: modulePart,
+              type: bridgeType,
+              field: fieldPart,
+              instance: baseInstance,
+            },
+          });
+        } else {
+          const forkInstance = 100000 + nextForkSeq++;
+          res = {
+            module: SELF_MODULE,
+            type: "Tools",
+            field: toolName,
+            instance: forkInstance,
+          };
+          const baseKey = `Tools:${toolName}`;
+          const baseInstance = instanceCounters.get(baseKey) ?? 1;
+          pipeHandleEntries.push({
+            key: `${SELF_MODULE}:Tools:${toolName}:${forkInstance}`,
+            handle: alias,
+            baseTrunk: {
+              module: SELF_MODULE,
+              type: "Tools",
+              field: toolName,
+              instance: baseInstance,
+            },
+          });
+        }
+        handleRes.set(alias, res);
+        addedAliases.push(alias);
+
+        // Add to handle bindings so the bridge knows about this element-scoped tool
+        handleBindings.push({
+          handle: alias,
+          kind: "tool",
+          name: toolName,
+          ...(memoize ? { memoize } : {}),
+          elementScoped: true,
+        });
+
+        continue;
+      }
+
+      // ── Existing: `alias <sourceExpr> as <name>` ──
       const sourceNode = sub(withDecl, "elemWithSource")!;
       const alias = extractNameToken(sub(withDecl, "elemWithAlias")!);
       assertNotReserved(alias, lineNum, "local binding alias");

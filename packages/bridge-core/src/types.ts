@@ -159,7 +159,16 @@ export type Bridge = {
  * Every wire reference in the bridge body must trace back to one of these.
  */
 export type HandleBinding =
-  | { handle: string; kind: "tool"; name: string; version?: string }
+  | {
+      handle: string;
+      kind: "tool";
+      name: string;
+      version?: string;
+      memoize?: boolean;
+      /** When true, this handle is declared inside an array mapping block
+       *  (`with <tool> as <handle>` inside `[] as iter { ... }`). */
+      elementScoped?: boolean;
+    }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }
@@ -193,6 +202,8 @@ export type ToolDef = {
   deps: ToolDep[];
   /** Wires: constants (`=`) and pulls (`<-`) defining the tool's input */
   wires: ToolWire[];
+  /** When true, the tool opts into request-scoped memoization. */
+  memoize?: boolean;
 };
 
 /**

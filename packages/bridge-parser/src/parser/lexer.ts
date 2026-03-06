@@ -150,6 +150,11 @@ export const BreakKw = createToken({
   pattern: /break/,
   longer_alt: Identifier,
 });
+export const MemoizeKw = createToken({
+  name: "MemoizeKw",
+  pattern: /memoize/,
+  longer_alt: Identifier,
+});
 
 // ── Operators & punctuation ────────────────────────────────────────────────
 
@@ -289,6 +294,7 @@ export const allTokens = [
   PanicKw,
   ContinueKw,
   BreakKw,
+  MemoizeKw,
   TrueLiteral,
   FalseLiteral,
   NullLiteral,

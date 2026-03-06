@@ -44,6 +44,7 @@ const RESERVED_BARE_VALUE_KEYWORDS = new Set([
   "break",
   "throw",
   "panic",
+  "memoize",
   "if",
   "pipe",
   // Boolean/logic operators
@@ -134,10 +135,11 @@ function serializeToolBlock(tool: ToolDef): string {
 
   // Declaration line — use `tool <name> from <source>` format
   const source = tool.extends ?? tool.fn;
+  const memoTag = tool.memoize ? " memoize" : "";
   lines.push(
     hasBody
-      ? `tool ${tool.name} from ${source} {`
-      : `tool ${tool.name} from ${source}`,
+      ? `tool ${tool.name} from ${source}${memoTag} {`
+      : `tool ${tool.name} from ${source}${memoTag}`,
   );
 
   // Dependencies
@@ -283,7 +285,18 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Header ──────────────────────────────────────────────────────────
   lines.push(`bridge ${bridge.type}.${bridge.field} {`);
 
+  // Detect element-scoped tool handles
+  const elementScopedHandles = new Set<string>();
   for (const h of bridge.handles) {
+    if (h.kind === "tool" && h.elementScoped) {
+      elementScopedHandles.add(h.handle);
+    }
+  }
+
+  for (const h of bridge.handles) {
+    // Skip element-scoped tool handles — they are serialized inside array blocks
+    if (h.kind === "tool" && elementScopedHandles.has(h.handle)) continue;
+
     switch (h.kind) {
       case "tool": {
         // Short form `with <name>` when handle == last segment of name
@@ -291,10 +304,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const defaultHandle =
           lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
         const vTag = h.version ? `@${h.version}` : "";
-        if (h.handle === defaultHandle && !vTag) {
+        const memoTag = h.memoize ? " memoize" : "";
+        if (h.handle === defaultHandle && !vTag && !memoTag) {
           lines.push(`  with ${h.name}`);
         } else {
-          lines.push(`  with ${h.name}${vTag} as ${h.handle}`);
+          lines.push(`  with ${h.name}${vTag} as ${h.handle}${memoTag}`);
         }
         break;
       }
@@ -773,6 +787,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
       ) {
         nestedArrayPaths.add(key);
       }
+    }
+
+    // Emit element-scoped tool declarations: with <tool> as <handle> [memoize]
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool" || !elementScopedHandles.has(h.handle)) continue;
+      const memoTag = h.memoize ? " memoize" : "";
+      lines.push(`${indent}with ${h.name} as ${h.handle}${memoTag}`);
     }
 
     // Emit block-scoped local bindings: alias <source> as <name>

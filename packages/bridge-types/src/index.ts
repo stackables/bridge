@@ -64,6 +64,30 @@ export interface ToolMetadata {
    */
   sync?: boolean;
 
+  // ─── Memoization ──────────────────────────────────────────────────────
+
+  /**
+   * Opt into request-scoped memoization.
+   *
+   * When enabled, duplicate calls with identical inputs within the same
+   * request share a single execution.  The cache stores Promises so even
+   * concurrent callers attach to the same in-flight request (stampede
+   * protection).
+   *
+   * Pass `true` for default JSON-key behaviour, or an object with a
+   * custom `keyFn` for ultra-fast key generation.
+   *
+   * Default: undefined (no memoization unless the bridge `memoize` keyword is used)
+   */
+  memoize?:
+    | boolean
+    | {
+        /** Custom cache-key function.  Receives the tool input object and
+         *  must return a string.  Falls back to `JSON.stringify(input)` when
+         *  omitted. */
+        keyFn?: (input: Record<string, any>) => string;
+      };
+
   // ─── Observability ────────────────────────────────────────────────────
 
   /**
