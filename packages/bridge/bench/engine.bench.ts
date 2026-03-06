@@ -127,6 +127,39 @@ bridge Query.enriched {
   };
 }
 
+// Array with per-element SYNC tool call — same structure but tools declare sync:true
+function arrayWithSyncToolPerElement(n: number) {
+  const api = () => ({
+    items: Array.from({ length: n }, (_, i) => ({
+      id: i,
+      name: `item-${i}`,
+    })),
+  });
+  api.bridge = { sync: true };
+
+  const enrich = (input: any) => ({
+    a: input.in.id * 10,
+    b: input.in.name.toUpperCase(),
+  });
+  enrich.bridge = { sync: true };
+
+  return {
+    text: `version 1.5
+bridge Query.enriched {
+  with api
+  with enrich
+  with output as o
+
+  o <- api.items[] as it {
+    alias enrich:it as resp
+    .a <- resp.a
+    .b <- resp.b
+  }
+}`,
+    tools: { api, enrich },
+  };
+}
+
 // Multi-handle chained resolution (fan-out)
 const CHAINED_MULTI = `version 1.5
 bridge Query.chained {
@@ -412,6 +445,36 @@ for (const size of [10, 100]) {
   const d = doc(fixture.text);
 
   bench.add(`compiled: array + tool-per-element ${size}`, async () => {
+    await executeBridgeCompiled({
+      document: d,
+      operation: "Query.enriched",
+      input: {},
+      tools: fixture.tools,
+    });
+  });
+}
+
+// --- Sync array + tool-per-element (sync tools) ---
+
+for (const size of [10, 100]) {
+  const fixture = arrayWithSyncToolPerElement(size);
+  const d = doc(fixture.text);
+
+  bench.add(`exec: array + SYNC tool-per-element ${size}`, async () => {
+    await executeBridge({
+      document: d,
+      operation: "Query.enriched",
+      input: {},
+      tools: fixture.tools,
+    });
+  });
+}
+
+for (const size of [10, 100]) {
+  const fixture = arrayWithSyncToolPerElement(size);
+  const d = doc(fixture.text);
+
+  bench.add(`compiled: array + SYNC tool-per-element ${size}`, async () => {
     await executeBridgeCompiled({
       document: d,
       operation: "Query.enriched",
