@@ -650,3 +650,52 @@ bridge Mutation.sendEmail {
     assert.equal(capturedParams.content, "Hi there"); // body -> content rename
   });
 });
+
+describe("executeGraph: multilevel break/continue in nested arrays", () => {
+  const catalogTypeDefs = /* GraphQL */ `
+    type Item {
+      sku: String
+      price: Float
+    }
+    type Category {
+      name: String
+      items: [Item!]!
+    }
+    type Query {
+      processCatalog: [Category!]!
+    }
+  `;
+
+  const catalogBridge = `version 1.5
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    .name <- cat.name
+    .items <- cat.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? break 2
+    }
+  }
+}`;
+
+  test("bridgeTransform throws at setup time for nested multilevel break/continue", () => {
+    const instructions = parseBridge(catalogBridge);
+    assert.throws(
+      () => createGateway(catalogTypeDefs, instructions),
+      (err: Error) => {
+        assert.ok(err instanceof Error);
+        assert.ok(
+          err.message.includes("break N") || err.message.includes("continue N"),
+          `Expected error about break N / continue N, got: ${err.message}`,
+        );
+        assert.ok(
+          err.message.includes("not supported"),
+          `Expected 'not supported' in error, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+});

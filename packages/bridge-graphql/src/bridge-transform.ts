@@ -20,8 +20,72 @@ import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
 } from "@stackables/bridge-stdlib";
-import type { BridgeDocument, ToolMap } from "@stackables/bridge-core";
+import type { Bridge, BridgeDocument, ToolMap } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
+
+export type { Logger };
+
+/**
+ * Detect whether a bridge uses multilevel break/continue (levels > 1) inside
+ * a nested array element wire (to.path.length > 1 && to.element === true).
+ *
+ * The GraphQL runtime resolves arrays field-by-field via resolver callbacks.
+ * This means a LoopControlSignal emitted deep inside an element field cannot
+ * propagate back out to the already-committed outer shadow array — the signal
+ * would simply be returned as a raw field value, silently producing wrong output.
+ *
+ * This pattern is only supported in standalone execution mode
+ * (`executeBridge` / `@stackables/bridge-core`).
+ */
+function assertNoNestedMultilevelControlFlow(doc: BridgeDocument): void {
+  for (const instr of doc.instructions) {
+    if (instr.kind !== "bridge") continue;
+    const bridge = instr as Bridge;
+    for (const wire of bridge.wires) {
+      if (wire.to.path.length <= 1) continue;
+      const fallbacks =
+        "from" in wire
+          ? wire.fallbacks
+          : "cond" in wire
+            ? wire.fallbacks
+            : "condAnd" in wire
+              ? wire.fallbacks
+              : "condOr" in wire
+                ? wire.fallbacks
+                : undefined;
+      const hasMultilevelFallback = fallbacks?.some(
+        (fb) =>
+          fb.control &&
+          (fb.control.kind === "break" || fb.control.kind === "continue") &&
+          (fb.control.levels ?? 1) > 1,
+      );
+      const catchControl =
+        "from" in wire
+          ? wire.catchControl
+          : "cond" in wire
+            ? wire.catchControl
+            : "condAnd" in wire
+              ? wire.catchControl
+              : "condOr" in wire
+                ? wire.catchControl
+                : undefined;
+      const hasMultilevelCatch =
+        catchControl &&
+        (catchControl.kind === "break" || catchControl.kind === "continue") &&
+        (catchControl.levels ?? 1) > 1;
+      if (hasMultilevelFallback || hasMultilevelCatch) {
+        const loc = `${bridge.type}.${bridge.field}`;
+        const path = wire.to.path.join(".");
+        throw new Error(
+          `[bridge] ${loc}: 'break N' / 'continue N' with N > 1 inside a nested ` +
+            `array element (path: ${path}) is not supported in GraphQL execution mode. ` +
+            `Use standalone execution (executeBridge) instead, or restructure to ` +
+            `use single-level break/continue and filter at the outer loop.`,
+        );
+      }
+    }
+  }
+}
 
 export type { Logger };
 
@@ -88,6 +152,12 @@ export function bridgeTransform(
   const userTools = options?.tools ?? {};
   const contextMapper = options?.contextMapper;
   const traceLevel = options?.trace ?? "off";
+
+  // Static documents are validated at setup time to catch unsupported patterns
+  // early instead of producing silent wrong output at runtime.
+  if (typeof document !== "function") {
+    assertNoNestedMultilevelControlFlow(document);
+  }
   const logger = options?.logger ?? defaultLogger;
 
   return mapSchema(schema, {
@@ -171,10 +241,18 @@ export function bridgeTransform(
             );
 
             source.logger = logger;
-            if (options?.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+            if (
+              options?.toolTimeoutMs !== undefined &&
+              Number.isFinite(options.toolTimeoutMs) &&
+              options.toolTimeoutMs >= 0
+            ) {
               source.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
             }
-            if (options?.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+            if (
+              options?.maxDepth !== undefined &&
+              Number.isFinite(options.maxDepth) &&
+              options.maxDepth >= 0
+            ) {
               source.maxDepth = Math.floor(options.maxDepth);
             }
 

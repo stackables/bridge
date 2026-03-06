@@ -105,6 +105,14 @@ o.catalogs <- api.catalogs[] as cat {
 
 ```
 
+:::caution[GraphQL execution mode limitation]
+`break N` / `continue N` with `N > 1` inside a **nested** array element is **not supported** when using the GraphQL runtime (`bridgeTransform`). GraphQL resolves arrays field-by-field through independent resolver callbacks, so a multilevel control signal emitted deep inside an inner element cannot propagate back out to the already-committed outer shadow array.
+
+`bridgeTransform` will throw a configuration error at startup if it detects this pattern, so it fails fast rather than producing silent wrong output.
+
+**Use standalone execution** (`executeBridge` / `@stackables/bridge-core`) instead, which materialises the full nested structure eagerly and supports multilevel control flow correctly.
+:::
+
 ## 3. Common Use Cases
 
 ### Use Case 1: Filtering an Array Before Mapping
