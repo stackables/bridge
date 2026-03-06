@@ -17,6 +17,7 @@ import {
   TraceCollector,
   BridgePanicError,
   BridgeAbortError,
+  BridgeTimeoutError,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
 import { compileBridge } from "./codegen.ts";
@@ -98,6 +99,7 @@ type BridgeFn = (
     ) => void;
     __BridgePanicError?: new (...args: any[]) => Error;
     __BridgeAbortError?: new (...args: any[]) => Error;
+    __BridgeTimeoutError?: new (...args: any[]) => Error;
   },
 ) => Promise<any>;
 
@@ -112,10 +114,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
 const fnCache = new WeakMap<BridgeDocument, Map<string, BridgeFn>>();
 
 /** Build a cache key that includes the sorted requestedFields. */
-function cacheKey(
-  operation: string,
-  requestedFields?: string[],
-): string {
+function cacheKey(operation: string, requestedFields?: string[]): string {
   if (!requestedFields || requestedFields.length === 0) return operation;
   return `${operation}:${[...requestedFields].sort().join(",")}`;
 }
@@ -253,6 +252,7 @@ export async function executeBridge<T = unknown>(
     logger,
     __BridgePanicError: BridgePanicError,
     __BridgeAbortError: BridgeAbortError,
+    __BridgeTimeoutError: BridgeTimeoutError,
     __trace: tracer
       ? (
           toolName: string,
