@@ -86,3 +86,25 @@ export async function myHttpTool(input: { url: string }, context: ToolContext) {
 ```
 
 By connecting the signal, the engine can instantly abort pending network requests the exact millisecond a failure state or client disconnect is detected, bypassing all local `?.` and `catch` fallbacks.
+
+## Tool Metadata
+
+You can attach a `.bridge` property to any tool function to control how the engine instruments it. Import `ToolMetadata` from `@stackables/bridge` for full type safety.
+
+```typescript
+import type { ToolMetadata } from "@stackables/bridge";
+
+export async function geocoder(input: { q: string }) {
+  return await geocodeService.lookup(input.q);
+}
+
+geocoder.bridge = {
+  trace: true, // emit an OTel span (default: true)
+  log: {
+    // log successful calls at info level (default false)
+    execution: "info",
+    // log failures at error level (default error)
+    errors: "error",
+  },
+} satisfies ToolMetadata;
+```

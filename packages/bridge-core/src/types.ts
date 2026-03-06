@@ -236,6 +236,7 @@ export type {
   ToolContext,
   ToolCallFn,
   ToolMap,
+  ToolMetadata,
   CacheStore,
 } from "@stackables/bridge-types";
 

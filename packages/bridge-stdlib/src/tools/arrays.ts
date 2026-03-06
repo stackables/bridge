@@ -1,3 +1,10 @@
+import type { ToolMetadata } from "@stackables/bridge-types";
+
+const syncUtility = {
+  sync: true,
+  trace: false,
+} satisfies ToolMetadata;
+
 export function filter(opts: { in: any[]; [key: string]: any }) {
   const { in: arr, ...criteria } = opts;
   return arr.filter((obj) => {
@@ -10,6 +17,8 @@ export function filter(opts: { in: any[]; [key: string]: any }) {
   });
 }
 
+filter.bridge = syncUtility;
+
 export function find(opts: { in: any[]; [key: string]: any }) {
   const { in: arr, ...criteria } = opts;
   return arr.find((obj) => {
@@ -21,6 +30,8 @@ export function find(opts: { in: any[]; [key: string]: any }) {
     return true;
   });
 }
+
+find.bridge = syncUtility;
 
 /**
  * Returns the first element of the array in `opts.in`.
@@ -47,6 +58,8 @@ export function first(opts: { in: any[]; strict?: boolean | string }) {
   return Array.isArray(arr) ? arr[0] : undefined;
 }
 
+first.bridge = syncUtility;
+
 /**
  * Wraps a single value in an array.
  *
@@ -55,3 +68,5 @@ export function first(opts: { in: any[]; strict?: boolean | string }) {
 export function toArray(opts: { in: any }) {
   return Array.isArray(opts.in) ? opts.in : [opts.in];
 }
+
+toArray.bridge = syncUtility;

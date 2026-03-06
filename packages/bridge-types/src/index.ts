@@ -42,6 +42,60 @@ export type ToolCallFn = (
 ) => Promise<Record<string, any>>;
 
 /**
+ * Optional metadata that can be attached to any tool function as a `.bridge` property.
+ *
+ * Used by the engine and observability layer to optimise execution and control telemetry.
+ *
+ * ```ts
+ * myTool.bridge = {
+ *   sync: true,
+ *   trace: false,
+ *   log: { execution: false, errors: "error" },
+ * } satisfies ToolMetadata;
+ * ```
+ */
+export interface ToolMetadata {
+  // ─── Execution ────────────────────────────────────────────────────────
+
+  /**
+   * If true, the tool is a purely synchronous function.
+   * The compiler will bypass Promise wrappers and `await` for maximum throughput.
+   * Default: false
+   */
+  sync?: boolean;
+
+  // ─── Observability ────────────────────────────────────────────────────
+
+  /**
+   * Should the engine emit OpenTelemetry spans for this tool?
+   * Set to false for high-frequency utility functions to prevent trace spam.
+   * Default: true
+   */
+  trace?: boolean;
+
+  /**
+   * Granular control over the engine's automatic logging.
+   * If set to false, disables ALL logging for this tool.
+   */
+  log?:
+    | boolean
+    | {
+        /**
+         * Log successful invocations (inputs, outputs, latency).
+         * Set to false to hide trace spam from loops.
+         * Default: true (or your global default log level)
+         */
+        execution?: boolean | "debug" | "info";
+
+        /**
+         * Log exceptions thrown by the tool.
+         * Default: true
+         */
+        errors?: boolean | "warn" | "error";
+      };
+}
+
+/**
  * Recursive tool map — supports namespaced tools via nesting.
  *
  * Example:

@@ -41,13 +41,19 @@ function createLogCapture(): Logger & {
 } {
   const debugMessages: string[] = [];
   const errorMessages: string[] = [];
+  // Structured log calls arrive as (data: object, msg: string) — Pino convention.
+  // Flatten to a single searchable string for test assertions.
+  const format = (...args: any[]): string =>
+    args
+      .map((a) => (a && typeof a === "object" ? JSON.stringify(a) : String(a)))
+      .join(" ");
   return {
     debugMessages,
     errorMessages,
-    debug: (...args: any[]) => debugMessages.push(args.join(" ")),
+    debug: (...args: any[]) => debugMessages.push(format(...args)),
     info: () => {},
     warn: () => {},
-    error: (...args: any[]) => errorMessages.push(args.join(" ")),
+    error: (...args: any[]) => errorMessages.push(format(...args)),
   };
 }
 
@@ -55,8 +61,10 @@ describe("logging: basics", () => {
   test("logger.debug is called on successful tool call", async () => {
     const instructions = parseBridge(bridge);
     const logger = createLogCapture();
+    const geocoder = async () => ({ label: "Berlin, DE" });
+    geocoder.bridge = { log: { execution: "debug" as const } };
     const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
-      tools: { geocoder: async () => ({ label: "Berlin, DE" }) },
+      tools: { geocoder },
       logger,
     });
     const yoga = createYoga({ schema, graphqlEndpoint: "*" });
