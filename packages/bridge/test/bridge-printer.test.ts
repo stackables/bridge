@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { formatBridge } from "../src/index.ts";
+import { formatBridge, prettyPrintToSource } from "../src/index.ts";
 
 /**
  * ============================================================================
@@ -218,6 +218,37 @@ describe("formatBridge - edge cases", () => {
 # comment 2
 `;
     assert.equal(formatBridge(input), expected);
+  });
+});
+
+describe("prettyPrintToSource - safety and options", () => {
+  test("is idempotent", () => {
+    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
+    const once = prettyPrintToSource(input);
+    const twice = prettyPrintToSource(once);
+    assert.equal(twice, once);
+  });
+
+  test("throws on syntax errors", () => {
+    assert.throws(() => prettyPrintToSource(`bridge Query.test {`));
+  });
+
+  test("uses tabSize when insertSpaces is true", () => {
+    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
+    const expected = `version 1.5\n\nbridge Query.test {\n    with input as i\n\n    o.x <- i.y\n}\n`;
+    assert.equal(
+      prettyPrintToSource(input, { tabSize: 4, insertSpaces: true }),
+      expected,
+    );
+  });
+
+  test("uses tabs when insertSpaces is false", () => {
+    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
+    const expected = `version 1.5\n\nbridge Query.test {\n\twith input as i\n\n\to.x <- i.y\n}\n`;
+    assert.equal(
+      prettyPrintToSource(input, { tabSize: 4, insertSpaces: false }),
+      expected,
+    );
   });
 });
 

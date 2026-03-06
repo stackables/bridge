@@ -10,6 +10,7 @@
 export {
   parseBridgeChevrotain as parseBridge,
   parseBridgeChevrotain,
+  parseBridgeCst,
   parseBridgeDiagnostics,
   PARSER_VERSION,
 } from "./parser/index.ts";
@@ -25,7 +26,11 @@ export {
 
 // ── Formatter ───────────────────────────────────────────────────────────────
 
-export { formatBridge } from "./bridge-printer.ts";
+export {
+  formatBridge,
+  prettyPrintToSource,
+  type BridgeFormattingOptions,
+} from "./bridge-printer.ts";
 
 // ── Language service ────────────────────────────────────────────────────────
 

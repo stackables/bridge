@@ -7,8 +7,30 @@
  */
 import type { IToken } from "chevrotain";
 import { BridgeLexer } from "./parser/lexer.ts";
+import { parseBridgeCst } from "./parser/parser.ts";
 
-const INDENT = "  ";
+const DEFAULT_FORMATTING_OPTIONS = {
+  tabSize: 2,
+  insertSpaces: true,
+} as const;
+
+export type BridgeFormattingOptions = {
+  tabSize: number;
+  insertSpaces: boolean;
+};
+
+function resolveFormattingOptions(
+  options?: Partial<BridgeFormattingOptions>,
+): BridgeFormattingOptions {
+  const tabSize = Number.isInteger(options?.tabSize)
+    ? Math.max(1, options?.tabSize ?? DEFAULT_FORMATTING_OPTIONS.tabSize)
+    : DEFAULT_FORMATTING_OPTIONS.tabSize;
+
+  return {
+    tabSize,
+    insertSpaces: options?.insertSpaces ?? DEFAULT_FORMATTING_OPTIONS.insertSpaces,
+  };
+}
 
 // ── Comment handling ─────────────────────────────────────────────────────────
 
@@ -145,7 +167,22 @@ function isTopLevelBlockStart(group: IToken[]): boolean {
  * @param source - The Bridge DSL source text to format
  * @returns Formatted source text, or the original if parsing fails
  */
-export function formatBridge(source: string): string {
+export function prettyPrintToSource(
+  source: string,
+  options?: Partial<BridgeFormattingOptions>,
+): string {
+  parseBridgeCst(source);
+  return formatBridgeInternal(source, options);
+}
+
+function formatBridgeInternal(
+  source: string,
+  options?: Partial<BridgeFormattingOptions>,
+): string {
+  const formatting = resolveFormattingOptions(options);
+  const indentUnit = formatting.insertSpaces
+    ? " ".repeat(formatting.tabSize)
+    : "\t";
   const lexResult = BridgeLexer.tokenize(source);
 
   if (lexResult.errors.length > 0) {
@@ -313,7 +350,7 @@ export function formatBridge(source: string): string {
         if (lastCommentLine > 0 && commentLine > lastCommentLine + 1) {
           output.push("\n"); // Preserve blank line between comments
         }
-        output.push(INDENT.repeat(lineStartDepth) + comment.image + "\n");
+        output.push(indentUnit.repeat(lineStartDepth) + comment.image + "\n");
         lastCommentLine = commentLine;
       }
     }
@@ -371,7 +408,7 @@ export function formatBridge(source: string): string {
         );
         if (hasContentAfter && lineOutput.length > 0) {
           // Emit the line with the brace, content will continue on next iteration
-          output.push(INDENT.repeat(currentIndent) + lineOutput + "\n");
+          output.push(indentUnit.repeat(currentIndent) + lineOutput + "\n");
           lineOutput = "";
           lastType = null;
           currentIndent = depth; // Update indentation for remaining content
@@ -390,7 +427,7 @@ export function formatBridge(source: string): string {
 
         // Output anything accumulated first
         if (lineOutput.length > 0) {
-          output.push(INDENT.repeat(depth) + lineOutput + "\n");
+          output.push(indentUnit.repeat(depth) + lineOutput + "\n");
           lineOutput = "";
         }
         // Decrement depth, then emit brace at new (outer) depth
@@ -405,7 +442,7 @@ export function formatBridge(source: string): string {
         }
 
         // Emit the closing brace immediately
-        output.push(INDENT.repeat(depth) + braceOutput + "\n");
+        output.push(indentUnit.repeat(depth) + braceOutput + "\n");
         continue;
       }
 
@@ -458,7 +495,7 @@ export function formatBridge(source: string): string {
 
     // Emit the line
     if (lineOutput.length > 0) {
-      output.push(INDENT.repeat(currentIndent) + lineOutput + "\n");
+      output.push(indentUnit.repeat(currentIndent) + lineOutput + "\n");
     }
 
     lastOutputLine = originalLine;
@@ -478,4 +515,16 @@ export function formatBridge(source: string): string {
   }
 
   return result;
+}
+
+/**
+ * Backward-compatible formatter API.
+ *
+ * Returns the original source when syntax is invalid.
+ */
+export function formatBridge(
+  source: string,
+  options?: Partial<BridgeFormattingOptions>,
+): string {
+  return formatBridgeInternal(source, options);
 }
