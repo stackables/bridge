@@ -5,7 +5,11 @@
  */
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { BREAK_SYM, CONTINUE_SYM } from "../src/tree-types.ts";
+import {
+  BREAK_SYM,
+  CONTINUE_SYM,
+  isLoopControlSignal,
+} from "../src/tree-types.ts";
 import {
   applyFallbackGates,
   applyCatchGate,
@@ -99,6 +103,18 @@ describe("applyFallbackGates — falsy (||)", () => {
     const ctx = makeCtx();
     const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "break" } }] });
     assert.equal(await applyFallbackGates(ctx, w, false), BREAK_SYM);
+  });
+
+  test("falsy control kind=break with level 2 returns multi-level signal", async () => {
+    const ctx = makeCtx();
+    const w = fromWire({
+      fallbacks: [{ type: "falsy", control: { kind: "break", levels: 2 } }],
+    });
+    const out = await applyFallbackGates(ctx, w, false);
+    assert.ok(isLoopControlSignal(out));
+    assert.notEqual(out, BREAK_SYM);
+    assert.notEqual(out, CONTINUE_SYM);
+    assert.deepStrictEqual(out, { __bridgeControl: "break", levels: 2 });
   });
 
   test("falsy control kind=throw throws an error", async () => {
@@ -259,6 +275,14 @@ describe("applyCatchGate", () => {
     const ctx = makeCtx();
     const w = fromWire({ catchControl: { kind: "continue" } });
     assert.equal(await applyCatchGate(ctx, w), CONTINUE_SYM);
+  });
+
+  test("applies catchControl kind=continue with level 3", async () => {
+    const ctx = makeCtx();
+    const w = fromWire({ catchControl: { kind: "continue", levels: 3 } });
+    const out = await applyCatchGate(ctx, w);
+    assert.ok(isLoopControlSignal(out));
+    assert.deepStrictEqual(out, { __bridgeControl: "continue", levels: 3 });
   });
 
   test("catchControl takes priority over catchFallbackRef", async () => {

@@ -48,8 +48,10 @@ const RESERVED_BARE_VALUE_KEYWORDS = new Set([
 function serializeControl(ctrl: ControlFlowInstruction): string {
   if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
   if (ctrl.kind === "panic") return `panic ${JSON.stringify(ctrl.message)}`;
-  if (ctrl.kind === "continue") return "continue";
-  return "break";
+  if (ctrl.kind === "continue") {
+    return ctrl.levels && ctrl.levels > 1 ? `continue ${ctrl.levels}` : "continue";
+  }
+  return ctrl.levels && ctrl.levels > 1 ? `break ${ctrl.levels}` : "break";
 }
 
 // ── Serializer ───────────────────────────────────────────────────────────────

@@ -252,8 +252,8 @@ export type {
 export type ControlFlowInstruction =
   | { kind: "throw"; message: string }
   | { kind: "panic"; message: string }
-  | { kind: "continue" }
-  | { kind: "break" };
+  | { kind: "continue"; levels?: number }
+  | { kind: "break"; levels?: number };
 
 /**
  * Named constant definition — a reusable value defined in the bridge file.

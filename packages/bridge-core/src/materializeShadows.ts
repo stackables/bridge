@@ -11,7 +11,14 @@
 import type { Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { setNested } from "./tree-utils.ts";
-import { isPromise, CONTINUE_SYM, BREAK_SYM } from "./tree-types.ts";
+import {
+  BREAK_SYM,
+  CONTINUE_SYM,
+  decrementLoopControl,
+  isLoopControlSignal,
+  isPromise,
+  type LoopControlSignal,
+} from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
 import { matchesRequestedFields } from "./requested-fields.ts";
 
@@ -113,7 +120,7 @@ export async function materializeShadows(
   host: MaterializerHost,
   items: MaterializableShadow[],
   pathPrefix: string[],
-): Promise<unknown[]> {
+): Promise<unknown[] | LoopControlSignal> {
   const { directFields, deepPaths, wireGroupsByPath } = planShadowOutput(
     host,
     pathPrefix,
@@ -170,18 +177,25 @@ export async function materializeShadows(
       : (rawValues as unknown[]);
 
     const finalResults: unknown[] = [];
+    let propagate: LoopControlSignal | undefined;
     for (let i = 0; i < items.length; i++) {
       const obj: Record<string, unknown> = {};
       let doBreak = false;
       let doSkip = false;
       for (let j = 0; j < nFields; j++) {
         const v = flatValues[i * nFields + j];
-        if (v === BREAK_SYM) {
-          doBreak = true;
-          break;
-        }
-        if (v === CONTINUE_SYM) {
-          doSkip = true;
+        if (isLoopControlSignal(v)) {
+          if (v === BREAK_SYM) {
+            doBreak = true;
+            break;
+          }
+          if (v === CONTINUE_SYM) {
+            doSkip = true;
+            break;
+          }
+          doBreak = v.__bridgeControl === "break";
+          doSkip = v.__bridgeControl === "continue";
+          propagate = decrementLoopControl(v);
           break;
         }
         obj[directFieldArray[j]!] = v;
@@ -190,6 +204,7 @@ export async function materializeShadows(
       if (doSkip) continue;
       finalResults.push(obj);
     }
+    if (propagate) return propagate;
     return finalResults;
   }
 
@@ -253,8 +268,7 @@ export async function materializeShadows(
       await Promise.all(tasks);
       // Check if any field resolved to a sentinel — propagate it
       for (const v of Object.values(obj)) {
-        if (v === CONTINUE_SYM) return CONTINUE_SYM;
-        if (v === BREAK_SYM) return BREAK_SYM;
+        if (isLoopControlSignal(v)) return v;
       }
       return obj;
     }),
@@ -263,8 +277,16 @@ export async function materializeShadows(
   // Filter sentinels from the final result
   const finalResults: unknown[] = [];
   for (const item of rawResults) {
-    if (item === BREAK_SYM) break;
-    if (item === CONTINUE_SYM) continue;
+    if (isLoopControlSignal(item)) {
+      if (item === BREAK_SYM) break;
+      if (item === CONTINUE_SYM) continue;
+      if (item.__bridgeControl === "break") {
+        return decrementLoopControl(item);
+      }
+      if (item.__bridgeControl === "continue") {
+        return decrementLoopControl(item);
+      }
+    }
     finalResults.push(item);
   }
   return finalResults;

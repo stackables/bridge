@@ -902,7 +902,7 @@ bridge Query.validateProfile {
   with output as o
 
   o.name <- i.name || throw "name is required"
-  o.status <- i.fatal ? panic "fatal validation error" : "ok"
+  o.status <- i.fatal ? null : "ok" ?? panic "fatal validation error"
 }`,
     queries: [
       {
@@ -956,7 +956,7 @@ bridge Query.validateProfile {
     id: "control-flow-break-continue",
     name: "Array Control Flow (Break/Continue)",
     description:
-      "Use continue to skip invalid items and break to stop processing items in the current category",
+      "Use continue 2 / break 2 to skip or stop from a nested array by targeting the parent loop",
     schema: `
 type Item {
   sku: String
@@ -981,8 +981,8 @@ bridge Query.processCatalog {
   o <- ctx.catalog[] as cat {
     .name <- cat.name
     .items <- cat.items[] as item {
-      .sku <- item.sku ?? continue
-      .price <- item.price ?? break
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? break 2
     }
   }
 }`,
@@ -1013,16 +1013,27 @@ bridge Query.processCatalog {
       "name": "Summer",
       "items": [
         { "sku": "S-1", "price": 19.99 },
-        { "sku": null, "price": 99.99 },
         { "sku": "S-2", "price": 29.99 }
       ]
     },
     {
-      "name": "Winter",
+      "name": "Skip category with continue 2",
       "items": [
-        { "sku": "W-1", "price": 39.99 },
-        { "sku": "W-2", "price": null },
+        { "sku": null, "price": 999.99 },
+        { "sku": "SHOULD-NOT-APPEAR", "price": 1.0 }
+      ]
+    },
+    {
+      "name": "Stop all with break 2",
+      "items": [
+        { "sku": "W-1", "price": null },
         { "sku": "W-3", "price": 49.99 }
+      ]
+    },
+    {
+      "name": "Never reached after break 2",
+      "items": [
+        { "sku": "N-1", "price": 10.0 }
       ]
     }
   ]

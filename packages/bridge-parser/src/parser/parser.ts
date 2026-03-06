@@ -825,8 +825,22 @@ class BridgeParser extends CstParser {
           this.CONSUME2(StringLiteral, { LABEL: "panicMsg" });
         },
       },
-      { ALT: () => this.CONSUME(ContinueKw, { LABEL: "continueKw" }) },
-      { ALT: () => this.CONSUME(BreakKw, { LABEL: "breakKw" }) },
+      {
+        ALT: () => {
+          this.CONSUME(ContinueKw, { LABEL: "continueKw" });
+          this.OPTION(() => {
+            this.CONSUME4(NumberLiteral, { LABEL: "continueLevel" });
+          });
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(BreakKw, { LABEL: "breakKw" });
+          this.OPTION2(() => {
+            this.CONSUME5(NumberLiteral, { LABEL: "breakLevel" });
+          });
+        },
+      },
       { ALT: () => this.CONSUME3(StringLiteral, { LABEL: "stringLit" }) },
       { ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numberLit" }) },
       { ALT: () => this.CONSUME(TrueLiteral, { LABEL: "trueLit" }) },
@@ -3528,8 +3542,24 @@ function buildBridgeBody(
       const msg = (c.panicMsg as IToken[])[0].image;
       return { control: { kind: "panic", message: JSON.parse(msg) } };
     }
-    if (c.continueKw) return { control: { kind: "continue" } };
-    if (c.breakKw) return { control: { kind: "break" } };
+    if (c.continueKw) {
+      const raw = (c.continueLevel as IToken[] | undefined)?.[0]?.image;
+      if (!raw) return { control: { kind: "continue" } };
+      const levels = Number(raw);
+      if (!Number.isInteger(levels) || levels < 1) {
+        throw new Error(`Line ${lineNum}: continue level must be a positive integer`);
+      }
+      return { control: { kind: "continue", levels } };
+    }
+    if (c.breakKw) {
+      const raw = (c.breakLevel as IToken[] | undefined)?.[0]?.image;
+      if (!raw) return { control: { kind: "break" } };
+      const levels = Number(raw);
+      if (!Number.isInteger(levels) || levels < 1) {
+        throw new Error(`Line ${lineNum}: break level must be a positive integer`);
+      }
+      return { control: { kind: "break", levels } };
+    }
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       const segs = parseTemplateString(raw.slice(1, -1));

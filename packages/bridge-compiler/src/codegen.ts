@@ -139,18 +139,35 @@ function hasCatchFallback(w: Wire): boolean {
   );
 }
 
+type DetectedControlFlow = {
+  kind: "break" | "continue" | "throw" | "panic";
+  levels: number;
+};
+
 /** Check if any wire in a set has a control flow instruction (break/continue/throw/panic). */
 function detectControlFlow(
   wires: Wire[],
-): "break" | "continue" | "throw" | "panic" | null {
+): DetectedControlFlow | null {
   for (const w of wires) {
     if ("fallbacks" in w && w.fallbacks) {
       for (const fb of w.fallbacks) {
-        if (fb.control) return fb.control.kind as "break" | "continue" | "throw" | "panic";
+        if (fb.control) {
+          const kind = fb.control.kind as "break" | "continue" | "throw" | "panic";
+          const levels =
+            kind === "break" || kind === "continue"
+              ? Math.max(1, Number((fb.control as any).levels) || 1)
+              : 1;
+          return { kind, levels };
+        }
       }
     }
     if ("catchControl" in w && w.catchControl) {
-      return w.catchControl.kind as "break" | "continue" | "throw" | "panic";
+      const kind = w.catchControl.kind as "break" | "continue" | "throw" | "panic";
+      const levels =
+        kind === "break" || kind === "continue"
+          ? Math.max(1, Number((w.catchControl as any).levels) || 1)
+          : 1;
+      return { kind, levels };
     }
   }
   return null;
@@ -644,6 +661,12 @@ class CodegenContext {
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
     lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(
+      `  const __isLoopCtrl = (v) => (v?.__bridgeControl === "break" || v?.__bridgeControl === "continue") && Number.isInteger(v?.levels) && v.levels > 0;`,
+    );
+    lines.push(
+      `  const __nextLoopCtrl = (v) => ({ __bridgeControl: v.__bridgeControl, levels: v.levels - 1 });`,
+    );
     lines.push(`  async function __call(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
     lines.push(`    const start = __trace ? performance.now() : 0;`);
@@ -1382,6 +1405,8 @@ class CodegenContext {
       // Only check control flow on direct element wires, not sub-array element wires
       const directElemWires = elemWires.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directElemWires);
+      const anyCf = detectControlFlow(elemWires);
+      const requiresLabeledLoop = !cf && !!anyCf && anyCf.levels > 1;
       // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
       const needsAsync = elemWires.some((w) => this.wireNeedsAwait(w));
 
@@ -1397,20 +1422,27 @@ class CodegenContext {
               arrayIterators,
               0,
               4,
-              cf === "continue" ? "for-continue" : "break",
+              cf.kind === "continue" ? "for-continue" : "break",
             )
           : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
 
         lines.push(`  const _result = [];`);
-        lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+        lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
+        lines.push(`    try {`);
         for (const pl of preambleLines) {
-          lines.push(`    ${pl}`);
+          lines.push(`      ${pl}`);
         }
-        lines.push(body);
+        lines.push(`    ${body.trimStart()}`);
+        lines.push(`    } catch (_ctrl) {`);
+        lines.push(
+          `      if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; }`,
+        );
+        lines.push(`      throw _ctrl;`);
+        lines.push(`    }`);
         lines.push(`  }`);
         lines.push(`  return _result;`);
         this.elementLocalVars.clear();
-      } else if (cf === "continue") {
+      } else if (cf?.kind === "continue" && cf.levels === 1) {
         // Use flatMap — skip elements that trigger continue (sync only)
         const body = this.buildElementBodyWithControlFlow(
           elemWires,
@@ -1422,18 +1454,31 @@ class CodegenContext {
         lines.push(`  return (${arrayExpr} ?? []).flatMap((_el0) => {`);
         lines.push(body);
         lines.push(`  });`);
-      } else if (cf === "break") {
+      } else if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+        // Use an explicit loop for:
+        // - direct break/continue control
+        // - nested multilevel control (e.g. break 2 / continue 2) that must
+        //   escape from sub-array IIFEs through throw/catch propagation.
         // Use a loop with early break (sync)
-        const body = this.buildElementBodyWithControlFlow(
-          elemWires,
-          arrayIterators,
-          0,
-          4,
-          "break",
-        );
+        const body = cf
+          ? this.buildElementBodyWithControlFlow(
+              elemWires,
+              arrayIterators,
+              0,
+              4,
+              cf.kind === "continue" ? "for-continue" : "break",
+            )
+          : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
         lines.push(`  const _result = [];`);
-        lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
-        lines.push(body);
+        lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
+        lines.push(`    try {`);
+        lines.push(`    ${body.trimStart()}`);
+        lines.push(`    } catch (_ctrl) {`);
+        lines.push(
+          `      if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; }`,
+        );
+        lines.push(`      throw _ctrl;`);
+        lines.push(`    }`);
         lines.push(`  }`);
         lines.push(`  return _result;`);
       } else {
@@ -1556,6 +1601,8 @@ class CodegenContext {
       // Only check control flow on direct element wires (not sub-array element wires)
       const directShifted = shifted.filter((w) => w.to.path.length === 1);
       const cf = detectControlFlow(directShifted);
+      const anyCf = detectControlFlow(shifted);
+      const requiresLabeledLoop = !cf && !!anyCf && anyCf.levels > 1;
       // Check if any element wire generates `await` (element-scoped tools or catch fallbacks)
       const needsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
@@ -1571,14 +1618,14 @@ class CodegenContext {
               arrayIterators,
               0,
               8,
-              cf === "continue" ? "for-continue" : "break",
+              cf.kind === "continue" ? "for-continue" : "break",
             )
           : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
 
         const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-        mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${preamble}\n${asyncBody}\n    } return _result; })()`;
+        mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
         this.elementLocalVars.clear();
-      } else if (cf === "continue") {
+      } else if (cf?.kind === "continue" && cf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1587,15 +1634,19 @@ class CodegenContext {
           "continue",
         );
         mapExpr = `(${arrayExpr})?.flatMap((_el0) => {\n${cfBody}\n    }) ?? null`;
-      } else if (cf === "break") {
-        const cfBody = this.buildElementBodyWithControlFlow(
-          shifted,
-          arrayIterators,
-          0,
-          8,
-          "break",
-        );
-        mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; for (const _el0 of _src) {\n${cfBody}\n      } return _result; })()`;
+      } else if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+        // Same rationale as root array handling above: nested multilevel
+        // control requires for-loop + throw/catch propagation instead of map.
+        const loopBody = cf
+          ? this.buildElementBodyWithControlFlow(
+              shifted,
+              arrayIterators,
+              0,
+              8,
+              cf.kind === "continue" ? "for-continue" : "break",
+            )
+          : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+        mapExpr = `(() => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${loopBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n      } return _result; })()`;
       } else {
         const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
         mapExpr = `(${arrayExpr})?.map((_el0) => (${body})) ?? null`;
@@ -1748,11 +1799,11 @@ class CodegenContext {
               arrayIterators,
               depth + 1,
               indent + 4,
-              innerCf === "continue" ? "for-continue" : "break",
+              innerCf.kind === "continue" ? "for-continue" : "break",
             )
           : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
-        mapExpr = `await (async () => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; for (const ${innerElVar} of _src) {\n${innerBody}\n${" ".repeat(indent + 2)}} return _result; })()`;
-      } else if (innerCf === "continue") {
+        mapExpr = `await (async () => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${innerBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
+      } else if (innerCf?.kind === "continue" && innerCf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
@@ -1761,15 +1812,15 @@ class CodegenContext {
           "continue",
         );
         mapExpr = `(${srcExpr})?.flatMap((${innerElVar}) => {\n${cfBody}\n${" ".repeat(indent + 2)}}) ?? null`;
-      } else if (innerCf === "break") {
+      } else if (innerCf?.kind === "break" || innerCf?.kind === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
           arrayIterators,
           depth + 1,
           indent + 4,
-          "break",
+          innerCf.kind === "continue" ? "for-continue" : "break",
         );
-        mapExpr = `(() => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; for (const ${innerElVar} of _src) {\n${cfBody}\n${" ".repeat(indent + 2)}} return _result; })()`;
+        mapExpr = `(() => { const _src = ${srcExpr}; if (_src == null) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${cfBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
       } else {
         const innerBody = this.buildElementBody(
           shifted,
@@ -1834,6 +1885,20 @@ class CodegenContext {
     // Determine the check type
     const isNullish =
       controlWire.fallbacks?.some(fb => fb.type === "nullish" && fb.control != null) ?? false;
+    const ctrlFromFallback =
+      controlWire.fallbacks?.find((fb) => fb.control != null)?.control;
+    const ctrl = ctrlFromFallback ?? controlWire.catchControl;
+    const controlKind = ctrl?.kind === "continue" ? "continue" : "break";
+    const controlLevels =
+      ctrl && (ctrl.kind === "continue" || ctrl.kind === "break")
+        ? Math.max(1, Number(ctrl.levels) || 1)
+        : 1;
+    const controlStatement =
+      controlLevels > 1
+        ? `throw { __bridgeControl: ${JSON.stringify(controlKind)}, levels: ${controlLevels} };`
+        : controlKind === "continue"
+          ? "continue;"
+          : "break;";
 
     if (mode === "continue") {
       if (isNullish) {
@@ -1846,16 +1911,16 @@ class CodegenContext {
     // mode === "for-continue" — same as break but uses native 'continue' keyword
     if (mode === "for-continue") {
       if (isNullish) {
-        return `${pad}  if (${checkExpr} == null) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+        return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
       }
-      return `${pad}  if (!${checkExpr}) continue;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      return `${pad}  if (!${checkExpr}) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
     }
 
     // mode === "break"
     if (isNullish) {
-      return `${pad}  if (${checkExpr} == null) break;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
     }
-    return `${pad}  if (!${checkExpr}) break;\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+    return `${pad}  if (!${checkExpr}) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
   }
 
   // ── Wire → expression ────────────────────────────────────────────────────

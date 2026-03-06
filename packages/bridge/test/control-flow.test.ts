@@ -93,6 +93,41 @@ bridge Query.test {
     assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "break" } }]);
   });
 
+  test("break/continue with levels on ?? gate", () => {
+    const doc = parseBridge(`version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .items <- order.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? break 2
+    }
+  }
+}`);
+    const b = doc.instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    const skuWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.sku",
+    );
+    const priceWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.price",
+    );
+    assert.ok(skuWire);
+    assert.ok(priceWire);
+    assert.deepStrictEqual(skuWire.fallbacks, [
+      { type: "nullish", control: { kind: "continue", levels: 2 } },
+    ]);
+    assert.deepStrictEqual(priceWire.fallbacks, [
+      { type: "nullish", control: { kind: "break", levels: 2 } },
+    ]);
+  });
+
   test("throw on catch gate", () => {
     const doc = parseBridge(`version 1.5
 bridge Query.test {
@@ -242,6 +277,49 @@ bridge Query.test {
     );
     assert.ok(pullWire);
     assert.deepStrictEqual(pullWire.catchControl, { kind: "break" });
+  });
+
+  test("break/continue levels round-trip", () => {
+    const src = `version 1.5
+
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .items <- order.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? break 2
+    }
+  }
+}`;
+    const doc = parseBridge(src);
+    const out = serializeBridge(doc);
+    assert.ok(out.includes("?? continue 2"));
+    assert.ok(out.includes("?? break 2"));
+    const roundtripped = parseBridge(out);
+    const b = roundtripped.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const skuWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.sku",
+    );
+    const priceWire = b.wires.find(
+      (w): w is Extract<Wire, { from: any }> =>
+        "from" in w &&
+        w.from.element === true &&
+        w.to.path.join(".") === "items.price",
+    );
+    assert.ok(skuWire);
+    assert.ok(priceWire);
+    assert.deepStrictEqual(skuWire.fallbacks, [
+      { type: "nullish", control: { kind: "continue", levels: 2 } },
+    ]);
+    assert.deepStrictEqual(priceWire.fallbacks, [
+      { type: "nullish", control: { kind: "break", levels: 2 } },
+    ]);
   });
 });
 
@@ -467,6 +545,61 @@ bridge Query.test {
         data: any[];
       };
       assert.deepStrictEqual(data, []);
+    });
+
+    test("continue 2 skips current parent element", async () => {
+      const src = `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .id <- order.id
+    .items <- order.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price
+    }
+  }
+}`;
+      const tools = {
+        api: async () => ({
+          orders: [
+            { id: 1, items: [{ sku: "A", price: 10 }, { sku: null, price: 99 }] },
+            { id: 2, items: [{ sku: "B", price: 20 }] },
+          ],
+        }),
+      };
+      const { data } = (await run(src, "Query.test", {}, tools)) as {
+        data: any[];
+      };
+      assert.deepStrictEqual(data, [{ id: 2, items: [{ sku: "B", price: 20 }] }]);
+    });
+
+    test("break 2 breaks out of parent loop", async () => {
+      const src = `version 1.5
+bridge Query.test {
+  with api as a
+  with output as o
+  o <- a.orders[] as order {
+    .id <- order.id
+    .items <- order.items[] as item {
+      .sku <- item.sku
+      .price <- item.price ?? break 2
+    }
+  }
+}`;
+      const tools = {
+        api: async () => ({
+          orders: [
+            { id: 1, items: [{ sku: "A", price: 10 }] },
+            { id: 2, items: [{ sku: "B", price: null }, { sku: "C", price: 30 }] },
+            { id: 3, items: [{ sku: "D", price: 40 }] },
+          ],
+        }),
+      };
+      const { data } = (await run(src, "Query.test", {}, tools)) as {
+        data: any[];
+      };
+      assert.deepStrictEqual(data, [{ id: 1, items: [{ sku: "A", price: 10 }] }]);
     });
   });
 
