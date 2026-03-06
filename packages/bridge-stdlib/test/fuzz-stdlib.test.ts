@@ -68,7 +68,7 @@ describe("stdlib fuzz — array tools", () => {
             }),
             { maxLength: 10 },
           ),
-          fc.string({ maxLength: 8 }),
+          fc.string({ maxLength: 8 }).filter((k) => k !== "in"),
           fc.jsonValue(),
           (arr, key, value) => {
             const result = filter({ in: arr, [key]: value });
