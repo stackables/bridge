@@ -474,7 +474,7 @@ export class ExecutionTree implements TreeContext {
 
     // Root-level null check
     if (result == null) {
-      if (ref.rootSafe) return undefined;
+      if (ref.rootSafe || ref.element) return undefined;
       throw new TypeError(
         `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
       );
@@ -491,7 +491,7 @@ export class ExecutionTree implements TreeContext {
       }
       result = result[segment];
       if (result == null && i < ref.path.length - 1) {
-        const nextSafe = ref.pathSafe?.[i + 1] ?? false;
+        const nextSafe = (ref.pathSafe?.[i + 1] ?? false) || !!ref.element;
         if (nextSafe) return undefined;
         throw new TypeError(
           `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
@@ -719,7 +719,7 @@ export class ExecutionTree implements TreeContext {
         // Array mapping on a sub-field: resolve the array source,
         // create shadow trees, and materialise with field mappings.
         const resolved = await this.resolveWires(regularWires);
-        if (!Array.isArray(resolved)) return resolved;
+        if (!Array.isArray(resolved)) return null;
         const shadows = this.createShadowArray(resolved);
         return this.materializeShadows(shadows, prefix);
       }
