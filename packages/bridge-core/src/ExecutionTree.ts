@@ -5,12 +5,15 @@ import { internal } from "./tools/index.ts";
 import type { ToolTrace } from "./tracing.ts";
 import {
   isOtelActive,
-  otelTracer,
-  SpanStatusCodeEnum,
+  logToolError,
+  logToolSuccess,
+  recordSpanError,
+  resolveToolMeta,
   toolCallCounter,
   toolDurationHistogram,
   toolErrorCounter,
   TraceCollector,
+  withSpan,
 } from "./tracing.ts";
 import type {
   Logger,
@@ -255,14 +258,17 @@ export class ExecutionTree implements TreeContext {
     }
 
     // ── Instrumented path ─────────────────────────────────────────
+    const { doTrace, log } = resolveToolMeta(fnImpl);
     const traceStart = tracer?.now();
     const metricAttrs = {
       "bridge.tool.name": toolName,
       "bridge.tool.fn": fnName,
     };
-    return otelTracer.startActiveSpan(
+
+    return withSpan(
+      doTrace,
       `bridge.tool.${toolName}.${fnName}`,
-      { attributes: metricAttrs },
+      metricAttrs,
       async (span) => {
         const wallStart = performance.now();
         try {
@@ -286,12 +292,7 @@ export class ExecutionTree implements TreeContext {
               }),
             );
           }
-          logger?.debug?.(
-            "[bridge] tool %s (%s) completed in %dms",
-            toolName,
-            fnName,
-            durationMs,
-          );
+          logToolSuccess(logger, log.execution, toolName, fnName, durationMs);
           return result;
         } catch (err) {
           const durationMs = roundMs(performance.now() - wallStart);
@@ -310,17 +311,8 @@ export class ExecutionTree implements TreeContext {
               }),
             );
           }
-          span.recordException(err as Error);
-          span.setStatus({
-            code: SpanStatusCodeEnum.ERROR,
-            message: (err as Error).message,
-          });
-          logger?.error?.(
-            "[bridge] tool %s (%s) failed: %s",
-            toolName,
-            fnName,
-            (err as Error).message,
-          );
+          recordSpanError(span, err as Error);
+          logToolError(logger, log.errors, toolName, fnName, err as Error);
           // Normalize platform AbortError to BridgeAbortError
           if (
             this.signal?.aborted &&
@@ -331,7 +323,7 @@ export class ExecutionTree implements TreeContext {
           }
           throw err;
         } finally {
-          span.end();
+          span?.end();
         }
       },
     );

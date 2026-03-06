@@ -6,6 +6,9 @@
  */
 
 import { metrics, trace } from "@opentelemetry/api";
+import type { Span } from "@opentelemetry/api";
+import type { ToolMetadata } from "@stackables/bridge-types";
+import type { Logger } from "./tree-types.ts";
 import { roundMs } from "./tree-utils.ts";
 
 // ── OTel setup ──────────────────────────────────────────────────────────────
@@ -45,8 +48,9 @@ export const toolErrorCounter = otelMeter.createCounter("bridge.tool.errors", {
   description: "Total number of tool invocation errors",
 });
 
-// Re-export SpanStatusCode for callTool usage
+// Re-export SpanStatusCode for internal usage
 export { SpanStatusCode as SpanStatusCodeEnum } from "@opentelemetry/api";
+import { SpanStatusCode } from "@opentelemetry/api";
 
 // ── Trace types ─────────────────────────────────────────────────────────────
 
@@ -96,10 +100,7 @@ export function boundedClone(
     0,
     Number.isFinite(maxStringLength) ? Math.floor(maxStringLength) : 1024,
   );
-  const safeDepth = Math.max(
-    0,
-    Number.isFinite(depth) ? Math.floor(depth) : 5,
-  );
+  const safeDepth = Math.max(0, Number.isFinite(depth) ? Math.floor(depth) : 5);
   return _boundedClone(value, safeArrayItems, safeStringLength, safeDepth, 0);
 }
 
@@ -165,7 +166,11 @@ export class TraceCollector {
 
   constructor(
     level: "basic" | "full" = "full",
-    options?: { maxArrayItems?: number; maxStringLength?: number; cloneDepth?: number },
+    options?: {
+      maxArrayItems?: number;
+      maxStringLength?: number;
+      cloneDepth?: number;
+    },
   ) {
     this.level = level;
     this.maxArrayItems = options?.maxArrayItems ?? 100;
@@ -224,4 +229,94 @@ export class TraceCollector {
     else if (base.output !== undefined) t.output = base.output;
     return t;
   }
+}
+
+// ── Tool metadata helpers ────────────────────────────────────────────────────
+
+/**
+ * Resolved logging behaviour derived from a tool's `.bridge` metadata.
+ * A fixed shape so call sites never branch on `undefined`.
+ */
+export type EffectiveToolLog = {
+  /** Logger level for successful invocations, or `false` to suppress. */
+  execution: false | "debug" | "info";
+  /** Logger level for thrown errors, or `false` to suppress. */
+  errors: false | "warn" | "error";
+};
+
+/** Normalised metadata resolved from the optional `.bridge` property. */
+export type ResolvedToolMeta = {
+  /** Emit an OTel span for this call. Default: `true`. */
+  doTrace: boolean;
+  log: EffectiveToolLog;
+};
+
+function resolveToolLog(meta: ToolMetadata | undefined): EffectiveToolLog {
+  const log = meta?.log;
+  if (log === false) return { execution: false, errors: false };
+  if (log == null) return { execution: false, errors: "error" };
+  if (log === true) return { execution: "info", errors: "error" };
+  return {
+    execution:
+      log.execution === "info" ? "info" : log.execution ? "debug" : false,
+    errors:
+      log.errors === false ? false : log.errors === "warn" ? "warn" : "error",
+  };
+}
+
+/** Read and normalise the `.bridge` metadata from a tool function. */
+export function resolveToolMeta(fn: (...args: any[]) => any): ResolvedToolMeta {
+  const bridge = (fn as any).bridge as ToolMetadata | undefined;
+  return { doTrace: bridge?.trace !== false, log: resolveToolLog(bridge) };
+}
+
+/** Log a successful tool invocation. No-ops when `level` is `false`. */
+export function logToolSuccess(
+  logger: Logger | undefined,
+  level: EffectiveToolLog["execution"],
+  toolName: string,
+  fnName: string,
+  durationMs: number,
+): void {
+  if (!level) return;
+  logger?.[level]?.(
+    { tool: toolName, fn: fnName, durationMs },
+    "[bridge] tool completed",
+  );
+}
+
+/** Log a tool error. No-ops when `level` is `false`. */
+export function logToolError(
+  logger: Logger | undefined,
+  level: EffectiveToolLog["errors"],
+  toolName: string,
+  fnName: string,
+  err: Error,
+): void {
+  if (!level) return;
+  logger?.[level]?.(
+    { tool: toolName, fn: fnName, err: err.message },
+    "[bridge] tool failed",
+  );
+}
+
+/** Record an exception on a span and mark it as errored. */
+export function recordSpanError(span: Span | undefined, err: Error): void {
+  if (!span) return;
+  span.recordException(err);
+  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+}
+
+/**
+ * Run `fn` inside an OTel span when `doTrace` is true;
+ * otherwise call it directly with `undefined` as the span argument.
+ */
+export function withSpan<T>(
+  doTrace: boolean,
+  name: string,
+  attrs: Record<string, string>,
+  fn: (span: Span | undefined) => Promise<T>,
+): Promise<T> {
+  if (!doTrace) return fn(undefined);
+  return otelTracer.startActiveSpan(name, { attributes: attrs }, fn);
 }

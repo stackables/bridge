@@ -1,4 +1,9 @@
-import type { ToolContext } from "@stackables/bridge-types";
+import type { ToolContext, ToolMetadata } from "@stackables/bridge-types";
+
+const syncUtility = {
+  sync: true,
+  trace: false,
+} satisfies ToolMetadata;
 
 /**
  * Built-in audit tool — logs all inputs via the engine logger.
@@ -39,3 +44,5 @@ export function audit(input: Record<string, any>, context?: ToolContext) {
   log?.(data, "[bridge:audit]");
   return input;
 }
+
+audit.bridge = syncUtility;

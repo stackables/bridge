@@ -61,6 +61,7 @@ export type {
   ToolDef,
   ToolDep,
   ToolMap,
+  ToolMetadata,
   ToolWire,
   VersionDecl,
   Wire,
@@ -74,4 +75,3 @@ export {
   matchesRequestedFields,
   filterOutputFields,
 } from "./requested-fields.ts";
-
