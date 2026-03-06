@@ -122,3 +122,53 @@ bridge Query.getUser {
 
 ```
 
+## 4. Tool Memoization
+
+Add the `memoize` keyword when declaring a tool handle to enable request-scoped caching. When a memoized tool is called multiple times with identical inputs during the same request, only one actual invocation is made.
+
+```bridge
+bridge Query.dashboard {
+  with expensiveApi as api memoize
+  with input as i
+  with output as o
+
+  # Both of these resolve to the same API call — only one HTTP request fires
+  api.userId <- i.userId
+  o.profile <- api.profile
+  o.settings <- api.settings
+}
+
+```
+
+### Memoization on Tool Blocks
+
+You can also enable memoization on tool blocks, making every usage of that tool automatically memoized:
+
+```bridge
+tool cachedLookup from std.httpCall memoize {
+  .baseUrl = "https://api.example.com"
+  .method = "GET"
+}
+
+```
+
+### TypeScript Metadata
+
+Tool authors can enable memoization by default with an optional custom key function for optimal cache key generation:
+
+```typescript
+export async function fetchExchangeRate(opts: { base: string, target: string }) {
+  // ... expensive API call ...
+}
+
+fetchExchangeRate.bridge = {
+  memoize: {
+    keyFn: (input) => `${input.base}:${input.target}`
+  }
+};
+```
+
+<Aside type="tip">
+A tool is memoized if **any** layer requests it: TypeScript metadata (`.bridge.memoize`), tool block declaration, or bridge handle binding.
+</Aside>
+

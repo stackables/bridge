@@ -178,3 +178,64 @@ bridge Query.getEnrichedUsers {
 <Aside>
 **Automatic Parallelism:** Because each element in the array gets its own Shadow Scope, the engine treats every `getUserDetail` alias as an independent node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP requests concurrently!
 </Aside>
+
+## 4. Element-Scoped Tool Declarations
+
+When you need to call a tool for each element in an array, declare the tool **inside** the mapping block with `with <tool> as <handle>`. This creates a fresh, isolated instance per element — preventing race conditions from shared state.
+
+```bridge
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    # Each element gets its own isolated tool instance
+    with std.httpCall as fetchItem
+
+    fetchItem.method = "GET"
+    fetchItem.url <- cat.url
+
+    .item <- fetchItem.response.data
+  }
+}
+
+```
+
+### Memoization
+
+Add the `memoize` keyword to cache results for identical inputs across elements. When multiple elements call the same tool with the same input, only one actual call is made.
+
+```bridge
+o <- ctx.items[] as item {
+  # Memoize: deduplicate calls with identical inputs
+  with std.httpCall as fetch memoize
+
+  fetch.url <- item.categoryUrl
+  .category <- fetch.response
+}
+
+```
+
+Memoization can also be applied at the bridge level or on tool blocks:
+
+```bridge
+# On bridge handle
+bridge Query.test {
+  with myApi as api memoize
+  ...
+}
+
+# On tool block
+tool cachedApi from std.httpCall memoize {
+  .baseUrl = "https://api.example.com"
+}
+
+```
+
+<Aside type="tip">
+**Stampede Protection:** The memoization cache stores the **Promise**, not the resolved result. This means that even if 100 concurrent array elements request the same URL, only 1 actual HTTP request is fired. All other elements attach to the same in-flight Promise.
+</Aside>
+
+<Aside type="caution">
+**Request-Scoped Cache:** The memoization cache lives on the request instance, never globally. Each new request gets a fresh cache, preventing cross-tenant data leaks.
+</Aside>

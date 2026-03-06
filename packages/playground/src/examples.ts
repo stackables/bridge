@@ -1039,4 +1039,74 @@ bridge Query.processCatalog {
   ]
 }`,
   },
+  {
+    id: "tool-memoization",
+    name: "Tool Memoization",
+    description:
+      "Use the memoize keyword to cache tool results for identical inputs, solving the N+1 problem",
+    schema: `
+type Price {
+  amount: Float
+  currency: String
+}
+
+type Product {
+  name: String
+  price: Price
+}
+
+type Query {
+  getProducts: [Product!]!
+}
+    `,
+    bridge: `version 1.5
+
+tool convertCurrency from currencyConverter memoize {
+  .baseCurrency = "USD"
+}
+
+bridge Query.getProducts {
+  with context as ctx
+  with convertCurrency as cc
+  with output as o
+
+  o <- ctx.products[] as p {
+    .name <- p.name
+
+    cc.targetCurrency <- p.currency
+    cc.amount <- p.rawPrice
+    .price.amount <- cc.convertedAmount
+    .price.currency <- p.currency
+  }
+}`,
+    queries: [
+      {
+        name: "Get products with memoized conversion",
+        query: `{
+  getProducts {
+    name
+    price {
+      amount
+      currency
+    }
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.getProducts",
+        outputFields: "",
+        input: {},
+      },
+    ],
+    context: `{
+  "products": [
+    { "name": "Widget A", "currency": "EUR", "rawPrice": 10.0 },
+    { "name": "Widget B", "currency": "EUR", "rawPrice": 25.0 },
+    { "name": "Widget C", "currency": "GBP", "rawPrice": 15.0 },
+    { "name": "Widget D", "currency": "EUR", "rawPrice": 30.0 }
+  ]
+}`,
+  },
 ];

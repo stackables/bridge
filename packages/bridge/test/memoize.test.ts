@@ -390,14 +390,7 @@ bridge Query.test {
     assert.equal(callCount, 1, "ToolDef memoize should deduplicate");
   });
 
-  test("memoize deduplicates in array with top-level tool", async () => {
-    let callCount = 0;
-    const lookup = async (input: Record<string, any>) => {
-      callCount++;
-      return { name: `item-${input.id}` };
-    };
-    (lookup as any).bridge = { memoize: true };
-
+  test("memoize deduplicates in array with top-level tool", () => {
     const doc = parseBridge(`version 1.5
 bridge Query.test {
   with lookup as fetch memoize
