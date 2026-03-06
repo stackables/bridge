@@ -15,6 +15,8 @@ Full IDE support for [The Bridge](https://github.com/stackables/bridge): a decla
   - Tool hover: function name, deps, wires
   - Define hover: subgraph details
   - Const hover: name and raw value
+- **Document formatting** — format `.bridge` files through the standard `textDocument/formatting` LSP request
+- Formatter respects your local editor settings (`editor.tabSize`, `editor.insertSpaces`) and works with `editor.formatOnSave`
 - Error recovery — partial AST is built even on broken files, so diagnostics remain accurate while you're mid-edit
 
 ### Syntax Highlighting

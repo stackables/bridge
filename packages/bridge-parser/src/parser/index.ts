@@ -5,6 +5,7 @@
  */
 export {
   parseBridgeChevrotain,
+  parseBridgeCst,
   parseBridgeDiagnostics,
   PARSER_VERSION,
 } from "./parser.ts";

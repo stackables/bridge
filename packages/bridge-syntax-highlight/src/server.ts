@@ -22,9 +22,11 @@ import {
   DiagnosticSeverity,
   CompletionItemKind,
   MarkupKind,
+  Range,
+  TextEdit,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { BridgeLanguageService } from "@stackables/bridge";
+import { BridgeLanguageService, parseBridgeCst, prettyPrintToSource } from "@stackables/bridge";
 import type { CompletionKind } from "@stackables/bridge";
 
 // ── Connection & document manager ──────────────────────────────────────────
@@ -49,6 +51,7 @@ connection.onInitialize(
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       hoverProvider: true,
+      documentFormattingProvider: true,
       completionProvider: {
         triggerCharacters: ["."],
       },
@@ -129,6 +132,37 @@ connection.onCompletion((params) => {
     detail: c.detail,
     documentation: c.documentation,
   }));
+});
+
+connection.onDocumentFormatting((params) => {
+  const doc = documents.get(params.textDocument.uri);
+  if (!doc) return null;
+
+  const text = doc.getText();
+
+  try {
+    const cst = parseBridgeCst(text);
+    const formatted = prettyPrintToSource(
+      { source: text, cst },
+      {
+        tabSize: params.options.tabSize,
+        insertSpaces: params.options.insertSpaces,
+      },
+    );
+
+    const range = Range.create(
+      { line: 0, character: 0 },
+      doc.positionAt(text.length),
+    );
+
+    return [TextEdit.replace(range, formatted)];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    connection.console.warn(
+      `Bridge formatting aborted due to syntax errors: ${message}`,
+    );
+    return null;
+  }
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────

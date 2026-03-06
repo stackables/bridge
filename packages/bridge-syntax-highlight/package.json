@@ -39,7 +39,12 @@
         "scopeName": "source.bridge",
         "path": "./syntaxes/bridge.tmLanguage.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[bridge]": {
+        "editor.defaultFormatter": "stackables.bridge-syntax-highlight"
+      }
+    }
   },
   "scripts": {
     "prebuild": "pnpm --filter @stackables/bridge build",

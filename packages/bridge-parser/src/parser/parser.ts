@@ -1240,6 +1240,23 @@ export function parseBridgeChevrotain(text: string): BridgeDocument {
   return internalParse(text);
 }
 
+export function parseBridgeCst(text: string): CstNode {
+  const lexResult = BridgeLexer.tokenize(text);
+  if (lexResult.errors.length > 0) {
+    const e = lexResult.errors[0];
+    throw new Error(`Line ${e.line}: Unexpected character "${e.message}"`);
+  }
+
+  parserInstance.input = lexResult.tokens;
+  const cst = parserInstance.program();
+  if (parserInstance.errors.length > 0) {
+    const e = parserInstance.errors[0];
+    throw new Error(e.message);
+  }
+
+  return cst;
+}
+
 // ── Diagnostic types ──────────────────────────────────────────────────────
 
 export type BridgeDiagnostic = {
