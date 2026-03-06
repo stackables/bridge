@@ -650,3 +650,88 @@ bridge Mutation.sendEmail {
     assert.equal(capturedParams.content, "Hi there"); // body -> content rename
   });
 });
+
+describe("executeGraph: multilevel break/continue in nested arrays", () => {
+  const catalogTypeDefs = /* GraphQL */ `
+    type Item {
+      sku: String
+      price: Float
+    }
+    type Category {
+      name: String
+      items: [Item!]!
+    }
+    type Query {
+      processCatalog: [Category!]!
+    }
+  `;
+
+  // continue 2 = skip the outer (category) element
+  // break 2    = stop iterating outer (category) array entirely
+  const catalogBridge = `version 1.5
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    .name <- cat.name
+    .items <- cat.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? break 2
+    }
+  }
+}`;
+
+  const catalog = [
+    // sku present, price present → emitted
+    { name: "Summer", items: [{ sku: "A1", price: 10.0 }] },
+    // sku null on first item → continue 2 → skip Winter
+    { name: "Winter", items: [{ sku: null, price: 5.0 }] },
+    // price null on first item → break 2 → stop entire outer loop
+    { name: "Spring", items: [{ sku: "A3", price: null }] },
+    // never reached
+    { name: "Autumn", items: [{ sku: "A4", price: 20.0 }] },
+  ];
+
+  test("falls back to standalone execution mode with a warning", async () => {
+    const warnings: string[] = [];
+    const mockLogger = {
+      debug: () => {},
+      info: () => {},
+      warn: (msg: string) => warnings.push(msg),
+      error: () => {},
+    };
+
+    const instructions = parseBridge(catalogBridge);
+    // Must NOT throw at setup time — fallback mode is used instead
+    const gateway = createGateway(catalogTypeDefs, instructions, {
+      logger: mockLogger,
+      context: { catalog },
+    });
+
+    // Warning must be logged at setup time
+    assert.ok(
+      warnings.some((w) => w.includes("Query.processCatalog")),
+      `Expected a warning about Query.processCatalog, got: ${JSON.stringify(warnings)}`,
+    );
+    assert.ok(
+      warnings.some((w) => w.includes("standalone")),
+      `Expected warning to mention standalone mode, got: ${JSON.stringify(warnings)}`,
+    );
+
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const result: any = await executor({
+      document: parse(`{
+        processCatalog {
+          name
+          items { sku price }
+        }
+      }`),
+    });
+
+    // Summer passes; Winter skipped (continue 2); Spring triggers break 2 → only Summer
+    assert.deepStrictEqual(result.data.processCatalog, [
+      { name: "Summer", items: [{ sku: "A1", price: 10.0 }] },
+    ]);
+  });
+});

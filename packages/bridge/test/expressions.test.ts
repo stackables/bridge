@@ -1395,3 +1395,58 @@ bridge Query.test {
     assert.equal(data.result, false);
   });
 });
+
+describe("serializeBridge: keyword strings are quoted", () => {
+  // Regression: the serializer emitted bare keywords (or, and, not, force,
+  // catch, …) when those were stored as string constant values, producing
+  // output the parser rejected.
+  const keywords = [
+    "or",
+    "and",
+    "not",
+    "version",
+    "bridge",
+    "tool",
+    "define",
+    "with",
+    "input",
+    "output",
+    "context",
+    "const",
+    "from",
+    "as",
+    "alias",
+    "on",
+    "error",
+    "force",
+    "catch",
+    "continue",
+    "break",
+    "throw",
+    "panic",
+    "if",
+    "pipe",
+  ];
+
+  for (const kw of keywords) {
+    test(`constant value "${kw}" round-trips through serializer`, () => {
+      const src = `version 1.5\nbridge Query.x {\n  with output as o\n  o.result = "${kw}"\n}`;
+      const doc = parseBridge(src);
+      const serialized = serializeBridge(doc);
+      // Must not contain a bare keyword (e.g. `= or` without quotes)
+      assert.ok(
+        !serialized.includes(`= ${kw}`),
+        `Expected "${kw}" to be quoted in: ${serialized}`,
+      );
+      // And must re-parse cleanly
+      const reparsed = parseBridge(serialized);
+      const bridge = reparsed.instructions.find(
+        (i) => i.kind === "bridge",
+      ) as any;
+      const wire = bridge.wires.find(
+        (w: any) => "value" in w && w.to?.path?.[0] === "result",
+      );
+      assert.equal(wire?.value, kw);
+    });
+  }
+});

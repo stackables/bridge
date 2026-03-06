@@ -14,6 +14,7 @@ export { prettyPrintToSource };
 import type {
   BridgeDiagnostic,
   Bridge,
+  NodeRef,
   ToolTrace,
   Logger,
   CacheStore,
@@ -393,16 +394,33 @@ export function extractInputSkeleton(
     // Exclude element wires (from array mappings like `c.field`) which also use
     // SELF_MODULE but have `element: true` — those are tool response fields, not inputs.
     const inputPaths: string[][] = [];
-    for (const wire of bridge.wires) {
+
+    const collectRef = (ref: NodeRef | undefined) => {
       if (
-        "from" in wire &&
-        wire.from.module === "_" &&
-        wire.from.type === type &&
-        wire.from.field === field &&
-        wire.from.path.length > 0 &&
-        !wire.from.element
+        ref &&
+        ref.module === "_" &&
+        ref.type === type &&
+        ref.field === field &&
+        ref.path.length > 0 &&
+        !ref.element
       ) {
-        inputPaths.push([...wire.from.path]);
+        inputPaths.push([...ref.path]);
+      }
+    };
+
+    for (const wire of bridge.wires) {
+      if ("from" in wire) {
+        collectRef(wire.from);
+      } else if ("cond" in wire) {
+        collectRef(wire.cond);
+        collectRef(wire.thenRef);
+        collectRef(wire.elseRef);
+      } else if ("condAnd" in wire) {
+        collectRef(wire.condAnd.leftRef);
+        collectRef(wire.condAnd.rightRef);
+      } else if ("condOr" in wire) {
+        collectRef(wire.condOr.leftRef);
+        collectRef(wire.condOr.rightRef);
       }
     }
 
