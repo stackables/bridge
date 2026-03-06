@@ -880,4 +880,152 @@ bridge Query.evaluate {
     ],
     context: `{}`,
   },
+  {
+    id: "control-flow-throw-panic",
+    name: "Control Flow (Throw/Panic)",
+    description:
+      "Use throw for recoverable validation failures and panic for unrecoverable fatal errors",
+    schema: `
+type Query {
+  validateProfile(name: String, fatal: Boolean): ValidationResult
+}
+
+type ValidationResult {
+  name: String
+  status: String
+}
+    `,
+    bridge: `version 1.5
+
+bridge Query.validateProfile {
+  with input as i
+  with output as o
+
+  o.name <- i.name || throw "name is required"
+  o.status <- i.fatal ? panic "fatal validation error" : "ok"
+}`,
+    queries: [
+      {
+        name: "Valid input",
+        query: `{
+  validateProfile(name: "Ada", fatal: false) {
+    name
+    status
+  }
+}`,
+      },
+      {
+        name: "Throw: missing name",
+        query: `{
+  validateProfile(fatal: false) {
+    name
+    status
+  }
+}`,
+      },
+      {
+        name: "Panic: fatal flag",
+        query: `{
+  validateProfile(name: "Ada", fatal: true) {
+    name
+    status
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.validateProfile",
+        outputFields: "",
+        input: { name: "Ada", fatal: false },
+      },
+      {
+        operation: "Query.validateProfile",
+        outputFields: "",
+        input: { fatal: false },
+      },
+      {
+        operation: "Query.validateProfile",
+        outputFields: "",
+        input: { name: "Ada", fatal: true },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "control-flow-break-continue",
+    name: "Array Control Flow (Break/Continue)",
+    description:
+      "Use continue to skip invalid items and break to stop processing items in the current category",
+    schema: `
+type Item {
+  sku: String
+  price: Float
+}
+
+type Category {
+  name: String
+  items: [Item!]!
+}
+
+type Query {
+  processCatalog: [Category!]!
+}
+    `,
+    bridge: `version 1.5
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    .name <- cat.name
+    .items <- cat.items[] as item {
+      .sku <- item.sku ?? continue
+      .price <- item.price ?? break
+    }
+  }
+}`,
+    queries: [
+      {
+        name: "Process catalog with break/continue",
+        query: `{
+  processCatalog {
+    name
+    items {
+      sku
+      price
+    }
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.processCatalog",
+        outputFields: "",
+        input: {},
+      },
+    ],
+    context: `{
+  "catalog": [
+    {
+      "name": "Summer",
+      "items": [
+        { "sku": "S-1", "price": 19.99 },
+        { "sku": null, "price": 99.99 },
+        { "sku": "S-2", "price": 29.99 }
+      ]
+    },
+    {
+      "name": "Winter",
+      "items": [
+        { "sku": "W-1", "price": 39.99 },
+        { "sku": "W-2", "price": null },
+        { "sku": "W-3", "price": 49.99 }
+      ]
+    }
+  ]
+}`,
+  },
 ];
