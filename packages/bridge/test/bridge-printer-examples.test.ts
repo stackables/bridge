@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { formatBridge } from "../src/index.ts";
+import { formatSnippet } from "./formatter-test-utils.ts";
 
 /**
  * ============================================================================
@@ -19,7 +19,7 @@ tool geo from std.httpCall`;
 
 tool geo from std.httpCall
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("tool with body", () => {
@@ -36,7 +36,7 @@ tool geo from std.httpCall {
   .method = GET
 }
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("bridge block with assignments", () => {
@@ -56,7 +56,7 @@ bridge Query.test {
   o.value <- i.value
 }
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("define block", () => {
@@ -70,7 +70,7 @@ o.x<-i.y
   o.x <- i.y
 }
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("bridge with comment, tool handles, and pipes", () => {
@@ -102,7 +102,7 @@ bridge Query.greet {
   o.lower <- lc:i.name
 }
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("ternary expressions preserve formatting", () => {
@@ -123,7 +123,7 @@ bridge Query.pricing {
 }
 `;
     // Should not change
-    assert.equal(formatBridge(input), input);
+    assert.equal(formatSnippet(input), input);
   });
 
   test("blank line between top-level blocks", () => {
@@ -158,14 +158,14 @@ define helper {
   with input as i
 }
 `;
-    assert.equal(formatBridge(input), expected);
+    assert.equal(formatSnippet(input), expected);
   });
 
   test("not operator preserves space", () => {
     const input = `o.requireMFA <- not i.verified
 `;
     // Should not change
-    assert.equal(formatBridge(input), input);
+    assert.equal(formatSnippet(input), input);
   });
 
   test("blank lines between comments are preserved", () => {
@@ -174,6 +174,6 @@ define helper {
 #sdasdsd
 `;
     // Should not change
-    assert.equal(formatBridge(input), input);
+    assert.equal(formatSnippet(input), input);
   });
 });

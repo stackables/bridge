@@ -27,7 +27,6 @@ export {
 // ── Formatter ───────────────────────────────────────────────────────────────
 
 export {
-  formatBridge,
   prettyPrintToSource,
   type BridgeFormattingOptions,
 } from "./bridge-printer.ts";

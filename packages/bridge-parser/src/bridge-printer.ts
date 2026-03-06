@@ -167,8 +167,7 @@ function isTopLevelBlockStart(group: IToken[]): boolean {
 /**
  * Format Bridge DSL source code with consistent styling.
  *
- * @param source - The Bridge DSL source text to format
- * @returns Formatted source text, or the original if parsing fails
+ * Throws on syntax-invalid input when called with a source string.
  */
 type PrettyPrintInput = string | { source: string; cst: CstNode };
 
@@ -523,16 +522,4 @@ function formatBridgeInternal(
   }
 
   return result;
-}
-
-/**
- * Backward-compatible formatter API.
- *
- * Returns the original source when syntax is invalid.
- */
-export function formatBridge(
-  source: string,
-  options?: Partial<BridgeFormattingOptions>,
-): string {
-  return formatBridgeInternal(source, options);
 }

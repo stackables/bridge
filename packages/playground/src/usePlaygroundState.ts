@@ -9,7 +9,7 @@ import {
   extractOutputFields,
   extractInputSkeleton,
   mergeInputSkeleton,
-  formatBridge,
+  prettyPrintToSource,
 } from "./engine";
 import type { RunResult } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
@@ -52,6 +52,14 @@ function tryFormatJson(val?: string): string {
   }
 }
 
+function tryFormatBridge(source: string): string {
+  try {
+    return prettyPrintToSource(source);
+  } catch {
+    return source;
+  }
+}
+
 export function usePlaygroundState(
   initialExampleIndex = 0,
   forceStandalone = false,
@@ -72,7 +80,7 @@ export function usePlaygroundState(
 
   // Format the default bridge if provided via overrides so it's not messy.
   const initialBridge = overrides?.bridge
-    ? formatBridge(overrides.bridge)
+    ? tryFormatBridge(overrides.bridge)
     : ex.bridge;
   const [schema, setSchema] = useState(ex.schema);
   const [bridge, setBridge] = useState(initialBridge);
@@ -245,7 +253,7 @@ export function usePlaygroundState(
   }, [activeQuery, mode, schema, bridge, context]);
 
   const handleFormatBridge = useCallback(() => {
-    setBridge(formatBridge(bridge));
+    setBridge(tryFormatBridge(bridge));
   }, [bridge]);
 
   const diagnostics = getDiagnostics(bridge).diagnostics;
