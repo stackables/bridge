@@ -17,6 +17,7 @@ import {
 } from "./tracing.ts";
 import type {
   Logger,
+  LoopControlSignal,
   MaybePromise,
   Path,
   TreeContext,
@@ -27,6 +28,8 @@ import {
   BridgeAbortError,
   BridgePanicError,
   CONTINUE_SYM,
+  decrementLoopControl,
+  isLoopControlSignal,
   isPromise,
   MAX_EXECUTION_DEPTH,
 } from "./tree-types.ts";
@@ -371,8 +374,11 @@ export class ExecutionTree implements TreeContext {
       if (this.signal?.aborted) {
         throw new BridgeAbortError();
       }
-      if (item === BREAK_SYM) break;
-      if (item === CONTINUE_SYM) continue;
+      if (isLoopControlSignal(item)) {
+        const ctrl = decrementLoopControl(item);
+        if (ctrl === BREAK_SYM) break;
+        if (ctrl === CONTINUE_SYM) continue;
+      }
       const s = this.shadow();
       s.state[this.elementTrunkKey] = item;
       shadows.push(s);
@@ -579,7 +585,7 @@ export class ExecutionTree implements TreeContext {
     const result = this.resolveWires(matches);
     if (!array) return result;
     const resolved = await result;
-    if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+    if (isLoopControlSignal(resolved)) return [];
     return this.createShadowArray(resolved as any[]);
   }
 
@@ -936,7 +942,7 @@ export class ExecutionTree implements TreeContext {
   private materializeShadows(
     items: ExecutionTree[],
     pathPrefix: string[],
-  ): Promise<unknown[]> {
+  ): Promise<unknown[] | LoopControlSignal> {
     return _materializeShadows(this, items, pathPrefix);
   }
 
@@ -1004,7 +1010,7 @@ export class ExecutionTree implements TreeContext {
 
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
-      if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+      if (isLoopControlSignal(resolved)) return [];
       return this.createShadowArray(resolved as any[]);
     }
 
@@ -1018,7 +1024,7 @@ export class ExecutionTree implements TreeContext {
         const response = this.resolveWires(defineFieldWires);
         if (!array) return response;
         const resolved = await response;
-        if (resolved === BREAK_SYM || resolved === CONTINUE_SYM) return [];
+        if (isLoopControlSignal(resolved)) return [];
         return this.createShadowArray(resolved as any[]);
       }
     }

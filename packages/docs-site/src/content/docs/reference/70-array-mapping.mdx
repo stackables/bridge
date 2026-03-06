@@ -83,6 +83,34 @@ o.items <- searchApi.results[] as item {
 
 ```
 
+### Multi-Level Control Flow (`break N`, `continue N`)
+
+When working with deeply nested arrays (e.g., mapping categories that contain lists of products), you may want an error deep inside the inner array to skip the *outer* array element.
+
+You can append a number to `break` or `continue` to specify how many loop levels the signal should pierce.
+
+```bridge
+o.catalogs <- api.catalogs[] as cat {
+  .id <- cat.id
+  
+  .products <- cat.products[] as prod {
+    .name <- prod.name
+    
+    # If a product has a fatal data corruption, skip the ENTIRE catalog.
+    # 'continue 1' would just skip this product.
+    # 'continue 2' skips this product AND the catalog it belongs to!
+    .sku <- prod.sku ?? continue 2
+  }
+}
+
+```
+
+:::note[GraphQL execution mode — automatic standalone fallback]
+`break N` / `continue N` with `N > 1` inside a **nested** array element cannot be executed correctly by the field-by-field GraphQL resolver. GraphQL resolves arrays through independent resolver callbacks, so a multilevel control signal emitted deep inside an inner element cannot propagate back to the outer shadow array.
+
+When `bridgeTransform` detects this pattern it **automatically falls back to standalone execution** for that operation. A `warn`-level log message is emitted at startup. In fallback mode the operation runs identically to `executeBridge` — multilevel control flow works correctly — but errors affect the entire field result rather than individual sub-fields (no per-field GraphQL error granularity).
+:::
+
 ## 3. Common Use Cases
 
 ### Use Case 1: Filtering an Array Before Mapping
