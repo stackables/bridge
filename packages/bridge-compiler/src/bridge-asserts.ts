@@ -10,35 +10,6 @@ export class BridgeCompilerIncompatibleError extends Error {
   }
 }
 
-export function assertBridgeCompilerCompatible(bridge: Bridge): void {
-  const operation = `${bridge.type}.${bridge.field}`;
-  const memoizedHandles = bridge.handles
-    .filter((handle) => handle.kind === "tool" && handle.memoize)
-    .map((handle) => handle.handle);
-
-  if (memoizedHandles.length > 0) {
-    throw new BridgeCompilerIncompatibleError(
-      operation,
-      `[bridge-compiler] ${operation}: memoized tool handles are not supported by AOT compilation yet (${memoizedHandles.join(", ")}).`,
-    );
-  }
-
-  const seenHandles = new Set<string>();
-  const shadowedHandles = new Set<string>();
-
-  for (const handle of bridge.handles) {
-    if (handle.kind !== "tool") continue;
-    if (seenHandles.has(handle.handle)) {
-      shadowedHandles.add(handle.handle);
-      continue;
-    }
-    seenHandles.add(handle.handle);
-  }
-
-  if (shadowedHandles.size > 0) {
-    throw new BridgeCompilerIncompatibleError(
-      operation,
-      `[bridge-compiler] ${operation}: shadowed loop-scoped tool handles are not supported by AOT compilation yet (${[...shadowedHandles].join(", ")}).`,
-    );
-  }
+export function assertBridgeCompilerCompatible(_bridge: Bridge): void {
+  // Intentionally empty: all currently supported bridge constructs compile.
 }

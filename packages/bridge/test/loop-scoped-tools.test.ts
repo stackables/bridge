@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
-  BridgeCompilerIncompatibleError,
   compileBridge,
   executeBridge as executeCompiled,
 } from "@stackables/bridge-compiler";
@@ -72,8 +71,8 @@ bridge Query.processCatalog {
   });
 });
 
-describe("loop scoped tools - compiler fallback", () => {
-  test("nested loop-scoped tools fall back to the interpreter", async () => {
+describe("loop scoped tools - compiler support", () => {
+  test("nested loop-scoped tools compile without falling back", async () => {
     const bridge = `version 1.5
 
 bridge Query.processCatalog {
@@ -95,11 +94,8 @@ bridge Query.processCatalog {
 }`;
 
     const document = parseBridge(bridge);
-    assert.throws(
-      () => compileBridge(document, { operation: "Query.processCatalog" }),
-      (error: unknown) =>
-        error instanceof BridgeCompilerIncompatibleError &&
-        /shadowed loop-scoped tool handles/i.test(error.message),
+    assert.doesNotThrow(() =>
+      compileBridge(document, { operation: "Query.processCatalog" }),
     );
 
     const warnings: string[] = [];
@@ -132,8 +128,42 @@ bridge Query.processCatalog {
         children: [{ inner: "tool:inner-a1" }, { inner: "tool:inner-a2" }],
       },
     ]);
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0]!, /Falling back to core executeBridge/i);
+    assert.deepStrictEqual(warnings, []);
+  });
+
+  test("unused repeated tool bindings still compile to distinct synthetic instances", async () => {
+    const bridge = `version 1.5
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+  with std.httpCall as http
+
+  o <- ctx.catalog[] as cat {
+    with std.httpCall as http
+    .val <- cat.val
+  }
+}`;
+
+    const document = parseBridge(bridge);
+    assert.doesNotThrow(() =>
+      compileBridge(document, { operation: "Query.processCatalog" }),
+    );
+
+    const warnings: string[] = [];
+    const result = await executeCompiled({
+      document,
+      operation: "Query.processCatalog",
+      context: {
+        catalog: [{ val: "a" }, { val: "b" }],
+      },
+      logger: {
+        warn: (message: string) => warnings.push(message),
+      },
+    });
+
+    assert.deepStrictEqual(result.data, [{ val: "a" }, { val: "b" }]);
+    assert.deepStrictEqual(warnings, []);
   });
 });
 

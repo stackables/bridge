@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
-  BridgeCompilerIncompatibleError,
   compileBridge,
   executeBridge as executeCompiled,
 } from "@stackables/bridge-compiler";
@@ -25,8 +24,8 @@ bridge Query.processCatalog {
   });
 });
 
-describe("memoized loop-scoped tools - compiler fallback", () => {
-  test("memoized loop-scoped tools fall back to the interpreter", async () => {
+describe("memoized loop-scoped tools - compiler support", () => {
+  test("memoized loop-scoped tools compile without falling back", async () => {
     const bridge = `version 1.5
 
 bridge Query.processCatalog {
@@ -42,14 +41,8 @@ bridge Query.processCatalog {
 }`;
 
     const document = parseBridge(bridge);
-    assert.throws(
-      () => compileBridge(document, { operation: "Query.processCatalog" }),
-      (error: unknown) => {
-        if (!(error instanceof BridgeCompilerIncompatibleError)) {
-          return false;
-        }
-        return /memoize|memoized/i.test(error.message);
-      },
+    assert.doesNotThrow(() =>
+      compileBridge(document, { operation: "Query.processCatalog" }),
     );
 
     let calls = 0;
@@ -80,8 +73,7 @@ bridge Query.processCatalog {
       { item: "item:a" },
     ]);
     assert.equal(calls, 2);
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0]!, /Falling back to core executeBridge/i);
+    assert.deepStrictEqual(warnings, []);
   });
 });
 
