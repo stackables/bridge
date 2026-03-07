@@ -120,7 +120,7 @@ bridge Query.location {
   with input as i
   with output as o
 
-  geo.q <- peek geo[0].city
+  geo.q <- geo[0].city
   o.lat <- geo[0].lat
   o.lon <- geo[0].lon
 }`;
@@ -406,7 +406,7 @@ describe("runtime error formatting", () => {
     );
   });
 
-  test("peek cycles retain the originating wire source location", async () => {
+  test("tool input cycles retain the originating wire source location", async () => {
     const document = parseBridge(bridgePeekCycleText, {
       filename: "playground.bridge",
     });
@@ -424,8 +424,8 @@ describe("runtime error formatting", () => {
           formatted,
           /Bridge Execution Error: Circular dependency detected: "_:Tools:geo:1" depends on itself/,
         );
-        assert.match(formatted, /playground\.bridge:15:17/);
-        assert.match(formatted, /geo\.q <- peek geo\[0\]\.city/);
+        assert.match(formatted, /playground\.bridge:15:12/);
+        assert.match(formatted, /geo\.q <- geo\[0\]\.city/);
         assert.equal(maxCaretCount(formatted), "geo[0].city".length);
         return true;
       },
