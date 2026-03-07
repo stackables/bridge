@@ -287,6 +287,8 @@ class CodegenContext {
   private elementLocalVars = new Map<string, string>();
   /** Current element variable name, set during element wire expression generation. */
   private currentElVar: string | undefined;
+  /** Stack of active element variables from outermost to innermost array scopes. */
+  private elementVarStack: string[] = [];
   /** Map from ToolDef dependency tool name to its emitted variable name.
    *  Populated lazily by emitToolDeps to avoid duplicating calls. */
   private toolDepVars = new Map<string, string>();
@@ -1714,15 +1716,11 @@ class CodegenContext {
           const syncPreamble: string[] = [];
           this.elementLocalVars.clear();
           this.collectElementPreamble(shifted, "_el0", syncPreamble, true);
-          const syncBody = this.buildElementBody(
-            shifted,
-            arrayIterators,
-            0,
-            6,
-          );
-          const syncMapExpr = syncPreamble.length > 0
-            ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; }) ?? null`
-            : `(${arrayExpr})?.map((_el0) => (${syncBody})) ?? null`;
+          const syncBody = this.buildElementBody(shifted, arrayIterators, 0, 6);
+          const syncMapExpr =
+            syncPreamble.length > 0
+              ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; }) ?? null`
+              : `(${arrayExpr})?.map((_el0) => (${syncBody})) ?? null`;
           this.elementLocalVars.clear();
 
           // Async branch — for...of inside an async IIFE
@@ -2128,12 +2126,26 @@ class CodegenContext {
   /** Convert an element wire (inside array mapping) to an expression. */
   private elementWireToExpr(w: Wire, elVar = "_el0"): string {
     const prevElVar = this.currentElVar;
+    this.elementVarStack.push(elVar);
     this.currentElVar = elVar;
     try {
       return this._elementWireToExprInner(w, elVar);
     } finally {
+      this.elementVarStack.pop();
       this.currentElVar = prevElVar;
     }
+  }
+
+  private refToElementExpr(ref: NodeRef): string {
+    const depth = ref.elementDepth ?? 0;
+    const stackIndex = this.elementVarStack.length - 1 - depth;
+    const elVar =
+      stackIndex >= 0 ? this.elementVarStack[stackIndex] : this.currentElVar;
+    if (!elVar) {
+      throw new Error(`Missing element variable for ${JSON.stringify(ref)}`);
+    }
+    if (ref.path.length === 0) return elVar;
+    return elVar + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
   }
 
   private _elementWireToExprInner(w: Wire, elVar: string): string {
@@ -2144,8 +2156,7 @@ class CodegenContext {
       const condRef = w.cond;
       let condExpr: string;
       if (condRef.element) {
-        condExpr =
-          elVar + condRef.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+        condExpr = this.refToElementExpr(condRef);
       } else {
         const condKey = refTrunkKey(condRef);
         if (this.elementScopedTools.has(condKey)) {
@@ -2164,10 +2175,7 @@ class CodegenContext {
         val: string | undefined,
       ): string => {
         if (ref !== undefined) {
-          if (ref.element)
-            return (
-              elVar + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("")
-            );
+          if (ref.element) return this.refToElementExpr(ref);
           const branchKey = refTrunkKey(ref);
           if (this.elementScopedTools.has(branchKey)) {
             let e = this.buildInlineToolExpr(branchKey, elVar);
@@ -2520,9 +2528,7 @@ class CodegenContext {
             `const ${vn} = __callSync(${fn}, ${inputObj}, ${JSON.stringify(fnName)});`,
           );
         } else {
-          lines.push(
-            `const ${vn} = ${this.syncAwareCall(fnName, inputObj)};`,
-          );
+          lines.push(`const ${vn} = ${this.syncAwareCall(fnName, inputObj)};`);
         }
       }
     }
@@ -2774,12 +2780,8 @@ class CodegenContext {
     }
 
     // Handle element refs (from.element = true)
-    if (ref.element && this.currentElVar) {
-      if (ref.path.length === 0) return this.currentElVar;
-      return (
-        this.currentElVar +
-        ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("")
-      );
+    if (ref.element) {
+      return this.refToElementExpr(ref);
     }
 
     const varName = this.varMap.get(key);

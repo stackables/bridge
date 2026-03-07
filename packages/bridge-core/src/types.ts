@@ -16,6 +16,8 @@ export type NodeRef = {
   instance?: number;
   /** References the current array element in a shadow tree (for per-element mapping) */
   element?: boolean;
+  /** How many shadow-tree levels above the current element this ref targets. */
+  elementDepth?: number;
   /** Path into the data: ["items", "0", "position", "lat"] */
   path: string[];
   /** True when the first `?.` is right after the root (e.g., `api?.data`) */

@@ -535,6 +535,13 @@ export class ExecutionTree implements TreeContext {
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
     let cursor: ExecutionTree | undefined = this;
+    if (ref.element && ref.elementDepth && ref.elementDepth > 0) {
+      let remaining = ref.elementDepth;
+      while (remaining > 0 && cursor) {
+        cursor = cursor.parent;
+        remaining--;
+      }
+    }
     while (cursor && value === undefined) {
       value = cursor.state[key];
       cursor = cursor.parent;
