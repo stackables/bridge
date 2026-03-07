@@ -3192,6 +3192,19 @@ function buildBridgeBody(
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
 
+  if (bridgeType === "Define") {
+    handleRes.set("in", {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+    });
+    handleRes.set("out", {
+      module: SELF_MODULE,
+      type: bridgeType,
+      field: bridgeField,
+    });
+  }
+
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
   for (const bodyLine of bodyLines) {
@@ -3564,6 +3577,26 @@ function buildBridgeBody(
 
       shadowedHandles.set(handle, handleRes.get(handle));
       writableHandles.add(handle);
+
+      const defineDef = previousInstructions.find(
+        (inst): inst is DefineDef =>
+          inst.kind === "define" && inst.name === name,
+      );
+
+      if (defineDef) {
+        if (memoize) {
+          throw new Error(
+            `Line ${lineNum}: memoize is only valid for tool references`,
+          );
+        }
+        handleBindings.push({ handle, kind: "define", name });
+        handleRes.set(handle, {
+          module: `__define_${handle}`,
+          type: bridgeType,
+          field: bridgeField,
+        });
+        continue;
+      }
 
       if (lastDot !== -1) {
         const modulePart = name.substring(0, lastDot);
@@ -5721,7 +5754,7 @@ function inlineDefine(
     const oldKey = `${oldModule}:${oldType}:${oldField}:${oldInstance}`;
     trunkRemap.set(oldKey, {
       module: oldModule,
-      type: oldType,
+      type: oldModule === SELF_MODULE ? oldType : bridgeType,
       field: oldField,
       instance: newInstance,
     });
@@ -5729,6 +5762,8 @@ function inlineDefine(
       handle: `${defineHandle}$${hb.handle}`,
       kind: "tool",
       name,
+      ...(hb.memoize ? { memoize: true as const } : {}),
+      ...(hb.version ? { version: hb.version } : {}),
     });
   }
 

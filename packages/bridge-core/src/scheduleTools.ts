@@ -8,7 +8,7 @@
  * keeping the dependency surface explicit.
  */
 
-import type { Bridge, ToolDef, Wire } from "./types.ts";
+import type { Bridge, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { isPromise } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
@@ -60,6 +60,83 @@ function getToolName(target: Trunk): string {
   return `${target.module}.${target.field}`;
 }
 
+function refsInWire(wire: Wire): NodeRef[] {
+  const refs: NodeRef[] = [];
+
+  if ("from" in wire) {
+    refs.push(wire.from);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("cond" in wire) {
+    refs.push(wire.cond);
+    if (wire.thenRef) refs.push(wire.thenRef);
+    if (wire.elseRef) refs.push(wire.elseRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("condAnd" in wire) {
+    refs.push(wire.condAnd.leftRef);
+    if (wire.condAnd.rightRef) refs.push(wire.condAnd.rightRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("condOr" in wire) {
+    refs.push(wire.condOr.leftRef);
+    if (wire.condOr.rightRef) refs.push(wire.condOr.rightRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+  }
+
+  return refs;
+}
+
+export function trunkDependsOnElement(
+  bridge: Bridge | undefined,
+  target: Trunk,
+  visited = new Set<string>(),
+): boolean {
+  if (!bridge) return false;
+
+  const key = trunkKey(target);
+  if (visited.has(key)) return false;
+  visited.add(key);
+
+  const incoming = bridge.wires.filter((wire) => sameTrunk(wire.to, target));
+  for (const wire of incoming) {
+    if (wire.to.element) return true;
+
+    for (const ref of refsInWire(wire)) {
+      if (ref.element) return true;
+      const sourceTrunk: Trunk = {
+        module: ref.module,
+        type: ref.type,
+        field: ref.field,
+        instance: ref.instance,
+      };
+      if (trunkDependsOnElement(bridge, sourceTrunk, visited)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // ── Schedule ────────────────────────────────────────────────────────────────
 
 /**
@@ -78,38 +155,9 @@ export function schedule(
 ): MaybePromise<any> {
   // Delegate to parent (shadow trees don't schedule directly) unless
   // the target fork has bridge wires sourced from element data,
-  // or a __local binding whose source chain touches element data.
+  // including transitive sources routed through __local / __define_* trunks.
   if (ctx.parent) {
-    const forkWires =
-      ctx.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-    const hasElementSource = forkWires.some(
-      (w) =>
-        ("from" in w && !!w.from.element) ||
-        ("condAnd" in w &&
-          (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
-        ("condOr" in w &&
-          (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
-    );
-    // For __local trunks, also check transitively: if the source is a
-    // pipe fork whose own wires reference element data, keep it local.
-    const hasTransitiveElementSource =
-      target.module === "__local" &&
-      forkWires.some((w) => {
-        if (!("from" in w)) return false;
-        const srcTrunk = {
-          module: w.from.module,
-          type: w.from.type,
-          field: w.from.field,
-          instance: w.from.instance,
-        };
-        return (
-          ctx.bridge?.wires.some(
-            (iw) =>
-              sameTrunk(iw.to, srcTrunk) && "from" in iw && !!iw.from.element,
-          ) ?? false
-        );
-      });
-    if (!hasElementSource && !hasTransitiveElementSource) {
+    if (!trunkDependsOnElement(ctx.bridge, target)) {
       return ctx.parent.schedule(target, pullChain);
     }
   }

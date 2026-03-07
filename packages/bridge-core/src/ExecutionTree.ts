@@ -1,6 +1,9 @@
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
 import { resolveWires as _resolveWires } from "./resolveWires.ts";
-import { schedule as _schedule } from "./scheduleTools.ts";
+import {
+  schedule as _schedule,
+  trunkDependsOnElement,
+} from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
 import type { ToolTrace } from "./tracing.ts";
 import {
@@ -741,20 +744,12 @@ export class ExecutionTree implements TreeContext {
   }
 
   private isElementScopedTrunk(ref: NodeRef): boolean {
-    const bridge = this.bridge;
-    if (!bridge) return false;
-
-    const forkWires = bridge.wires.filter(
-      (w) => "from" in w && sameTrunk(w.to, ref),
-    );
-
-    return forkWires.some(
-      (w) =>
-        "from" in w &&
-        (w.from.element === true ||
-          w.from.module === "__local" ||
-          w.to.element === true),
-    );
+    return trunkDependsOnElement(this.bridge, {
+      module: ref.module,
+      type: ref.type,
+      field: ref.field,
+      instance: ref.instance,
+    });
   }
 
   /**
