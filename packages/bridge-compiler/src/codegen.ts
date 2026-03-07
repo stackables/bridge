@@ -299,6 +299,8 @@ class CodegenContext {
   private requestedFields: string[] | undefined;
   /** Per tool signature cursor used to assign distinct wire instances to repeated handle bindings. */
   private toolInstanceCursors = new Map<string, number>();
+  /** Tool trunk keys declared with `memoize`. */
+  private memoizedToolKeys = new Set<string>();
 
   constructor(
     bridge: Bridge,
@@ -372,6 +374,9 @@ class CodegenContext {
           const vn = `_t${++this.toolCounter}`;
           this.varMap.set(tk, vn);
           this.tools.set(tk, { trunkKey: tk, toolName: h.name, varName: vn });
+          if (h.memoize) {
+            this.memoizedToolKeys.add(tk);
+          }
           break;
         }
       }
@@ -742,6 +747,50 @@ class CodegenContext {
     lines.push(`      throw err;`);
     lines.push(`    }`);
     lines.push(`  }`);
+    if (this.memoizedToolKeys.size > 0) {
+      lines.push(`  const __toolMemoCache = new Map();`);
+      lines.push(`  function __stableMemoizeKey(value) {`);
+      lines.push(
+        `    if (value === null || typeof value !== "object") return JSON.stringify(value);`,
+      );
+      lines.push(`    if (Array.isArray(value)) {`);
+      lines.push(
+        `      return "[" + value.map((item) => __stableMemoizeKey(item)).join(",") + "]";`,
+      );
+      lines.push(`    }`);
+      lines.push(
+        `    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));`,
+      );
+      lines.push(
+        `    return "{" + entries.map(([key, entryValue]) => JSON.stringify(key) + ":" + __stableMemoizeKey(entryValue)).join(",") + "}";`,
+      );
+      lines.push(`  }`);
+      lines.push(
+        `  function __callMemoized(fn, input, toolName, memoizeKey) {`,
+      );
+      lines.push(`    let toolCache = __toolMemoCache.get(memoizeKey);`);
+      lines.push(`    if (!toolCache) {`);
+      lines.push(`      toolCache = new Map();`);
+      lines.push(`      __toolMemoCache.set(memoizeKey, toolCache);`);
+      lines.push(`    }`);
+      lines.push(`    const cacheKey = __stableMemoizeKey(input);`);
+      lines.push(`    const cached = toolCache.get(cacheKey);`);
+      lines.push(`    if (cached !== undefined) return cached;`);
+      lines.push(`    try {`);
+      lines.push(
+        `      const result = fn.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
+      );
+      lines.push(
+        `      if (result && typeof result.then === "function") { const pending = Promise.resolve(result).catch((error) => { toolCache.delete(cacheKey); throw error; }); toolCache.set(cacheKey, pending); return pending; }`,
+      );
+      lines.push(`      toolCache.set(cacheKey, result);`);
+      lines.push(`      return result;`);
+      lines.push(`    } catch (error) {`);
+      lines.push(`      toolCache.delete(cacheKey);`);
+      lines.push(`      throw error;`);
+      lines.push(`    }`);
+      lines.push(`  }`);
+    }
 
     // ── Dead tool detection ────────────────────────────────────────────
     // Detect which tools are reachable from the (possibly filtered) output
@@ -951,9 +1000,16 @@ class CodegenContext {
    * Generate a tool call expression that uses __callSync for sync tools at runtime,
    * falling back to `await __call` for async tools. Used at individual call sites.
    */
-  private syncAwareCall(fnName: string, inputObj: string): string {
+  private syncAwareCall(
+    fnName: string,
+    inputObj: string,
+    memoizeTrunkKey?: string,
+  ): string {
     const fn = `tools[${JSON.stringify(fnName)}]`;
     const name = JSON.stringify(fnName);
+    if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
+      return `await __callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
+    }
     return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
   }
 
@@ -961,9 +1017,16 @@ class CodegenContext {
    * Same as syncAwareCall but without await — for use inside Promise.all() and
    * in sync array map bodies.  Returns a value for sync tools, a Promise for async.
    */
-  private syncAwareCallNoAwait(fnName: string, inputObj: string): string {
+  private syncAwareCallNoAwait(
+    fnName: string,
+    inputObj: string,
+    memoizeTrunkKey?: string,
+  ): string {
     const fn = `tools[${JSON.stringify(fnName)}]`;
     const name = JSON.stringify(fnName);
+    if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
+      return `__callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
+    }
     return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
   }
 
@@ -999,18 +1062,18 @@ class CodegenContext {
       );
       if (mode === "fire-and-forget") {
         lines.push(
-          `  try { ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) {}`,
+          `  try { ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)}; } catch (_e) {}`,
         );
         lines.push(`  const ${tool.varName} = undefined;`);
       } else if (mode === "catch-guarded") {
         // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
         lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
         lines.push(
-          `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+          `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
         );
       } else {
         lines.push(
-          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)};`,
+          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
         );
       }
       return;
@@ -1083,7 +1146,7 @@ class CodegenContext {
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
       lines.push(
-        `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
+        `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
       );
       lines.push(`  } catch (_e) {`);
       if ("value" in onErrorWire) {
@@ -1100,18 +1163,18 @@ class CodegenContext {
       lines.push(`  }`);
     } else if (mode === "fire-and-forget") {
       lines.push(
-        `  try { ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) {}`,
+        `  try { ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)}; } catch (_e) {}`,
       );
       lines.push(`  const ${tool.varName} = undefined;`);
     } else if (mode === "catch-guarded") {
       // Catch-guarded: store result AND the actual error so unguarded wires can re-throw.
       lines.push(`  let ${tool.varName}, ${tool.varName}_err;`);
       lines.push(
-        `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
+        `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
       );
     } else {
       lines.push(
-        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj)};`,
+        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
       );
     }
   }
@@ -1203,7 +1266,7 @@ class CodegenContext {
           4,
         );
         lines.push(
-          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj)};`,
+          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
         );
         return;
       }
@@ -2398,7 +2461,9 @@ class CodegenContext {
     // Non-internal tool in element scope — inline as an await __call
     const inputObj = this.buildElementToolInput(toolWires, elVar);
     const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
-    return `await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+    return this.memoizedToolKeys.has(trunkKey)
+      ? `await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(trunkKey)})`
+      : `await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
   }
 
   /**
@@ -2584,11 +2649,19 @@ class CodegenContext {
         const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
         if (syncOnly) {
           const fn = `tools[${JSON.stringify(fnName)}]`;
-          lines.push(
-            `const ${vn} = __callSync(${fn}, ${inputObj}, ${JSON.stringify(fnName)});`,
-          );
+          if (this.memoizedToolKeys.has(tk)) {
+            lines.push(
+              `const ${vn} = __callMemoized(${fn}, ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(tk)});`,
+            );
+          } else {
+            lines.push(
+              `const ${vn} = __callSync(${fn}, ${inputObj}, ${JSON.stringify(fnName)});`,
+            );
+          }
         } else {
-          lines.push(`const ${vn} = ${this.syncAwareCall(fnName, inputObj)};`);
+          lines.push(
+            `const ${vn} = ${this.syncAwareCall(fnName, inputObj, tk)};`,
+          );
         }
       }
     }
@@ -2932,7 +3005,9 @@ class CodegenContext {
           inputObj = this.buildObjectLiteral(toolWires, (w) => w.to.path, 4);
         }
 
-        let expr = `(await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}))`;
+        let expr = this.memoizedToolKeys.has(key)
+          ? `(await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(key)}))`
+          : `(await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}))`;
         if (ref.path.length > 0) {
           expr =
             expr + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
@@ -3362,7 +3437,7 @@ class CodegenContext {
         (w) => w.to.path,
         4,
       );
-      return this.syncAwareCallNoAwait(tool.toolName, inputObj);
+      return this.syncAwareCallNoAwait(tool.toolName, inputObj, tool.trunkKey);
     }
 
     const fnName = toolDef.fn ?? tool.toolName;
@@ -3397,7 +3472,7 @@ class CodegenContext {
     const inputParts = [...inputEntries.values()];
     const inputObj =
       inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
-    return this.syncAwareCallNoAwait(fnName, inputObj);
+    return this.syncAwareCallNoAwait(fnName, inputObj, tool.trunkKey);
   }
 
   private topologicalLayers(toolWires: Map<string, Wire[]>): string[][] {

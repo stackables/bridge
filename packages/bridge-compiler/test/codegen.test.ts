@@ -761,6 +761,55 @@ bridge Query.chain {
   });
 });
 
+describe("AOT codegen: memoized tool handles", () => {
+  const bridgeText = `version 1.5
+bridge Query.memoized {
+  with input as i
+  with output as o
+
+  o <- i.items[] as item {
+    with worker as w memoize
+
+    w.id <- item.id
+    .item <- w.data
+  }
+}`;
+
+  test("generated code emits memoization helper for memoized handles", () => {
+    const code = compileOnly(bridgeText, "Query.memoized");
+    assert.match(code, /function __callMemoized/);
+    assert.match(code, /function __stableMemoizeKey/);
+  });
+
+  test("memoized handles reuse cached results within one compiled request", async () => {
+    let calls = 0;
+    const worker = Object.assign(
+      (params: { id: string }) => {
+        calls++;
+        return { data: `item:${params.id}` };
+      },
+      { bridge: { sync: true } },
+    );
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.memoized",
+      {
+        items: [{ id: "a" }, { id: "a" }, { id: "b" }, { id: "a" }],
+      },
+      { worker },
+    );
+
+    assert.deepEqual(data, [
+      { item: "item:a" },
+      { item: "item:a" },
+      { item: "item:b" },
+      { item: "item:a" },
+    ]);
+    assert.equal(calls, 2);
+  });
+});
+
 // ── Phase 6: Catch fallback ──────────────────────────────────────────────────
 
 describe("AOT codegen: catch fallback", () => {
