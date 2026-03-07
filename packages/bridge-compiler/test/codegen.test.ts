@@ -808,6 +808,34 @@ bridge Query.memoized {
     ]);
     assert.equal(calls, 2);
   });
+
+  test("memoized handles treat undefined inputs as a stable cache key", async () => {
+    let calls = 0;
+    const worker = Object.assign(
+      (params: { id?: string }) => {
+        calls++;
+        return { data: params.id ?? "missing" };
+      },
+      { bridge: { sync: true } },
+    );
+
+    const data = await compileAndRun(
+      bridgeText,
+      "Query.memoized",
+      {
+        items: [{}, {}, { id: "set" }, {}],
+      },
+      { worker },
+    );
+
+    assert.deepEqual(data, [
+      { item: "missing" },
+      { item: "missing" },
+      { item: "set" },
+      { item: "missing" },
+    ]);
+    assert.equal(calls, 2);
+  });
 });
 
 // ── Phase 6: Catch fallback ──────────────────────────────────────────────────

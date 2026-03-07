@@ -750,19 +750,21 @@ class CodegenContext {
     if (this.memoizedToolKeys.size > 0) {
       lines.push(`  const __toolMemoCache = new Map();`);
       lines.push(`  function __stableMemoizeKey(value) {`);
+      lines.push(`    if (value === undefined) return "undefined";`);
+      lines.push('    if (typeof value === "bigint") return `${value}n`;');
       lines.push(
-        `    if (value === null || typeof value !== "object") return JSON.stringify(value);`,
+        `    if (value === null || typeof value !== "object") { const serialized = JSON.stringify(value); return serialized ?? String(value); }`,
       );
       lines.push(`    if (Array.isArray(value)) {`);
       lines.push(
-        `      return "[" + value.map((item) => __stableMemoizeKey(item)).join(",") + "]";`,
+        '      return `[${value.map((item) => __stableMemoizeKey(item)).join(",")}]`;',
       );
       lines.push(`    }`);
       lines.push(
-        `    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));`,
+        `    const entries = Object.entries(value).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));`,
       );
       lines.push(
-        `    return "{" + entries.map(([key, entryValue]) => JSON.stringify(key) + ":" + __stableMemoizeKey(entryValue)).join(",") + "}";`,
+        '    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${__stableMemoizeKey(entryValue)}`).join(",")}}`;',
       );
       lines.push(`  }`);
       lines.push(
@@ -780,9 +782,16 @@ class CodegenContext {
       lines.push(
         `      const result = fn.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
       );
+      lines.push(`      if (result && typeof result.then === "function") {`);
       lines.push(
-        `      if (result && typeof result.then === "function") { const pending = Promise.resolve(result).catch((error) => { toolCache.delete(cacheKey); throw error; }); toolCache.set(cacheKey, pending); return pending; }`,
+        `        const pending = Promise.resolve(result).catch((error) => {`,
       );
+      lines.push(`          toolCache.delete(cacheKey);`);
+      lines.push(`          throw error;`);
+      lines.push(`        });`);
+      lines.push(`        toolCache.set(cacheKey, pending);`);
+      lines.push(`        return pending;`);
+      lines.push(`      }`);
       lines.push(`      toolCache.set(cacheKey, result);`);
       lines.push(`      return result;`);
       lines.push(`    } catch (error) {`);

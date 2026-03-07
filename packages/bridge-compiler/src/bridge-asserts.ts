@@ -10,6 +10,6 @@ export class BridgeCompilerIncompatibleError extends Error {
   }
 }
 
-export function assertBridgeCompilerCompatible(bridge: Bridge): void {
-  void bridge;
+export function assertBridgeCompilerCompatible(_bridge: Bridge): void {
+  // Intentionally empty: all currently supported bridge constructs compile.
 }

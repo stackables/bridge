@@ -60,15 +60,22 @@ import {
 import { raceTimeout } from "./utils.ts";
 
 function stableMemoizeKey(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (typeof value === "bigint") {
+    return `${value}n`;
+  }
   if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
+    const serialized = JSON.stringify(value);
+    return serialized ?? String(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableMemoizeKey(item)).join(",")}]`;
   }
 
   const entries = Object.entries(value as Record<string, unknown>).sort(
-    ([left], [right]) => left.localeCompare(right),
+    ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
   );
   return `{${entries
     .map(
