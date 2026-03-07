@@ -1111,4 +1111,19 @@ o.result <- t.user.profile.name
       /Cannot read properties of null \(reading 'name'\)/,
     );
   });
+
+  test("?. only guards the segment it prefixes", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.does?.not.crash.hard ?? throw "Errore"
+}`;
+
+    await assert.rejects(
+      () => run(bridgeText, "Query.test", { does: null }),
+      /Cannot read properties of undefined \(reading 'crash'\)/,
+    );
+  });
 });

@@ -61,6 +61,12 @@ export class BridgeRuntimeError extends Error {
   }
 }
 
+type BridgeErrorMetadataCarrier = {
+  bridgeLoc?: SourceLocation;
+  bridgeSource?: string;
+  bridgeFilename?: string;
+};
+
 // ── Sentinels ───────────────────────────────────────────────────────────────
 
 /** Sentinel for `continue` — skip the current array element */
@@ -192,6 +198,31 @@ export function wrapBridgeRuntimeError(
     bridgeFilename: options.bridgeFilename,
     cause: err,
   });
+}
+
+export function attachBridgeErrorMetadata<T>(
+  err: T,
+  options: {
+    bridgeLoc?: SourceLocation;
+    bridgeSource?: string;
+    bridgeFilename?: string;
+  } = {},
+): T {
+  if (!err || (typeof err !== "object" && typeof err !== "function")) {
+    return err;
+  }
+
+  const carrier = err as BridgeErrorMetadataCarrier;
+  if (carrier.bridgeLoc === undefined) {
+    carrier.bridgeLoc = options.bridgeLoc;
+  }
+  if (carrier.bridgeSource === undefined) {
+    carrier.bridgeSource = options.bridgeSource;
+  }
+  if (carrier.bridgeFilename === undefined) {
+    carrier.bridgeFilename = options.bridgeFilename;
+  }
+  return err;
 }
 
 function controlLevels(

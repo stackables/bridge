@@ -47,6 +47,30 @@ bridge Query.greet {
   o.message <- missing:i.name
 }`;
 
+const bridgeThrowFallbackText = `version 1.5
+
+bridge Query.greet {
+  with std.str.toUpperCase as uc
+  with std.str.toLowerCase as lc
+  with kala as k
+  with input as i
+  with output as o
+
+  o.message <- i.does?.not?.crash ?? throw "Errore"
+
+  o.upper <- uc:i.name
+  o.lower <- lc:i.name
+}`;
+
+const bridgePanicFallbackText = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o.message <- i.name ?? panic "Fatale"
+}`;
+
 function maxCaretCount(formatted: string): number {
   return Math.max(
     0,
@@ -120,6 +144,55 @@ describe("runtime error formatting", () => {
         assert.match(formatted, /playground\.bridge:8:16/);
         assert.match(formatted, /o\.message <- missing:i\.name/);
         assert.equal(maxCaretCount(formatted), "missing:i.name".length);
+        return true;
+      },
+    );
+  });
+
+  test("throw fallbacks underline only the throw clause", async () => {
+    const document = parseBridge(bridgeThrowFallbackText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.greet",
+          input: { name: "Ada" },
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(formatted, /Bridge Execution Error: Errore/);
+        assert.match(formatted, /playground\.bridge:10:38/);
+        assert.match(
+          formatted,
+          /o\.message <- i\.does\?\.not\?\.crash \?\? throw "Errore"/,
+        );
+        assert.equal(maxCaretCount(formatted), 'throw "Errore"'.length);
+        return true;
+      },
+    );
+  });
+
+  test("panic fallbacks underline only the panic clause", async () => {
+    const document = parseBridge(bridgePanicFallbackText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.greet",
+          input: {},
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(formatted, /Bridge Execution Error: Fatale/);
+        assert.match(formatted, /playground\.bridge:7:26/);
+        assert.match(formatted, /o\.message <- i\.name \?\? panic "Fatale"/);
+        assert.equal(maxCaretCount(formatted), 'panic "Fatale"'.length);
         return true;
       },
     );

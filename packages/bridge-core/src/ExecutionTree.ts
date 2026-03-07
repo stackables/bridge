@@ -550,37 +550,19 @@ export class ExecutionTree implements TreeContext {
 
     let result: any = resolved;
 
-    // Root-level null check
-    if (result == null) {
-      if (ref.rootSafe || ref.element) return undefined;
-      throw wrapBridgeRuntimeError(
-        new TypeError(
-          `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
-        ),
-        {
-          bridgeLoc,
-          bridgeSource: this.source,
-          bridgeFilename: this.filename,
-        },
-      );
-    }
-
     for (let i = 0; i < ref.path.length; i++) {
       const segment = ref.path[i]!;
-      if (UNSAFE_KEYS.has(segment))
-        throw new Error(`Unsafe property traversal: ${segment}`);
-      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
-        this.logger?.warn?.(
-          `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
-        );
-      }
-      result = result[segment];
-      if (result == null && i < ref.path.length - 1) {
-        const nextSafe = (ref.pathSafe?.[i + 1] ?? false) || !!ref.element;
-        if (nextSafe) return undefined;
+      const accessSafe =
+        ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
+
+      if (result == null) {
+        if ((i === 0 && ref.element) || accessSafe) {
+          result = undefined;
+          continue;
+        }
         throw wrapBridgeRuntimeError(
           new TypeError(
-            `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
+            `Cannot read properties of ${result} (reading '${segment}')`,
           ),
           {
             bridgeLoc,
@@ -589,6 +571,15 @@ export class ExecutionTree implements TreeContext {
           },
         );
       }
+
+      if (UNSAFE_KEYS.has(segment))
+        throw new Error(`Unsafe property traversal: ${segment}`);
+      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
+        this.logger?.warn?.(
+          `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
+        );
+      }
+      result = result[segment];
     }
     return result;
   }

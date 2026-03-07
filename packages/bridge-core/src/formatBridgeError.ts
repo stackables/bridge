@@ -1,4 +1,3 @@
-import { BridgeRuntimeError } from "./tree-types.ts";
 import type { SourceLocation } from "./types.ts";
 
 export type FormatBridgeErrorOptions = {
@@ -10,18 +9,31 @@ function getMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function getBridgeMetadata(err: unknown): {
+  bridgeLoc?: SourceLocation;
+  bridgeSource?: string;
+  bridgeFilename?: string;
+} | null {
+  if (!err || (typeof err !== "object" && typeof err !== "function")) {
+    return null;
+  }
+
+  return err as {
+    bridgeLoc?: SourceLocation;
+    bridgeSource?: string;
+    bridgeFilename?: string;
+  };
+}
+
 function getBridgeLoc(err: unknown): SourceLocation | undefined {
-  return err instanceof BridgeRuntimeError ? err.bridgeLoc : undefined;
+  return getBridgeMetadata(err)?.bridgeLoc;
 }
 
 function getBridgeSource(
   err: unknown,
   options: FormatBridgeErrorOptions,
 ): string | undefined {
-  return (
-    options.source ??
-    (err instanceof BridgeRuntimeError ? err.bridgeSource : undefined)
-  );
+  return options.source ?? getBridgeMetadata(err)?.bridgeSource;
 }
 
 function getBridgeFilename(
@@ -29,9 +41,7 @@ function getBridgeFilename(
   options: FormatBridgeErrorOptions,
 ): string {
   return (
-    options.filename ??
-    (err instanceof BridgeRuntimeError ? err.bridgeFilename : undefined) ??
-    "<bridge>"
+    options.filename ?? getBridgeMetadata(err)?.bridgeFilename ?? "<bridge>"
   );
 }
 

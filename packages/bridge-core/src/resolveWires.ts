@@ -9,13 +9,15 @@
  * the full `ExecutionTree` class.
  */
 
-import type { NodeRef, Wire } from "./types.ts";
+import type { ControlFlowInstruction, NodeRef, Wire } from "./types.ts";
 import type { MaybePromise, TreeContext } from "./tree-types.ts";
 import {
+  attachBridgeErrorMetadata,
   isFatalError,
   isPromise,
   applyControlFlow,
   BridgeAbortError,
+  BridgePanicError,
   wrapBridgeRuntimeError,
 } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
@@ -151,7 +153,13 @@ export async function applyFallbackGates(
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
-      if (fallback.control) return applyControlFlow(fallback.control);
+      if (fallback.control) {
+        return applyControlFlowWithLoc(
+          ctx,
+          fallback.control,
+          fallback.loc ?? w.loc,
+        );
+      }
       if (fallback.ref) {
         value = await ctx.pullSingle(
           fallback.ref,
@@ -182,12 +190,38 @@ export async function applyCatchGate(
   w: WireWithGates,
   pullChain?: Set<string>,
 ): Promise<unknown> {
-  if (w.catchControl) return applyControlFlow(w.catchControl);
+  if (w.catchControl) {
+    return applyControlFlowWithLoc(ctx, w.catchControl, w.catchLoc ?? w.loc);
+  }
   if (w.catchFallbackRef) {
     return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
   }
   if (w.catchFallback != null) return coerceConstant(w.catchFallback);
   return undefined;
+}
+
+function applyControlFlowWithLoc(
+  ctx: TreeContext,
+  control: ControlFlowInstruction,
+  bridgeLoc: Wire["loc"],
+): symbol | import("./tree-types.ts").LoopControlSignal {
+  try {
+    return applyControlFlow(control);
+  } catch (err) {
+    if (err instanceof BridgePanicError) {
+      throw attachBridgeErrorMetadata(err, {
+        bridgeLoc,
+        bridgeSource: ctx.source,
+        bridgeFilename: ctx.filename,
+      });
+    }
+    if (isFatalError(err)) throw err;
+    throw wrapBridgeRuntimeError(err, {
+      bridgeLoc,
+      bridgeSource: ctx.source,
+      bridgeFilename: ctx.filename,
+    });
+  }
 }
 
 // ── Layer 1: Wire source evaluation ─────────────────────────────────────────

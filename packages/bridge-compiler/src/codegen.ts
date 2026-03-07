@@ -708,8 +708,9 @@ class CodegenContext {
     lines.push(`  const __trace = __opts?.__trace;`);
     lines.push(`  function __rethrowBridgeError(err, loc) {`);
     lines.push(
-      `    if (err?.name === "BridgePanicError" || err?.name === "BridgeAbortError") throw err;`,
+      `    if (err?.name === "BridgePanicError") throw __attachBridgeMeta(err, loc);`,
     );
+    lines.push(`    if (err?.name === "BridgeAbortError") throw err;`);
     lines.push(
       `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc !== undefined) throw err;`,
     );
@@ -730,6 +731,38 @@ class CodegenContext {
     lines.push(`    } catch (err) {`);
     lines.push(`      __rethrowBridgeError(err, loc);`);
     lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  function __attachBridgeMeta(err, loc) {`);
+    lines.push(
+      `    if (err && (typeof err === "object" || typeof err === "function")) {`,
+    );
+    lines.push(`      if (err.bridgeLoc === undefined) err.bridgeLoc = loc;`);
+    lines.push(
+      `      if (err.bridgeSource === undefined) err.bridgeSource = __bridgeSource;`,
+    );
+    lines.push(
+      `      if (err.bridgeFilename === undefined) err.bridgeFilename = __bridgeFilename;`,
+    );
+    lines.push(`    }`);
+    lines.push(`    return err;`);
+    lines.push(`  }`);
+    lines.push(`  function __path(base, path, safe, allowMissingBase) {`);
+    lines.push(`    let result = base;`);
+    lines.push(`    for (let i = 0; i < path.length; i++) {`);
+    lines.push(`      const segment = path[i];`);
+    lines.push(`      const accessSafe = safe?.[i] ?? false;`);
+    lines.push(`      if (result == null) {`);
+    lines.push(`        if ((i === 0 && allowMissingBase) || accessSafe) {`);
+    lines.push(`          result = undefined;`);
+    lines.push(`          continue;`);
+    lines.push(`        }`);
+    lines.push(
+      `        throw new TypeError("Cannot read properties of " + result + " (reading '" + segment + "')");`,
+    );
+    lines.push(`      }`);
+    lines.push(`      result = result[segment];`);
+    lines.push(`    }`);
+    lines.push(`    return result;`);
     lines.push(`  }`);
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
@@ -2352,7 +2385,7 @@ class CodegenContext {
       throw new Error(`Missing element variable for ${JSON.stringify(ref)}`);
     }
     if (ref.path.length === 0) return elVar;
-    return elVar + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    return this.appendPathExpr(elVar, ref, true);
   }
 
   private _elementWireToExprInner(w: Wire, elVar: string): string {
@@ -3084,19 +3117,7 @@ class CodegenContext {
       !ref.element
     ) {
       if (ref.path.length === 0) return "input";
-      // Respect rootSafe / pathSafe flags, same as tool-result refs.
-      // A bare `.` access (no `?.`) on a null intermediate throws TypeError,
-      // matching the runtime's applyPath strict-null behaviour.
-      return (
-        "input" +
-        ref.path
-          .map((p, i) => {
-            const safe =
-              ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
-            return safe ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`;
-          })
-          .join("")
-      );
+      return this.appendPathExpr("input", ref);
     }
 
     // Tool result reference
@@ -3106,9 +3127,7 @@ class CodegenContext {
     if (this.elementScopedTools.has(key) && this.currentElVar) {
       let expr = this.buildInlineToolExpr(key, this.currentElVar);
       if (ref.path.length > 0) {
-        expr =
-          `(${expr})` +
-          ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+        expr = this.appendPathExpr(`(${expr})`, ref);
       }
       return expr;
     }
@@ -3122,17 +3141,25 @@ class CodegenContext {
     if (!varName)
       throw new Error(`Unknown reference: ${key} (${JSON.stringify(ref)})`);
     if (ref.path.length === 0) return varName;
-    // Use pathSafe flags to decide ?. vs . for each segment
-    return (
-      varName +
-      ref.path
-        .map((p, i) => {
-          const safe =
-            ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
-          return safe ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`;
-        })
-        .join("")
+    return this.appendPathExpr(varName, ref);
+  }
+
+  private appendPathExpr(
+    baseExpr: string,
+    ref: NodeRef,
+    allowMissingBase = false,
+  ): string {
+    if (ref.path.length === 0) return baseExpr;
+
+    const safeFlags = ref.path.map(
+      (_, i) =>
+        ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false),
     );
+    if (allowMissingBase || safeFlags.some(Boolean)) {
+      return `__path(${baseExpr}, ${JSON.stringify(ref.path)}, ${JSON.stringify(safeFlags)}, ${allowMissingBase ? "true" : "false"})`;
+    }
+
+    return baseExpr + ref.path.map((p) => `[${JSON.stringify(p)}]`).join("");
   }
 
   /**
