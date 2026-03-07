@@ -674,6 +674,23 @@ export class ExecutionTree implements TreeContext {
     return this.createShadowArray(resolved as any[]);
   }
 
+  private isElementScopedTrunk(ref: NodeRef): boolean {
+    const bridge = this.bridge;
+    if (!bridge) return false;
+
+    const forkWires = bridge.wires.filter(
+      (w) => "from" in w && sameTrunk(w.to, ref),
+    );
+
+    return forkWires.some(
+      (w) =>
+        "from" in w &&
+        (w.from.element === true ||
+          w.from.module === "__local" ||
+          w.to.element === true),
+    );
+  }
+
   /**
    * Resolve pre-grouped wires on this shadow tree without re-filtering.
    * Called by the parent's `materializeShadows` to skip per-element wire
@@ -720,6 +737,7 @@ export class ExecutionTree implements TreeContext {
           "from" in w &&
           ((w.from as NodeRef).element === true ||
             (w.from as NodeRef).module === "__local" ||
+            this.isElementScopedTrunk(w.from as NodeRef) ||
             w.to.element === true) &&
           w.to.module === SELF_MODULE &&
           w.to.type === type &&
@@ -949,6 +967,7 @@ export class ExecutionTree implements TreeContext {
         "from" in w &&
         ((w.from as NodeRef).element === true ||
           (w.from as NodeRef).module === "__local" ||
+          this.isElementScopedTrunk(w.from as NodeRef) ||
           w.to.element === true) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&

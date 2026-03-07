@@ -566,6 +566,8 @@ class BridgeParser extends CstParser {
     this.MANY(() =>
       this.OR([
         { ALT: () => this.SUBRULE(this.elementWithDecl) },
+        { ALT: () => this.SUBRULE(this.elementToolWithDecl) },
+        { ALT: () => this.SUBRULE(this.elementHandleWire) },
         { ALT: () => this.SUBRULE(this.elementLine) },
       ]),
     );
@@ -582,6 +584,87 @@ class BridgeParser extends CstParser {
     this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
     this.CONSUME(AsKw);
     this.SUBRULE(this.nameToken, { LABEL: "elemWithAlias" });
+  });
+
+  /**
+   * Loop-scoped tool binding inside array mapping:
+   *   with std.httpCall as http
+   */
+  public elementToolWithDecl = this.RULE("elementToolWithDecl", () => {
+    this.CONSUME(WithKw);
+    this.SUBRULE(this.dottedName, { LABEL: "refName" });
+    this.OPTION(() => {
+      this.CONSUME(VersionTag, { LABEL: "refVersion" });
+    });
+    this.OPTION2(() => {
+      this.CONSUME(AsKw);
+      this.SUBRULE(this.nameToken, { LABEL: "refAlias" });
+    });
+  });
+
+  /**
+   * Writable handle wire inside array mapping:
+   *   http.value <- item.id
+   *   http.value = "x"
+   */
+  public elementHandleWire = this.RULE("elementHandleWire", () => {
+    this.SUBRULE(this.addressPath, { LABEL: "target" });
+    this.OR([
+      {
+        ALT: () => {
+          this.CONSUME(Equals, { LABEL: "equalsOp" });
+          this.SUBRULE(this.bareValue, { LABEL: "constValue" });
+        },
+      },
+      {
+        ALT: () => {
+          this.CONSUME(Arrow, { LABEL: "arrow" });
+          this.OR2([
+            {
+              ALT: () => {
+                this.CONSUME(StringLiteral, { LABEL: "stringSource" });
+              },
+            },
+            {
+              ALT: () => {
+                this.OPTION(() => {
+                  this.CONSUME(NotKw, { LABEL: "notPrefix" });
+                });
+                this.OR3([
+                  {
+                    ALT: () => {
+                      this.SUBRULE(this.parenExpr, { LABEL: "firstParenExpr" });
+                    },
+                  },
+                  {
+                    ALT: () => {
+                      this.SUBRULE(this.sourceExpr, { LABEL: "firstSource" });
+                    },
+                  },
+                ]);
+                this.MANY2(() => {
+                  this.SUBRULE(this.exprOperator, { LABEL: "exprOp" });
+                  this.SUBRULE(this.exprOperand, { LABEL: "exprRight" });
+                });
+                this.OPTION3(() => {
+                  this.CONSUME(QuestionMark, { LABEL: "ternaryOp" });
+                  this.SUBRULE(this.ternaryBranch, { LABEL: "thenBranch" });
+                  this.CONSUME(Colon, { LABEL: "ternaryColon" });
+                  this.SUBRULE2(this.ternaryBranch, { LABEL: "elseBranch" });
+                });
+              },
+            },
+          ]);
+          this.MANY(() => {
+            this.SUBRULE(this.coalesceChainItem, { LABEL: "coalesceItem" });
+          });
+          this.OPTION5(() => {
+            this.CONSUME(CatchKw);
+            this.SUBRULE3(this.coalesceAlternative, { LABEL: "catchAlt" });
+          });
+        },
+      },
+    ]);
   });
 
   /**
@@ -1678,7 +1761,7 @@ function processElementLines(
     | { literal: string }
     | { sourceRef: NodeRef }
     | { control: ControlFlowInstruction },
-  desugarExprChain?: (
+  desugarExprChain: (
     leftRef: NodeRef,
     exprOps: CstNode[],
     exprRights: CstNode[],
@@ -1686,26 +1769,35 @@ function processElementLines(
     iterScope?: string | string[],
     safe?: boolean,
   ) => NodeRef,
-  extractTernaryBranchFn?: (
+  extractTernaryBranchFn: (
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
   ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
-  processLocalBindings?: (
+  processLocalBindings: (
     withDecls: CstNode[],
     iterScope: string | string[],
   ) => () => void,
-  desugarTemplateStringFn?: (
+  processLocalToolBindings: (withDecls: CstNode[]) => {
+    writableHandles: Set<string>;
+    cleanup: () => void;
+  },
+  processElementHandleWires: (
+    wireNodes: CstNode[],
+    iterScope: string | string[],
+    writableHandles: Set<string>,
+  ) => void,
+  desugarTemplateStringFn: (
     segs: TemplateSeg[],
     lineNum: number,
     iterScope?: string | string[],
   ) => NodeRef,
-  desugarNotFn?: (
+  desugarNotFn: (
     sourceRef: NodeRef,
     lineNum: number,
     safe?: boolean,
   ) => NodeRef,
-  resolveParenExprFn?: (
+  resolveParenExprFn: (
     parenNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
@@ -1919,10 +2011,23 @@ function processElementLines(
 
         // Recurse into nested element lines
         const nestedWithDecls = subs(nestedArrayNode, "elementWithDecl");
+        const nestedToolWithDecls = subs(
+          nestedArrayNode,
+          "elementToolWithDecl",
+        );
+        const {
+          writableHandles: nestedWritableHandles,
+          cleanup: nestedToolCleanup,
+        } = processLocalToolBindings(nestedToolWithDecls);
         const nestedCleanup = processLocalBindings?.(nestedWithDecls, [
           ...iterNames,
           innerIterName,
         ]);
+        processElementHandleWires(
+          subs(nestedArrayNode, "elementHandleWire"),
+          [...iterNames, innerIterName],
+          nestedWritableHandles,
+        );
         processElementLines(
           subs(nestedArrayNode, "elementLine"),
           elemToPath,
@@ -1936,11 +2041,14 @@ function processElementLines(
           desugarExprChain,
           extractTernaryBranchFn,
           processLocalBindings,
+          processLocalToolBindings,
+          processElementHandleWires,
           desugarTemplateStringFn,
           desugarNotFn,
           resolveParenExprFn,
         );
         nestedCleanup?.();
+        nestedToolCleanup();
         continue;
       }
 
@@ -3390,6 +3498,349 @@ function buildBridgeBody(
         else handleRes.delete(alias);
       }
     };
+  }
+
+  function processLocalToolBindings(withDecls: CstNode[]): {
+    writableHandles: Set<string>;
+    cleanup: () => void;
+  } {
+    const shadowedHandles = new Map<string, HandleResolution | undefined>();
+    const writableHandles = new Set<string>();
+
+    for (const withDecl of withDecls) {
+      const wc = withDecl.children;
+      const lineNum = line(findFirstToken(withDecl));
+      const name = extractDottedName((wc.refName as CstNode[])[0]);
+      const versionTag = (
+        wc.refVersion as IToken[] | undefined
+      )?.[0]?.image.slice(1);
+      const lastDot = name.lastIndexOf(".");
+      const defaultHandle = lastDot !== -1 ? name.substring(lastDot + 1) : name;
+      const handle = wc.refAlias
+        ? extractNameToken((wc.refAlias as CstNode[])[0])
+        : defaultHandle;
+
+      if (shadowedHandles.has(handle)) {
+        throw new Error(`Line ${lineNum}: Duplicate handle name "${handle}"`);
+      }
+      if (wc.refAlias) assertNotReserved(handle, lineNum, "handle alias");
+
+      shadowedHandles.set(handle, handleRes.get(handle));
+      writableHandles.add(handle);
+
+      if (lastDot !== -1) {
+        const modulePart = name.substring(0, lastDot);
+        const fieldPart = name.substring(lastDot + 1);
+        const key = `${modulePart}:${fieldPart}`;
+        const instance = (instanceCounters.get(key) ?? 0) + 1;
+        instanceCounters.set(key, instance);
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
+        handleRes.set(handle, {
+          module: modulePart,
+          type: bridgeType,
+          field: fieldPart,
+          instance,
+        });
+      } else {
+        const key = `Tools:${name}`;
+        const instance = (instanceCounters.get(key) ?? 0) + 1;
+        instanceCounters.set(key, instance);
+        handleBindings.push({
+          handle,
+          kind: "tool",
+          name,
+          ...(versionTag ? { version: versionTag } : {}),
+        });
+        handleRes.set(handle, {
+          module: SELF_MODULE,
+          type: "Tools",
+          field: name,
+          instance,
+        });
+      }
+    }
+
+    return {
+      writableHandles,
+      cleanup: () => {
+        for (const [handle, previous] of shadowedHandles) {
+          if (previous) handleRes.set(handle, previous);
+          else handleRes.delete(handle);
+        }
+      },
+    };
+  }
+
+  function processElementHandleWires(
+    wireNodes: CstNode[],
+    iterScope: string | string[],
+    writableHandles: Set<string>,
+  ): void {
+    const iterNames = Array.isArray(iterScope) ? iterScope : [iterScope];
+
+    for (const wireNode of wireNodes) {
+      const wc = wireNode.children;
+      const lineNum = line(findFirstToken(wireNode));
+      const { root: targetRoot, segments: targetSegs } = extractAddressPath(
+        sub(wireNode, "target")!,
+      );
+
+      if (!writableHandles.has(targetRoot)) {
+        throw new Error(
+          `Line ${lineNum}: Cannot wire inputs for handle "${targetRoot}" from this loop scope. Add 'with <tool> as ${targetRoot}' in the current array block.`,
+        );
+      }
+
+      const toRef = resolveAddress(targetRoot, targetSegs, lineNum);
+      assertNoTargetIndices(toRef, lineNum);
+
+      if (wc.equalsOp) {
+        const value = extractBareValue(sub(wireNode, "constValue")!);
+        wires.push({ value, to: toRef });
+        continue;
+      }
+
+      const stringSourceToken = (wc.stringSource as IToken[] | undefined)?.[0];
+      if (stringSourceToken) {
+        const raw = stringSourceToken.image.slice(1, -1);
+        const segs = parseTemplateString(raw);
+
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(wireNode, "coalesceItem")) {
+          const type = tok(item, "falsyOp")
+            ? ("falsy" as const)
+            : ("nullish" as const);
+          const altNode = sub(item, "altValue")!;
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(altNode, lineNum, iterNames);
+          if ("literal" in altResult) {
+            fallbacks.push({ type, value: altResult.literal });
+          } else if ("control" in altResult) {
+            fallbacks.push({ type, control: altResult.control });
+          } else {
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
+          }
+        }
+        let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
+        let catchFallbackRef: NodeRef | undefined;
+        let catchFallbackInternalWires: Wire[] = [];
+        const catchAlt = sub(wireNode, "catchAlt");
+        if (catchAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(catchAlt, lineNum, iterNames);
+          if ("literal" in altResult) {
+            catchFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            catchControl = altResult.control;
+          } else {
+            catchFallbackRef = altResult.sourceRef;
+            catchFallbackInternalWires = wires.splice(preLen);
+          }
+        }
+        const lastAttrs = {
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
+          ...(catchFallback ? { catchFallback } : {}),
+          ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchControl ? { catchControl } : {}),
+        };
+        if (segs) {
+          const concatOutRef = desugarTemplateString(segs, lineNum, iterNames);
+          wires.push({
+            from: concatOutRef,
+            to: toRef,
+            pipe: true,
+            ...lastAttrs,
+          });
+        } else {
+          wires.push({ value: raw, to: toRef, ...lastAttrs });
+        }
+        wires.push(...fallbackInternalWires);
+        wires.push(...catchFallbackInternalWires);
+        continue;
+      }
+
+      const firstSourceNode = sub(wireNode, "firstSource");
+      const firstParenNode = sub(wireNode, "firstParenExpr");
+      const headNode = firstSourceNode
+        ? sub(firstSourceNode, "head")
+        : undefined;
+      const isSafe = headNode ? !!extractAddressPath(headNode).rootSafe : false;
+      const exprOps = subs(wireNode, "exprOp");
+
+      let condRef: NodeRef;
+      let condIsPipeFork: boolean;
+      if (firstParenNode) {
+        const parenRef = resolveParenExpr(
+          firstParenNode,
+          lineNum,
+          iterNames,
+          isSafe,
+        );
+        if (exprOps.length > 0) {
+          const exprRights = subs(wireNode, "exprRight");
+          condRef = desugarExprChain(
+            parenRef,
+            exprOps,
+            exprRights,
+            lineNum,
+            iterNames,
+            isSafe,
+          );
+        } else {
+          condRef = parenRef;
+        }
+        condIsPipeFork = true;
+      } else if (exprOps.length > 0) {
+        const exprRights = subs(wireNode, "exprRight");
+        const leftRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
+        condRef = desugarExprChain(
+          leftRef,
+          exprOps,
+          exprRights,
+          lineNum,
+          iterNames,
+          isSafe,
+        );
+        condIsPipeFork = true;
+      } else {
+        const pipeSegs = subs(firstSourceNode!, "pipeSegment");
+        condRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
+        condIsPipeFork =
+          condRef.instance != null &&
+          condRef.path.length === 0 &&
+          pipeSegs.length > 0;
+      }
+
+      if (wc.notPrefix) {
+        condRef = desugarNot(condRef, lineNum, isSafe);
+        condIsPipeFork = true;
+      }
+
+      const ternaryOp = tok(wireNode, "ternaryOp");
+      if (ternaryOp) {
+        const thenNode = sub(wireNode, "thenBranch")!;
+        const elseNode = sub(wireNode, "elseBranch")!;
+        const thenBranch = extractTernaryBranch(thenNode, lineNum, iterNames);
+        const elseBranch = extractTernaryBranch(elseNode, lineNum, iterNames);
+
+        const fallbacks: WireFallback[] = [];
+        const fallbackInternalWires: Wire[] = [];
+        for (const item of subs(wireNode, "coalesceItem")) {
+          const type = tok(item, "falsyOp")
+            ? ("falsy" as const)
+            : ("nullish" as const);
+          const altNode = sub(item, "altValue")!;
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(altNode, lineNum, iterNames);
+          if ("literal" in altResult) {
+            fallbacks.push({ type, value: altResult.literal });
+          } else if ("control" in altResult) {
+            fallbacks.push({ type, control: altResult.control });
+          } else {
+            fallbacks.push({ type, ref: altResult.sourceRef });
+            fallbackInternalWires.push(...wires.splice(preLen));
+          }
+        }
+
+        let catchFallback: string | undefined;
+        let catchControl: ControlFlowInstruction | undefined;
+        let catchFallbackRef: NodeRef | undefined;
+        let catchFallbackInternalWires: Wire[] = [];
+        const catchAlt = sub(wireNode, "catchAlt");
+        if (catchAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(catchAlt, lineNum, iterNames);
+          if ("literal" in altResult) {
+            catchFallback = altResult.literal;
+          } else if ("control" in altResult) {
+            catchControl = altResult.control;
+          } else {
+            catchFallbackRef = altResult.sourceRef;
+            catchFallbackInternalWires = wires.splice(preLen);
+          }
+        }
+
+        wires.push({
+          cond: condRef,
+          ...(thenBranch.kind === "ref"
+            ? { thenRef: thenBranch.ref }
+            : { thenValue: thenBranch.value }),
+          ...(elseBranch.kind === "ref"
+            ? { elseRef: elseBranch.ref }
+            : { elseValue: elseBranch.value }),
+          ...(fallbacks.length > 0 ? { fallbacks } : {}),
+          ...(catchFallback !== undefined ? { catchFallback } : {}),
+          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+          ...(catchControl ? { catchControl } : {}),
+          to: toRef,
+        });
+        wires.push(...fallbackInternalWires);
+        wires.push(...catchFallbackInternalWires);
+        continue;
+      }
+
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      let hasTruthyLiteralFallback = false;
+      for (const item of subs(wireNode, "coalesceItem")) {
+        const type = tok(item, "falsyOp")
+          ? ("falsy" as const)
+          : ("nullish" as const);
+        if (type === "falsy" && hasTruthyLiteralFallback) break;
+        const altNode = sub(item, "altValue")!;
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(altNode, lineNum, iterNames);
+        if ("literal" in altResult) {
+          fallbacks.push({ type, value: altResult.literal });
+          if (type === "falsy") {
+            hasTruthyLiteralFallback = Boolean(JSON.parse(altResult.literal));
+          }
+        } else if ("control" in altResult) {
+          fallbacks.push({ type, control: altResult.control });
+        } else {
+          fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbackInternalWires.push(...wires.splice(preLen));
+        }
+      }
+
+      let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
+      let catchFallbackRef: NodeRef | undefined;
+      let catchFallbackInternalWires: Wire[] = [];
+      const catchAlt = sub(wireNode, "catchAlt");
+      if (catchAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(catchAlt, lineNum, iterNames);
+        if ("literal" in altResult) {
+          catchFallback = altResult.literal;
+        } else if ("control" in altResult) {
+          catchControl = altResult.control;
+        } else {
+          catchFallbackRef = altResult.sourceRef;
+          catchFallbackInternalWires = wires.splice(preLen);
+        }
+      }
+
+      wires.push({
+        from: condRef,
+        to: toRef,
+        ...(condIsPipeFork ? { pipe: true as const } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+        ...(catchControl ? { catchControl } : {}),
+      });
+      wires.push(...fallbackInternalWires);
+      wires.push(...catchFallbackInternalWires);
+    }
   }
 
   // ── Helper: build source expression ────────────────────────────────────
@@ -4909,7 +5360,15 @@ function buildBridgeBody(
 
       // Process element lines (supports nested array mappings recursively)
       const elemWithDecls = subs(arrayMappingNode, "elementWithDecl");
+      const elemToolWithDecls = subs(arrayMappingNode, "elementToolWithDecl");
+      const { writableHandles, cleanup: toolCleanup } =
+        processLocalToolBindings(elemToolWithDecls);
       const cleanup = processLocalBindings(elemWithDecls, iterName);
+      processElementHandleWires(
+        subs(arrayMappingNode, "elementHandleWire"),
+        iterName,
+        writableHandles,
+      );
       processElementLines(
         subs(arrayMappingNode, "elementLine"),
         arrayToPath,
@@ -4923,11 +5382,14 @@ function buildBridgeBody(
         desugarExprChain,
         extractTernaryBranch,
         processLocalBindings,
+        processLocalToolBindings,
+        processElementHandleWires,
         desugarTemplateString,
         desugarNot,
         resolveParenExpr,
       );
       cleanup();
+      toolCleanup();
       continue;
     }
 

@@ -30,6 +30,7 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
+import { assertBridgeCompilerCompatible } from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
 
@@ -108,6 +109,8 @@ export function compileBridge(
   );
   if (!bridge)
     throw new Error(`No bridge definition found for operation: ${operation}`);
+
+  assertBridgeCompilerCompatible(bridge);
 
   // Collect const definitions from the document
   const constDefs = new Map<string, string>();
@@ -1456,6 +1459,10 @@ class CodegenContext {
       }
       // Only check control flow on direct element wires, not sub-array element wires
       const directElemWires = elemWires.filter((w) => w.to.path.length === 1);
+      const currentScopeElemWires = this.filterCurrentElementWires(
+        elemWires,
+        arrayIterators,
+      );
       const cf = detectControlFlow(directElemWires);
       const anyCf = detectControlFlow(elemWires);
       const requiresLabeledLoop = !cf && !!anyCf && anyCf.levels > 1;
@@ -1467,7 +1474,7 @@ class CodegenContext {
         // If so, generate a dual sync/async path with a runtime check.
         const canDualPath = !cf && this.asyncOnlyFromTools(elemWires);
         const toolRefs = canDualPath
-          ? this.collectElementToolRefs(elemWires)
+          ? this.collectElementToolRefs(currentScopeElemWires)
           : [];
         const hasDualPath = canDualPath && toolRefs.length > 0;
 
@@ -1480,7 +1487,12 @@ class CodegenContext {
           // Sync branch — .map() with __callSync
           const syncPreamble: string[] = [];
           this.elementLocalVars.clear();
-          this.collectElementPreamble(elemWires, "_el0", syncPreamble, true);
+          this.collectElementPreamble(
+            currentScopeElemWires,
+            "_el0",
+            syncPreamble,
+            true,
+          );
           const syncBody = this.buildElementBody(
             elemWires,
             arrayIterators,
@@ -1504,7 +1516,11 @@ class CodegenContext {
         // Async branch — for...of loop with await
         const preambleLines: string[] = [];
         this.elementLocalVars.clear();
-        this.collectElementPreamble(elemWires, "_el0", preambleLines);
+        this.collectElementPreamble(
+          currentScopeElemWires,
+          "_el0",
+          preambleLines,
+        );
 
         const body = cf
           ? this.buildElementBodyWithControlFlow(
@@ -1694,6 +1710,10 @@ class CodegenContext {
       const arrayExpr = this.wireToExpr(sourceW);
       // Only check control flow on direct element wires (not sub-array element wires)
       const directShifted = shifted.filter((w) => w.to.path.length === 1);
+      const currentScopeShifted = this.filterCurrentElementWires(
+        shifted,
+        arrayIterators,
+      );
       const cf = detectControlFlow(directShifted);
       const anyCf = detectControlFlow(shifted);
       const requiresLabeledLoop = !cf && !!anyCf && anyCf.levels > 1;
@@ -1704,7 +1724,7 @@ class CodegenContext {
         // Check if we can generate a dual sync/async path
         const canDualPath = !cf && this.asyncOnlyFromTools(shifted);
         const toolRefs = canDualPath
-          ? this.collectElementToolRefs(shifted)
+          ? this.collectElementToolRefs(currentScopeShifted)
           : [];
         const hasDualPath = canDualPath && toolRefs.length > 0;
 
@@ -1715,7 +1735,12 @@ class CodegenContext {
             .join(" && ");
           const syncPreamble: string[] = [];
           this.elementLocalVars.clear();
-          this.collectElementPreamble(shifted, "_el0", syncPreamble, true);
+          this.collectElementPreamble(
+            currentScopeShifted,
+            "_el0",
+            syncPreamble,
+            true,
+          );
           const syncBody = this.buildElementBody(shifted, arrayIterators, 0, 6);
           const syncMapExpr =
             syncPreamble.length > 0
@@ -1726,7 +1751,11 @@ class CodegenContext {
           // Async branch — for...of inside an async IIFE
           const preambleLines: string[] = [];
           this.elementLocalVars.clear();
-          this.collectElementPreamble(shifted, "_el0", preambleLines);
+          this.collectElementPreamble(
+            currentScopeShifted,
+            "_el0",
+            preambleLines,
+          );
           const asyncBody = `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
           const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
           const asyncExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
@@ -1737,7 +1766,11 @@ class CodegenContext {
           // Standard async path — for...of inside an async IIFE
           const preambleLines: string[] = [];
           this.elementLocalVars.clear();
-          this.collectElementPreamble(shifted, "_el0", preambleLines);
+          this.collectElementPreamble(
+            currentScopeShifted,
+            "_el0",
+            preambleLines,
+          );
 
           const asyncBody = cf
             ? this.buildElementBodyWithControlFlow(
@@ -1924,17 +1957,31 @@ class CodegenContext {
       const innerNeedsAsync = shifted.some((w) => this.wireNeedsAwait(w));
       let mapExpr: string;
       if (innerNeedsAsync) {
-        // Inner async loop must use for...of inside an async IIFE
-        const innerBody = innerCf
-          ? this.buildElementBodyWithControlFlow(
-              shifted,
-              arrayIterators,
-              depth + 1,
-              indent + 4,
-              innerCf.kind === "continue" ? "for-continue" : "break",
-            )
-          : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
-        mapExpr = `await (async () => { const _src = ${srcExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${innerBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
+        mapExpr = this.withElementLocalVarScope(() => {
+          const innerCurrentScope = this.filterCurrentElementWires(
+            shifted,
+            arrayIterators,
+          );
+          const innerPreambleLines: string[] = [];
+          this.collectElementPreamble(
+            innerCurrentScope,
+            innerElVar,
+            innerPreambleLines,
+          );
+          const innerBody = innerCf
+            ? this.buildElementBodyWithControlFlow(
+                shifted,
+                arrayIterators,
+                depth + 1,
+                indent + 4,
+                innerCf.kind === "continue" ? "for-continue" : "break",
+              )
+            : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
+          const innerPreamble = innerPreambleLines
+            .map((line) => `${" ".repeat(indent + 4)}${line}`)
+            .join("\n");
+          return `await (async () => { const _src = ${srcExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop${depth + 1}: for (const ${innerElVar} of _src) {\n${" ".repeat(indent + 4)}try {\n${innerPreamble}${innerPreamble ? "\n" : ""}${innerBody}\n${" ".repeat(indent + 4)}} catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n${" ".repeat(indent + 2)}} return _result; })()`;
+        });
       } else if (innerCf?.kind === "continue" && innerCf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
@@ -2531,6 +2578,25 @@ class CodegenContext {
           lines.push(`const ${vn} = ${this.syncAwareCall(fnName, inputObj)};`);
         }
       }
+    }
+  }
+
+  private filterCurrentElementWires(
+    elemWires: Wire[],
+    arrayIterators: Record<string, string>,
+  ): Wire[] {
+    return elemWires.filter(
+      (w) => !(w.to.path.length > 1 && w.to.path[0]! in arrayIterators),
+    );
+  }
+
+  private withElementLocalVarScope<T>(fn: () => T): T {
+    const previous = this.elementLocalVars;
+    this.elementLocalVars = new Map(previous);
+    try {
+      return fn();
+    } finally {
+      this.elementLocalVars = previous;
     }
   }
 
