@@ -8,7 +8,7 @@
  * keeping the dependency surface explicit.
  */
 
-import type { Bridge, ToolDef, Wire } from "./types.ts";
+import type { Bridge, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { isPromise } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
@@ -42,6 +42,8 @@ export interface SchedulerContext extends ToolLookupContext {
     | undefined;
   /** Handle version tags (`@version`) for versioned tool lookups. */
   readonly handleVersionMap: ReadonlyMap<string, string>;
+  /** Tool trunks marked with `memoize`. */
+  readonly memoizedToolKeys: ReadonlySet<string>;
 
   // ── Methods ────────────────────────────────────────────────────────────
   /** Recursive entry point — parent delegation calls this. */
@@ -56,6 +58,95 @@ export interface SchedulerContext extends ToolLookupContext {
 function getToolName(target: Trunk): string {
   if (target.module === SELF_MODULE) return target.field;
   return `${target.module}.${target.field}`;
+}
+
+function refsInWire(wire: Wire): NodeRef[] {
+  const refs: NodeRef[] = [];
+
+  if ("from" in wire) {
+    refs.push(wire.from);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("cond" in wire) {
+    refs.push(wire.cond);
+    if (wire.thenRef) refs.push(wire.thenRef);
+    if (wire.elseRef) refs.push(wire.elseRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("condAnd" in wire) {
+    refs.push(wire.condAnd.leftRef);
+    if (wire.condAnd.rightRef) refs.push(wire.condAnd.rightRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+    return refs;
+  }
+
+  if ("condOr" in wire) {
+    refs.push(wire.condOr.leftRef);
+    if (wire.condOr.rightRef) refs.push(wire.condOr.rightRef);
+    for (const fallback of wire.fallbacks ?? []) {
+      if (fallback.ref) refs.push(fallback.ref);
+    }
+    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
+  }
+
+  return refs;
+}
+
+export function trunkDependsOnElement(
+  bridge: Bridge | undefined,
+  target: Trunk,
+  visited = new Set<string>(),
+): boolean {
+  if (!bridge) return false;
+
+  // The current bridge trunk doubles as the input state container. Do not walk
+  // its incoming output wires when classifying element scope; refs like
+  // `i.category` would otherwise inherit element scope from unrelated output
+  // array mappings on the same bridge.
+  if (
+    target.module === "_" &&
+    target.type === bridge.type &&
+    target.field === bridge.field
+  ) {
+    return false;
+  }
+
+  const key = trunkKey(target);
+  if (visited.has(key)) return false;
+  visited.add(key);
+
+  const incoming = bridge.wires.filter((wire) => sameTrunk(wire.to, target));
+  for (const wire of incoming) {
+    if (wire.to.element) return true;
+
+    for (const ref of refsInWire(wire)) {
+      if (ref.element) return true;
+      const sourceTrunk: Trunk = {
+        module: ref.module,
+        type: ref.type,
+        field: ref.field,
+        instance: ref.instance,
+      };
+      if (trunkDependsOnElement(bridge, sourceTrunk, visited)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // ── Schedule ────────────────────────────────────────────────────────────────
@@ -76,38 +167,9 @@ export function schedule(
 ): MaybePromise<any> {
   // Delegate to parent (shadow trees don't schedule directly) unless
   // the target fork has bridge wires sourced from element data,
-  // or a __local binding whose source chain touches element data.
+  // including transitive sources routed through __local / __define_* trunks.
   if (ctx.parent) {
-    const forkWires =
-      ctx.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
-    const hasElementSource = forkWires.some(
-      (w) =>
-        ("from" in w && !!w.from.element) ||
-        ("condAnd" in w &&
-          (!!w.condAnd.leftRef.element || !!w.condAnd.rightRef?.element)) ||
-        ("condOr" in w &&
-          (!!w.condOr.leftRef.element || !!w.condOr.rightRef?.element)),
-    );
-    // For __local trunks, also check transitively: if the source is a
-    // pipe fork whose own wires reference element data, keep it local.
-    const hasTransitiveElementSource =
-      target.module === "__local" &&
-      forkWires.some((w) => {
-        if (!("from" in w)) return false;
-        const srcTrunk = {
-          module: w.from.module,
-          type: w.from.type,
-          field: w.from.field,
-          instance: w.from.instance,
-        };
-        return (
-          ctx.bridge?.wires.some(
-            (iw) =>
-              sameTrunk(iw.to, srcTrunk) && "from" in iw && !!iw.from.element,
-          ) ?? false
-        );
-      });
-    if (!hasElementSource && !hasTransitiveElementSource) {
+    if (!trunkDependsOnElement(ctx.bridge, target)) {
       return ctx.parent.schedule(target, pullChain);
     }
   }
@@ -150,7 +212,14 @@ export function schedule(
 
   // ── Async path: tool definition requires resolveToolWires + callTool ──
   if (toolDef) {
-    return scheduleToolDef(ctx, toolName, toolDef, wireGroups, pullChain);
+    return scheduleToolDef(
+      ctx,
+      target,
+      toolName,
+      toolDef,
+      wireGroups,
+      pullChain,
+    );
   }
 
   // ── Sync-capable path: no tool definition ──
@@ -227,7 +296,10 @@ export function scheduleFinish(
     directFn = lookupToolFn(ctx, toolName);
   }
   if (directFn) {
-    return ctx.callTool(toolName, toolName, directFn, input);
+    const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
+      ? trunkKey(target)
+      : undefined;
+    return ctx.callTool(toolName, toolName, directFn, input, memoizeKey);
   }
 
   // Define pass-through: synthetic trunks created by define inlining
@@ -263,6 +335,7 @@ export function scheduleFinish(
  */
 export async function scheduleToolDef(
   ctx: SchedulerContext,
+  target: Trunk,
   toolName: string,
   toolDef: ToolDef,
   wireGroups: Map<string, Wire[]>,
@@ -295,7 +368,10 @@ export async function scheduleToolDef(
   // on error: wrap the tool call with fallback from onError wire
   const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
   try {
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+    const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
+      ? trunkKey(target)
+      : undefined;
+    return await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
   } catch (err) {
     if (!onErrorWire) throw err;
     if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);

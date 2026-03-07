@@ -18,9 +18,11 @@ import {
   BridgePanicError,
   BridgeAbortError,
   BridgeTimeoutError,
+  executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
 import { compileBridge } from "./codegen.ts";
+import { BridgeCompilerIncompatibleError } from "./bridge-asserts.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,8 @@ export type ExecuteBridgeOptions = {
   toolTimeoutMs?: number;
   /** Structured logger for tool calls. */
   logger?: Logger;
+  /** Maximum shadow-tree nesting depth when falling back to the interpreter. */
+  maxDepth?: number;
   /**
    * Enable tool-call tracing.
    * - `"off"` (default) — no collection, zero overhead
@@ -112,6 +116,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {})
  * the document is no longer referenced.
  */
 const fnCache = new WeakMap<BridgeDocument, Map<string, BridgeFn>>();
+const incompatibleCache = new WeakMap<BridgeDocument, Map<string, string>>();
 
 /** Build a cache key that includes the sorted requestedFields. */
 function cacheKey(operation: string, requestedFields?: string[]): string {
@@ -125,16 +130,34 @@ function getOrCompile(
   requestedFields?: string[],
 ): BridgeFn {
   const key = cacheKey(operation, requestedFields);
+  const incompatible = incompatibleCache.get(document)?.get(key);
+  if (incompatible) {
+    throw new BridgeCompilerIncompatibleError(operation, incompatible);
+  }
+
   let opMap = fnCache.get(document);
   if (opMap) {
     const cached = opMap.get(key);
     if (cached) return cached;
   }
 
-  const { functionBody } = compileBridge(document, {
-    operation,
-    requestedFields,
-  });
+  let functionBody: string;
+  try {
+    ({ functionBody } = compileBridge(document, {
+      operation,
+      requestedFields,
+    }));
+  } catch (err) {
+    if (err instanceof BridgeCompilerIncompatibleError) {
+      let perDoc = incompatibleCache.get(document);
+      if (!perDoc) {
+        perDoc = new Map();
+        incompatibleCache.set(document, perDoc);
+      }
+      perDoc.set(key, err.message);
+    }
+    throw err;
+  }
 
   let fn: BridgeFn;
   try {
@@ -230,9 +253,31 @@ export async function executeBridge<T = unknown>(
     signal,
     toolTimeoutMs,
     logger,
+    maxDepth,
   } = options;
 
-  const fn = getOrCompile(document, operation, options.requestedFields);
+  let fn: BridgeFn;
+  try {
+    fn = getOrCompile(document, operation, options.requestedFields);
+  } catch (err) {
+    if (err instanceof BridgeCompilerIncompatibleError) {
+      logger?.warn?.(`${err.message} Falling back to core executeBridge.`);
+      return executeCoreBridge<T>({
+        document,
+        operation,
+        input,
+        tools: userTools,
+        context,
+        signal,
+        toolTimeoutMs,
+        logger,
+        trace: options.trace,
+        requestedFields: options.requestedFields,
+        ...(maxDepth !== undefined ? { maxDepth } : {}),
+      });
+    }
+    throw err;
+  }
 
   // Merge built-in std namespace with user-provided tools, then flatten
   // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].

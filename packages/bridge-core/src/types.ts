@@ -16,6 +16,8 @@ export type NodeRef = {
   instance?: number;
   /** References the current array element in a shadow tree (for per-element mapping) */
   element?: boolean;
+  /** How many shadow-tree levels above the current element this ref targets. */
+  elementDepth?: number;
   /** Path into the data: ["items", "0", "position", "lat"] */
   path: string[];
   /** True when the first `?.` is right after the root (e.g., `api?.data`) */
@@ -159,7 +161,13 @@ export type Bridge = {
  * Every wire reference in the bridge body must trace back to one of these.
  */
 export type HandleBinding =
-  | { handle: string; kind: "tool"; name: string; version?: string }
+  | {
+      handle: string;
+      kind: "tool";
+      name: string;
+      version?: string;
+      memoize?: true;
+    }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
   | { handle: string; kind: "context" }

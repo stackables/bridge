@@ -19,7 +19,6 @@
     { "include": "#path-values" }
   ],
   "repository": {
-
     "version-line": {
       "comment": "version 1.5",
       "match": "^\\s*(version)\\s+(\\d+\\.\\d+)",
@@ -31,17 +30,21 @@
 
     "block-braces": {
       "comment": "Optional block delimiters { }",
-      "patterns": [{
-        "name": "punctuation.definition.block.bridge",
-        "match": "[{}]"
-      }]
+      "patterns": [
+        {
+          "name": "punctuation.definition.block.bridge",
+          "match": "[{}]"
+        }
+      ]
     },
 
     "comments": {
-      "patterns": [{
-        "name": "comment.line.number-sign.bridge",
-        "match": "#.*$"
-      }]
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.bridge",
+          "match": "#.*$"
+        }
+      ]
     },
 
     "http-methods": {
@@ -118,21 +121,23 @@
           }
         },
         {
-          "comment": "with <tool> as <handle>  /  with input as i",
-          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)",
+          "comment": "with <tool> as <handle> [memoize]  /  with input as i",
+          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(\\s+as\\s+)([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(memoize))?",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
             "2": { "name": "entity.name.function.bridge" },
             "3": { "name": "keyword.control.bridge" },
-            "4": { "name": "variable.other.handle.bridge" }
+            "4": { "name": "variable.other.handle.bridge" },
+            "5": { "name": "keyword.control.bridge" }
           }
         },
         {
-          "comment": "with <tool>  (no alias)",
-          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "comment": "with <tool> [memoize]  (no alias)",
+          "match": "^\\s*(with)\\s+([A-Za-z_][A-Za-z0-9_.]*)(?:\\s+(memoize))?",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
-            "2": { "name": "entity.name.function.bridge" }
+            "2": { "name": "entity.name.function.bridge" },
+            "3": { "name": "keyword.control.bridge" }
           }
         },
         {
@@ -273,7 +278,9 @@
       "name": "string.quoted.double.bridge",
       "begin": "\"",
       "end": "\"",
-      "patterns": [{ "name": "constant.character.escape.bridge", "match": "\\\\." }]
+      "patterns": [
+        { "name": "constant.character.escape.bridge", "match": "\\\\." }
+      ]
     },
 
     "numbers": {

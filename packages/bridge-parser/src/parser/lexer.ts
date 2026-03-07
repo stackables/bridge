@@ -70,6 +70,11 @@ export const AsKw = createToken({
   pattern: /as/i,
   longer_alt: Identifier,
 });
+export const MemoizeKw = createToken({
+  name: "MemoizeKw",
+  pattern: /memoize/i,
+  longer_alt: Identifier,
+});
 export const FromKw = createToken({
   name: "FromKw",
   pattern: /from/i,
@@ -273,6 +278,7 @@ export const allTokens = [
   ConstKw,
   WithKw,
   AsKw,
+  MemoizeKw,
   FromKw,
   InputKw,
   OutputKw,

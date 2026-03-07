@@ -10,7 +10,11 @@ import type {
   WireFallback,
 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
-import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
+import {
+  BridgeCompilerIncompatibleError,
+  compileBridge,
+  executeBridge as executeAot,
+} from "../src/index.ts";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {})
   .constructor as new (
@@ -37,6 +41,7 @@ const canonicalIdentifierArb = fc.constantFrom(
   "g",
   "h",
 );
+const toolAliasArb = fc.constantFrom("fetch", "http", "load", "lookup");
 const pathArb = fc.array(identifierArb, { minLength: 1, maxLength: 4 });
 const flatPathArb = fc.array(identifierArb, { minLength: 1, maxLength: 1 });
 
@@ -85,8 +90,14 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
         to: toArb,
         fallbacks: fc.array(
           fc.oneof(
-            fc.record({ type: fc.constant<"falsy">("falsy"), value: constantValueArb }),
-            fc.record({ type: fc.constant<"nullish">("nullish"), value: constantValueArb }),
+            fc.record({
+              type: fc.constant<"falsy">("falsy"),
+              value: constantValueArb,
+            }),
+            fc.record({
+              type: fc.constant<"nullish">("nullish"),
+              value: constantValueArb,
+            }),
           ) as fc.Arbitrary<WireFallback>,
           { minLength: 0, maxLength: 2 },
         ),
@@ -251,6 +262,92 @@ function buildBridgeText(spec: {
   return lines.join("\n");
 }
 
+const loopScopedCompileSpecArb = fc
+  .record({
+    type: canonicalIdentifierArb,
+    field: canonicalIdentifierArb,
+    names: fc.uniqueArray(canonicalIdentifierArb, {
+      minLength: 5,
+      maxLength: 5,
+    }),
+    outerAlias: toolAliasArb,
+    innerAlias: toolAliasArb,
+    nested: fc.boolean(),
+    memoizeOuter: fc.boolean(),
+    memoizeInner: fc.boolean(),
+    shadowInnerAlias: fc.boolean(),
+  })
+  .map(
+    ({
+      type,
+      field,
+      names,
+      outerAlias,
+      innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+      shadowInnerAlias,
+    }) => ({
+      type,
+      field,
+      outField: names[0]!,
+      outerValueField: names[1]!,
+      childrenField: names[2]!,
+      innerValueField: names[3]!,
+      parentField: names[4]!,
+      outerAlias,
+      innerAlias: shadowInnerAlias ? outerAlias : innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+      shadowInnerAlias,
+    }),
+  );
+
+function buildLoopScopedCompileBridgeText(spec: {
+  type: string;
+  field: string;
+  outField: string;
+  outerValueField: string;
+  childrenField: string;
+  innerValueField: string;
+  parentField: string;
+  outerAlias: string;
+  innerAlias: string;
+  nested: boolean;
+  memoizeOuter: boolean;
+  memoizeInner: boolean;
+}): string {
+  const lines = [
+    "version 1.5",
+    `bridge ${spec.type}.${spec.field} {`,
+    "  with context as ctx",
+    "  with output as o",
+    "",
+    `  o.${spec.outField} <- ctx.catalog[] as cat {`,
+    `    with std.httpCall as ${spec.outerAlias}${spec.memoizeOuter ? " memoize" : ""}`,
+    "",
+    `    ${spec.outerAlias}.value <- cat.id`,
+    `    .${spec.outerValueField} <- ${spec.outerAlias}.data`,
+  ];
+
+  if (spec.nested) {
+    lines.push(`    .${spec.childrenField} <- cat.children[] as child {`);
+    lines.push(
+      `      with std.httpCall as ${spec.innerAlias}${spec.memoizeInner ? " memoize" : ""}`,
+    );
+    lines.push("");
+    lines.push(`      ${spec.innerAlias}.value <- child.id`);
+    lines.push(`      .${spec.innerValueField} <- ${spec.innerAlias}.data`);
+    lines.push("    }");
+  }
+
+  lines.push("  }");
+  lines.push("}");
+  return lines.join("\n");
+}
+
 const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
   .record({
     type: identifierArb,
@@ -271,8 +368,14 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
           to: flatPathArb.map((path) => outputRef(type, field, path)),
           fallbacks: fc.array(
             fc.oneof(
-              fc.record({ type: fc.constant<"falsy">("falsy"), value: constantValueArb }),
-              fc.record({ type: fc.constant<"nullish">("nullish"), value: constantValueArb }),
+              fc.record({
+                type: fc.constant<"falsy">("falsy"),
+                value: constantValueArb,
+              }),
+              fc.record({
+                type: fc.constant<"nullish">("nullish"),
+                value: constantValueArb,
+              }),
             ) as fc.Arbitrary<WireFallback>,
             { minLength: 0, maxLength: 2 },
           ),
@@ -536,6 +639,68 @@ describe("compileBridge fuzzing", () => {
         }),
         {
           numRuns: 4_000,
+          endOnFailure: true,
+        },
+      );
+    },
+  );
+
+  test(
+    "loop-scoped tool bridges compile deterministically or reject deterministically",
+    { timeout: 90_000 },
+    () => {
+      fc.assert(
+        fc.property(loopScopedCompileSpecArb, (spec) => {
+          const sourceText = buildLoopScopedCompileBridgeText(spec);
+          const document = parseBridgeFormat(sourceText);
+          const operation = `${spec.type}.${spec.field}`;
+
+          let first:
+            | ReturnType<typeof compileBridge>
+            | BridgeCompilerIncompatibleError;
+          let second:
+            | ReturnType<typeof compileBridge>
+            | BridgeCompilerIncompatibleError;
+
+          try {
+            first = compileBridge(document, { operation });
+          } catch (error) {
+            assert.ok(error instanceof BridgeCompilerIncompatibleError);
+            first = error;
+          }
+
+          try {
+            second = compileBridge(document, { operation });
+          } catch (error) {
+            assert.ok(error instanceof BridgeCompilerIncompatibleError);
+            second = error as BridgeCompilerIncompatibleError;
+          }
+
+          if (first instanceof BridgeCompilerIncompatibleError) {
+            assert.ok(second instanceof BridgeCompilerIncompatibleError);
+            assert.equal(second.message, first.message);
+            assert.match(
+              first.message,
+              /(memoize|memoized|shadowed loop-scoped tool handles|nested loop-scoped tool handles)/i,
+            );
+            return;
+          }
+
+          assert.ok(!(second instanceof BridgeCompilerIncompatibleError));
+          assert.equal(first.code, second.code);
+          assert.equal(first.functionBody, second.functionBody);
+          assert.doesNotThrow(() => {
+            new AsyncFunction(
+              "input",
+              "tools",
+              "context",
+              "__opts",
+              first.functionBody,
+            );
+          });
+        }),
+        {
+          numRuns: 1_000,
           endOnFailure: true,
         },
       );

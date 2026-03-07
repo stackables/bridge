@@ -33,6 +33,35 @@ When the engine executes an array mapping block, it creates a **Shadow Scope** (
 
 The variable `j` represents the current element being processed. Because each element executes in its own isolated scope, you can nest array mappings arbitrarily deep without worrying about variable collisions.
 
+### Loop-scoped Tool Handles
+
+Array mappings can introduce tool handles inside the loop body with `with`.
+Those handles are writable only inside the current loop scope.
+
+```bridge
+o.items <- api.items[] as item {
+  with std.httpCall as fetchItem
+
+  fetchItem.value <- item.id
+  .detail <- fetchItem.data
+}
+```
+
+If repeated elements can resolve to the same tool input, add `memoize` to the
+loop-scoped handle:
+
+```bridge
+o.items <- api.items[] as item {
+  with std.httpCall as fetchItem memoize
+
+  fetchItem.value <- item.id
+  .detail <- fetchItem.data
+}
+```
+
+Memoization is scoped to that declared handle. A nested loop can declare its
+own memoized handle without sharing the parent cache.
+
 ### Aliasing Sub-fields for Readability
 
 You can also use aliases inside loops purely for readability, without triggering any tools. If your iterator has deeply nested data, bind it to a short variable:
@@ -178,3 +207,7 @@ bridge Query.getEnrichedUsers {
 <Aside>
 **Automatic Parallelism:** Because each element in the array gets its own Shadow Scope, the engine treats every `getUserDetail` alias as an independent node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP requests concurrently!
 </Aside>
+
+If duplicate inputs are common, prefer a loop-scoped `with ... memoize` handle
+over a pipe alias so repeated requests can reuse prior results within that
+handle's cache.

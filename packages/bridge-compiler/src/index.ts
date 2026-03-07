@@ -9,6 +9,10 @@
 
 export { compileBridge } from "./codegen.ts";
 export type { CompileResult, CompileOptions } from "./codegen.ts";
+export {
+  BridgeCompilerIncompatibleError,
+  assertBridgeCompilerCompatible,
+} from "./bridge-asserts.ts";
 
 export { executeBridge } from "./execute-bridge.ts";
 export type {

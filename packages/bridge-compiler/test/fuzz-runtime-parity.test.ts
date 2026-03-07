@@ -12,7 +12,7 @@ import {
   executeBridge as executeRuntime,
 } from "@stackables/bridge-core";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
-import { executeBridge as executeAot } from "../src/index.ts";
+import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
 // ── Shared infrastructure ───────────────────────────────────────────────────
 
@@ -222,6 +222,8 @@ describe("runtime parity fuzzing — deep paths + chaotic inputs", () => {
 // so there is no exponential blowup. Text is bounded by the token-count limit.
 
 const canonicalIdArb = fc.constantFrom("a", "b", "c", "d", "e", "f", "g", "h");
+const toolAliasArb = fc.constantFrom("fetch", "http", "load", "lookup");
+const toolValueArb = fc.constantFrom("alpha", "beta", "gamma", "delta");
 
 // A single "leaf" value — safe for array element fields.
 const chaosLeafArb2 = fc.oneof(
@@ -301,6 +303,138 @@ function buildArrayBridgeText(spec: {
   return lines.join("\n");
 }
 
+const loopToolParitySpecArb = fc
+  .record({
+    type: canonicalIdArb,
+    field: canonicalIdArb,
+    names: fc.uniqueArray(canonicalIdArb, {
+      minLength: 5,
+      maxLength: 5,
+    }),
+    outerAlias: toolAliasArb,
+    innerAlias: toolAliasArb,
+    nested: fc.boolean(),
+    memoizeOuter: fc.boolean(),
+    memoizeInner: fc.boolean(),
+    shadowInnerAlias: fc.boolean(),
+    catalog: fc.array(
+      fc.record({
+        id: toolValueArb,
+        children: fc.array(
+          fc.record({
+            id: toolValueArb,
+          }),
+          { maxLength: 3 },
+        ),
+      }),
+      { maxLength: 5 },
+    ),
+  })
+  .map(
+    ({
+      type,
+      field,
+      names,
+      outerAlias,
+      innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+      shadowInnerAlias,
+      catalog,
+    }) => ({
+      type,
+      field,
+      outField: names[0]!,
+      outerValueField: names[1]!,
+      childrenField: names[2]!,
+      innerValueField: names[3]!,
+      parentField: names[4]!,
+      outerAlias,
+      innerAlias: shadowInnerAlias ? outerAlias : innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+      shadowInnerAlias,
+      catalog,
+    }),
+  );
+
+const supportedLoopToolSpecArb = loopToolParitySpecArb.filter(
+  (spec) => !spec.memoizeOuter && !spec.nested,
+);
+
+const fallbackLoopToolSpecArb = loopToolParitySpecArb.filter(
+  (spec) => spec.memoizeOuter || spec.nested,
+);
+
+function buildLoopToolBridgeText(spec: {
+  type: string;
+  field: string;
+  outField: string;
+  outerValueField: string;
+  childrenField: string;
+  innerValueField: string;
+  parentField: string;
+  outerAlias: string;
+  innerAlias: string;
+  nested: boolean;
+  memoizeOuter: boolean;
+  memoizeInner: boolean;
+}): string {
+  const lines = [
+    "version 1.5",
+    `bridge ${spec.type}.${spec.field} {`,
+    "  with context as ctx",
+    "  with output as o",
+    "",
+    `  o.${spec.outField} <- ctx.catalog[] as cat {`,
+    `    with std.httpCall as ${spec.outerAlias}${spec.memoizeOuter ? " memoize" : ""}`,
+    "",
+    `    ${spec.outerAlias}.value <- cat.id`,
+    `    .${spec.outerValueField} <- ${spec.outerAlias}.data`,
+  ];
+
+  if (spec.nested) {
+    lines.push(`    .${spec.childrenField} <- cat.children[] as child {`);
+    lines.push(
+      `      with std.httpCall as ${spec.innerAlias}${spec.memoizeInner ? " memoize" : ""}`,
+    );
+    lines.push("");
+    lines.push(`      ${spec.innerAlias}.value <- child.id`);
+    lines.push(`      .${spec.innerValueField} <- ${spec.innerAlias}.data`);
+    lines.push("    }");
+  }
+
+  lines.push("  }");
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function expectedLoopToolCalls(spec: {
+  catalog: Array<{ id: string; children: Array<{ id: string }> }>;
+  nested: boolean;
+  memoizeOuter: boolean;
+  memoizeInner: boolean;
+}): number {
+  const outerCalls = spec.memoizeOuter
+    ? new Set(spec.catalog.map((cat) => cat.id)).size
+    : spec.catalog.length;
+
+  if (!spec.nested) {
+    return outerCalls;
+  }
+
+  const childIds = spec.catalog.flatMap((cat) =>
+    cat.children.map((child) => child.id),
+  );
+  const innerCalls = spec.memoizeInner
+    ? new Set(childIds).size
+    : childIds.length;
+
+  return outerCalls + innerCalls;
+}
+
 describe("runtime parity fuzzing — array mapping (P2-1B-ext)", () => {
   test(
     "AOT matches runtime on array-mapping bridges with chaotic inputs",
@@ -364,6 +498,109 @@ describe("runtime parity fuzzing — array mapping (P2-1B-ext)", () => {
           },
         ),
         { numRuns: 1_000, endOnFailure: true },
+      );
+    },
+  );
+});
+
+describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
+  test(
+    "AOT matches runtime on compiler-compatible loop-scoped tool bridges",
+    { timeout: 120_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(supportedLoopToolSpecArb, async (spec) => {
+          const bridgeText = buildLoopToolBridgeText(spec);
+          const document = parseBridgeFormat(bridgeText);
+          const operation = `${spec.type}.${spec.field}`;
+          const input = {};
+          const tools = {
+            std: {
+              httpCall: async (params: { value: string }) => ({
+                data: `tool:${params.value}`,
+              }),
+            },
+          };
+          const context = { catalog: spec.catalog };
+
+          assert.doesNotThrow(() => {
+            compileBridge(document, { operation });
+          });
+
+          const runtimeResult = await executeRuntime({
+            document,
+            operation,
+            input,
+            tools,
+            context,
+          });
+          const aotResult = await executeAot({
+            document,
+            operation,
+            input,
+            tools,
+            context,
+          });
+
+          assert.deepEqual(aotResult.data, runtimeResult.data);
+        }),
+        { numRuns: 400, endOnFailure: true },
+      );
+    },
+  );
+
+  test(
+    "extended loop-scoped tool bridges match runtime execution",
+    { timeout: 120_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(fallbackLoopToolSpecArb, async (spec) => {
+          const bridgeText = buildLoopToolBridgeText(spec);
+          const document = parseBridgeFormat(bridgeText);
+          const operation = `${spec.type}.${spec.field}`;
+          const expectedCalls = expectedLoopToolCalls(spec);
+
+          assert.doesNotThrow(() => {
+            compileBridge(document, { operation });
+          });
+
+          let runtimeCalls = 0;
+          const runtimeResult = await executeRuntime({
+            document,
+            operation,
+            input: {},
+            tools: {
+              std: {
+                httpCall: async (params: { value: string }) => {
+                  runtimeCalls++;
+                  return { data: `tool:${params.value}` };
+                },
+              },
+            },
+            context: { catalog: spec.catalog },
+          });
+
+          let aotCalls = 0;
+          const aotResult = await executeAot({
+            document,
+            operation,
+            input: {},
+            tools: {
+              std: {
+                httpCall: async (params: { value: string }) => {
+                  aotCalls++;
+                  return { data: `tool:${params.value}` };
+                },
+              },
+            },
+            context: { catalog: spec.catalog },
+          });
+
+          assert.deepEqual(aotResult.data, runtimeResult.data);
+          assert.equal(runtimeCalls, expectedCalls);
+          assert.equal(aotCalls, expectedCalls);
+        }),
+        { numRuns: 300, endOnFailure: true },
       );
     },
   );

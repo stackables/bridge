@@ -45,6 +45,8 @@ _Zero-allocation iteration using native JavaScript loops._
 | **Array mapping**           | `out.items <- api.list[] as el { .id <- el.id }`      |
 | **Root array output**       | `o <- api.list[] as el { ... }`                       |
 | **Nested arrays**           | `o <- items[] as i { .sub <- i.list[] as j { ... } }` |
+| **Loop-scoped tools**       | `o <- items[] as i { with api as t .id <- t.value }`  |
+| **Memoized handles**        | `with std.httpCall as fetch memoize`                  |
 | **Array Control Flow**      | `item.name ?? break`, `item.name ?? continue`         |
 | **Nested Control Flow**     | `break 1`/`continue 2` scopes correctly in sub-arrays |
 | **Interpolation in arrays** | `o <- items[] as it { .url <- "/items/{it.id}" }`     |

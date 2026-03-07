@@ -1,6 +1,9 @@
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
 import { resolveWires as _resolveWires } from "./resolveWires.ts";
-import { schedule as _schedule } from "./scheduleTools.ts";
+import {
+  schedule as _schedule,
+  trunkDependsOnElement,
+} from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
 import type { ToolTrace } from "./tracing.ts";
 import {
@@ -59,6 +62,32 @@ import {
 } from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 
+function stableMemoizeKey(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (typeof value === "bigint") {
+    return `${value}n`;
+  }
+  if (value === null || typeof value !== "object") {
+    const serialized = JSON.stringify(value);
+    return serialized ?? String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableMemoizeKey(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
+  );
+  return `{${entries
+    .map(
+      ([key, entryValue]) =>
+        `${JSON.stringify(key)}:${stableMemoizeKey(entryValue)}`,
+    )
+    .join(",")}}`;
+}
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
@@ -86,6 +115,11 @@ export class ExecutionTree implements TreeContext {
    * Public to satisfy `SchedulerContext` — used by `scheduleTools.ts`.
    */
   handleVersionMap: Map<string, string> = new Map();
+  /** Tool trunks marked with `memoize`. Shared with shadow trees. */
+  memoizedToolKeys: Set<string> = new Set();
+  /** Per-tool memoization caches keyed by stable input fingerprints. */
+  private toolMemoCache: Map<string, Map<string, MaybePromise<any>>> =
+    new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -172,9 +206,12 @@ export class ExecutionTree implements TreeContext {
         }
         const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
         instanceCounters.set(counterKey, instance);
+        const key = trunkKey({ module, type, field, instance });
         if (h.version) {
-          const key = trunkKey({ module, type, field, instance });
           this.handleVersionMap.set(key, h.version);
+        }
+        if (h.memoize) {
+          this.memoizedToolKeys.add(key);
         }
       }
     }
@@ -222,7 +259,37 @@ export class ExecutionTree implements TreeContext {
     fnName: string,
     fnImpl: (...args: any[]) => any,
     input: Record<string, any>,
+    memoizeKey?: string,
   ): MaybePromise<any> {
+    if (memoizeKey) {
+      const cacheKey = stableMemoizeKey(input);
+      let toolCache = this.toolMemoCache.get(memoizeKey);
+      if (!toolCache) {
+        toolCache = new Map();
+        this.toolMemoCache.set(memoizeKey, toolCache);
+      }
+
+      const cached = toolCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+
+      try {
+        const result = this.callTool(toolName, fnName, fnImpl, input);
+        if (isPromise(result)) {
+          const pending = Promise.resolve(result).catch((error) => {
+            toolCache.delete(cacheKey);
+            throw error;
+          });
+          toolCache.set(cacheKey, pending);
+          return pending;
+        }
+        toolCache.set(cacheKey, result);
+        return result;
+      } catch (error) {
+        toolCache.delete(cacheKey);
+        throw error;
+      }
+    }
+
     // Short-circuit before starting if externally aborted
     if (this.signal?.aborted) {
       throw new BridgeAbortError();
@@ -433,6 +500,8 @@ export class ExecutionTree implements TreeContext {
     child.bridge = this.bridge;
     child.pipeHandleMap = this.pipeHandleMap;
     child.handleVersionMap = this.handleVersionMap;
+    child.memoizedToolKeys = this.memoizedToolKeys;
+    child.toolMemoCache = this.toolMemoCache;
     child.toolFns = this.toolFns;
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
@@ -532,9 +601,23 @@ export class ExecutionTree implements TreeContext {
       );
     }
 
+    // Shadow trees must share cached values for refs that do not depend on the
+    // current element. Otherwise top-level aliases/tools reused inside arrays
+    // are recomputed once per element instead of being memoized at the parent.
+    if (this.parent && !ref.element && !this.isElementScopedTrunk(ref)) {
+      return this.parent.pullSingle(ref, pullChain);
+    }
+
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
     let cursor: ExecutionTree | undefined = this;
+    if (ref.element && ref.elementDepth && ref.elementDepth > 0) {
+      let remaining = ref.elementDepth;
+      while (remaining > 0 && cursor) {
+        cursor = cursor.parent;
+        remaining--;
+      }
+    }
     while (cursor && value === undefined) {
       value = cursor.state[key];
       cursor = cursor.parent;
@@ -667,6 +750,15 @@ export class ExecutionTree implements TreeContext {
     return this.createShadowArray(resolved as any[]);
   }
 
+  private isElementScopedTrunk(ref: NodeRef): boolean {
+    return trunkDependsOnElement(this.bridge, {
+      module: ref.module,
+      type: ref.type,
+      field: ref.field,
+      instance: ref.instance,
+    });
+  }
+
   /**
    * Resolve pre-grouped wires on this shadow tree without re-filtering.
    * Called by the parent's `materializeShadows` to skip per-element wire
@@ -712,7 +804,7 @@ export class ExecutionTree implements TreeContext {
         (w) =>
           "from" in w &&
           ((w.from as NodeRef).element === true ||
-            (w.from as NodeRef).module === "__local" ||
+            this.isElementScopedTrunk(w.from as NodeRef) ||
             w.to.element === true) &&
           w.to.module === SELF_MODULE &&
           w.to.type === type &&
@@ -934,14 +1026,13 @@ export class ExecutionTree implements TreeContext {
     // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
     // AND element-level wires (from.element === true).  A plain passthrough
     // (`o <- api.user`) only has the root wire.
-    // Local bindings (from.__local) are also element-scoped.
     // Pipe fork output wires in element context (e.g. concat template strings)
     // may have to.element === true instead.
     const hasElementWires = bridge.wires.some(
       (w) =>
         "from" in w &&
         ((w.from as NodeRef).element === true ||
-          (w.from as NodeRef).module === "__local" ||
+          this.isElementScopedTrunk(w.from as NodeRef) ||
           w.to.element === true) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
