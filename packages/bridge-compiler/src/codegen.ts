@@ -297,6 +297,8 @@ class CodegenContext {
   private toolDepVars = new Map<string, string>();
   /** Sparse fieldset filter for output wire pruning. */
   private requestedFields: string[] | undefined;
+  /** Per tool signature cursor used to assign distinct wire instances to repeated handle bindings. */
+  private toolInstanceCursors = new Map<string, number>();
 
   constructor(
     bridge: Bridge,
@@ -365,7 +367,7 @@ class CodegenContext {
               break;
             }
           }
-          const instance = this.findInstance(module, refType, fieldName);
+          const instance = this.findNextInstance(module, refType, fieldName);
           const tk = `${module}:${refType}:${fieldName}:${instance}`;
           const vn = `_t${++this.toolCounter}`;
           this.varMap.set(tk, vn);
@@ -435,7 +437,9 @@ class CodegenContext {
   }
 
   /** Find the instance number for a tool from the wires. */
-  private findInstance(module: string, type: string, field: string): number {
+  private findNextInstance(module: string, type: string, field: string): number {
+    const sig = `${module}:${type}:${field}`;
+    const instances: number[] = [];
     for (const w of this.bridge.wires) {
       if (
         w.to.module === module &&
@@ -443,7 +447,7 @@ class CodegenContext {
         w.to.field === field &&
         w.to.instance != null
       )
-        return w.to.instance;
+        instances.push(w.to.instance);
       if (
         "from" in w &&
         w.from.module === module &&
@@ -451,9 +455,12 @@ class CodegenContext {
         w.from.field === field &&
         w.from.instance != null
       )
-        return w.from.instance;
+        instances.push(w.from.instance);
     }
-    return 1;
+    const uniqueInstances = [...new Set(instances)].sort((a, b) => a - b);
+    const nextIndex = this.toolInstanceCursors.get(sig) ?? 0;
+    this.toolInstanceCursors.set(sig, nextIndex + 1);
+    return uniqueInstances[nextIndex] ?? uniqueInstances[0] ?? 1;
   }
 
   // ── Main compilation entry point ──────────────────────────────────────────

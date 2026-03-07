@@ -22,23 +22,4 @@ export function assertBridgeCompilerCompatible(bridge: Bridge): void {
       `[bridge-compiler] ${operation}: memoized tool handles are not supported by AOT compilation yet (${memoizedHandles.join(", ")}).`,
     );
   }
-
-  const seenHandles = new Set<string>();
-  const shadowedHandles = new Set<string>();
-
-  for (const handle of bridge.handles) {
-    if (handle.kind !== "tool") continue;
-    if (seenHandles.has(handle.handle)) {
-      shadowedHandles.add(handle.handle);
-      continue;
-    }
-    seenHandles.add(handle.handle);
-  }
-
-  if (shadowedHandles.size > 0) {
-    throw new BridgeCompilerIncompatibleError(
-      operation,
-      `[bridge-compiler] ${operation}: shadowed loop-scoped tool handles are not supported by AOT compilation yet (${[...shadowedHandles].join(", ")}).`,
-    );
-  }
 }
