@@ -77,6 +77,7 @@ import type {
   HandleBinding,
   Instruction,
   NodeRef,
+  SourceLocation,
   ToolDef,
   ToolDep,
   ToolWire,
@@ -1071,15 +1072,7 @@ class BridgeParser extends CstParser {
           // consumption in multi-line contexts like element blocks.
           // LA(0) gives the last consumed token.
           const prev = this.LA(0);
-          if (
-            prev &&
-            la.startLine != null &&
-            prev.endLine != null &&
-            la.startLine > prev.endLine
-          ) {
-            return false;
-          }
-          return true;
+          return (prev.endLine ?? prev.startLine ?? 0) === (la.startLine ?? 0);
         }
         if (la.tokenType === LSquare) {
           const la2 = this.LA(2);
@@ -1337,12 +1330,20 @@ export const PARSER_VERSION = {
   maxMajor: BRIDGE_MAX_MAJOR,
 } as const;
 
+export type ParseBridgeOptions = {
+  /** Optional logical filename associated with the parsed source. */
+  filename?: string;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Public API
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function parseBridgeChevrotain(text: string): BridgeDocument {
-  return internalParse(text);
+export function parseBridgeChevrotain(
+  text: string,
+  options: ParseBridgeOptions = {},
+): BridgeDocument {
+  return internalParse(text, undefined, options);
 }
 
 export function parseBridgeCst(text: string): CstNode {
@@ -1385,7 +1386,10 @@ export type BridgeParseResult = {
  * Uses Chevrotain's error recovery — always returns a (possibly partial) AST
  * even when the file has errors. Designed for LSP/IDE use.
  */
-export function parseBridgeDiagnostics(text: string): BridgeParseResult {
+export function parseBridgeDiagnostics(
+  text: string,
+  options: ParseBridgeOptions = {},
+): BridgeParseResult {
   const diagnostics: BridgeDiagnostic[] = [];
 
   // 1. Lex
@@ -1426,11 +1430,16 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
   }
 
   // 3. Visit → AST (semantic errors thrown as "Line N: ..." messages)
-  let document: BridgeDocument = { instructions: [] };
+  let document: BridgeDocument = { source: text, instructions: [] };
   let startLines = new Map<Instruction, number>();
   try {
     const result = toBridgeAst(cst, []);
-    document = { version: result.version, instructions: result.instructions };
+    document = {
+      version: result.version,
+      source: text,
+      ...(options.filename ? { filename: options.filename } : {}),
+      instructions: result.instructions,
+    };
     startLines = result.startLines;
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
@@ -1452,6 +1461,7 @@ export function parseBridgeDiagnostics(text: string): BridgeParseResult {
 function internalParse(
   text: string,
   previousInstructions?: Instruction[],
+  options: ParseBridgeOptions = {},
 ): BridgeDocument {
   // 1. Lex
   const lexResult = BridgeLexer.tokenize(text);
@@ -1470,7 +1480,12 @@ function internalParse(
 
   // 3. Visit → AST
   const result = toBridgeAst(cst, previousInstructions);
-  return { version: result.version, instructions: result.instructions };
+  return {
+    version: result.version,
+    source: text,
+    ...(options.filename ? { filename: options.filename } : {}),
+    instructions: result.instructions,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1499,6 +1514,68 @@ function toks(node: CstNode, tokenName: string): IToken[] {
 
 function line(token: IToken | undefined): number {
   return token?.startLine ?? 0;
+}
+
+function makeLoc(
+  start: IToken | undefined,
+  end: IToken | undefined = start,
+): SourceLocation | undefined {
+  if (!start) return undefined;
+  const last = end ?? start;
+  return {
+    startLine: start.startLine ?? 0,
+    startColumn: start.startColumn ?? 0,
+    endLine: last.endLine ?? last.startLine ?? 0,
+    endColumn: last.endColumn ?? last.startColumn ?? 0,
+  };
+}
+
+type CoalesceAltResult =
+  | { literal: string }
+  | { sourceRef: NodeRef }
+  | { control: ControlFlowInstruction };
+
+function buildWireFallback(
+  type: "falsy" | "nullish",
+  altNode: CstNode,
+  altResult: CoalesceAltResult,
+): WireFallback {
+  const loc = locFromNode(altNode);
+  if ("literal" in altResult) {
+    return { type, value: altResult.literal, ...(loc ? { loc } : {}) };
+  }
+  if ("control" in altResult) {
+    return { type, control: altResult.control, ...(loc ? { loc } : {}) };
+  }
+  return { type, ref: altResult.sourceRef, ...(loc ? { loc } : {}) };
+}
+
+function buildCatchAttrs(
+  catchAlt: CstNode,
+  altResult: CoalesceAltResult,
+): {
+  catchLoc?: SourceLocation;
+  catchFallback?: string;
+  catchFallbackRef?: NodeRef;
+  catchControl?: ControlFlowInstruction;
+} {
+  const catchLoc = locFromNode(catchAlt);
+  if ("literal" in altResult) {
+    return {
+      ...(catchLoc ? { catchLoc } : {}),
+      catchFallback: altResult.literal,
+    };
+  }
+  if ("control" in altResult) {
+    return {
+      ...(catchLoc ? { catchLoc } : {}),
+      catchControl: altResult.control,
+    };
+  }
+  return {
+    ...(catchLoc ? { catchLoc } : {}),
+    catchFallbackRef: altResult.sourceRef,
+  };
 }
 
 /* ── extractNameToken: get string from nameToken CST node ── */
@@ -1613,6 +1690,35 @@ function findFirstToken(node: CstNode): IToken | undefined {
     }
   }
   return undefined;
+}
+
+function findLastToken(node: CstNode): IToken | undefined {
+  const tokens: IToken[] = [];
+  collectTokens(node, tokens);
+  if (tokens.length === 0) return undefined;
+  tokens.sort((left, right) => left.startOffset - right.startOffset);
+  return tokens[tokens.length - 1];
+}
+
+function locFromNode(node: CstNode | undefined): SourceLocation | undefined {
+  if (!node) return undefined;
+  return makeLoc(findFirstToken(node), findLastToken(node));
+}
+
+function locFromNodeRange(
+  startNode: CstNode | undefined,
+  endNode: CstNode | undefined = startNode,
+): SourceLocation | undefined {
+  if (!startNode) return undefined;
+  return makeLoc(
+    findFirstToken(startNode),
+    findLastToken(endNode ?? startNode),
+  );
+}
+
+function withLoc<T extends Wire>(wire: T, loc: SourceLocation | undefined): T {
+  if (!loc) return wire;
+  return { ...wire, loc } as T;
 }
 
 /* ── parsePath: split "a.b[0].c" → ["a","b","0","c"] ── */
@@ -1776,12 +1882,15 @@ function processElementLines(
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
   extractTernaryBranchFn: (
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  ) =>
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation },
   processLocalBindings: (
     withDecls: CstNode[],
     iterScope: string | string[],
@@ -1799,17 +1908,20 @@ function processElementLines(
     segs: TemplateSeg[],
     lineNum: number,
     iterScope?: string | string[],
+    loc?: SourceLocation,
   ) => NodeRef,
   desugarNotFn: (
     sourceRef: NodeRef,
     lineNum: number,
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
   resolveParenExprFn: (
     parenNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
 ): void {
   const iterNames = Array.isArray(iterScope) ? iterScope : [iterScope];
@@ -1864,6 +1976,7 @@ function processElementLines(
   for (const elemLine of elemLines) {
     const elemC = elemLine.children;
     const elemLineNum = line(findFirstToken(elemLine));
+    const elemLineLoc = locFromNode(elemLine);
     const elemTargetPathStr = extractDottedPathStr(
       sub(elemLine, "elemTarget")!,
     );
@@ -1871,16 +1984,21 @@ function processElementLines(
 
     if (elemC.elemEquals) {
       const value = extractBareValue(sub(elemLine, "elemValue")!);
-      wires.push({
-        value,
-        to: {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
-          element: true,
-          path: elemToPath,
-        },
-      });
+      wires.push(
+        withLoc(
+          {
+            value,
+            to: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: elemToPath,
+            },
+          },
+          elemLineLoc,
+        ),
+      );
     } else if (elemC.elemArrow) {
       // ── String source in element context: .field <- "..." ──
       const elemStrToken = (
@@ -1907,37 +2025,35 @@ function processElementLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(elemLine, "elemCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
-          if ("literal" in altResult) {
-            catchFallback = altResult.literal;
-          } else if ("control" in altResult) {
-            catchControl = altResult.control;
-          } else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
 
         const lastAttrs = {
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchFallback ? { catchFallback } : {}),
-          ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
+          ...(catchFallback !== undefined ? { catchFallback } : {}),
+          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
 
@@ -1946,16 +2062,24 @@ function processElementLines(
             segs,
             elemLineNum,
             iterNames,
+            elemLineLoc,
           );
           const elemToRefWithElement: NodeRef = { ...elemToRef, element: true };
-          wires.push({
-            from: concatOutRef,
-            to: elemToRefWithElement,
-            pipe: true,
-            ...lastAttrs,
-          });
+          wires.push(
+            withLoc(
+              {
+                from: concatOutRef,
+                to: elemToRefWithElement,
+                pipe: true,
+                ...lastAttrs,
+              },
+              elemLineLoc,
+            ),
+          );
         } else {
-          wires.push({ value: raw, to: elemToRef, ...lastAttrs });
+          wires.push(
+            withLoc({ value: raw, to: elemToRef, ...lastAttrs }, elemLineLoc),
+          );
         }
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
@@ -2006,7 +2130,9 @@ function processElementLines(
           field: bridgeField,
           path: elemToPath,
         };
-        wires.push({ from: innerFromRef, to: innerToRef });
+        wires.push(
+          withLoc({ from: innerFromRef, to: innerToRef }, elemLineLoc),
+        );
 
         // Register the inner iterator
         const innerIterName = extractNameToken(
@@ -2071,6 +2197,13 @@ function processElementLines(
       const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
       const elemExprOps = subs(elemLine, "elemExprOp");
+      const elemExprRights = subs(elemLine, "elemExprRight");
+      const elemCondLoc = locFromNodeRange(
+        elemFirstParenNode ?? elemSourceNode,
+        elemExprRights[elemExprRights.length - 1] ??
+          elemFirstParenNode ??
+          elemSourceNode,
+      );
 
       // Compute condition ref (expression chain result or plain source)
       let elemCondRef: NodeRef;
@@ -2084,7 +2217,6 @@ function processElementLines(
           elemSafe || undefined,
         );
         if (elemExprOps.length > 0 && desugarExprChain) {
-          const elemExprRights = subs(elemLine, "elemExprRight");
           elemCondRef = desugarExprChain(
             parenRef,
             elemExprOps,
@@ -2092,6 +2224,7 @@ function processElementLines(
             elemLineNum,
             iterNames,
             elemSafe || undefined,
+            elemLineLoc,
           );
         } else {
           elemCondRef = parenRef;
@@ -2099,7 +2232,6 @@ function processElementLines(
         elemCondIsPipeFork = true;
       } else if (elemExprOps.length > 0 && desugarExprChain) {
         // Expression in element line — desugar then merge with fallback path
-        const elemExprRights = subs(elemLine, "elemExprRight");
         let leftRef: NodeRef;
         const directIterRef =
           elemPipeSegs.length === 0
@@ -2117,6 +2249,7 @@ function processElementLines(
           elemLineNum,
           iterNames,
           elemSafe || undefined,
+          elemLineLoc,
         );
         elemCondIsPipeFork = true;
       } else if (elemPipeSegs.length === 0) {
@@ -2146,6 +2279,7 @@ function processElementLines(
           elemCondRef,
           elemLineNum,
           elemSafe || undefined,
+          elemLineLoc,
         );
         elemCondIsPipeFork = true;
       }
@@ -2208,24 +2342,32 @@ function processElementLines(
           }
         }
 
-        wires.push({
-          cond: elemCondRef,
-          ...(thenBranch.kind === "ref"
-            ? { thenRef: thenBranch.ref }
-            : { thenValue: thenBranch.value }),
-          ...(elseBranch.kind === "ref"
-            ? { elseRef: elseBranch.ref }
-            : { elseValue: elseBranch.value }),
-          ...(elemFallbacks.length > 0 ? { fallbacks: elemFallbacks } : {}),
-          ...(elemCatchFallback !== undefined
-            ? { catchFallback: elemCatchFallback }
-            : {}),
-          ...(elemCatchFallbackRef !== undefined
-            ? { catchFallbackRef: elemCatchFallbackRef }
-            : {}),
-          ...(elemCatchControl ? { catchControl: elemCatchControl } : {}),
-          to: elemToRef,
-        });
+        wires.push(
+          withLoc(
+            {
+              cond: elemCondRef,
+              ...(elemCondLoc ? { condLoc: elemCondLoc } : {}),
+              thenLoc: thenBranch.loc,
+              ...(thenBranch.kind === "ref"
+                ? { thenRef: thenBranch.ref }
+                : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
+              ...(elseBranch.kind === "ref"
+                ? { elseRef: elseBranch.ref }
+                : { elseValue: elseBranch.value }),
+              ...(elemFallbacks.length > 0 ? { fallbacks: elemFallbacks } : {}),
+              ...(elemCatchFallback !== undefined
+                ? { catchFallback: elemCatchFallback }
+                : {}),
+              ...(elemCatchFallbackRef !== undefined
+                ? { catchFallbackRef: elemCatchFallbackRef }
+                : {}),
+              ...(elemCatchControl ? { catchControl: elemCatchControl } : {}),
+              to: elemToRef,
+            },
+            elemLineLoc,
+          ),
+        );
         wires.push(...elemFallbackInternalWires);
         wires.push(...elemCatchFallbackInternalWires);
         continue;
@@ -2243,12 +2385,8 @@ function processElementLines(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
@@ -2257,17 +2395,18 @@ function processElementLines(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
+      let catchLoc: SourceLocation | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(elemLine, "elemCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
-        if ("literal" in altResult) {
-          catchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          catchControl = altResult.control;
-        } else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
@@ -2277,11 +2416,14 @@ function processElementLines(
       const wireAttrs = {
         ...(isPipeFork ? { pipe: true as const } : {}),
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback ? { catchFallback } : {}),
-        ...(catchFallbackRef ? { catchFallbackRef } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
-      wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
+      wires.push(
+        withLoc({ from: fromRef, to: elemToRef, ...wireAttrs }, elemLineLoc),
+      );
       wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     } else if (elemC.elemScopeBlock) {
@@ -2299,18 +2441,23 @@ function processElementLines(
         const actualNode =
           pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
         const { safe: spreadSafe } = extractAddressPath(actualNode);
-        wires.push({
-          from: fromRef,
-          to: {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemToPath,
-          },
-          spread: true as const,
-          ...(spreadSafe ? { safe: true as const } : {}),
-        });
+        wires.push(
+          withLoc(
+            {
+              from: fromRef,
+              to: {
+                module: SELF_MODULE,
+                type: bridgeType,
+                field: bridgeField,
+                element: true,
+                path: elemToPath,
+              },
+              spread: true as const,
+              ...(spreadSafe ? { safe: true as const } : {}),
+            },
+            locFromNode(spreadLine),
+          ),
+        );
       }
       processElementScopeLines(
         scopeLines,
@@ -2367,27 +2514,33 @@ function processElementScopeLines(
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
   extractTernaryBranchFn?: (
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  ) =>
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation },
   desugarTemplateStringFn?: (
     segs: TemplateSeg[],
     lineNum: number,
     iterScope?: string | string[],
+    loc?: SourceLocation,
   ) => NodeRef,
   desugarNotFn?: (
     sourceRef: NodeRef,
     lineNum: number,
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
   resolveParenExprFn?: (
     parenNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc?: SourceLocation,
   ) => NodeRef,
 ): void {
   const iterNames = Array.isArray(iterScope) ? iterScope : [iterScope];
@@ -2442,6 +2595,7 @@ function processElementScopeLines(
   for (const scopeLine of scopeLines) {
     const sc = scopeLine.children;
     const scopeLineNum = line(findFirstToken(scopeLine));
+    const scopeLineLoc = locFromNode(scopeLine);
     const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
     const scopeSegs = parsePath(targetStr);
     const fullSegs = [...pathPrefix, ...scopeSegs];
@@ -2542,34 +2696,34 @@ function processElementScopeLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-          if ("literal" in altResult) catchFallback = altResult.literal;
-          else if ("control" in altResult) catchControl = altResult.control;
-          else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
         const lastAttrs = {
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchFallback ? { catchFallback } : {}),
-          ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
+          ...(catchFallback !== undefined ? { catchFallback } : {}),
+          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
         if (segs) {
@@ -2577,15 +2731,23 @@ function processElementScopeLines(
             segs,
             scopeLineNum,
             iterNames,
+            scopeLineLoc,
           );
-          wires.push({
-            from: concatOutRef,
-            to: { ...elemToRef, element: true },
-            pipe: true,
-            ...lastAttrs,
-          });
+          wires.push(
+            withLoc(
+              {
+                from: concatOutRef,
+                to: { ...elemToRef, element: true },
+                pipe: true,
+                ...lastAttrs,
+              },
+              scopeLineLoc,
+            ),
+          );
         } else {
-          wires.push({ value: raw, to: elemToRef, ...lastAttrs });
+          wires.push(
+            withLoc({ value: raw, to: elemToRef, ...lastAttrs }, scopeLineLoc),
+          );
         }
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
@@ -2610,6 +2772,13 @@ function processElementScopeLines(
       }
 
       const exprOps = subs(scopeLine, "scopeExprOp");
+      const exprRights = subs(scopeLine, "scopeExprRight");
+      const condLoc = locFromNodeRange(
+        scopeFirstParenNode ?? scopeSourceNode,
+        exprRights[exprRights.length - 1] ??
+          scopeFirstParenNode ??
+          scopeSourceNode,
+      );
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
       if (scopeFirstParenNode && resolveParenExprFn) {
@@ -2618,9 +2787,9 @@ function processElementScopeLines(
           scopeLineNum,
           iterNames,
           scopeSafe || undefined,
+          scopeLineLoc,
         );
         if (exprOps.length > 0 && desugarExprChain) {
-          const exprRights = subs(scopeLine, "scopeExprRight");
           condRef = desugarExprChain(
             parenRef,
             exprOps,
@@ -2628,13 +2797,13 @@ function processElementScopeLines(
             scopeLineNum,
             iterNames,
             scopeSafe || undefined,
+            scopeLineLoc,
           );
         } else {
           condRef = parenRef;
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0 && desugarExprChain) {
-        const exprRights = subs(scopeLine, "scopeExprRight");
         let leftRef: NodeRef;
         const directIterRef =
           scopePipeSegs.length === 0
@@ -2652,6 +2821,7 @@ function processElementScopeLines(
           scopeLineNum,
           iterNames,
           scopeSafe || undefined,
+          scopeLineLoc,
         );
         condIsPipeFork = true;
       } else if (scopePipeSegs.length === 0) {
@@ -2702,39 +2872,42 @@ function processElementScopeLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-          if ("literal" in altResult) catchFallback = altResult.literal;
-          else if ("control" in altResult) catchControl = altResult.control;
-          else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
         wires.push({
           cond: condRef,
+          ...(condLoc ? { condLoc } : {}),
+          thenLoc: thenBranch.loc,
           ...(thenBranch.kind === "ref"
             ? { thenRef: thenBranch.ref }
             : { thenValue: thenBranch.value }),
+          elseLoc: elseBranch.loc,
           ...(elseBranch.kind === "ref"
             ? { elseRef: elseBranch.ref }
             : { elseValue: elseBranch.value }),
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
           ...(catchFallback !== undefined ? { catchFallback } : {}),
           ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
@@ -2758,12 +2931,8 @@ function processElementScopeLines(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
@@ -2771,15 +2940,18 @@ function processElementScopeLines(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
+      let catchLoc: SourceLocation | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(scopeLine, "scopeCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-        if ("literal" in altResult) catchFallback = altResult.literal;
-        else if ("control" in altResult) catchControl = altResult.control;
-        else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
@@ -2788,8 +2960,9 @@ function processElementScopeLines(
       const wireAttrs = {
         ...(isPipe ? { pipe: true as const } : {}),
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback ? { catchFallback } : {}),
-        ...(catchFallbackRef ? { catchFallbackRef } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
       wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
@@ -3645,6 +3818,7 @@ function buildBridgeBody(
     for (const wireNode of wireNodes) {
       const wc = wireNode.children;
       const lineNum = line(findFirstToken(wireNode));
+      const wireLoc = locFromNode(wireNode);
       const { root: targetRoot, segments: targetSegs } = extractAddressPath(
         sub(wireNode, "target")!,
       );
@@ -3660,7 +3834,7 @@ function buildBridgeBody(
 
       if (wc.equalsOp) {
         const value = extractBareValue(sub(wireNode, "constValue")!);
-        wires.push({ value, to: toRef });
+        wires.push(withLoc({ value, to: toRef }, wireLoc));
         continue;
       }
 
@@ -3711,15 +3885,25 @@ function buildBridgeBody(
           ...(catchControl ? { catchControl } : {}),
         };
         if (segs) {
-          const concatOutRef = desugarTemplateString(segs, lineNum, iterNames);
-          wires.push({
-            from: concatOutRef,
-            to: toRef,
-            pipe: true,
-            ...lastAttrs,
-          });
+          const concatOutRef = desugarTemplateString(
+            segs,
+            lineNum,
+            iterNames,
+            wireLoc,
+          );
+          wires.push(
+            withLoc(
+              {
+                from: concatOutRef,
+                to: toRef,
+                pipe: true,
+                ...lastAttrs,
+              },
+              wireLoc,
+            ),
+          );
         } else {
-          wires.push({ value: raw, to: toRef, ...lastAttrs });
+          wires.push(withLoc({ value: raw, to: toRef, ...lastAttrs }, wireLoc));
         }
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
@@ -3733,6 +3917,11 @@ function buildBridgeBody(
         : undefined;
       const isSafe = headNode ? !!extractAddressPath(headNode).rootSafe : false;
       const exprOps = subs(wireNode, "exprOp");
+      const exprRights = subs(wireNode, "exprRight");
+      const condLoc = locFromNodeRange(
+        firstParenNode ?? firstSourceNode,
+        exprRights[exprRights.length - 1] ?? firstParenNode ?? firstSourceNode,
+      );
 
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
@@ -3742,9 +3931,9 @@ function buildBridgeBody(
           lineNum,
           iterNames,
           isSafe,
+          wireLoc,
         );
         if (exprOps.length > 0) {
-          const exprRights = subs(wireNode, "exprRight");
           condRef = desugarExprChain(
             parenRef,
             exprOps,
@@ -3752,13 +3941,13 @@ function buildBridgeBody(
             lineNum,
             iterNames,
             isSafe,
+            wireLoc,
           );
         } else {
           condRef = parenRef;
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0) {
-        const exprRights = subs(wireNode, "exprRight");
         const leftRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
         condRef = desugarExprChain(
           leftRef,
@@ -3767,6 +3956,7 @@ function buildBridgeBody(
           lineNum,
           iterNames,
           isSafe,
+          wireLoc,
         );
         condIsPipeFork = true;
       } else {
@@ -3779,7 +3969,7 @@ function buildBridgeBody(
       }
 
       if (wc.notPrefix) {
-        condRef = desugarNot(condRef, lineNum, isSafe);
+        condRef = desugarNot(condRef, lineNum, isSafe, wireLoc);
         condIsPipeFork = true;
       }
 
@@ -3827,20 +4017,28 @@ function buildBridgeBody(
           }
         }
 
-        wires.push({
-          cond: condRef,
-          ...(thenBranch.kind === "ref"
-            ? { thenRef: thenBranch.ref }
-            : { thenValue: thenBranch.value }),
-          ...(elseBranch.kind === "ref"
-            ? { elseRef: elseBranch.ref }
-            : { elseValue: elseBranch.value }),
-          ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchFallback !== undefined ? { catchFallback } : {}),
-          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
-          ...(catchControl ? { catchControl } : {}),
-          to: toRef,
-        });
+        wires.push(
+          withLoc(
+            {
+              cond: condRef,
+              ...(condLoc ? { condLoc } : {}),
+              thenLoc: thenBranch.loc,
+              ...(thenBranch.kind === "ref"
+                ? { thenRef: thenBranch.ref }
+                : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
+              ...(elseBranch.kind === "ref"
+                ? { elseRef: elseBranch.ref }
+                : { elseValue: elseBranch.value }),
+              ...(fallbacks.length > 0 ? { fallbacks } : {}),
+              ...(catchFallback !== undefined ? { catchFallback } : {}),
+              ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+              ...(catchControl ? { catchControl } : {}),
+              to: toRef,
+            },
+            wireLoc,
+          ),
+        );
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
         continue;
@@ -3888,15 +4086,20 @@ function buildBridgeBody(
         }
       }
 
-      wires.push({
-        from: condRef,
-        to: toRef,
-        ...(condIsPipeFork ? { pipe: true as const } : {}),
-        ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback !== undefined ? { catchFallback } : {}),
-        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
-        ...(catchControl ? { catchControl } : {}),
-      });
+      wires.push(
+        withLoc(
+          {
+            from: condRef,
+            to: toRef,
+            ...(condIsPipeFork ? { pipe: true as const } : {}),
+            ...(fallbacks.length > 0 ? { fallbacks } : {}),
+            ...(catchFallback !== undefined ? { catchFallback } : {}),
+            ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+            ...(catchControl ? { catchControl } : {}),
+          },
+          wireLoc,
+        ),
+      );
       wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     }
@@ -3909,6 +4112,7 @@ function buildBridgeBody(
     lineNum: number,
     iterScope?: string | string[],
   ): { ref: NodeRef; safe?: boolean } {
+    const sourceLoc = locFromNode(sourceNode);
     const headNode = sub(sourceNode, "head")!;
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
@@ -3997,11 +4201,16 @@ function buildBridgeBody(
         instance: forkInstance,
         path: [],
       };
-      wires.push({
-        from: prevOutRef,
-        to: forkInRef,
-        pipe: true,
-      });
+      wires.push(
+        withLoc(
+          {
+            from: prevOutRef,
+            to: forkInRef,
+            pipe: true,
+          },
+          sourceLoc,
+        ),
+      );
       prevOutRef = forkRootRef;
     }
     return {
@@ -4029,6 +4238,7 @@ function buildBridgeBody(
     segs: TemplateSeg[],
     lineNum: number,
     iterScope?: string | string[],
+    loc?: SourceLocation,
   ): NodeRef {
     const forkInstance = 100000 + nextForkSeq++;
     const forkModule = SELF_MODULE;
@@ -4055,7 +4265,7 @@ function buildBridgeBody(
         path: ["parts", String(idx)],
       };
       if (seg.kind === "text") {
-        wires.push({ value: seg.value, to: partRef });
+        wires.push(withLoc({ value: seg.value, to: partRef }, loc));
       } else {
         // Parse the ref path: e.g. "i.id" → root="i", segments=["id"]
         const dotParts = seg.path.split(".");
@@ -4065,12 +4275,17 @@ function buildBridgeBody(
         // Check for iterator-relative refs
         const fromRef = resolveIterRef(root, segments, iterScope);
         if (fromRef) {
-          wires.push({ from: fromRef, to: partRef });
+          wires.push(withLoc({ from: fromRef, to: partRef }, loc));
         } else {
-          wires.push({
-            from: resolveAddress(root, segments, lineNum),
-            to: partRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                from: resolveAddress(root, segments, lineNum),
+                to: partRef,
+              },
+              loc,
+            ),
+          );
         }
       }
     }
@@ -4130,7 +4345,14 @@ function buildBridgeBody(
       const raw = (c.stringLit as IToken[])[0].image;
       const segs = parseTemplateString(raw.slice(1, -1));
       if (segs)
-        return { sourceRef: desugarTemplateString(segs, lineNum, iterScope) };
+        return {
+          sourceRef: desugarTemplateString(
+            segs,
+            lineNum,
+            iterScope,
+            locFromNode(altNode),
+          ),
+        };
       return { literal: raw };
     }
     if (c.numberLit) return { literal: (c.numberLit as IToken[])[0].image };
@@ -4158,34 +4380,57 @@ function buildBridgeBody(
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
+  ):
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation } {
     const c = branchNode.children;
+    const branchLoc = locFromNode(branchNode);
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       const segs = parseTemplateString(raw.slice(1, -1));
       if (segs)
         return {
           kind: "ref",
-          ref: desugarTemplateString(segs, lineNum, iterScope),
+          loc: branchLoc,
+          ref: desugarTemplateString(segs, lineNum, iterScope, branchLoc),
         };
-      return { kind: "literal", value: raw };
+      return { kind: "literal", value: raw, loc: branchLoc };
     }
     if (c.numberLit)
-      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
-    if (c.trueLit) return { kind: "literal", value: "true" };
-    if (c.falseLit) return { kind: "literal", value: "false" };
-    if (c.nullLit) return { kind: "literal", value: "null" };
+      return {
+        kind: "literal",
+        value: (c.numberLit as IToken[])[0].image,
+        loc: branchLoc,
+      };
+    if (c.trueLit) return { kind: "literal", value: "true", loc: branchLoc };
+    if (c.falseLit) return { kind: "literal", value: "false", loc: branchLoc };
+    if (c.nullLit) return { kind: "literal", value: "null", loc: branchLoc };
     if (c.sourceRef) {
       const addrNode = (c.sourceRef as CstNode[])[0];
-      const { root, segments } = extractAddressPath(addrNode);
+      const { root, segments, rootSafe, segmentSafe } =
+        extractAddressPath(addrNode);
       const iterRef = resolveIterRef(root, segments, iterScope);
       if (iterRef) {
         return {
           kind: "ref",
-          ref: iterRef,
+          loc: branchLoc,
+          ref: {
+            ...iterRef,
+            ...(rootSafe ? { rootSafe: true } : {}),
+            ...(segmentSafe ? { pathSafe: segmentSafe } : {}),
+          },
         };
       }
-      return { kind: "ref", ref: resolveAddress(root, segments, lineNum) };
+      const ref = resolveAddress(root, segments, lineNum);
+      return {
+        kind: "ref",
+        loc: branchLoc,
+        ref: {
+          ...ref,
+          ...(rootSafe ? { rootSafe: true } : {}),
+          ...(segmentSafe ? { pathSafe: segmentSafe } : {}),
+        },
+      };
     }
     throw new Error(`Line ${lineNum}: Invalid ternary branch`);
   }
@@ -4261,7 +4506,12 @@ function buildBridgeBody(
       if (segs)
         return {
           kind: "ref",
-          ref: desugarTemplateString(segs, lineNum, iterScope),
+          ref: desugarTemplateString(
+            segs,
+            lineNum,
+            iterScope,
+            locFromNode(operandNode),
+          ),
         };
       return { kind: "literal", value: content };
     }
@@ -4296,7 +4546,13 @@ function buildBridgeBody(
     }
     if (c.parenExpr) {
       const parenNode = (c.parenExpr as CstNode[])[0];
-      const ref = resolveParenExpr(parenNode, lineNum, iterScope);
+      const ref = resolveParenExpr(
+        parenNode,
+        lineNum,
+        iterScope,
+        undefined,
+        locFromNode(operandNode),
+      );
       return { kind: "ref", ref };
     }
     throw new Error(`Line ${lineNum}: Invalid expression operand`);
@@ -4311,6 +4567,7 @@ function buildBridgeBody(
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc = locFromNode(parenNode),
   ): NodeRef {
     const pc = parenNode.children;
     const innerSourceNode = sub(parenNode, "parenSource")!;
@@ -4347,6 +4604,7 @@ function buildBridgeBody(
         lineNum,
         iterScope,
         innerSafe,
+        loc,
       );
     } else {
       resultRef = innerRef;
@@ -4354,7 +4612,7 @@ function buildBridgeBody(
 
     // Apply not prefix if present
     if (hasNot) {
-      resultRef = desugarNot(resultRef, lineNum, innerSafe);
+      resultRef = desugarNot(resultRef, lineNum, innerSafe, loc);
     }
 
     return resultRef;
@@ -4377,6 +4635,7 @@ function buildBridgeBody(
     lineNum: number,
     iterScope?: string | string[],
     safe?: boolean,
+    loc?: SourceLocation,
   ): NodeRef {
     // Build flat operand/operator lists for the precedence parser.
     // operands[0] = leftRef, operands[i+1] = resolved exprRights[i]
@@ -4448,7 +4707,7 @@ function buildBridgeBody(
                   instance: litInstance,
                   path: [],
                 };
-                wires.push({ value: left.value, to: litRef });
+                wires.push(withLoc({ value: left.value, to: litRef }, loc));
                 return litRef;
               })();
 
@@ -4462,15 +4721,35 @@ function buildBridgeBody(
         const rightSafeAttr = rightSafe ? { rightSafe: true as const } : {};
 
         if (opStr === "and") {
-          wires.push({
-            condAnd: { leftRef, ...rightSide, ...safeAttr, ...rightSafeAttr },
-            to: toRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                condAnd: {
+                  leftRef,
+                  ...rightSide,
+                  ...safeAttr,
+                  ...rightSafeAttr,
+                },
+                to: toRef,
+              },
+              loc,
+            ),
+          );
         } else {
-          wires.push({
-            condOr: { leftRef, ...rightSide, ...safeAttr, ...rightSafeAttr },
-            to: toRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                condOr: {
+                  leftRef,
+                  ...rightSide,
+                  ...safeAttr,
+                  ...rightSafeAttr,
+                },
+                to: toRef,
+              },
+              loc,
+            ),
+          );
         }
 
         return { kind: "ref", ref: toRef };
@@ -4507,28 +4786,38 @@ function buildBridgeBody(
 
       // Wire left → fork.a (propagate safe flag from operand)
       if (left.kind === "literal") {
-        wires.push({ value: left.value, to: makeTarget("a") });
+        wires.push(withLoc({ value: left.value, to: makeTarget("a") }, loc));
       } else {
         const safeAttr = leftSafe ? { safe: true as const } : {};
-        wires.push({
-          from: left.ref,
-          to: makeTarget("a"),
-          pipe: true,
-          ...safeAttr,
-        });
+        wires.push(
+          withLoc(
+            {
+              from: left.ref,
+              to: makeTarget("a"),
+              pipe: true,
+              ...safeAttr,
+            },
+            loc,
+          ),
+        );
       }
 
       // Wire right → fork.b (propagate safe flag from operand)
       if (right.kind === "literal") {
-        wires.push({ value: right.value, to: makeTarget("b") });
+        wires.push(withLoc({ value: right.value, to: makeTarget("b") }, loc));
       } else {
         const safeAttr = rightSafe ? { safe: true as const } : {};
-        wires.push({
-          from: right.ref,
-          to: makeTarget("b"),
-          pipe: true,
-          ...safeAttr,
-        });
+        wires.push(
+          withLoc(
+            {
+              from: right.ref,
+              to: makeTarget("b"),
+              pipe: true,
+              ...safeAttr,
+            },
+            loc,
+          ),
+        );
       }
 
       return {
@@ -4583,6 +4872,7 @@ function buildBridgeBody(
     sourceRef: NodeRef,
     _lineNum: number,
     safe?: boolean,
+    loc?: SourceLocation,
   ): NodeRef {
     const forkInstance = 100000 + nextForkSeq++;
     const forkTrunkModule = SELF_MODULE;
@@ -4601,18 +4891,23 @@ function buildBridgeBody(
     });
 
     const safeAttr = safe ? { safe: true as const } : {};
-    wires.push({
-      from: sourceRef,
-      to: {
-        module: forkTrunkModule,
-        type: forkTrunkType,
-        field: forkTrunkField,
-        instance: forkInstance,
-        path: ["a"],
-      },
-      pipe: true,
-      ...safeAttr,
-    });
+    wires.push(
+      withLoc(
+        {
+          from: sourceRef,
+          to: {
+            module: forkTrunkModule,
+            type: forkTrunkType,
+            field: forkTrunkField,
+            instance: forkInstance,
+            path: ["a"],
+          },
+          pipe: true,
+          ...safeAttr,
+        },
+        loc,
+      ),
+    );
 
     return {
       module: forkTrunkModule,
@@ -4635,6 +4930,7 @@ function buildBridgeBody(
     for (const scopeLine of scopeLines) {
       const sc = scopeLine.children;
       const scopeLineNum = line(findFirstToken(scopeLine));
+      const scopeLineLoc = locFromNode(scopeLine);
       const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
       const scopeSegs = parsePath(targetStr);
       const fullSegs = [...pathPrefix, ...scopeSegs];
@@ -4675,11 +4971,16 @@ function buildBridgeBody(
             field: alias,
             path: [],
           };
-          wires.push({
-            from: sourceRef,
-            to: localToRef,
-            ...(aliasSafe ? { safe: true as const } : {}),
-          });
+          wires.push(
+            withLoc(
+              {
+                from: sourceRef,
+                to: localToRef,
+                ...(aliasSafe ? { safe: true as const } : {}),
+              },
+              locFromNode(aliasNode),
+            ),
+          );
         }
         // Process spread lines inside this nested scope block: ...sourceExpr
         const nestedToRef = resolveAddress(targetRoot, fullSegs, scopeLineNum);
@@ -4690,12 +4991,17 @@ function buildBridgeBody(
             sourceNode,
             spreadLineNum,
           );
-          wires.push({
-            from: fromRef,
-            to: nestedToRef,
-            spread: true as const,
-            ...(spreadSafe ? { safe: true as const } : {}),
-          });
+          wires.push(
+            withLoc(
+              {
+                from: fromRef,
+                to: nestedToRef,
+                spread: true as const,
+                ...(spreadSafe ? { safe: true as const } : {}),
+              },
+              locFromNode(spreadLine),
+            ),
+          );
         }
         processScopeLines(nestedScopeLines, targetRoot, fullSegs);
         continue;
@@ -4707,7 +5013,7 @@ function buildBridgeBody(
       // ── Constant wire: .field = value ──
       if (sc.scopeEquals) {
         const value = extractBareValue(sub(scopeLine, "scopeValue")!);
-        wires.push({ value, to: toRef });
+        wires.push(withLoc({ value, to: toRef }, scopeLineLoc));
         continue;
       }
 
@@ -4761,15 +5067,27 @@ function buildBridgeBody(
             ...(catchControl ? { catchControl } : {}),
           };
           if (segs) {
-            const concatOutRef = desugarTemplateString(segs, scopeLineNum);
-            wires.push({
-              from: concatOutRef,
-              to: toRef,
-              pipe: true,
-              ...lastAttrs,
-            });
+            const concatOutRef = desugarTemplateString(
+              segs,
+              scopeLineNum,
+              undefined,
+              scopeLineLoc,
+            );
+            wires.push(
+              withLoc(
+                {
+                  from: concatOutRef,
+                  to: toRef,
+                  pipe: true,
+                  ...lastAttrs,
+                },
+                scopeLineLoc,
+              ),
+            );
           } else {
-            wires.push({ value: raw, to: toRef, ...lastAttrs });
+            wires.push(
+              withLoc({ value: raw, to: toRef, ...lastAttrs }, scopeLineLoc),
+            );
           }
           wires.push(...fallbackInternalWires);
           wires.push(...catchFallbackInternalWires);
@@ -4781,6 +5099,13 @@ function buildBridgeBody(
         const scopeFirstParenNode = sub(scopeLine, "scopeFirstParenExpr");
         const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
         const exprOps = subs(scopeLine, "scopeExprOp");
+        const exprRights = subs(scopeLine, "scopeExprRight");
+        const condLoc = locFromNodeRange(
+          scopeFirstParenNode ?? firstSourceNode,
+          exprRights[exprRights.length - 1] ??
+            scopeFirstParenNode ??
+            firstSourceNode,
+        );
 
         // Extract safe flag from head node
         let scopeBlockSafe: boolean = false;
@@ -4801,7 +5126,6 @@ function buildBridgeBody(
             scopeBlockSafe || undefined,
           );
           if (exprOps.length > 0) {
-            const exprRights = subs(scopeLine, "scopeExprRight");
             condRef = desugarExprChain(
               parenRef,
               exprOps,
@@ -4809,13 +5133,13 @@ function buildBridgeBody(
               scopeLineNum,
               undefined,
               scopeBlockSafe || undefined,
+              scopeLineLoc,
             );
           } else {
             condRef = parenRef;
           }
           condIsPipeFork = true;
         } else if (exprOps.length > 0) {
-          const exprRights = subs(scopeLine, "scopeExprRight");
           const leftRef = buildSourceExpr(firstSourceNode!, scopeLineNum);
           condRef = desugarExprChain(
             leftRef,
@@ -4824,6 +5148,7 @@ function buildBridgeBody(
             scopeLineNum,
             undefined,
             scopeBlockSafe || undefined,
+            scopeLineLoc,
           );
           condIsPipeFork = true;
         } else {
@@ -4841,6 +5166,7 @@ function buildBridgeBody(
             condRef,
             scopeLineNum,
             scopeBlockSafe || undefined,
+            scopeLineLoc,
           );
           condIsPipeFork = true;
         }
@@ -4885,20 +5211,28 @@ function buildBridgeBody(
               catchFallbackInternalWires = wires.splice(preLen);
             }
           }
-          wires.push({
-            cond: condRef,
-            ...(thenBranch.kind === "ref"
-              ? { thenRef: thenBranch.ref }
-              : { thenValue: thenBranch.value }),
-            ...(elseBranch.kind === "ref"
-              ? { elseRef: elseBranch.ref }
-              : { elseValue: elseBranch.value }),
-            ...(fallbacks.length > 0 ? { fallbacks } : {}),
-            ...(catchFallback !== undefined ? { catchFallback } : {}),
-            ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
-            ...(catchControl ? { catchControl } : {}),
-            to: toRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                cond: condRef,
+                ...(condLoc ? { condLoc } : {}),
+                thenLoc: thenBranch.loc,
+                ...(thenBranch.kind === "ref"
+                  ? { thenRef: thenBranch.ref }
+                  : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
+                ...(elseBranch.kind === "ref"
+                  ? { elseRef: elseBranch.ref }
+                  : { elseValue: elseBranch.value }),
+                ...(fallbacks.length > 0 ? { fallbacks } : {}),
+                ...(catchFallback !== undefined ? { catchFallback } : {}),
+                ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+                ...(catchControl ? { catchControl } : {}),
+                to: toRef,
+              },
+              scopeLineLoc,
+            ),
+          );
           wires.push(...fallbackInternalWires);
           wires.push(...catchFallbackInternalWires);
           continue;
@@ -4950,7 +5284,9 @@ function buildBridgeBody(
           ...(catchFallbackRef ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
-        wires.push({ from: fromRef, to: toRef, ...wireAttrs });
+        wires.push(
+          withLoc({ from: fromRef, to: toRef, ...wireAttrs }, scopeLineLoc),
+        );
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
       }
@@ -4969,6 +5305,7 @@ function buildBridgeBody(
     const nodeAliasNode = (c.bridgeNodeAlias as CstNode[] | undefined)?.[0];
     if (nodeAliasNode) {
       const lineNum = line(findFirstToken(nodeAliasNode));
+      const aliasLoc = locFromNode(nodeAliasNode);
       const alias = extractNameToken(sub(nodeAliasNode, "nodeAliasName")!);
       assertNotReserved(alias, lineNum, "node alias");
       if (handleRes.has(alias)) {
@@ -4985,15 +5322,12 @@ function buildBridgeBody(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(altNode, lineNum);
-        if ("literal" in altResult) {
-          aliasFallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          aliasFallbacks.push({ type, control: altResult.control });
-        } else {
-          aliasFallbacks.push({ type, ref: altResult.sourceRef });
+        aliasFallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           aliasFallbackInternalWires.push(...wires.splice(preLen));
         }
       }
+      let aliasCatchLoc: SourceLocation | undefined;
       let aliasCatchFallback: string | undefined;
       let aliasCatchControl: ControlFlowInstruction | undefined;
       let aliasCatchFallbackRef: NodeRef | undefined;
@@ -5002,17 +5336,18 @@ function buildBridgeBody(
       if (aliasCatchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(aliasCatchAlt, lineNum);
-        if ("literal" in altResult) {
-          aliasCatchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          aliasCatchControl = altResult.control;
-        } else {
-          aliasCatchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(aliasCatchAlt, altResult);
+        aliasCatchLoc = catchAttrs.catchLoc;
+        aliasCatchFallback = catchAttrs.catchFallback;
+        aliasCatchControl = catchAttrs.catchControl;
+        aliasCatchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           aliasCatchFallbackInternalWires = wires.splice(preLen);
         }
       }
       const modifierAttrs = {
         ...(aliasFallbacks.length > 0 ? { fallbacks: aliasFallbacks } : {}),
+        ...(aliasCatchLoc ? { catchLoc: aliasCatchLoc } : {}),
         ...(aliasCatchFallback ? { catchFallback: aliasCatchFallback } : {}),
         ...(aliasCatchFallbackRef
           ? { catchFallbackRef: aliasCatchFallbackRef }
@@ -5022,6 +5357,7 @@ function buildBridgeBody(
 
       // ── Compute the source ref ──
       let sourceRef: NodeRef;
+      let sourceLoc: SourceLocation | undefined;
       let aliasSafe: boolean | undefined;
 
       const aliasStringToken = (
@@ -5034,8 +5370,13 @@ function buildBridgeBody(
         const stringExprOps = subs(nodeAliasNode, "aliasStringExprOp");
         // Produce a NodeRef for the string value (concat fork or template desugar)
         const strRef: NodeRef = segs
-          ? desugarTemplateString(segs, lineNum)
-          : desugarTemplateString([{ kind: "text", value: raw }], lineNum);
+          ? desugarTemplateString(segs, lineNum, undefined, aliasLoc)
+          : desugarTemplateString(
+              [{ kind: "text", value: raw }],
+              lineNum,
+              undefined,
+              aliasLoc,
+            );
         if (stringExprOps.length > 0) {
           const stringExprRights = subs(nodeAliasNode, "aliasStringExprRight");
           sourceRef = desugarExprChain(
@@ -5043,10 +5384,14 @@ function buildBridgeBody(
             stringExprOps,
             stringExprRights,
             lineNum,
+            undefined,
+            undefined,
+            aliasLoc,
           );
         } else {
           sourceRef = strRef;
         }
+        sourceLoc = aliasLoc;
         // Ternary after string source (e.g. alias "a" == "b" ? x : y as name)
         const strTernaryOp = (
           nodeAliasNode.children.aliasStringTernaryOp as IToken[] | undefined
@@ -5067,17 +5412,25 @@ function buildBridgeBody(
             type: "Shadow",
             field: alias,
           });
-          wires.push({
-            cond: sourceRef,
-            ...(thenBranch.kind === "ref"
-              ? { thenRef: thenBranch.ref }
-              : { thenValue: thenBranch.value }),
-            ...(elseBranch.kind === "ref"
-              ? { elseRef: elseBranch.ref }
-              : { elseValue: elseBranch.value }),
-            ...modifierAttrs,
-            to: ternaryToRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                cond: sourceRef,
+                ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+                thenLoc: thenBranch.loc,
+                ...(thenBranch.kind === "ref"
+                  ? { thenRef: thenBranch.ref }
+                  : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
+                ...(elseBranch.kind === "ref"
+                  ? { elseRef: elseBranch.ref }
+                  : { elseValue: elseBranch.value }),
+                ...modifierAttrs,
+                to: ternaryToRef,
+              },
+              aliasLoc,
+            ),
+          );
           wires.push(...aliasFallbackInternalWires);
           wires.push(...aliasCatchFallbackInternalWires);
           continue;
@@ -5094,6 +5447,13 @@ function buildBridgeBody(
           ? !!extractAddressPath(headNode).rootSafe
           : false;
         const exprOps = subs(nodeAliasNode, "aliasExprOp");
+        const exprRights = subs(nodeAliasNode, "aliasExprRight");
+        sourceLoc = locFromNodeRange(
+          firstParenNode ?? firstSourceNode,
+          exprRights[exprRights.length - 1] ??
+            firstParenNode ??
+            firstSourceNode,
+        );
 
         let condRef: NodeRef;
         if (firstParenNode) {
@@ -5104,7 +5464,6 @@ function buildBridgeBody(
             isSafe,
           );
           if (exprOps.length > 0) {
-            const exprRights = subs(nodeAliasNode, "aliasExprRight");
             condRef = desugarExprChain(
               parenRef,
               exprOps,
@@ -5112,12 +5471,12 @@ function buildBridgeBody(
               lineNum,
               undefined,
               isSafe,
+              aliasLoc,
             );
           } else {
             condRef = parenRef;
           }
         } else if (exprOps.length > 0) {
-          const exprRights = subs(nodeAliasNode, "aliasExprRight");
           const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
           condRef = desugarExprChain(
             leftRef,
@@ -5126,6 +5485,7 @@ function buildBridgeBody(
             lineNum,
             undefined,
             isSafe,
+            aliasLoc,
           );
         } else {
           const result = buildSourceExprSafe(firstSourceNode!, lineNum);
@@ -5137,7 +5497,7 @@ function buildBridgeBody(
         if (
           (nodeAliasNode.children.aliasNotPrefix as IToken[] | undefined)?.[0]
         ) {
-          condRef = desugarNot(condRef, lineNum, isSafe);
+          condRef = desugarNot(condRef, lineNum, isSafe, aliasLoc);
         }
 
         // Ternary
@@ -5160,17 +5520,25 @@ function buildBridgeBody(
             type: "Shadow",
             field: alias,
           });
-          wires.push({
-            cond: condRef,
-            ...(thenBranch.kind === "ref"
-              ? { thenRef: thenBranch.ref }
-              : { thenValue: thenBranch.value }),
-            ...(elseBranch.kind === "ref"
-              ? { elseRef: elseBranch.ref }
-              : { elseValue: elseBranch.value }),
-            ...modifierAttrs,
-            to: ternaryToRef,
-          });
+          wires.push(
+            withLoc(
+              {
+                cond: condRef,
+                ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+                thenLoc: thenBranch.loc,
+                ...(thenBranch.kind === "ref"
+                  ? { thenRef: thenBranch.ref }
+                  : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
+                ...(elseBranch.kind === "ref"
+                  ? { elseRef: elseBranch.ref }
+                  : { elseValue: elseBranch.value }),
+                ...modifierAttrs,
+                to: ternaryToRef,
+              },
+              aliasLoc,
+            ),
+          );
           wires.push(...aliasFallbackInternalWires);
           wires.push(...aliasCatchFallbackInternalWires);
           continue;
@@ -5197,9 +5565,12 @@ function buildBridgeBody(
       };
       const aliasAttrs = {
         ...(aliasSafe ? { safe: true as const } : {}),
+        ...(sourceLoc ? { fromLoc: sourceLoc } : {}),
         ...modifierAttrs,
       };
-      wires.push({ from: sourceRef, to: localToRef, ...aliasAttrs });
+      wires.push(
+        withLoc({ from: sourceRef, to: localToRef, ...aliasAttrs }, aliasLoc),
+      );
       wires.push(...aliasFallbackInternalWires);
       wires.push(...aliasCatchFallbackInternalWires);
     }
@@ -5218,6 +5589,7 @@ function buildBridgeBody(
 
     const wc = wireNode.children;
     const lineNum = line(findFirstToken(wireNode));
+    const wireLoc = locFromNode(wireNode);
 
     // Parse target
     const { root: targetRoot, segments: targetSegs } = extractAddressPath(
@@ -5229,7 +5601,7 @@ function buildBridgeBody(
     // ── Constant wire: target = value ──
     if (wc.equalsOp) {
       const value = extractBareValue(sub(wireNode, "constValue")!);
-      wires.push({ value, to: toRef });
+      wires.push(withLoc({ value, to: toRef }, wireLoc));
       continue;
     }
 
@@ -5263,11 +5635,16 @@ function buildBridgeBody(
           field: alias,
           path: [],
         };
-        wires.push({
-          from: sourceRef,
-          to: localToRef,
-          ...(aliasSafe ? { safe: true as const } : {}),
-        });
+        wires.push(
+          withLoc(
+            {
+              from: sourceRef,
+              to: localToRef,
+              ...(aliasSafe ? { safe: true as const } : {}),
+            },
+            locFromNode(aliasNode),
+          ),
+        );
       }
       const scopeLines = subs(wireNode, "pathScopeLine");
       // Process spread lines inside the scope block: ...sourceExpr
@@ -5279,12 +5656,17 @@ function buildBridgeBody(
           sourceNode,
           spreadLineNum,
         );
-        wires.push({
-          from: fromRef,
-          to: toRef,
-          spread: true as const,
-          ...(spreadSafe ? { safe: true as const } : {}),
-        });
+        wires.push(
+          withLoc(
+            {
+              from: fromRef,
+              to: toRef,
+              spread: true as const,
+              ...(spreadSafe ? { safe: true as const } : {}),
+            },
+            locFromNode(spreadLine),
+          ),
+        );
       }
       processScopeLines(scopeLines, targetRoot, targetSegs);
       continue;
@@ -5308,15 +5690,12 @@ function buildBridgeBody(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(altNode, lineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
+      let catchLoc: SourceLocation | undefined;
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
@@ -5325,18 +5704,19 @@ function buildBridgeBody(
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(catchAlt, lineNum);
-        if ("literal" in altResult) {
-          catchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          catchControl = altResult.control;
-        } else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
 
       const lastAttrs = {
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
         ...(catchFallback ? { catchFallback } : {}),
         ...(catchFallbackRef ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
@@ -5344,11 +5724,21 @@ function buildBridgeBody(
 
       if (segs) {
         // Template string — desugar to synthetic internal.concat fork
-        const concatOutRef = desugarTemplateString(segs, lineNum);
-        wires.push({ from: concatOutRef, to: toRef, pipe: true, ...lastAttrs });
+        const concatOutRef = desugarTemplateString(
+          segs,
+          lineNum,
+          undefined,
+          wireLoc,
+        );
+        wires.push(
+          withLoc(
+            { from: concatOutRef, to: toRef, pipe: true, ...lastAttrs },
+            wireLoc,
+          ),
+        );
       } else {
         // Plain string without interpolation — emit constant wire
-        wires.push({ value: raw, to: toRef, ...lastAttrs });
+        wires.push(withLoc({ value: raw, to: toRef, ...lastAttrs }, wireLoc));
       }
       wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
@@ -5361,7 +5751,13 @@ function buildBridgeBody(
       const firstSourceNode = sub(wireNode, "firstSource");
       const firstParenNode = sub(wireNode, "firstParenExpr");
       const srcRef = firstParenNode
-        ? resolveParenExpr(firstParenNode, lineNum)
+        ? resolveParenExpr(
+            firstParenNode,
+            lineNum,
+            undefined,
+            undefined,
+            wireLoc,
+          )
         : buildSourceExpr(firstSourceNode!, lineNum);
 
       // Process coalesce modifiers on the array wire (same as plain pull wires)
@@ -5374,15 +5770,12 @@ function buildBridgeBody(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(altNode, lineNum);
-        if ("literal" in altResult) {
-          arrayFallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          arrayFallbacks.push({ type, control: altResult.control });
-        } else {
-          arrayFallbacks.push({ type, ref: altResult.sourceRef });
+        arrayFallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           arrayFallbackInternalWires.push(...wires.splice(preLen));
         }
       }
+      let arrayCatchLoc: SourceLocation | undefined;
       let arrayCatchFallback: string | undefined;
       let arrayCatchControl: ControlFlowInstruction | undefined;
       let arrayCatchFallbackRef: NodeRef | undefined;
@@ -5391,24 +5784,27 @@ function buildBridgeBody(
       if (arrayCatchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(arrayCatchAlt, lineNum);
-        if ("literal" in altResult) {
-          arrayCatchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          arrayCatchControl = altResult.control;
-        } else {
-          arrayCatchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(arrayCatchAlt, altResult);
+        arrayCatchLoc = catchAttrs.catchLoc;
+        arrayCatchFallback = catchAttrs.catchFallback;
+        arrayCatchControl = catchAttrs.catchControl;
+        arrayCatchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           arrayCatchFallbackInternalWires = wires.splice(preLen);
         }
       }
       const arrayWireAttrs = {
         ...(arrayFallbacks.length > 0 ? { fallbacks: arrayFallbacks } : {}),
+        ...(arrayCatchLoc ? { catchLoc: arrayCatchLoc } : {}),
         ...(arrayCatchFallback ? { catchFallback: arrayCatchFallback } : {}),
         ...(arrayCatchFallbackRef
           ? { catchFallbackRef: arrayCatchFallbackRef }
           : {}),
         ...(arrayCatchControl ? { catchControl: arrayCatchControl } : {}),
       };
-      wires.push({ from: srcRef, to: toRef, ...arrayWireAttrs });
+      wires.push(
+        withLoc({ from: srcRef, to: toRef, ...arrayWireAttrs }, wireLoc),
+      );
       wires.push(...arrayFallbackInternalWires);
       wires.push(...arrayCatchFallbackInternalWires);
 
@@ -5461,6 +5857,11 @@ function buildBridgeBody(
     const isSafe = headNode ? !!extractAddressPath(headNode).rootSafe : false;
 
     const exprOps = subs(wireNode, "exprOp");
+    const exprRights = subs(wireNode, "exprRight");
+    const sourceLoc = locFromNodeRange(
+      firstParenNode ?? firstSourceNode,
+      exprRights[exprRights.length - 1] ?? firstParenNode ?? firstSourceNode,
+    );
 
     // Compute condition ref (expression chain result or plain source)
     let condRef: NodeRef;
@@ -5472,9 +5873,9 @@ function buildBridgeBody(
         lineNum,
         undefined,
         isSafe,
+        wireLoc,
       );
       if (exprOps.length > 0) {
-        const exprRights = subs(wireNode, "exprRight");
         condRef = desugarExprChain(
           parenRef,
           exprOps,
@@ -5482,6 +5883,7 @@ function buildBridgeBody(
           lineNum,
           undefined,
           isSafe,
+          wireLoc,
         );
       } else {
         condRef = parenRef;
@@ -5489,7 +5891,6 @@ function buildBridgeBody(
       condIsPipeFork = true;
     } else if (exprOps.length > 0) {
       // It's a math/comparison expression — desugar it.
-      const exprRights = subs(wireNode, "exprRight");
       const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
       condRef = desugarExprChain(
         leftRef,
@@ -5498,6 +5899,7 @@ function buildBridgeBody(
         lineNum,
         undefined,
         isSafe,
+        wireLoc,
       );
       condIsPipeFork = true;
     } else {
@@ -5511,7 +5913,7 @@ function buildBridgeBody(
 
     // ── Apply `not` prefix if present ──
     if (wc.notPrefix) {
-      condRef = desugarNot(condRef, lineNum, isSafe);
+      condRef = desugarNot(condRef, lineNum, isSafe, wireLoc);
       condIsPipeFork = true;
     }
 
@@ -5533,17 +5935,14 @@ function buildBridgeBody(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(altNode, lineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
 
       // Process catch error fallback.
+      let catchLoc: SourceLocation | undefined;
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
@@ -5552,30 +5951,39 @@ function buildBridgeBody(
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAlt(catchAlt, lineNum);
-        if ("literal" in altResult) {
-          catchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          catchControl = altResult.control;
-        } else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
 
-      wires.push({
-        cond: condRef,
-        ...(thenBranch.kind === "ref"
-          ? { thenRef: thenBranch.ref }
-          : { thenValue: thenBranch.value }),
-        ...(elseBranch.kind === "ref"
-          ? { elseRef: elseBranch.ref }
-          : { elseValue: elseBranch.value }),
-        ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback !== undefined ? { catchFallback } : {}),
-        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
-        ...(catchControl ? { catchControl } : {}),
-        to: toRef,
-      });
+      wires.push(
+        withLoc(
+          {
+            cond: condRef,
+            ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+            thenLoc: thenBranch.loc,
+            ...(thenBranch.kind === "ref"
+              ? { thenRef: thenBranch.ref }
+              : { thenValue: thenBranch.value }),
+            elseLoc: elseBranch.loc,
+            ...(elseBranch.kind === "ref"
+              ? { elseRef: elseBranch.ref }
+              : { elseValue: elseBranch.value }),
+            ...(fallbacks.length > 0 ? { fallbacks } : {}),
+            ...(catchLoc ? { catchLoc } : {}),
+            ...(catchFallback !== undefined ? { catchFallback } : {}),
+            ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+            ...(catchControl ? { catchControl } : {}),
+            to: toRef,
+          },
+          wireLoc,
+        ),
+      );
       wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
       continue;
@@ -5595,18 +6003,19 @@ function buildBridgeBody(
       const preLen = wires.length;
       const altResult = extractCoalesceAlt(altNode, lineNum);
       if ("literal" in altResult) {
-        fallbacks.push({ type, value: altResult.literal });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
         if (type === "falsy") {
           hasTruthyLiteralFallback = Boolean(JSON.parse(altResult.literal));
         }
       } else if ("control" in altResult) {
-        fallbacks.push({ type, control: altResult.control });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
       } else {
-        fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
         fallbackInternalWires.push(...wires.splice(preLen));
       }
     }
 
+    let catchLoc: SourceLocation | undefined;
     let catchFallback: string | undefined;
     let catchControl: ControlFlowInstruction | undefined;
     let catchFallbackRef: NodeRef | undefined;
@@ -5615,12 +6024,12 @@ function buildBridgeBody(
     if (catchAlt) {
       const preLen = wires.length;
       const altResult = extractCoalesceAlt(catchAlt, lineNum);
-      if ("literal" in altResult) {
-        catchFallback = altResult.literal;
-      } else if ("control" in altResult) {
-        catchControl = altResult.control;
-      } else {
-        catchFallbackRef = altResult.sourceRef;
+      const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+      catchLoc = catchAttrs.catchLoc;
+      catchFallback = catchAttrs.catchFallback;
+      catchControl = catchAttrs.catchControl;
+      catchFallbackRef = catchAttrs.catchFallbackRef;
+      if ("sourceRef" in altResult) {
         catchFallbackInternalWires = wires.splice(preLen);
       }
     }
@@ -5628,13 +6037,15 @@ function buildBridgeBody(
     const { ref: fromRef, isPipeFork: isPipe } = sourceParts[0];
     const wireAttrs = {
       ...(isSafe ? { safe: true as const } : {}),
+      ...(sourceLoc ? { fromLoc: sourceLoc } : {}),
       ...(isPipe ? { pipe: true as const } : {}),
       ...(fallbacks.length > 0 ? { fallbacks } : {}),
+      ...(catchLoc ? { catchLoc } : {}),
       ...(catchFallback ? { catchFallback } : {}),
       ...(catchFallbackRef ? { catchFallbackRef } : {}),
       ...(catchControl ? { catchControl } : {}),
     };
-    wires.push({ from: fromRef, to: toRef, ...wireAttrs });
+    wires.push(withLoc({ from: fromRef, to: toRef, ...wireAttrs }, wireLoc));
     wires.push(...fallbackInternalWires);
     wires.push(...catchFallbackInternalWires);
   }

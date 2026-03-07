@@ -1,3 +1,5 @@
+type SourceLocation = import("@stackables/bridge-types").SourceLocation;
+
 /**
  * Structured node reference — identifies a specific data point in the execution graph.
  *
@@ -41,6 +43,7 @@ export interface WireFallback {
   ref?: NodeRef;
   value?: string;
   control?: ControlFlowInstruction;
+  loc?: SourceLocation;
 }
 
 /**
@@ -58,24 +61,32 @@ export type Wire =
   | {
       from: NodeRef;
       to: NodeRef;
+      loc?: SourceLocation;
+      fromLoc?: SourceLocation;
       pipe?: true;
       /** When true, this wire merges source properties into target (from `...source` syntax). */
       spread?: true;
       safe?: true;
       fallbacks?: WireFallback[];
+      catchLoc?: SourceLocation;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
     }
-  | { value: string; to: NodeRef }
+  | { value: string; to: NodeRef; loc?: SourceLocation }
   | {
       cond: NodeRef;
+      condLoc?: SourceLocation;
       thenRef?: NodeRef;
       thenValue?: string;
+      thenLoc?: SourceLocation;
       elseRef?: NodeRef;
       elseValue?: string;
+      elseLoc?: SourceLocation;
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
+      catchLoc?: SourceLocation;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -90,7 +101,9 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
+      catchLoc?: SourceLocation;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -105,7 +118,9 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
+      catchLoc?: SourceLocation;
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
@@ -246,6 +261,7 @@ export type {
   ToolMap,
   ToolMetadata,
   CacheStore,
+  SourceLocation,
 } from "@stackables/bridge-types";
 
 /**
@@ -308,6 +324,10 @@ export type Instruction = Bridge | ToolDef | ConstDef | DefineDef;
 export interface BridgeDocument {
   /** Declared language version (from `version X.Y` header). */
   version?: string;
+  /** Original Bridge source text that produced this document. */
+  source?: string;
+  /** Optional logical filename associated with the source text. */
+  filename?: string;
   /** All instructions: bridge, tool, const, and define blocks. */
   instructions: Instruction[];
 }

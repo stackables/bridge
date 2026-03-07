@@ -121,3 +121,10 @@ export type CacheStore = {
   get(key: string): Promise<any | undefined> | any | undefined;
   set(key: string, value: any, ttlSeconds: number): Promise<void> | void;
 };
+
+export type SourceLocation = {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+};

@@ -6,7 +6,11 @@
  * See docs/execution-tree-refactor.md
  */
 
-import type { ControlFlowInstruction, NodeRef } from "./types.ts";
+import type {
+  ControlFlowInstruction,
+  NodeRef,
+  SourceLocation,
+} from "./types.ts";
 
 // ── Error classes ───────────────────────────────────────────────────────────
 
@@ -29,12 +33,31 @@ export class BridgeAbortError extends Error {
 /** Timeout error — raised when a tool call exceeds the configured timeout. */
 export class BridgeTimeoutError extends Error {
   constructor(toolName: string, timeoutMs: number) {
-    super(
-      `Tool "${toolName}" timed out after ${timeoutMs}ms`,
-    );
+    super(`Tool "${toolName}" timed out after ${timeoutMs}ms`);
     this.name = "BridgeTimeoutError";
   }
 }
+
+/** Runtime error enriched with the originating Bridge wire location. */
+export class BridgeRuntimeError extends Error {
+  bridgeLoc?: SourceLocation;
+
+  constructor(
+    message: string,
+    options: {
+      bridgeLoc?: SourceLocation;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, "cause" in options ? { cause: options.cause } : undefined);
+    this.name = "BridgeRuntimeError";
+    this.bridgeLoc = options.bridgeLoc;
+  }
+}
+
+type BridgeErrorMetadataCarrier = {
+  bridgeLoc?: SourceLocation;
+};
 
 // ── Sentinels ───────────────────────────────────────────────────────────────
 
@@ -43,10 +66,13 @@ export const CONTINUE_SYM = Symbol.for("BRIDGE_CONTINUE");
 /** Sentinel for `break` — halt array iteration */
 export const BREAK_SYM = Symbol.for("BRIDGE_BREAK");
 /** Multi-level loop control signal used for break/continue N (N > 1). */
-export type LoopControlSignal = {
-  __bridgeControl: "break" | "continue";
-  levels: number;
-} | typeof BREAK_SYM | typeof CONTINUE_SYM;
+export type LoopControlSignal =
+  | {
+      __bridgeControl: "break" | "continue";
+      levels: number;
+    }
+  | typeof BREAK_SYM
+  | typeof CONTINUE_SYM;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -59,7 +85,7 @@ export const MAX_EXECUTION_DEPTH = 30;
  * A value that may already be resolved (synchronous) or still pending (asynchronous).
  * Using this instead of always returning `Promise<T>` lets callers skip
  * microtask scheduling when the value is immediately available.
- * See docs/performance.md (#10).
+ * See packages/bridge-core/performance.md (#10).
  */
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -100,7 +126,11 @@ export interface Path {
  */
 export interface TreeContext {
   /** Resolve a single NodeRef, returning sync when already in state. */
-  pullSingle(ref: NodeRef, pullChain?: Set<string>): MaybePromise<any>;
+  pullSingle(
+    ref: NodeRef,
+    pullChain?: Set<string>,
+    bridgeLoc?: SourceLocation,
+  ): MaybePromise<any>;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
 }
@@ -120,13 +150,61 @@ export function isFatalError(err: any): boolean {
   );
 }
 
-function controlLevels(ctrl: Extract<ControlFlowInstruction, { kind: "break" | "continue" }>): number {
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function wrapBridgeRuntimeError(
+  err: unknown,
+  options: {
+    bridgeLoc?: SourceLocation;
+  } = {},
+): BridgeRuntimeError {
+  if (err instanceof BridgeRuntimeError) {
+    if (err.bridgeLoc || !options.bridgeLoc) {
+      return err;
+    }
+
+    return new BridgeRuntimeError(err.message, {
+      bridgeLoc: options.bridgeLoc,
+      cause: err.cause ?? err,
+    });
+  }
+
+  return new BridgeRuntimeError(errorMessage(err), {
+    bridgeLoc: options.bridgeLoc,
+    cause: err,
+  });
+}
+
+export function attachBridgeErrorMetadata<T>(
+  err: T,
+  options: {
+    bridgeLoc?: SourceLocation;
+  } = {},
+): T {
+  if (!err || (typeof err !== "object" && typeof err !== "function")) {
+    return err;
+  }
+
+  const carrier = err as BridgeErrorMetadataCarrier;
+  if (carrier.bridgeLoc === undefined) {
+    carrier.bridgeLoc = options.bridgeLoc;
+  }
+  return err;
+}
+
+function controlLevels(
+  ctrl: Extract<ControlFlowInstruction, { kind: "break" | "continue" }>,
+): number {
   const n = ctrl.levels;
   return Number.isInteger(n) && (n as number) > 0 ? (n as number) : 1;
 }
 
 /** True when `value` is a loop control signal (single- or multi-level). */
-export function isLoopControlSignal(value: unknown): value is typeof BREAK_SYM | typeof CONTINUE_SYM | LoopControlSignal {
+export function isLoopControlSignal(
+  value: unknown,
+): value is typeof BREAK_SYM | typeof CONTINUE_SYM | LoopControlSignal {
   if (value === BREAK_SYM || value === CONTINUE_SYM) return true;
   if (typeof value !== "object" || value == null) return false;
   const candidate = value as { __bridgeControl?: unknown; levels?: unknown };
@@ -160,9 +238,7 @@ export function applyControlFlow(
   if (ctrl.kind === "panic") throw new BridgePanicError(ctrl.message);
   if (ctrl.kind === "continue") {
     const levels = controlLevels(ctrl);
-    return levels <= 1
-      ? CONTINUE_SYM
-      : { __bridgeControl: "continue", levels };
+    return levels <= 1 ? CONTINUE_SYM : { __bridgeControl: "continue", levels };
   }
   /* ctrl.kind === "break" */
   const levels = controlLevels(ctrl);

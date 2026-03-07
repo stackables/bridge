@@ -8,6 +8,7 @@ import {
 } from "../src/index.ts";
 import type { Bridge } from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ── Parser: `force <handle>` creates forces entries ─────────────────────────
@@ -224,7 +225,7 @@ force lg
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assertDeepStrictEqualIgnoringLoc(reparsed, instructions);
   });
 
   test("mixed force and regular wires roundtrip", () => {
@@ -244,7 +245,7 @@ o.result <- m.data
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assertDeepStrictEqualIgnoringLoc(reparsed, instructions);
   });
 
   test("serialized output contains force syntax", () => {
@@ -285,7 +286,7 @@ force ping catch null
       "should contain catch null",
     );
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assertDeepStrictEqualIgnoringLoc(reparsed, instructions);
   });
 
   test("mixed critical and fire-and-forget roundtrip", () => {
@@ -304,7 +305,7 @@ force mt catch null
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assertDeepStrictEqualIgnoringLoc(reparsed, instructions);
   });
 
   test("multiple force statements roundtrip", () => {
@@ -323,7 +324,7 @@ force mt
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, instructions);
+    assertDeepStrictEqualIgnoringLoc(reparsed, instructions);
   });
 });
 
@@ -381,7 +382,7 @@ o.title <- m.title
       auditCalled,
       "audit tool must be called even though output is not queried",
     );
-    assert.deepStrictEqual(auditInput, { action: "test" });
+    assertDeepStrictEqualIgnoringLoc(auditInput, { action: "test" });
   });
 
   test("forced tool receives correct input from multiple wires", async () => {

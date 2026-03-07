@@ -14,7 +14,11 @@ export {
   parseBridgeDiagnostics,
   PARSER_VERSION,
 } from "./parser/index.ts";
-export type { BridgeDiagnostic, BridgeParseResult } from "./parser/index.ts";
+export type {
+  BridgeDiagnostic,
+  BridgeParseResult,
+  ParseBridgeOptions,
+} from "./parser/index.ts";
 export { BridgeLexer, allTokens } from "./parser/index.ts";
 
 // ── Serializer ──────────────────────────────────────────────────────────────

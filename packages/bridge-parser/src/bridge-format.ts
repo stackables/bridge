@@ -9,14 +9,20 @@ import type {
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
-import { parseBridgeChevrotain } from "./parser/index.ts";
+import {
+  parseBridgeChevrotain,
+  type ParseBridgeOptions,
+} from "./parser/index.ts";
 export { parsePath } from "@stackables/bridge-core";
 
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.
  */
-export function parseBridge(text: string): BridgeDocument {
-  return parseBridgeChevrotain(text);
+export function parseBridge(
+  text: string,
+  options: ParseBridgeOptions = {},
+): BridgeDocument {
+  return parseBridgeChevrotain(text, options);
 }
 
 const BRIDGE_VERSION = "1.5";

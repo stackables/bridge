@@ -62,9 +62,12 @@ export function ResultView({
               Errors
             </p>
             {errors.map((err, i) => (
-              <p key={i} className="font-mono text-[13px] text-red-300">
+              <pre
+                key={i}
+                className="font-mono text-[13px] text-red-300 whitespace-pre-wrap wrap-break-word"
+              >
                 {err}
-              </p>
+              </pre>
             ))}
           </div>
         )}

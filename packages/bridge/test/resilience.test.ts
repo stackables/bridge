@@ -7,6 +7,7 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import type { Bridge, ConstDef, NodeRef, ToolDef, Wire } from "../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -21,7 +22,7 @@ const fallbackGeo = { "lat": 0, "lon": 0 }`);
     const c = doc.instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(c.kind, "const");
     assert.equal(c.name, "fallbackGeo");
-    assert.deepStrictEqual(JSON.parse(c.value), { lat: 0, lon: 0 });
+    assertDeepStrictEqualIgnoringLoc(JSON.parse(c.value), { lat: 0, lon: 0 });
   });
 
   test("single const with string value", () => {
@@ -70,7 +71,7 @@ const geo = {
   "lat": 0,
   "lon": 0
 }`).instructions.find((i): i is ConstDef => i.kind === "const")!;
-    assert.deepStrictEqual(JSON.parse(c.value), { lat: 0, lon: 0 });
+    assertDeepStrictEqualIgnoringLoc(JSON.parse(c.value), { lat: 0, lon: 0 });
   });
 
   test("multi-line JSON array", () => {
@@ -80,7 +81,7 @@ const items = [
   "b",
   "c"
 ]`).instructions.find((i): i is ConstDef => i.kind === "const")!;
-    assert.deepStrictEqual(JSON.parse(c.value), ["a", "b", "c"]);
+    assertDeepStrictEqualIgnoringLoc(JSON.parse(c.value), ["a", "b", "c"]);
   });
 
   test("const coexists with tool and bridge blocks", () => {
@@ -137,7 +138,7 @@ o.result <- i.q
     const doc = parseBridge(input);
     const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, doc);
+    assertDeepStrictEqualIgnoringLoc(reparsed, doc);
   });
 });
 
@@ -200,7 +201,10 @@ tool myApi from httpCall {
     assert.ok(onError, "should have an onError wire");
     assert.ok("value" in onError!, "should have a value");
     if ("value" in onError!) {
-      assert.deepStrictEqual(JSON.parse(onError.value), { lat: 0, lon: 0 });
+      assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
+        lat: 0,
+        lon: 0,
+      });
     }
   });
 
@@ -235,7 +239,10 @@ tool myApi from httpCall {
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
-      assert.deepStrictEqual(JSON.parse(onError.value), { lat: 0, lon: 0 });
+      assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
+        lat: 0,
+        lon: 0,
+      });
     }
   });
 
@@ -267,7 +274,7 @@ tool myApi from httpCall {
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("on error <- source roundtrips", () => {
@@ -278,7 +285,7 @@ tool myApi from httpCall {
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(serializeBridge(doc)), doc);
   });
 });
 
@@ -595,7 +602,7 @@ o.lat <- a.lat catch 0
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("catch on pipe chain roundtrips", () => {
@@ -609,7 +616,7 @@ o.result <- t:i.text catch "fallback"
 
 }`;
     const doc = parseBridge(input);
-    assert.deepStrictEqual(parseBridge(serializeBridge(doc)), doc);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(serializeBridge(doc)), doc);
   });
 
   test("serialized output contains catch", () => {
@@ -821,7 +828,9 @@ o.name <- i.name || "World"
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
-    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '"World"' }]);
+    assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
+      { type: "falsy", value: '"World"' },
+    ]);
     assert.equal(wire.catchFallback, undefined);
   });
 
@@ -839,7 +848,9 @@ o.name <- i.name || "World" catch "Error"
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const wire = bridge.wires[0] as Extract<Wire, { from: NodeRef }>;
-    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '"World"' }]);
+    assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
+      { type: "falsy", value: '"World"' },
+    ]);
     assert.equal(wire.catchFallback, '"Error"');
   });
 
@@ -861,7 +872,9 @@ o.result <- a.data || {"lat":0,"lon":0}
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).from.path[0] === "data",
     ) as Extract<Wire, { from: NodeRef }>;
-    assert.deepStrictEqual(wire.fallbacks, [{ type: "falsy", value: '{"lat":0,"lon":0}' }]);
+    assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
+      { type: "falsy", value: '{"lat":0,"lon":0}' },
+    ]);
   });
 
   test("wire without || has no fallbacks", () => {
@@ -900,7 +913,9 @@ o.result <- up:i.text || "N/A"
       (w) =>
         "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
     ) as Extract<Wire, { from: NodeRef }>;
-    assert.deepStrictEqual(terminalWire?.fallbacks, [{ type: "falsy", value: '"N/A"' }]);
+    assertDeepStrictEqualIgnoringLoc(terminalWire?.fallbacks, [
+      { type: "falsy", value: '"N/A"' },
+    ]);
   });
 });
 
@@ -916,7 +931,7 @@ o.name <- i.name || "World"
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     const original = parseBridge(input);
-    assert.deepStrictEqual(reparsed, original);
+    assertDeepStrictEqualIgnoringLoc(reparsed, original);
   });
 
   test("|| and catch together roundtrip", () => {
@@ -932,7 +947,7 @@ o.name <- a.name || "World" catch "Error"
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     const original = parseBridge(input);
-    assert.deepStrictEqual(reparsed, original);
+    assertDeepStrictEqualIgnoringLoc(reparsed, original);
   });
 
   test("pipe wire with || roundtrips", () => {
@@ -947,7 +962,7 @@ o.result <- up:i.text || "N/A"
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
     const original = parseBridge(input);
-    assert.deepStrictEqual(reparsed, original);
+    assertDeepStrictEqualIgnoringLoc(reparsed, original);
   });
 });
 
@@ -1332,7 +1347,7 @@ o.label <- api.label catch i.fallbackLabel
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
-    assert.deepStrictEqual(reparsed, parseBridge(input));
+    assertDeepStrictEqualIgnoringLoc(reparsed, parseBridge(input));
   });
 
   test("catch pipe:source roundtrips", () => {
@@ -1348,7 +1363,7 @@ o.label <- api.label catch up:i.errorDefault
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
-    assert.deepStrictEqual(reparsed, parseBridge(input));
+    assertDeepStrictEqualIgnoringLoc(reparsed, parseBridge(input));
   });
 
   test("|| source || source roundtrips (desugars to multi-wire)", () => {
@@ -1367,7 +1382,7 @@ o.label <- p.label || b.label || "default"
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
-    assert.deepStrictEqual(reparsed, parseBridge(input));
+    assertDeepStrictEqualIgnoringLoc(reparsed, parseBridge(input));
   });
 
   test("full chain: || source || literal catch pipe roundtrips", () => {
@@ -1385,7 +1400,7 @@ o.label <- api.label || b.label || "default" catch up:i.errorDefault
 
 }`;
     const reparsed = parseBridge(serializeBridge(parseBridge(input)));
-    assert.deepStrictEqual(reparsed, parseBridge(input));
+    assertDeepStrictEqualIgnoringLoc(reparsed, parseBridge(input));
   });
 });
 

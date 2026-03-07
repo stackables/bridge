@@ -30,6 +30,7 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
+import type { SourceLocation } from "@stackables/bridge-types";
 import { assertBridgeCompilerCompatible } from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
@@ -694,12 +695,99 @@ class CodegenContext {
     lines.push(
       `  const __BridgeTimeoutError = __opts?.__BridgeTimeoutError ?? class extends Error { constructor(n, ms) { super('Tool "' + n + '" timed out after ' + ms + 'ms'); this.name = "BridgeTimeoutError"; } };`,
     );
+    lines.push(
+      `  const __BridgeRuntimeError = __opts?.__BridgeRuntimeError ?? class extends Error { constructor(message, options) { super(message, options && "cause" in options ? { cause: options.cause } : undefined); this.name = "BridgeRuntimeError"; this.bridgeLoc = options?.bridgeLoc; } };`,
+    );
     lines.push(`  const __signal = __opts?.signal;`);
     lines.push(`  const __timeoutMs = __opts?.toolTimeoutMs ?? 0;`);
     lines.push(
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
     lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(`  function __rethrowBridgeError(err, loc) {`);
+    lines.push(
+      `    if (err?.name === "BridgePanicError") throw __attachBridgeMeta(err, loc);`,
+    );
+    lines.push(`    if (err?.name === "BridgeAbortError") throw err;`);
+    lines.push(
+      `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc !== undefined) throw err;`,
+    );
+    lines.push(
+      `    throw new __BridgeRuntimeError(err instanceof Error ? err.message : String(err), { cause: err, bridgeLoc: loc });`,
+    );
+    lines.push(`  }`);
+    lines.push(`  function __wrapBridgeError(fn, loc) {`);
+    lines.push(`    try {`);
+    lines.push(`      return fn();`);
+    lines.push(`    } catch (err) {`);
+    lines.push(`      __rethrowBridgeError(err, loc);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  async function __wrapBridgeErrorAsync(fn, loc) {`);
+    lines.push(`    try {`);
+    lines.push(`      return await fn();`);
+    lines.push(`    } catch (err) {`);
+    lines.push(`      __rethrowBridgeError(err, loc);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  function __attachBridgeMeta(err, loc) {`);
+    lines.push(
+      `    if (err && (typeof err === "object" || typeof err === "function")) {`,
+    );
+    lines.push(`      if (err.bridgeLoc === undefined) err.bridgeLoc = loc;`);
+    lines.push(`    }`);
+    lines.push(`    return err;`);
+    lines.push(`  }`);
+    lines.push(
+      `  // Single-segment access is split out to preserve the compiled-path recovery documented in packages/bridge-compiler/performance.md (#2).`,
+    );
+    lines.push(
+      `  function __get(base, segment, accessSafe, allowMissingBase) {`,
+    );
+    lines.push(`    if (base == null) {`);
+    lines.push(`      if (allowMissingBase || accessSafe) return undefined;`);
+    lines.push(
+      `      throw new TypeError("Cannot read properties of " + base + " (reading '" + segment + "')");`,
+    );
+    lines.push(`    }`);
+    lines.push(`    const next = base[segment];`);
+    lines.push(
+      `    const isPrimitiveBase = base !== null && typeof base !== "object" && typeof base !== "function";`,
+    );
+    lines.push(`    if (isPrimitiveBase && next === undefined) {`);
+    lines.push(
+      `      throw new TypeError("Cannot read properties of " + base + " (reading '" + segment + "')");`,
+    );
+    lines.push(`    }`);
+    lines.push(`    return next;`);
+    lines.push(`  }`);
+    lines.push(`  function __path(base, path, safe, allowMissingBase) {`);
+    lines.push(`    let result = base;`);
+    lines.push(`    for (let i = 0; i < path.length; i++) {`);
+    lines.push(`      const segment = path[i];`);
+    lines.push(`      const accessSafe = safe?.[i] ?? false;`);
+    lines.push(`      if (result == null) {`);
+    lines.push(`        if ((i === 0 && allowMissingBase) || accessSafe) {`);
+    lines.push(`          result = undefined;`);
+    lines.push(`          continue;`);
+    lines.push(`        }`);
+    lines.push(
+      `        throw new TypeError("Cannot read properties of " + result + " (reading '" + segment + "')");`,
+    );
+    lines.push(`      }`);
+    lines.push(`      const next = result[segment];`);
+    lines.push(
+      `      const isPrimitiveBase = result !== null && typeof result !== "object" && typeof result !== "function";`,
+    );
+    lines.push(`      if (isPrimitiveBase && next === undefined) {`);
+    lines.push(
+      `        throw new TypeError("Cannot read properties of " + result + " (reading '" + segment + "')");`,
+    );
+    lines.push(`      }`);
+    lines.push(`      result = next;`);
+    lines.push(`    }`);
+    lines.push(`    return result;`);
+    lines.push(`  }`);
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
@@ -1407,7 +1495,7 @@ class CodegenContext {
           if (restPath.length === 1) return base;
           const tail = restPath
             .slice(1)
-            .map((p) => `?.[${JSON.stringify(p)}]`)
+            .map((p) => `[${JSON.stringify(p)}]`)
             .join("");
           return `(${base})${tail}`;
         }
@@ -1432,7 +1520,7 @@ class CodegenContext {
     }
 
     if (restPath.length === 0) return baseExpr;
-    return baseExpr + restPath.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    return baseExpr + restPath.map((p) => `[${JSON.stringify(p)}]`).join("");
   }
 
   /** Find a tool info by tool name. */
@@ -2222,29 +2310,32 @@ class CodegenContext {
 
     // Pull wire
     if ("from" in w) {
-      let expr = this.refToExpr(w.from);
+      let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Conditional wire (ternary)
     if ("cond" in w) {
-      const condExpr = this.refToExpr(w.cond);
+      const condExpr = this.wrapExprWithLoc(
+        this.refToExpr(w.cond),
+        w.condLoc ?? w.loc,
+      );
       const thenExpr =
         w.thenRef !== undefined
-          ? this.lazyRefToExpr(w.thenRef)
+          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.thenRef), w.thenLoc)
           : w.thenValue !== undefined
             ? emitCoerced(w.thenValue)
             : "undefined";
       const elseExpr =
         w.elseRef !== undefined
-          ? this.lazyRefToExpr(w.elseRef)
+          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.elseRef), w.elseLoc)
           : w.elseValue !== undefined
             ? emitCoerced(w.elseValue)
             : "undefined";
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Logical AND
@@ -2258,7 +2349,7 @@ class CodegenContext {
         expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Logical OR
@@ -2272,7 +2363,7 @@ class CodegenContext {
         expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     return "undefined";
@@ -2284,11 +2375,32 @@ class CodegenContext {
     this.elementVarStack.push(elVar);
     this.currentElVar = elVar;
     try {
-      return this._elementWireToExprInner(w, elVar);
+      return this.wrapWireExpr(w, this._elementWireToExprInner(w, elVar));
     } finally {
       this.elementVarStack.pop();
       this.currentElVar = prevElVar;
     }
+  }
+
+  private wrapWireExpr(w: Wire, expr: string): string {
+    const loc = this.serializeLoc(w.loc);
+    if (expr.includes("await ")) {
+      return `await __wrapBridgeErrorAsync(async () => (${expr}), ${loc})`;
+    }
+    return `__wrapBridgeError(() => (${expr}), ${loc})`;
+  }
+
+  private serializeLoc(loc?: SourceLocation): string {
+    return JSON.stringify(loc ?? null);
+  }
+
+  private wrapExprWithLoc(expr: string, loc?: SourceLocation): string {
+    if (!loc) return expr;
+    const serializedLoc = this.serializeLoc(loc);
+    if (expr.includes("await ")) {
+      return `await __wrapBridgeErrorAsync(async () => (${expr}), ${serializedLoc})`;
+    }
+    return `__wrapBridgeError(() => (${expr}), ${serializedLoc})`;
   }
 
   private refToElementExpr(ref: NodeRef): string {
@@ -2300,7 +2412,7 @@ class CodegenContext {
       throw new Error(`Missing element variable for ${JSON.stringify(ref)}`);
     }
     if (ref.path.length === 0) return elVar;
-    return elVar + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    return this.appendPathExpr(elVar, ref, true);
   }
 
   private _elementWireToExprInner(w: Wire, elVar: string): string {
@@ -2317,35 +2429,34 @@ class CodegenContext {
         if (this.elementScopedTools.has(condKey)) {
           condExpr = this.buildInlineToolExpr(condKey, elVar);
           if (condRef.path.length > 0) {
-            condExpr =
-              `(${condExpr})` +
-              condRef.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+            condExpr = this.appendPathExpr(`(${condExpr})`, condRef);
           }
         } else {
           condExpr = this.refToExpr(condRef);
         }
       }
+      condExpr = this.wrapExprWithLoc(condExpr, w.condLoc ?? w.loc);
       const resolveBranch = (
         ref: NodeRef | undefined,
         val: string | undefined,
+        loc: SourceLocation | undefined,
       ): string => {
         if (ref !== undefined) {
-          if (ref.element) return this.refToElementExpr(ref);
+          if (ref.element) {
+            return this.wrapExprWithLoc(this.refToElementExpr(ref), loc);
+          }
           const branchKey = refTrunkKey(ref);
           if (this.elementScopedTools.has(branchKey)) {
             let e = this.buildInlineToolExpr(branchKey, elVar);
-            if (ref.path.length > 0)
-              e =
-                `(${e})` +
-                ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
-            return e;
+            if (ref.path.length > 0) e = this.appendPathExpr(`(${e})`, ref);
+            return this.wrapExprWithLoc(e, loc);
           }
-          return this.refToExpr(ref);
+          return this.wrapExprWithLoc(this.refToExpr(ref), loc);
         }
         return val !== undefined ? emitCoerced(val) : "undefined";
       };
-      const thenExpr = resolveBranch(w.thenRef, w.thenValue);
-      const elseExpr = resolveBranch(w.elseRef, w.elseValue);
+      const thenExpr = resolveBranch(w.thenRef, w.thenValue, w.thenLoc);
+      const elseExpr = resolveBranch(w.elseRef, w.elseValue, w.elseLoc);
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -2358,21 +2469,20 @@ class CodegenContext {
         if (this.elementScopedTools.has(srcKey)) {
           let expr = this.buildInlineToolExpr(srcKey, elVar);
           if (w.from.path.length > 0) {
-            expr =
-              `(${expr})` +
-              w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+            expr = this.appendPathExpr(`(${expr})`, w.from);
           }
+          expr = this.wrapExprWithLoc(expr, w.fromLoc);
           expr = this.applyFallbacks(w, expr);
           return expr;
         }
         // Non-element ref inside array mapping — use normal refToExpr
-        let expr = this.refToExpr(w.from);
+        let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
         expr = this.applyFallbacks(w, expr);
         return expr;
       }
       // Element refs: from.element === true, path = ["srcField"]
-      let expr =
-        elVar + w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+      let expr = this.appendPathExpr(elVar, w.from, true);
+      expr = this.wrapExprWithLoc(expr, w.fromLoc);
       expr = this.applyFallbacks(w, expr);
       return expr;
     }
@@ -2888,7 +2998,7 @@ class CodegenContext {
       for (const fb of w.fallbacks) {
         if (fb.type === "falsy") {
           if (fb.ref) {
-            expr = `(${expr} || ${this.refToExpr(fb.ref)})`; // lgtm [js/code-injection]
+            expr = `(${expr} || ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)})`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -2902,7 +3012,7 @@ class CodegenContext {
         } else {
           // nullish
           if (fb.ref) {
-            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(fb.ref)}))`; // lgtm [js/code-injection]
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)}))`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -2923,7 +3033,10 @@ class CodegenContext {
     if (hasCatchFallback(w)) {
       let catchExpr: string;
       if ("catchFallbackRef" in w && w.catchFallbackRef) {
-        catchExpr = this.refToExpr(w.catchFallbackRef);
+        catchExpr = this.wrapExprWithLoc(
+          this.refToExpr(w.catchFallbackRef),
+          "catchLoc" in w ? w.catchLoc : undefined,
+        );
       } else if ("catchFallback" in w && w.catchFallback != null) {
         catchExpr = emitCoerced(w.catchFallback);
       } else {
@@ -3013,7 +3126,7 @@ class CodegenContext {
         if (ref.path.length === 1) return base;
         const tail = ref.path
           .slice(1)
-          .map((p) => `?.[${JSON.stringify(p)}]`)
+          .map((p) => `[${JSON.stringify(p)}]`)
           .join("");
         return `(${base})${tail}`;
       }
@@ -3027,19 +3140,7 @@ class CodegenContext {
       !ref.element
     ) {
       if (ref.path.length === 0) return "input";
-      // Respect rootSafe / pathSafe flags, same as tool-result refs.
-      // A bare `.` access (no `?.`) on a null intermediate throws TypeError,
-      // matching the runtime's applyPath strict-null behaviour.
-      return (
-        "input" +
-        ref.path
-          .map((p, i) => {
-            const safe =
-              ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
-            return safe ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`;
-          })
-          .join("")
-      );
+      return this.appendPathExpr("input", ref);
     }
 
     // Tool result reference
@@ -3049,9 +3150,7 @@ class CodegenContext {
     if (this.elementScopedTools.has(key) && this.currentElVar) {
       let expr = this.buildInlineToolExpr(key, this.currentElVar);
       if (ref.path.length > 0) {
-        expr =
-          `(${expr})` +
-          ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+        expr = this.appendPathExpr(`(${expr})`, ref);
       }
       return expr;
     }
@@ -3065,17 +3164,26 @@ class CodegenContext {
     if (!varName)
       throw new Error(`Unknown reference: ${key} (${JSON.stringify(ref)})`);
     if (ref.path.length === 0) return varName;
-    // Use pathSafe flags to decide ?. vs . for each segment
-    return (
-      varName +
-      ref.path
-        .map((p, i) => {
-          const safe =
-            ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
-          return safe ? `?.[${JSON.stringify(p)}]` : `[${JSON.stringify(p)}]`;
-        })
-        .join("")
+    return this.appendPathExpr(varName, ref);
+  }
+
+  private appendPathExpr(
+    baseExpr: string,
+    ref: NodeRef,
+    allowMissingBase = false,
+  ): string {
+    if (ref.path.length === 0) return baseExpr;
+
+    const safeFlags = ref.path.map(
+      (_, i) =>
+        ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false),
     );
+    // Prefer the dedicated single-segment helper on the dominant case.
+    // See packages/bridge-compiler/performance.md (#2).
+    if (ref.path.length === 1) {
+      return `__get(${baseExpr}, ${JSON.stringify(ref.path[0])}, ${safeFlags[0] ? "true" : "false"}, ${allowMissingBase ? "true" : "false"})`;
+    }
+    return `__path(${baseExpr}, ${JSON.stringify(ref.path)}, ${JSON.stringify(safeFlags)}, ${allowMissingBase ? "true" : "false"})`;
   }
 
   /**
@@ -3134,8 +3242,7 @@ class CodegenContext {
           ? `(await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(key)}))`
           : `(await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}))`;
         if (ref.path.length > 0) {
-          expr =
-            expr + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+          expr = this.appendPathExpr(expr, ref);
         }
         return expr;
       }

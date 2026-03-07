@@ -1,4 +1,5 @@
 import { ExecutionTree } from "./ExecutionTree.ts";
+import { attachBridgeErrorDocumentContext } from "./formatBridgeError.ts";
 import { TraceCollector } from "./tracing.ts";
 import type { Logger } from "./tree-types.ts";
 import type { ToolTrace, TraceLevel } from "./tracing.ts";
@@ -133,12 +134,23 @@ export async function executeBridge<T = unknown>(
 
   const tree = new ExecutionTree(trunk, doc, allTools, context);
 
+  tree.source = doc.source;
+  tree.filename = doc.filename;
+
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;
-  if (options.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+  if (
+    options.toolTimeoutMs !== undefined &&
+    Number.isFinite(options.toolTimeoutMs) &&
+    options.toolTimeoutMs >= 0
+  ) {
     tree.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
   }
-  if (options.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+  if (
+    options.maxDepth !== undefined &&
+    Number.isFinite(options.maxDepth) &&
+    options.maxDepth >= 0
+  ) {
     tree.maxDepth = Math.floor(options.maxDepth);
   }
 
@@ -147,7 +159,12 @@ export async function executeBridge<T = unknown>(
     tree.tracer = new TraceCollector(traceLevel);
   }
 
-  const data = await tree.run(input, options.requestedFields);
+  let data: unknown;
+  try {
+    data = await tree.run(input, options.requestedFields);
+  } catch (err) {
+    throw attachBridgeErrorDocumentContext(err, doc);
+  }
 
   return { data: data as T, traces: tree.getTraces() };
 }

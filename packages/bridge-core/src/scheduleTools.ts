@@ -10,7 +10,7 @@
 
 import type { Bridge, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { isPromise } from "./tree-types.ts";
+import { isPromise, wrapBridgeRuntimeError } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
 import { trunkKey, sameTrunk, setNested } from "./tree-utils.ts";
 import {
@@ -50,6 +50,15 @@ export interface SchedulerContext extends ToolLookupContext {
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any>;
   /** Resolve a set of matched wires (delegates to resolveWires.ts). */
   resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any>;
+}
+
+function getBridgeLocFromGroups(groupEntries: [string, Wire[]][]): Wire["loc"] {
+  for (const [, wires] of groupEntries) {
+    for (const wire of wires) {
+      if (wire.loc) return wire.loc;
+    }
+  }
+  return undefined;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -226,7 +235,7 @@ export function schedule(
   // For __local bindings, __define_ pass-throughs, pipe forks backed by
   // sync tools, and logic nodes — resolve bridge wires and return
   // synchronously when all sources are already in state.
-  // See docs/performance.md (#12).
+  // See packages/bridge-core/performance.md (#12).
   const groupEntries = Array.from(wireGroups.entries());
   const nGroups = groupEntries.length;
   const values: MaybePromise<any>[] = new Array(nGroups);
@@ -258,7 +267,7 @@ export function schedule(
  * Assemble input from resolved wire values and either invoke a direct tool
  * function or return the data for pass-through targets (local/define/logic).
  * Returns synchronously when the tool function (if any) returns sync.
- * See docs/performance.md (#12).
+ * See packages/bridge-core/performance.md (#12).
  */
 export function scheduleFinish(
   ctx: SchedulerContext,
@@ -270,6 +279,7 @@ export function scheduleFinish(
 ): MaybePromise<any> {
   const input: Record<string, any> = {};
   const resolved: [string[], any][] = [];
+  const bridgeLoc = getBridgeLocFromGroups(groupEntries);
   for (let i = 0; i < groupEntries.length; i++) {
     const path = groupEntries[i]![1][0]!.to.path;
     const value = resolvedValues[i];
@@ -323,7 +333,9 @@ export function scheduleFinish(
     return input;
   }
 
-  throw new Error(`No tool found for "${toolName}"`);
+  throw wrapBridgeRuntimeError(new Error(`No tool found for "${toolName}"`), {
+    bridgeLoc,
+  });
 }
 
 // ── Schedule ToolDef ────────────────────────────────────────────────────────
@@ -361,9 +373,18 @@ export async function scheduleToolDef(
     }
   }
 
+  const bridgeLoc = getBridgeLocFromGroups(groupEntries);
+
   // Call ToolDef-backed tool function
   const fn = lookupToolFn(ctx, toolDef.fn!);
-  if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
+  if (!fn) {
+    throw wrapBridgeRuntimeError(
+      new Error(`Tool function "${toolDef.fn}" not registered`),
+      {
+        bridgeLoc,
+      },
+    );
+  }
 
   // on error: wrap the tool call with fallback from onError wire
   const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");

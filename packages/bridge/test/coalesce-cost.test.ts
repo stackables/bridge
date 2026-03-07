@@ -3,6 +3,7 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -57,7 +58,7 @@ o.label <- p.label || b.label
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "P");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["primary"],
       "backup should never be called",
@@ -96,7 +97,7 @@ o.label <- p.label || b.label
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "B");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["primary", "backup"],
       "backup called after primary returned null",
@@ -149,7 +150,11 @@ o.label <- a.label || b.label || c.label
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "from-B");
-    assert.deepStrictEqual(callLog, ["A", "B"], "C should never be called");
+    assertDeepStrictEqualIgnoringLoc(
+      callLog,
+      ["A", "B"],
+      "C should never be called",
+    );
   });
 
   test("|| with literal fallback: both null → literal, no extra calls", async () => {
@@ -184,7 +189,7 @@ o.label <- p.label || b.label || "default"
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "default");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["primary", "backup"],
       "both called, then literal fires",
@@ -224,7 +229,7 @@ o.label <- p.label || b.label
     });
     // strict source throws → error exits || chain → no catch → GraphQL error
     assert.ok(result.errors?.length, "strict throw → GraphQL error");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["primary"],
       "backup never called — strict throw exits chain",
@@ -263,7 +268,7 @@ o.label <- p.label || b.label || "null-default" catch "error-default"
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "error-default");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["primary"],
       "strict throw exits || — catch fires immediately",
@@ -302,7 +307,7 @@ o.label <- i.hint
     });
     // Authored order: api.label is first → wins
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["expensiveApi"],
       "first wire evaluated first",
@@ -337,7 +342,7 @@ o.label <- i.hint
       document: parse(`{ lookup(q: "x") { label } }`),
     });
     assert.equal(result.data.lookup.label, "from-api");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["expensiveApi"],
       "API called when input is null",
@@ -373,7 +378,7 @@ o.label <- i.hint
       document: parse(`{ lookup(q: "x", hint: "from-input") { label } }`),
     });
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["expensiveApi"],
       "first wire wins — authored order matters",
@@ -412,7 +417,7 @@ o.label <- ctx.defaultLabel
     });
     // api.label is first wire → evaluated first → wins
     assert.equal(result.data.lookup.label, "expensive");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["api"],
       "authored order: api first, context second",
@@ -453,7 +458,7 @@ o.label <- b.label
     });
     // Authored order: A is first in the bridge → wins.
     assert.equal(result.data.lookup.label, "from-A");
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["A"],
       "B never called — A is first, short-circuits",
@@ -758,8 +763,8 @@ bridge Query.lookup {
       "Query.lookup",
       { q: "test" },
       {
-        "primary": async () => ({ label: null }),
-        "backup": async () => ({ label: "" }),
+        primary: async () => ({ label: null }),
+        backup: async () => ({ label: "" }),
       },
     );
     // p.label is null → ?? gate opens → b.label is "" (non-nullish, gate closes)
@@ -783,8 +788,8 @@ bridge Query.lookup {
       "Query.lookup",
       { q: "test" },
       {
-        "primary": async () => ({ label: "" }),
-        "backup": async () => ({ label: null }),
+        primary: async () => ({ label: "" }),
+        backup: async () => ({ label: null }),
       },
     );
     // p.label is "" → || gate opens → b.label is null (still falsy)
@@ -810,9 +815,9 @@ bridge Query.lookup {
       "Query.lookup",
       { q: "test" },
       {
-        "a": async () => ({ label: null }),
-        "b": async () => ({ label: 0 }),
-        "c": async () => ({ label: null }),
+        a: async () => ({ label: null }),
+        b: async () => ({ label: 0 }),
+        c: async () => ({ label: null }),
       },
     );
     // a.label null → ?? opens → b.label is 0 (non-nullish, ?? closes)
@@ -837,8 +842,8 @@ bridge Query.lookup {
       "Query.lookup",
       { q: "test" },
       {
-        "a": async () => ({ label: null }),
-        "b": async () => ({ label: "found" }),
+        a: async () => ({ label: null }),
+        b: async () => ({ label: "found" }),
       },
     );
     // a.label null → ?? opens → b.label is "found" (truthy)
@@ -863,7 +868,7 @@ bridge Query.lookup {
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, doc);
+    assertDeepStrictEqualIgnoringLoc(reparsed, doc);
   });
 
   test("?? then || with literals round-trips", () => {
@@ -879,7 +884,7 @@ bridge Query.lookup {
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     const reparsed = parseBridge(serialized);
-    assert.deepStrictEqual(reparsed, doc);
+    assertDeepStrictEqualIgnoringLoc(reparsed, doc);
   });
 
   test("parser produces correct fallbacks array for mixed chain", () => {

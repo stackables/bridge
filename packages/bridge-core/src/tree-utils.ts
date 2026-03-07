@@ -28,7 +28,7 @@ export function sameTrunk(a: Trunk, b: Trunk): boolean {
 
 // ── Path helpers ────────────────────────────────────────────────────────────
 
-/** Strict path equality — manual loop avoids `.every()` closure allocation.  See docs/performance.md (#7). */
+/** Strict path equality — manual loop avoids `.every()` closure allocation. See packages/bridge-core/performance.md (#7). */
 export function pathEquals(a: string[], b: string[]): boolean {
   if (!a || !b) return a === b;
   if (a.length !== b.length) return false;
@@ -51,7 +51,7 @@ export function pathEquals(a: string[], b: string[]): boolean {
  * Results are cached in a module-level Map because the same constant
  * strings appear repeatedly across shadow trees.  Only safe for
  * immutable values (primitives); callers must not mutate the returned
- * value.  See docs/performance.md (#6).
+ * value. See packages/bridge-core/performance.md (#6).
  */
 const constantCache = new Map<string, unknown>();
 export function coerceConstant(raw: string): unknown {
@@ -160,7 +160,7 @@ export function setNested(obj: any, path: string[], value: any): void {
 // This means the execution engine can safely cache computed values on
 // parser-produced objects without triggering shape transitions that would
 // degrade the parser's allocation-site throughput.
-// See docs/performance.md (#11).
+// See packages/bridge-core/performance.md (#11).
 
 /** Symbol key for the cached `trunkKey()` result on NodeRef objects. */
 export const TRUNK_KEY_CACHE = Symbol.for("bridge.trunkKey");
@@ -175,7 +175,7 @@ export const SIMPLE_PULL_CACHE = Symbol.for("bridge.simplePull");
  * path (single `from` wire, no safe/fallbacks/catch modifiers).  Returns
  * `null` otherwise.  The result is cached on the wire via a Symbol key so
  * subsequent calls are a single property read without affecting V8 shapes.
- * See docs/performance.md (#11).
+ * See packages/bridge-core/performance.md (#11).
  */
 export function getSimplePullRef(w: Wire): NodeRef | null {
   if ("from" in w) {

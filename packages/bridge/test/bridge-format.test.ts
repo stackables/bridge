@@ -8,6 +8,7 @@ import {
 } from "../src/index.ts";
 import type { Bridge, Instruction, ToolDef, Wire } from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 
 /** Pull wire — the Wire variant that has a `from` field */
 type PullWire = Extract<Wire, { from: unknown }>;
@@ -16,15 +17,18 @@ type PullWire = Extract<Wire, { from: unknown }>;
 
 describe("parsePath", () => {
   test("simple field", () => {
-    assert.deepStrictEqual(parsePath("name"), ["name"]);
+    assertDeepStrictEqualIgnoringLoc(parsePath("name"), ["name"]);
   });
 
   test("dotted path", () => {
-    assert.deepStrictEqual(parsePath("position.lat"), ["position", "lat"]);
+    assertDeepStrictEqualIgnoringLoc(parsePath("position.lat"), [
+      "position",
+      "lat",
+    ]);
   });
 
   test("array index", () => {
-    assert.deepStrictEqual(parsePath("items[0].position.lat"), [
+    assertDeepStrictEqualIgnoringLoc(parsePath("items[0].position.lat"), [
       "items",
       "0",
       "position",
@@ -33,14 +37,14 @@ describe("parsePath", () => {
   });
 
   test("hyphenated key", () => {
-    assert.deepStrictEqual(parsePath("headers.x-message-id"), [
+    assertDeepStrictEqualIgnoringLoc(parsePath("headers.x-message-id"), [
       "headers",
       "x-message-id",
     ]);
   });
 
   test("empty brackets stripped", () => {
-    assert.deepStrictEqual(parsePath("properties[]"), ["properties"]);
+    assertDeepStrictEqualIgnoringLoc(parsePath("properties[]"), ["properties"]);
   });
 });
 
@@ -67,16 +71,22 @@ gc.q <- i.search
     assert.equal(bridge.type, "Query");
     assert.equal(bridge.field, "geocode");
     assert.equal(bridge.handles.length, 3);
-    assert.deepStrictEqual(bridge.handles[0], {
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[0], {
       handle: "gc",
       kind: "tool",
       name: "hereapi.geocode",
     });
-    assert.deepStrictEqual(bridge.handles[1], { handle: "i", kind: "input" });
-    assert.deepStrictEqual(bridge.handles[2], { handle: "o", kind: "output" });
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[1], {
+      handle: "i",
+      kind: "input",
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[2], {
+      handle: "o",
+      kind: "output",
+    });
     assert.equal(bridge.wires.length, 2);
 
-    assert.deepStrictEqual(bridge.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -90,7 +100,7 @@ gc.q <- i.search
         path: ["search"],
       },
     });
-    assert.deepStrictEqual(bridge.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -125,7 +135,7 @@ o.output <- ti.result
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(bridge.handles.length, 3);
-    assert.deepStrictEqual(bridge.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
       from: {
         module: "api",
         type: "Query",
@@ -141,7 +151,7 @@ o.output <- ti.result
         path: ["value"],
       },
     });
-    assert.deepStrictEqual(bridge.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
       from: {
         module: SELF_MODULE,
         type: "Tools",
@@ -172,26 +182,29 @@ o.topPick.city    <- z.properties[0].location.city
     const bridge = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.deepStrictEqual((bridge.wires[0] as PullWire).from, {
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[0] as PullWire).from, {
       module: "zillow",
       type: "Query",
       field: "find",
       instance: 1,
       path: ["properties", "0", "streetAddress"],
     });
-    assert.deepStrictEqual(bridge.wires[0].to, {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0].to, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
       path: ["topPick", "address"],
     });
-    assert.deepStrictEqual((bridge.wires[1] as PullWire).from.path, [
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[1] as PullWire).from.path, [
       "properties",
       "0",
       "location",
       "city",
     ]);
-    assert.deepStrictEqual(bridge.wires[1].to.path, ["topPick", "city"]);
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1].to.path, [
+      "topPick",
+      "city",
+    ]);
   });
 
   test("array mapping with element wires", () => {
@@ -211,7 +224,7 @@ o.results <- p.items[] as item {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(bridge.wires.length, 3);
-    assert.deepStrictEqual(bridge.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
       from: {
         module: "provider",
         type: "Query",
@@ -226,7 +239,7 @@ o.results <- p.items[] as item {
         path: ["results"],
       },
     });
-    assert.deepStrictEqual(bridge.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -241,7 +254,7 @@ o.results <- p.items[] as item {
         path: ["results", "name"],
       },
     });
-    assert.deepStrictEqual(bridge.wires[2], {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[2], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -274,14 +287,14 @@ o.messageId <- sg.headers.x-message-id
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(bridge.type, "Mutation");
-    assert.deepStrictEqual(bridge.wires[0].to, {
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0].to, {
       module: "sendgrid",
       type: "Mutation",
       field: "send",
       instance: 1,
       path: ["content"],
     });
-    assert.deepStrictEqual((bridge.wires[1] as PullWire).from.path, [
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[1] as PullWire).from.path, [
       "headers",
       "x-message-id",
     ]);
@@ -329,8 +342,11 @@ z.lat <- i.lat
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(bridge.handles.length, 3);
-    assert.deepStrictEqual(bridge.handles[2], { handle: "c", kind: "context" });
-    assert.deepStrictEqual((bridge.wires[0] as PullWire).from, {
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[2], {
+      handle: "c",
+      kind: "context",
+    });
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[0] as PullWire).from, {
       module: SELF_MODULE,
       type: "Context",
       field: "context",
@@ -355,7 +371,7 @@ gc.q <- i.search
 }`;
     const instructions = parseBridge(input);
     const output = serializeBridge(instructions);
-    assert.deepStrictEqual(parseBridge(output), instructions);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(output), instructions);
   });
 
   test("tool bridge roundtrip", () => {
@@ -375,7 +391,7 @@ o.lifeExpectancy <- ti.result
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -395,7 +411,7 @@ o.results <- gc.items[] as item {
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -415,7 +431,7 @@ o.messageId <- sg.headers.x-message-id
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -464,7 +480,7 @@ o.propertyComments <- pt.result
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -539,7 +555,7 @@ define myTransform {
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -584,7 +600,7 @@ o.email <- d.email
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -600,7 +616,7 @@ o.approved <- i.age > 18 and i.verified or i.admin
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -639,8 +655,10 @@ gc.q <- i.search
     const root = tools.find((t) => t.name === "hereapi")!;
     assert.equal(root.fn, "httpCall");
     assert.equal(root.extends, undefined);
-    assert.deepStrictEqual(root.deps, [{ kind: "context", handle: "context" }]);
-    assert.deepStrictEqual(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(root.deps, [
+      { kind: "context", handle: "context" },
+    ]);
+    assertDeepStrictEqualIgnoringLoc(root.wires, [
       {
         target: "baseUrl",
         kind: "constant",
@@ -656,7 +674,7 @@ gc.q <- i.search
     const child = tools.find((t) => t.name === "hereapi.geocode")!;
     assert.equal(child.fn, undefined);
     assert.equal(child.extends, "hereapi");
-    assert.deepStrictEqual(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(child.wires, [
       { target: "method", kind: "constant", value: "GET" },
       { target: "path", kind: "constant", value: "/geocode" },
     ]);
@@ -687,7 +705,7 @@ sg.content <- i.body
     const root = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
-    assert.deepStrictEqual(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(root.wires, [
       {
         target: "baseUrl",
         kind: "constant",
@@ -705,7 +723,7 @@ sg.content <- i.body
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
     )!;
     assert.equal(child.extends, "sendgrid");
-    assert.deepStrictEqual(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(child.wires, [
       { target: "method", kind: "constant", value: "POST" },
       { target: "path", kind: "constant", value: "/mail/send" },
     ]);
@@ -739,11 +757,11 @@ sb.q <- i.query
     const serviceB = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
     )!;
-    assert.deepStrictEqual(serviceB.deps, [
+    assertDeepStrictEqualIgnoringLoc(serviceB.deps, [
       { kind: "context", handle: "context" },
       { kind: "tool", handle: "auth", tool: "authService" },
     ]);
-    assert.deepStrictEqual(serviceB.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
       target: "headers.Authorization",
       kind: "pull",
       source: "auth.access_token",
@@ -778,7 +796,7 @@ gc.limit <- i.limit
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -808,7 +826,7 @@ o.messageId <- sg.id
 
 }`;
     const instructions = parseBridge(input);
-    assert.deepStrictEqual(
+    assertDeepStrictEqualIgnoringLoc(
       parseBridge(serializeBridge(instructions)),
       instructions,
     );
@@ -1054,7 +1072,7 @@ bridge Query.demo {
 o.result <- api.value
 
 }`);
-    assert.deepStrictEqual(brace, indent);
+    assertDeepStrictEqualIgnoringLoc(brace, indent);
   });
 
   test("tool block with braces parses identically to indented style", () => {
@@ -1071,7 +1089,7 @@ tool myApi from httpCall {
   .method = GET
 
 }`);
-    assert.deepStrictEqual(brace, indent);
+    assertDeepStrictEqualIgnoringLoc(brace, indent);
   });
 
   test("indented } inside on error value is not stripped", () => {
@@ -1089,7 +1107,10 @@ tool myApi from httpCall {
     const onError = tool.wires.find((w) => w.kind === "onError");
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
-      assert.deepStrictEqual(JSON.parse(onError.value), { lat: 0, lon: 0 });
+      assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
+        lat: 0,
+        lon: 0,
+      });
     }
   });
 
@@ -1286,7 +1307,9 @@ bridge Query.test {
 
 describe("parser diagnostics and serializer edge cases", () => {
   test("parseBridgeDiagnostics reports lexer errors with a range", () => {
-    const result = parseBridgeDiagnostics("version 1.5\nbridge Query.x {\n  with output as o\n  o.x = \"ok\"\n}\n§");
+    const result = parseBridgeDiagnostics(
+      'version 1.5\nbridge Query.x {\n  with output as o\n  o.x = "ok"\n}\n§',
+    );
     assert.ok(result.diagnostics.length > 0);
     assert.equal(result.diagnostics[0]?.severity, "error");
     assert.equal(result.diagnostics[0]?.range.start.line, 5);

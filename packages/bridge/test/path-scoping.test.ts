@@ -5,6 +5,7 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 import { forEachEngine } from "./_dual-run.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
@@ -65,9 +66,9 @@ bridge Query.test {
       (w) => w.to.path.join(".") === "user.email",
     );
     assert.ok(nameWire);
-    assert.deepStrictEqual(nameWire.from.path, ["name"]);
+    assertDeepStrictEqualIgnoringLoc(nameWire.from.path, ["name"]);
     assert.ok(emailWire);
-    assert.deepStrictEqual(emailWire.from.path, ["email"]);
+    assertDeepStrictEqualIgnoringLoc(emailWire.from.path, ["email"]);
   });
 
   test("nested scope blocks", () => {
@@ -105,8 +106,8 @@ bridge Query.test {
     );
     assert.ok(idWire, "id wire should exist");
     assert.ok(nameWire, "name wire should exist");
-    assert.deepStrictEqual(idWire.from.path, ["id"]);
-    assert.deepStrictEqual(nameWire.from.path, ["name"]);
+    assertDeepStrictEqualIgnoringLoc(idWire.from.path, ["id"]);
+    assertDeepStrictEqualIgnoringLoc(nameWire.from.path, ["name"]);
 
     // Constant wires
     const constWires = wires.filter(
@@ -163,7 +164,9 @@ bridge Query.test {
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
-    assert.deepStrictEqual(nameWire.fallbacks, [{ type: "falsy", value: '"anonymous"' }]);
+    assertDeepStrictEqualIgnoringLoc(nameWire.fallbacks, [
+      { type: "falsy", value: '"anonymous"' },
+    ]);
 
     const valueWire = pullWires.find(
       (w) => w.to.path.join(".") === "data.value",
@@ -322,7 +325,7 @@ bridge Query.test {
       (i): i is Bridge => i.kind === "bridge",
     )!;
 
-    assert.deepStrictEqual(scopedBridge.wires, flatBridge.wires);
+    assertDeepStrictEqualIgnoringLoc(scopedBridge.wires, flatBridge.wires);
   });
 });
 
@@ -351,7 +354,7 @@ bridge Query.test {
     const bridge2 = reparsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.deepStrictEqual(bridge1.wires, bridge2.wires);
+    assertDeepStrictEqualIgnoringLoc(bridge1.wires, bridge2.wires);
   });
 
   test("deeply nested scope round-trips correctly", () => {
@@ -381,7 +384,7 @@ bridge Query.test {
     const bridge2 = reparsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.deepStrictEqual(bridge1.wires, bridge2.wires);
+    assertDeepStrictEqualIgnoringLoc(bridge1.wires, bridge2.wires);
   });
 });
 
@@ -401,7 +404,10 @@ bridge Query.config {
   }
 }`;
       const result = await run(bridge, "Query.config", {});
-      assert.deepStrictEqual(result.data, { theme: "dark", lang: "en" });
+      assertDeepStrictEqualIgnoringLoc(result.data, {
+        theme: "dark",
+        lang: "en",
+      });
     });
 
     test("scope block pull wires resolve at runtime", async () => {
@@ -420,7 +426,7 @@ bridge Query.user {
         name: "Alice",
         email: "alice@test.com",
       });
-      assert.deepStrictEqual(result.data, {
+      assertDeepStrictEqualIgnoringLoc(result.data, {
         name: "Alice",
         email: "alice@test.com",
       });
@@ -469,7 +475,7 @@ bridge Query.profile {
         theme: "dark",
       });
 
-      assert.deepStrictEqual(scopedResult.data, flatResult.data);
+      assertDeepStrictEqualIgnoringLoc(scopedResult.data, flatResult.data);
     });
 
     test("scope block on tool input wires to tool correctly", () => {
@@ -571,7 +577,7 @@ bridge Query.test {
     assert.equal(constWires.length, 1);
     const wire = constWires[0];
     assert.equal(wire.value, "1");
-    assert.deepStrictEqual(wire.to.path, ["obj", "etc"]);
+    assertDeepStrictEqualIgnoringLoc(wire.to.path, ["obj", "etc"]);
     assert.equal(wire.to.element, true);
   });
 
@@ -597,7 +603,7 @@ bridge Query.test {
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "obj.name");
     assert.ok(nameWire, "wire to obj.name should exist");
     assert.equal(nameWire!.from.element, true);
-    assert.deepStrictEqual(nameWire!.from.path, ["title"]);
+    assertDeepStrictEqualIgnoringLoc(nameWire!.from.path, ["title"]);
   });
 
   test("nested scope blocks inside array mapper flatten to correct paths", () => {
@@ -622,7 +628,7 @@ bridge Query.test {
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 1);
-    assert.deepStrictEqual(constWires[0].to.path, ["a", "b", "c"]);
+    assertDeepStrictEqualIgnoringLoc(constWires[0].to.path, ["a", "b", "c"]);
     assert.equal(constWires[0].to.element, true);
   });
 
@@ -683,7 +689,7 @@ bridge Query.test {
     const result = await run(bridge, "Query.test", {
       items: [{ title: "Hello" }, { title: "World" }],
     });
-    assert.deepStrictEqual(result.data, [
+    assertDeepStrictEqualIgnoringLoc(result.data, [
       { obj: { name: "Hello", code: 42 } },
       { obj: { name: "World", code: 42 } },
     ]);
@@ -708,7 +714,7 @@ bridge Query.test {
     const result = await run(bridge, "Query.test", {
       items: [{ title: "Alice" }, { title: "Bob" }],
     });
-    assert.deepStrictEqual(result.data, [
+    assertDeepStrictEqualIgnoringLoc(result.data, [
       { level1: { level2: { name: "Alice", fixed: "ok" } } },
       { level1: { level2: { name: "Bob", fixed: "ok" } } },
     ]);
@@ -740,7 +746,7 @@ bridge Query.test {
     );
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
     assert.ok(spreadWire, "spread wire targeting tool root should exist");
-    assert.deepStrictEqual(spreadWire.from.path, []);
+    assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, []);
   });
 
   test("spread combined with constant wires in scope block", () => {
@@ -799,7 +805,7 @@ bridge Query.test {
     );
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
     assert.ok(spreadWire, "spread wire should exist");
-    assert.deepStrictEqual(spreadWire.from.path, ["profile"]);
+    assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, ["profile"]);
   });
 
   test("spread in nested scope block produces wire to nested path", () => {
@@ -848,7 +854,7 @@ bridge Query.test {
     );
     const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");
     assert.ok(spreadWire, "spread wire to tool.nested should exist");
-    assert.deepStrictEqual(spreadWire.from.path, []);
+    assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, []);
   });
 });
 
@@ -875,7 +881,7 @@ bridge Query.test {
         myTool: async (input: any) => ({ received: input }),
       },
     );
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       result: { received: { name: "Alice", age: 30 } },
     });
   });
@@ -903,7 +909,7 @@ bridge Query.test {
         myTool: async (input: any) => ({ received: input }),
       },
     );
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       result: { received: { name: "Alice", age: 30, extra: "added" } },
     });
   });
@@ -930,7 +936,7 @@ bridge Query.test {
         myTool: async (input: any) => ({ received: input }),
       },
     );
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       result: { received: { name: "Bob", email: "bob@test.com" } },
     });
   });
@@ -951,7 +957,7 @@ bridge Query.greet {
   }
 }`;
     const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assert.deepStrictEqual(result.data, { name: "Hello Bridge" });
+    assertDeepStrictEqualIgnoringLoc(result.data, { name: "Hello Bridge" });
   });
 
   test("spread with explicit field overrides", async () => {
@@ -967,7 +973,7 @@ bridge Query.greet {
   }
 }`;
     const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       name: "Hello Bridge",
       message: "Hello Bridge",
     });
@@ -990,7 +996,7 @@ bridge Query.test {
       second: { b: 3, c: 4 },
     });
     // second should override b from first
-    assert.deepStrictEqual(result.data, { a: 1, b: 3, c: 4 });
+    assertDeepStrictEqualIgnoringLoc(result.data, { a: 1, b: 3, c: 4 });
   });
 
   test("spread with explicit override taking precedence", async () => {
@@ -1010,7 +1016,10 @@ bridge Query.test {
       age: 30,
     });
     // explicit .name should override spread
-    assert.deepStrictEqual(result.data, { name: "overridden", age: 30 });
+    assertDeepStrictEqualIgnoringLoc(result.data, {
+      name: "overridden",
+      age: 30,
+    });
   });
 
   test("spread with deep path source", async () => {
@@ -1027,7 +1036,7 @@ bridge Query.test {
     const result = await run(bridge, "Query.test", {
       user: { profile: { email: "test@test.com", verified: true } },
     });
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       email: "test@test.com",
       verified: true,
     });
@@ -1049,7 +1058,7 @@ bridge Query.greet {
   }
 }`;
     const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       name: "Hello Bridge",
       upper: "HELLO BRIDGE",
       lower: "hello bridge",
@@ -1071,7 +1080,7 @@ bridge Query.test {
     const result = await run(bridge, "Query.test", {
       data: { x: 1, y: 2 },
     });
-    assert.deepStrictEqual(result.data, {
+    assertDeepStrictEqualIgnoringLoc(result.data, {
       result: { x: 1, y: 2, extra: "added" },
     });
   });
@@ -1100,6 +1109,21 @@ o.result <- t.user.profile.name
           },
         ),
       /Cannot read properties of null \(reading 'name'\)/,
+    );
+  });
+
+  test("?. only guards the segment it prefixes", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.result <- i.does?.not.crash.hard ?? throw "Errore"
+}`;
+
+    await assert.rejects(
+      () => run(bridgeText, "Query.test", { does: null }),
+      /Cannot read properties of undefined \(reading 'crash'\)/,
     );
   });
 });

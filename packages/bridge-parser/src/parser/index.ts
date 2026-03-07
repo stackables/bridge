@@ -9,5 +9,9 @@ export {
   parseBridgeDiagnostics,
   PARSER_VERSION,
 } from "./parser.ts";
-export type { BridgeDiagnostic, BridgeParseResult } from "./parser.ts";
+export type {
+  BridgeDiagnostic,
+  BridgeParseResult,
+  ParseBridgeOptions,
+} from "./parser.ts";
 export { BridgeLexer, allTokens } from "./lexer.ts";

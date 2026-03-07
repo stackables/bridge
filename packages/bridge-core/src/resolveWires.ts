@@ -9,13 +9,16 @@
  * the full `ExecutionTree` class.
  */
 
-import type { NodeRef, Wire } from "./types.ts";
+import type { ControlFlowInstruction, NodeRef, Wire } from "./types.ts";
 import type { MaybePromise, TreeContext } from "./tree-types.ts";
 import {
+  attachBridgeErrorMetadata,
   isFatalError,
   isPromise,
   applyControlFlow,
   BridgeAbortError,
+  BridgePanicError,
+  wrapBridgeRuntimeError,
 } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 
@@ -57,7 +60,7 @@ type WireWithGates = Exclude<Wire, { value: string }>;
  * Fast path: single `from` wire with no fallback/catch modifiers, which is
  * the common case for element field wires like `.id <- it.id`.  Delegates to
  * `resolveWiresAsync` for anything more complex.
- * See docs/performance.md (#10).
+ * See packages/bridge-core/performance.md (#10).
  */
 export function resolveWires(
   ctx: TreeContext,
@@ -71,7 +74,13 @@ export function resolveWires(
     const w = wires[0]!;
     if ("value" in w) return coerceConstant(w.value);
     const ref = getSimplePullRef(w);
-    if (ref) return ctx.pullSingle(ref, pullChain);
+    if (ref) {
+      return ctx.pullSingle(
+        ref,
+        pullChain,
+        "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
+      );
+    }
   }
   return resolveWiresAsync(ctx, wires, pullChain);
 }
@@ -108,7 +117,9 @@ async function resolveWiresAsync(
       const recoveredValue = await applyCatchGate(ctx, w, pullChain);
       if (recoveredValue !== undefined) return recoveredValue;
 
-      lastError = err;
+      lastError = wrapBridgeRuntimeError(err, {
+        bridgeLoc: w.loc,
+      });
     }
   }
 
@@ -140,9 +151,15 @@ export async function applyFallbackGates(
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
-      if (fallback.control) return applyControlFlow(fallback.control);
+      if (fallback.control) {
+        return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
+      }
       if (fallback.ref) {
-        value = await ctx.pullSingle(fallback.ref, pullChain);
+        value = await ctx.pullSingle(
+          fallback.ref,
+          pullChain,
+          fallback.loc ?? w.loc,
+        );
       } else if (fallback.value !== undefined) {
         value = coerceConstant(fallback.value);
       }
@@ -167,10 +184,33 @@ export async function applyCatchGate(
   w: WireWithGates,
   pullChain?: Set<string>,
 ): Promise<unknown> {
-  if (w.catchControl) return applyControlFlow(w.catchControl);
-  if (w.catchFallbackRef) return ctx.pullSingle(w.catchFallbackRef, pullChain);
+  if (w.catchControl) {
+    return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
+  }
+  if (w.catchFallbackRef) {
+    return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
+  }
   if (w.catchFallback != null) return coerceConstant(w.catchFallback);
   return undefined;
+}
+
+function applyControlFlowWithLoc(
+  control: ControlFlowInstruction,
+  bridgeLoc: Wire["loc"],
+): symbol | import("./tree-types.ts").LoopControlSignal {
+  try {
+    return applyControlFlow(control);
+  } catch (err) {
+    if (err instanceof BridgePanicError) {
+      throw attachBridgeErrorMetadata(err, {
+        bridgeLoc,
+      });
+    }
+    if (isFatalError(err)) throw err;
+    throw wrapBridgeRuntimeError(err, {
+      bridgeLoc,
+    });
+  }
 }
 
 // ── Layer 1: Wire source evaluation ─────────────────────────────────────────
@@ -188,12 +228,20 @@ async function evaluateWireSource(
   pullChain?: Set<string>,
 ): Promise<any> {
   if ("cond" in w) {
-    const condValue = await ctx.pullSingle(w.cond, pullChain);
+    const condValue = await ctx.pullSingle(
+      w.cond,
+      pullChain,
+      w.condLoc ?? w.loc,
+    );
     if (condValue) {
-      if (w.thenRef !== undefined) return ctx.pullSingle(w.thenRef, pullChain);
+      if (w.thenRef !== undefined) {
+        return ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
+      }
       if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
     } else {
-      if (w.elseRef !== undefined) return ctx.pullSingle(w.elseRef, pullChain);
+      if (w.elseRef !== undefined) {
+        return ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
+      }
       if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
     }
     return undefined;
@@ -201,20 +249,24 @@ async function evaluateWireSource(
 
   if ("condAnd" in w) {
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
-    const leftVal = await pullSafe(ctx, leftRef, safe, pullChain);
+    const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
     if (!leftVal) return false;
     if (rightRef !== undefined)
-      return Boolean(await pullSafe(ctx, rightRef, rightSafe, pullChain));
+      return Boolean(
+        await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
+      );
     if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
     return Boolean(leftVal);
   }
 
   if ("condOr" in w) {
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
-    const leftVal = await pullSafe(ctx, leftRef, safe, pullChain);
+    const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
     if (leftVal) return true;
     if (rightRef !== undefined)
-      return Boolean(await pullSafe(ctx, rightRef, rightSafe, pullChain));
+      return Boolean(
+        await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
+      );
     if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
     return Boolean(leftVal);
   }
@@ -222,13 +274,13 @@ async function evaluateWireSource(
   if ("from" in w) {
     if (w.safe) {
       try {
-        return await ctx.pullSingle(w.from, pullChain);
+        return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
       } catch (err: any) {
         if (isFatalError(err)) throw err;
         return undefined;
       }
     }
-    return ctx.pullSingle(w.from, pullChain);
+    return ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
   }
 
   return undefined;
@@ -246,16 +298,17 @@ function pullSafe(
   ref: NodeRef,
   safe: boolean | undefined,
   pullChain?: Set<string>,
+  bridgeLoc?: Wire["loc"],
 ): MaybePromise<any> {
   // FAST PATH: Unsafe wires bypass the try/catch overhead entirely
   if (!safe) {
-    return ctx.pullSingle(ref, pullChain);
+    return ctx.pullSingle(ref, pullChain, bridgeLoc);
   }
 
   // SAFE PATH: We must catch synchronous throws during the invocation
   let pull: any;
   try {
-    pull = ctx.pullSingle(ref, pullChain);
+    pull = ctx.pullSingle(ref, pullChain, bridgeLoc);
   } catch (e: any) {
     // Caught a synchronous error!
     if (isFatalError(e)) throw e;
