@@ -130,6 +130,41 @@ bridge Query.processCatalog {
     ]);
     assert.deepStrictEqual(warnings, []);
   });
+
+  test("unused repeated tool bindings still compile to distinct synthetic instances", async () => {
+    const bridge = `version 1.5
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+  with std.httpCall as http
+
+  o <- ctx.catalog[] as cat {
+    with std.httpCall as http
+    .val <- cat.val
+  }
+}`;
+
+    const document = parseBridge(bridge);
+    assert.doesNotThrow(() =>
+      compileBridge(document, { operation: "Query.processCatalog" }),
+    );
+
+    const warnings: string[] = [];
+    const result = await executeCompiled({
+      document,
+      operation: "Query.processCatalog",
+      context: {
+        catalog: [{ val: "a" }, { val: "b" }],
+      },
+      logger: {
+        warn: (message: string) => warnings.push(message),
+      },
+    });
+
+    assert.deepStrictEqual(result.data, [{ val: "a" }, { val: "b" }]);
+    assert.deepStrictEqual(warnings, []);
+  });
 });
 
 forEachEngine("loop scoped tools - valid behavior", (run) => {

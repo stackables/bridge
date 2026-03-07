@@ -460,7 +460,13 @@ class CodegenContext {
     const uniqueInstances = [...new Set(instances)].sort((a, b) => a - b);
     const nextIndex = this.toolInstanceCursors.get(sig) ?? 0;
     this.toolInstanceCursors.set(sig, nextIndex + 1);
-    return uniqueInstances[nextIndex] ?? uniqueInstances[0] ?? 1;
+    if (uniqueInstances[nextIndex] != null) return uniqueInstances[nextIndex]!;
+    const lastInstance = uniqueInstances.at(-1) ?? 0;
+    // Some repeated handle bindings are never referenced in wires (for example,
+    // an unused shadowed tool alias in a nested loop). In that case we still
+    // need a distinct synthetic instance number so later bindings don't collide
+    // with earlier tool registrations.
+    return lastInstance + (nextIndex - uniqueInstances.length) + 1;
   }
 
   // ── Main compilation entry point ──────────────────────────────────────────
