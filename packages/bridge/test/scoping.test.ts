@@ -340,7 +340,7 @@ bridge Query.test {
         },
       ],
     },
-    pending: "parser does not yet support outer-scope iterator references",
+    aotSupported: false,
   },
 ];
 
@@ -448,7 +448,6 @@ bridge Query.test {
     aotSupported: false,
   },
   {
-    // EXPECTED but NOT YET SUPPORTED
     name: "level 3 reads outer iterators x.v and y.v (cross-scope)",
     bridgeText: `version 1.5
 bridge Query.test {
@@ -499,10 +498,9 @@ bridge Query.test {
         },
       ],
     },
-    pending: "parser does not yet support outer-scope iterator references",
+    aotSupported: false,
   },
   {
-    // EXPECTED but NOT YET SUPPORTED
     name: "level 2 reads outer iterator x.v with three levels (cross-scope)",
     bridgeText: `version 1.5
 bridge Query.test {
@@ -545,7 +543,7 @@ bridge Query.test {
         },
       ],
     },
-    pending: "parser does not yet support outer-scope iterator references",
+    aotSupported: false,
   },
 ];
 

@@ -1762,6 +1762,42 @@ function processElementLines(
     safe?: boolean,
   ) => NodeRef,
 ): void {
+  // Build a reverse lookup: iterator name → array output path.
+  // Used to detect cross-scope iterator references (e.g. reading `x.v`
+  // from inside a nested `y` scope).
+  const outerIteratorScope = new Map<string, string>();
+  for (const [path, name] of Object.entries(arrayIterators)) {
+    if (name !== iterName) {
+      outerIteratorScope.set(name, path);
+    }
+  }
+
+  /** Check if `root` is the current iterator or an outer-scope iterator.
+   *  Returns an element-relative NodeRef if it is, undefined otherwise. */
+  function resolveIteratorRef(root: string, segments: string[]): NodeRef | undefined {
+    if (root === iterName) {
+      return {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        element: true,
+        path: segments,
+      };
+    }
+    const scope = outerIteratorScope.get(root);
+    if (scope !== undefined) {
+      return {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        element: true,
+        elementScope: scope,
+        path: segments,
+      };
+    }
+    return undefined;
+  }
+
   function extractCoalesceAltIterAware(
     altNode: CstNode,
     lineNum: number,
@@ -1776,16 +1812,9 @@ function processElementLines(
       if (headNode) {
         const { root, segments } = extractAddressPath(headNode);
         const pipeSegs = subs(srcNode, "pipeSegment");
-        if (root === iterName && pipeSegs.length === 0) {
-          return {
-            sourceRef: {
-              module: SELF_MODULE,
-              type: bridgeType,
-              field: bridgeField,
-              element: true,
-              path: segments,
-            },
-          };
+        if (pipeSegs.length === 0) {
+          const iterRef = resolveIteratorRef(root, segments);
+          if (iterRef) return { sourceRef: iterRef };
         }
       }
     }
@@ -1916,14 +1945,17 @@ function processElementLines(
       if (nestedArrayNode) {
         // Emit the pass-through wire for the inner array source
         let innerFromRef: NodeRef;
-        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-          innerFromRef = {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemSrcSegs,
-          };
+        if (elemPipeSegs.length === 0) {
+          const iterRef = resolveIteratorRef(elemSrcRoot, elemSrcSegs);
+          if (iterRef) {
+            innerFromRef = iterRef;
+          } else {
+            innerFromRef = buildSourceExpr(
+              elemSourceNode!,
+              elemLineNum,
+              iterName,
+            );
+          }
         } else {
           innerFromRef = buildSourceExpr(
             elemSourceNode!,
@@ -2017,14 +2049,11 @@ function processElementLines(
         // Expression in element line — desugar then merge with fallback path
         const elemExprRights = subs(elemLine, "elemExprRight");
         let leftRef: NodeRef;
-        if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-          leftRef = {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: elemSrcSegs,
-          };
+        const exprIterRef = elemPipeSegs.length === 0
+          ? resolveIteratorRef(elemSrcRoot, elemSrcSegs)
+          : undefined;
+        if (exprIterRef) {
+          leftRef = exprIterRef;
         } else {
           leftRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterName);
         }
@@ -2037,21 +2066,20 @@ function processElementLines(
           elemSafe || undefined,
         );
         elemCondIsPipeFork = true;
-      } else if (elemSrcRoot === iterName && elemPipeSegs.length === 0) {
-        elemCondRef = {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
-          element: true,
-          path: elemSrcSegs,
-        };
-        elemCondIsPipeFork = false;
       } else {
-        elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterName);
-        elemCondIsPipeFork =
-          elemCondRef.instance != null &&
-          elemCondRef.path.length === 0 &&
-          elemPipeSegs.length > 0;
+        const plainIterRef = elemPipeSegs.length === 0
+          ? resolveIteratorRef(elemSrcRoot, elemSrcSegs)
+          : undefined;
+        if (plainIterRef) {
+          elemCondRef = plainIterRef;
+          elemCondIsPipeFork = false;
+        } else {
+          elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterName);
+          elemCondIsPipeFork =
+            elemCondRef.instance != null &&
+            elemCondRef.path.length === 0 &&
+            elemPipeSegs.length > 0;
+        }
       }
 
       // ── Apply `not` prefix if present (element context) ──
@@ -3362,6 +3390,23 @@ function buildBridgeBody(
           element: true,
           path: srcSegs,
         };
+      } else if (pipeSegs.length === 0) {
+        // Check outer-scope iterators
+        const outerScope = Object.entries(arrayIterators).find(
+          ([, name]) => name === srcRoot && name !== iterName,
+        );
+        if (outerScope) {
+          sourceRef = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            elementScope: outerScope[0],
+            path: srcSegs,
+          };
+        } else {
+          sourceRef = resolveAddress(srcRoot, srcSegs, lineNum);
+        }
       } else if (pipeSegs.length > 0) {
         // Pipe expression — the last segment may be iterator-relative.
         // Resolve data source (last part), then build pipe fork chain.
@@ -3383,7 +3428,21 @@ function buildBridgeBody(
             path: dataSrcSegs,
           };
         } else {
-          prevOutRef = resolveAddress(dataSrcRoot, dataSrcSegs, lineNum);
+          const outerScope = Object.entries(arrayIterators).find(
+            ([, name]) => name === dataSrcRoot && name !== iterName,
+          );
+          if (outerScope) {
+            prevOutRef = {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              elementScope: outerScope[0],
+              path: dataSrcSegs,
+            };
+          } else {
+            prevOutRef = resolveAddress(dataSrcRoot, dataSrcSegs, lineNum);
+          }
         }
 
         // Build pipe fork chain (same logic as buildSourceExpr)
@@ -3484,6 +3543,23 @@ function buildBridgeBody(
           element: true,
           path: segments,
         };
+      } else if (iterName) {
+        // Check outer-scope iterators
+        const outerScope = Object.entries(arrayIterators).find(
+          ([, name]) => name === root && name !== iterName,
+        );
+        if (outerScope) {
+          ref = {
+            module: SELF_MODULE,
+            type: bridgeType,
+            field: bridgeField,
+            element: true,
+            elementScope: outerScope[0],
+            path: segments,
+          };
+        } else {
+          ref = resolveAddress(root, segments, lineNum);
+        }
       } else {
         ref = resolveAddress(root, segments, lineNum);
       }
@@ -3529,6 +3605,22 @@ function buildBridgeBody(
         element: true,
         path: srcSegments,
       };
+    } else if (iterName) {
+      const outerScope = Object.entries(arrayIterators).find(
+        ([, name]) => name === srcRoot && name !== iterName,
+      );
+      if (outerScope) {
+        prevOutRef = {
+          module: SELF_MODULE,
+          type: bridgeType,
+          field: bridgeField,
+          element: true,
+          elementScope: outerScope[0],
+          path: srcSegments,
+        };
+      } else {
+        prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
+      }
     } else {
       prevOutRef = resolveAddress(srcRoot, srcSegments, lineNum);
     }
@@ -3632,7 +3724,7 @@ function buildBridgeBody(
         const root = dotParts[0];
         const segments = dotParts.slice(1);
 
-        // Check for iterator-relative refs
+        // Check for iterator-relative refs (current or outer scope)
         if (iterName && root === iterName) {
           const fromRef: NodeRef = {
             module: SELF_MODULE,
@@ -3642,6 +3734,24 @@ function buildBridgeBody(
             path: segments,
           };
           wires.push({ from: fromRef, to: partRef });
+        } else if (iterName) {
+          const outerScope = Object.entries(arrayIterators).find(
+            ([, name]) => name === root && name !== iterName,
+          );
+          if (outerScope) {
+            const fromRef: NodeRef = {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              elementScope: outerScope[0],
+              path: segments,
+            };
+            wires.push({ from: fromRef, to: partRef });
+          } else {
+            const fromRef = resolveAddress(root, segments, lineNum);
+            wires.push({ from: fromRef, to: partRef });
+          }
         } else {
           const fromRef = resolveAddress(root, segments, lineNum);
           wires.push({ from: fromRef, to: partRef });
@@ -3748,7 +3858,7 @@ function buildBridgeBody(
     if (c.sourceRef) {
       const addrNode = (c.sourceRef as CstNode[])[0];
       const { root, segments } = extractAddressPath(addrNode);
-      // Iterator-relative ref in element context
+      // Iterator-relative ref in element context (current or outer scope)
       if (iterName && root === iterName) {
         return {
           kind: "ref",
@@ -3760,6 +3870,24 @@ function buildBridgeBody(
             path: segments,
           },
         };
+      }
+      if (iterName) {
+        const outerScope = Object.entries(arrayIterators).find(
+          ([, name]) => name === root && name !== iterName,
+        );
+        if (outerScope) {
+          return {
+            kind: "ref",
+            ref: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              elementScope: outerScope[0],
+              path: segments,
+            },
+          };
+        }
       }
       return { kind: "ref", ref: resolveAddress(root, segments, lineNum) };
     }
@@ -3864,6 +3992,25 @@ function buildBridgeBody(
               path: segments,
             },
           };
+        }
+        if (pipeSegs.length === 0) {
+          const outerScope = Object.entries(arrayIterators).find(
+            ([, name]) => name === root && name !== iterName,
+          );
+          if (outerScope) {
+            return {
+              kind: "ref",
+              safe,
+              ref: {
+                module: SELF_MODULE,
+                type: bridgeType,
+                field: bridgeField,
+                element: true,
+                elementScope: outerScope[0],
+                path: segments,
+              },
+            };
+          }
         }
       }
 

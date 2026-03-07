@@ -122,6 +122,13 @@ export class ExecutionTree implements TreeContext {
   private depth: number;
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
   private elementTrunkKey: string;
+  /**
+   * Identifies which array nesting level this shadow represents.
+   * Set by `createShadowArray()` using the wire output path prefix
+   * (e.g. `"items"` for `o.items <- src[] as x { ... }`).
+   * Used by cross-scope iterator resolution in `pullSingle()`.
+   */
+  elementScopeKey?: string;
   /** Sparse fieldset filter — set by `run()` when requestedFields is provided. */
   requestedFields: string[] | undefined;
 
@@ -495,7 +502,7 @@ export class ExecutionTree implements TreeContext {
    * Wrap raw array items into shadow trees, honouring `break` / `continue`
    * sentinels.  Shared by `pullOutputField`, `response`, and `run`.
    */
-  private createShadowArray(items: any[]): ExecutionTree[] {
+  private createShadowArray(items: any[], scopeKey?: string): ExecutionTree[] {
     const shadows: ExecutionTree[] = [];
     for (const item of items) {
       // Abort discipline — yield immediately if client disconnected
@@ -509,6 +516,7 @@ export class ExecutionTree implements TreeContext {
       }
       const s = this.shadow();
       s.state[this.elementTrunkKey] = item;
+      if (scopeKey) s.elementScopeKey = scopeKey;
       shadows.push(s);
     }
     return shadows;
@@ -569,6 +577,23 @@ export class ExecutionTree implements TreeContext {
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
   ): MaybePromise<any> {
+    // ── Cross-scope element reference ──────────────────────────────
+    // When the wire targets a specific outer array scope (elementScope),
+    // walk up the parent chain to the shadow whose elementScopeKey
+    // matches and read the element data from there directly.
+    if (ref.element && ref.elementScope) {
+      let cursor: ExecutionTree | undefined = this;
+      while (cursor) {
+        if (cursor.elementScopeKey === ref.elementScope) {
+          const elementData = cursor.state[this.elementTrunkKey];
+          return this.applyPath(elementData, ref);
+        }
+        cursor = cursor.parent;
+      }
+      // Scope not found — return undefined (will be null in output)
+      return undefined;
+    }
+
     // Cache trunkKey on the NodeRef via a Symbol key to avoid repeated
     // string allocation.  Symbol keys don't affect V8 hidden classes,
     // so this won't degrade parser allocation-site throughput.
@@ -714,7 +739,8 @@ export class ExecutionTree implements TreeContext {
     if (!array) return result;
     const resolved = await result;
     if (isLoopControlSignal(resolved)) return [];
-    return this.createShadowArray(resolved as any[]);
+    const scopeKey = path.length > 0 ? path.join(".") : undefined;
+    return this.createShadowArray(resolved as any[], scopeKey);
   }
 
   /**
@@ -776,7 +802,8 @@ export class ExecutionTree implements TreeContext {
         // create shadow trees, and materialise with field mappings.
         const resolved = await this.resolveWires(regularWires);
         if (!Array.isArray(resolved)) return null;
-        const shadows = this.createShadowArray(resolved);
+        const scopeKey = prefix.length > 0 ? prefix.join(".") : undefined;
+        const shadows = this.createShadowArray(resolved, scopeKey);
         return this.materializeShadows(shadows, prefix);
       }
 
@@ -1139,7 +1166,8 @@ export class ExecutionTree implements TreeContext {
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
       if (isLoopControlSignal(resolved)) return [];
-      return this.createShadowArray(resolved as any[]);
+      const scopeKey = cleanPath.length > 0 ? cleanPath.join(".") : undefined;
+      return this.createShadowArray(resolved as any[], scopeKey);
     }
 
     // ── Resolve field from deferred define ────────────────────────────
@@ -1153,7 +1181,8 @@ export class ExecutionTree implements TreeContext {
         if (!array) return response;
         const resolved = await response;
         if (isLoopControlSignal(resolved)) return [];
-        return this.createShadowArray(resolved as any[]);
+        const scopeKey = cleanPath.length > 0 ? cleanPath.join(".") : undefined;
+        return this.createShadowArray(resolved as any[], scopeKey);
       }
     }
 
@@ -1174,9 +1203,11 @@ export class ExecutionTree implements TreeContext {
           if (array && Array.isArray(value)) {
             // Nested array: wrap items in shadow trees so they can
             // resolve their own fields via this same fallback path.
+            const nestedScopeKey = cleanPath.length > 0 ? cleanPath.join(".") : undefined;
             return value.map((item: any) => {
               const s = this.shadow();
               s.state[this.elementTrunkKey] = item;
+              if (nestedScopeKey) s.elementScopeKey = nestedScopeKey;
               return s;
             });
           }

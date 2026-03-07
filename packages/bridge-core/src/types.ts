@@ -16,6 +16,17 @@ export type NodeRef = {
   instance?: number;
   /** References the current array element in a shadow tree (for per-element mapping) */
   element?: boolean;
+  /**
+   * When set, this element ref targets a *specific* nesting level identified
+   * by the array output path prefix (e.g. `"items"` for the outer array in
+   * `o.items <- src[] as x { .l2 <- x.children[] as y { .xv <- x.v } }`).
+   *
+   * Only meaningful when `element === true`.  Without `elementScope`, the
+   * runtime resolves element data from the innermost shadow tree.  With it,
+   * the runtime walks the parent chain until it finds the shadow whose
+   * `elementScopeKey` matches.
+   */
+  elementScope?: string;
   /** Path into the data: ["items", "0", "position", "lat"] */
   path: string[];
   /** True when the first `?.` is right after the root (e.g., `api?.data`) */
