@@ -10,7 +10,7 @@
 
 import type { Bridge, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { isPromise } from "./tree-types.ts";
+import { isPromise, wrapBridgeRuntimeError } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
 import { trunkKey, sameTrunk, setNested } from "./tree-utils.ts";
 import {
@@ -44,12 +44,25 @@ export interface SchedulerContext extends ToolLookupContext {
   readonly handleVersionMap: ReadonlyMap<string, string>;
   /** Tool trunks marked with `memoize`. */
   readonly memoizedToolKeys: ReadonlySet<string>;
+  /** Optional original bridge source used for formatted runtime errors. */
+  readonly source?: string;
+  /** Optional bridge filename used for formatted runtime errors. */
+  readonly filename?: string;
 
   // ── Methods ────────────────────────────────────────────────────────────
   /** Recursive entry point — parent delegation calls this. */
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any>;
   /** Resolve a set of matched wires (delegates to resolveWires.ts). */
   resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any>;
+}
+
+function getBridgeLocFromGroups(groupEntries: [string, Wire[]][]): Wire["loc"] {
+  for (const [, wires] of groupEntries) {
+    for (const wire of wires) {
+      if (wire.loc) return wire.loc;
+    }
+  }
+  return undefined;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -270,6 +283,7 @@ export function scheduleFinish(
 ): MaybePromise<any> {
   const input: Record<string, any> = {};
   const resolved: [string[], any][] = [];
+  const bridgeLoc = getBridgeLocFromGroups(groupEntries);
   for (let i = 0; i < groupEntries.length; i++) {
     const path = groupEntries[i]![1][0]!.to.path;
     const value = resolvedValues[i];
@@ -323,7 +337,11 @@ export function scheduleFinish(
     return input;
   }
 
-  throw new Error(`No tool found for "${toolName}"`);
+  throw wrapBridgeRuntimeError(new Error(`No tool found for "${toolName}"`), {
+    bridgeLoc,
+    bridgeSource: ctx.source,
+    bridgeFilename: ctx.filename,
+  });
 }
 
 // ── Schedule ToolDef ────────────────────────────────────────────────────────
@@ -361,9 +379,20 @@ export async function scheduleToolDef(
     }
   }
 
+  const bridgeLoc = getBridgeLocFromGroups(groupEntries);
+
   // Call ToolDef-backed tool function
   const fn = lookupToolFn(ctx, toolDef.fn!);
-  if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
+  if (!fn) {
+    throw wrapBridgeRuntimeError(
+      new Error(`Tool function "${toolDef.fn}" not registered`),
+      {
+        bridgeLoc,
+        bridgeSource: ctx.source,
+        bridgeFilename: ctx.filename,
+      },
+    );
+  }
 
   // on error: wrap the tool call with fallback from onError wire
   const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");

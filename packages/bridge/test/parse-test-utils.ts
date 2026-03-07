@@ -8,7 +8,12 @@ function omitLoc(value: unknown): unknown {
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (key === "loc") {
+      if (
+        key === "loc" ||
+        key.endsWith("Loc") ||
+        key === "source" ||
+        key === "filename"
+      ) {
         continue;
       }
       result[key] = omitLoc(entry);

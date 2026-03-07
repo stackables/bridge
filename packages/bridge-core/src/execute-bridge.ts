@@ -133,12 +133,23 @@ export async function executeBridge<T = unknown>(
 
   const tree = new ExecutionTree(trunk, doc, allTools, context);
 
+  tree.source = doc.source;
+  tree.filename = doc.filename;
+
   if (options.logger) tree.logger = options.logger;
   if (options.signal) tree.signal = options.signal;
-  if (options.toolTimeoutMs !== undefined && Number.isFinite(options.toolTimeoutMs) && options.toolTimeoutMs >= 0) {
+  if (
+    options.toolTimeoutMs !== undefined &&
+    Number.isFinite(options.toolTimeoutMs) &&
+    options.toolTimeoutMs >= 0
+  ) {
     tree.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
   }
-  if (options.maxDepth !== undefined && Number.isFinite(options.maxDepth) && options.maxDepth >= 0) {
+  if (
+    options.maxDepth !== undefined &&
+    Number.isFinite(options.maxDepth) &&
+    options.maxDepth >= 0
+  ) {
     tree.maxDepth = Math.floor(options.maxDepth);
   }
 

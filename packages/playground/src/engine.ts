@@ -8,6 +8,7 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
   executeBridge,
+  formatBridgeError,
   prettyPrintToSource,
 } from "@stackables/bridge";
 export { prettyPrintToSource };
@@ -86,7 +87,9 @@ export type DiagnosticResult = {
  * Parse bridge DSL and return diagnostics (errors / warnings).
  */
 export function getDiagnostics(bridgeText: string): DiagnosticResult {
-  const result = parseBridgeDiagnostics(bridgeText);
+  const result = parseBridgeDiagnostics(bridgeText, {
+    filename: "playground.bridge",
+  });
   return { diagnostics: result.diagnostics };
 }
 
@@ -241,6 +244,9 @@ export async function runBridge(
     });
 
     const errors = result.errors?.map((e) => {
+      if (e.message.includes("\n")) {
+        return e.message;
+      }
       const path = e.path ? ` (path: ${e.path.join(".")})` : "";
       return `${e.message}${path}`;
     });
@@ -254,9 +260,7 @@ export async function runBridge(
     };
   } catch (err: unknown) {
     return {
-      errors: [
-        `Execution error: ${err instanceof Error ? err.message : String(err)}`,
-      ],
+      errors: [formatBridgeError(err)],
     };
   } finally {
     _onCacheHit = null;
@@ -273,7 +277,9 @@ export type BridgeOperation = { type: string; field: string; label: string };
  */
 export function extractBridgeOperations(bridgeText: string): BridgeOperation[] {
   try {
-    const { document } = parseBridgeDiagnostics(bridgeText);
+    const { document } = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
     return document.instructions
       .filter((i): i is Bridge => i.kind === "bridge")
       .map((b) => ({
@@ -311,7 +317,9 @@ export function extractOutputFields(
   operation: string,
 ): OutputFieldNode[] {
   try {
-    const { document } = parseBridgeDiagnostics(bridgeText);
+    const { document } = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
     const [type, field] = operation.split(".");
     if (!type || !field) return [];
 
@@ -380,7 +388,9 @@ export function extractInputSkeleton(
   operation: string,
 ): string {
   try {
-    const { document } = parseBridgeDiagnostics(bridgeText);
+    const { document } = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
     const [type, field] = operation.split(".");
     if (!type || !field) return "{}";
 
@@ -528,7 +538,9 @@ export async function runBridgeStandalone(
   // 1. Parse Bridge DSL
   let document;
   try {
-    const result = parseBridgeDiagnostics(bridgeText);
+    const result = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
     document = result.document;
   } catch (err: unknown) {
     return {
@@ -646,9 +658,7 @@ export async function runBridgeStandalone(
     };
   } catch (err: unknown) {
     return {
-      errors: [
-        `Execution error: ${err instanceof Error ? err.message : String(err)}`,
-      ],
+      errors: [formatBridgeError(err)],
     };
   } finally {
     _onCacheHit = null;

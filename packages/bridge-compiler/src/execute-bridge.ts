@@ -17,6 +17,7 @@ import {
   TraceCollector,
   BridgePanicError,
   BridgeAbortError,
+  BridgeRuntimeError,
   BridgeTimeoutError,
   executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
@@ -104,6 +105,7 @@ type BridgeFn = (
     __BridgePanicError?: new (...args: any[]) => Error;
     __BridgeAbortError?: new (...args: any[]) => Error;
     __BridgeTimeoutError?: new (...args: any[]) => Error;
+    __BridgeRuntimeError?: new (...args: any[]) => Error;
   },
 ) => Promise<any>;
 
@@ -298,6 +300,7 @@ export async function executeBridge<T = unknown>(
     __BridgePanicError: BridgePanicError,
     __BridgeAbortError: BridgeAbortError,
     __BridgeTimeoutError: BridgeTimeoutError,
+    __BridgeRuntimeError: BridgeRuntimeError,
     __trace: tracer
       ? (
           toolName: string,

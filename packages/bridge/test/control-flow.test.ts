@@ -7,6 +7,7 @@ import {
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
 import { forEachEngine } from "./_dual-run.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Parser: control flow keywords
@@ -26,7 +27,7 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(pullWire.fallbacks, [
       {
         type: "falsy",
         control: { kind: "throw", message: "name is required" },
@@ -47,7 +48,7 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(pullWire.fallbacks, [
       {
         type: "nullish",
         control: { kind: "panic", message: "fatal: name cannot be null" },
@@ -73,7 +74,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(elemWire.fallbacks, [
       { type: "nullish", control: { kind: "continue" } },
     ]);
   });
@@ -96,7 +97,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(elemWire.fallbacks, [
       { type: "nullish", control: { kind: "break" } },
     ]);
   });
@@ -128,10 +129,10 @@ bridge Query.test {
     );
     assert.ok(skuWire);
     assert.ok(priceWire);
-    assert.deepStrictEqual(skuWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(skuWire.fallbacks, [
       { type: "nullish", control: { kind: "continue", levels: 2 } },
     ]);
-    assert.deepStrictEqual(priceWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(priceWire.fallbacks, [
       { type: "nullish", control: { kind: "break", levels: 2 } },
     ]);
   });
@@ -203,7 +204,7 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(pullWire.fallbacks, [
       {
         type: "falsy",
         control: { kind: "throw", message: "name is required" },
@@ -231,7 +232,7 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(pullWire.fallbacks, [
       {
         type: "nullish",
         control: { kind: "panic", message: "fatal" },
@@ -264,7 +265,7 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(elemWire.fallbacks, [
       { type: "nullish", control: { kind: "continue" } },
     ]);
   });
@@ -328,10 +329,10 @@ bridge Query.test {
     );
     assert.ok(skuWire);
     assert.ok(priceWire);
-    assert.deepStrictEqual(skuWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(skuWire.fallbacks, [
       { type: "nullish", control: { kind: "continue", levels: 2 } },
     ]);
-    assert.deepStrictEqual(priceWire.fallbacks, [
+    assertDeepStrictEqualIgnoringLoc(priceWire.fallbacks, [
       { type: "nullish", control: { kind: "break", levels: 2 } },
     ]);
   });

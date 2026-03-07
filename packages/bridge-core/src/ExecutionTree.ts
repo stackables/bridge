@@ -31,6 +31,7 @@ import {
   BREAK_SYM,
   BridgeAbortError,
   BridgePanicError,
+  wrapBridgeRuntimeError,
   CONTINUE_SYM,
   decrementLoopControl,
   isLoopControlSignal,
@@ -91,6 +92,8 @@ function stableMemoizeKey(value: unknown): string {
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
+  source?: string;
+  filename?: string;
   /**
    * Cache for resolved tool dependency promises.
    * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
@@ -542,7 +545,7 @@ export class ExecutionTree implements TreeContext {
    * Traverse `ref.path` on an already-resolved value, respecting null guards.
    * Extracted from `pullSingle` so the sync and async paths can share logic.
    */
-  private applyPath(resolved: any, ref: NodeRef): any {
+  private applyPath(resolved: any, ref: NodeRef, bridgeLoc?: Wire["loc"]): any {
     if (!ref.path.length) return resolved;
 
     let result: any = resolved;
@@ -550,8 +553,15 @@ export class ExecutionTree implements TreeContext {
     // Root-level null check
     if (result == null) {
       if (ref.rootSafe || ref.element) return undefined;
-      throw new TypeError(
-        `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
+      throw wrapBridgeRuntimeError(
+        new TypeError(
+          `Cannot read properties of ${result} (reading '${ref.path[0]}')`,
+        ),
+        {
+          bridgeLoc,
+          bridgeSource: this.source,
+          bridgeFilename: this.filename,
+        },
       );
     }
 
@@ -568,8 +578,15 @@ export class ExecutionTree implements TreeContext {
       if (result == null && i < ref.path.length - 1) {
         const nextSafe = (ref.pathSafe?.[i + 1] ?? false) || !!ref.element;
         if (nextSafe) return undefined;
-        throw new TypeError(
-          `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
+        throw wrapBridgeRuntimeError(
+          new TypeError(
+            `Cannot read properties of ${result} (reading '${ref.path[i + 1]}')`,
+          ),
+          {
+            bridgeLoc,
+            bridgeSource: this.source,
+            bridgeFilename: this.filename,
+          },
         );
       }
     }
@@ -587,6 +604,7 @@ export class ExecutionTree implements TreeContext {
   pullSingle(
     ref: NodeRef,
     pullChain: Set<string> = new Set(),
+    bridgeLoc?: Wire["loc"],
   ): MaybePromise<any> {
     // Cache trunkKey on the NodeRef via a Symbol key to avoid repeated
     // string allocation.  Symbol keys don't affect V8 hidden classes,
@@ -649,12 +667,12 @@ export class ExecutionTree implements TreeContext {
 
     // Sync fast path: value is already resolved (not a pending Promise).
     if (!isPromise(value)) {
-      return this.applyPath(value, ref);
+      return this.applyPath(value, ref, bridgeLoc);
     }
 
     // Async: chain path traversal onto the pending promise.
     return (value as Promise<any>).then((resolved: any) =>
-      this.applyPath(resolved, ref),
+      this.applyPath(resolved, ref, bridgeLoc),
     );
   }
 

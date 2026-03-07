@@ -14,6 +14,7 @@ import {
   ExecutionTree,
   TraceCollector,
   executeBridge as executeBridgeDefault,
+  formatBridgeError,
   resolveStd,
   checkHandleVersions,
   type Logger,
@@ -250,26 +251,30 @@ export function bridgeTransform(
         info: GraphQLResolveInfo,
       ): Promise<unknown> {
         const requestedFields = collectRequestedFields(info);
-        const { data, traces } = await executeBridgeFn({
-          document: activeDoc,
-          operation: `${typeName}.${fieldName}`,
-          input: args,
-          context: bridgeContext,
-          tools: userTools,
-          ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
-          logger,
-          ...(options?.toolTimeoutMs !== undefined
-            ? { toolTimeoutMs: options.toolTimeoutMs }
-            : {}),
-          ...(options?.maxDepth !== undefined
-            ? { maxDepth: options.maxDepth }
-            : {}),
-          ...(requestedFields.length > 0 ? { requestedFields } : {}),
-        });
-        if (traceLevel !== "off") {
-          context.__bridgeTracer = { traces };
+        try {
+          const { data, traces } = await executeBridgeFn({
+            document: activeDoc,
+            operation: `${typeName}.${fieldName}`,
+            input: args,
+            context: bridgeContext,
+            tools: userTools,
+            ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
+            logger,
+            ...(options?.toolTimeoutMs !== undefined
+              ? { toolTimeoutMs: options.toolTimeoutMs }
+              : {}),
+            ...(options?.maxDepth !== undefined
+              ? { maxDepth: options.maxDepth }
+              : {}),
+            ...(requestedFields.length > 0 ? { requestedFields } : {}),
+          });
+          if (traceLevel !== "off") {
+            context.__bridgeTracer = { traces };
+          }
+          return data;
+        } catch (err) {
+          throw new Error(formatBridgeError(err), { cause: err });
         }
-        return data;
       }
 
       const standalonePrecomputed = precomputeStandalone();
@@ -349,6 +354,8 @@ export function bridgeTransform(
             );
 
             source.logger = logger;
+            source.source = activeDoc.source;
+            source.filename = activeDoc.filename;
             if (
               options?.toolTimeoutMs !== undefined &&
               Number.isFinite(options.toolTimeoutMs) &&
@@ -395,19 +402,34 @@ export function bridgeTransform(
           }
 
           if (source instanceof ExecutionTree) {
-            const result = await source.response(info.path, array);
+            let result;
+            try {
+              result = await source.response(info.path, array);
+            } catch (err) {
+              throw new Error(formatBridgeError(err), { cause: err });
+            }
 
             // Scalar return types (JSON, JSONObject, etc.) won't trigger
             // sub-field resolvers, so if response() deferred resolution by
             // returning the tree itself, eagerly materialise the output.
             if (scalar) {
               if (result instanceof ExecutionTree) {
-                return result.collectOutput();
+                try {
+                  return result.collectOutput();
+                } catch (err) {
+                  throw new Error(formatBridgeError(err), { cause: err });
+                }
               }
               if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
-                return Promise.all(
-                  result.map((shadow: ExecutionTree) => shadow.collectOutput()),
-                );
+                try {
+                  return await Promise.all(
+                    result.map((shadow: ExecutionTree) =>
+                      shadow.collectOutput(),
+                    ),
+                  );
+                } catch (err) {
+                  throw new Error(formatBridgeError(err), { cause: err });
+                }
               }
             }
 
@@ -415,9 +437,14 @@ export function bridgeTransform(
             // force promises so errors propagate into GraphQL `errors[]`
             // while still allowing parallel execution.
             if (info.path.prev && source.getForcedExecution()) {
-              return Promise.all([result, source.getForcedExecution()]).then(
-                ([data]) => data,
-              );
+              try {
+                return await Promise.all([
+                  result,
+                  source.getForcedExecution(),
+                ]).then(([data]) => data);
+              } catch (err) {
+                throw new Error(formatBridgeError(err), { cause: err });
+              }
             }
             return result;
           }

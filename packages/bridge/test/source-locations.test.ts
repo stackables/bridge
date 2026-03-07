@@ -70,4 +70,34 @@ bridge Query.test {
     );
     assertLoc(concatPartWire, 5, 3);
   });
+
+  it("fallback and catch refs carry granular locations", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+  alias i.empty.array.error catch i.empty.array.error as clean
+  o.message <- i.empty.array?.error ?? i.empty.array.error catch clean
+}`);
+
+    const aliasWire = bridge.wires.find(
+      (wire) => "to" in wire && wire.to.field === "clean",
+    );
+    assert.ok(aliasWire && "catchLoc" in aliasWire);
+    assert.equal(aliasWire.catchLoc?.startLine, 5);
+    assert.equal(aliasWire.catchLoc?.startColumn, 35);
+
+    const messageWire = bridge.wires.find(
+      (wire) => "to" in wire && wire.to.path.join(".") === "message",
+    );
+    assert.ok(
+      messageWire && "from" in messageWire && "fallbacks" in messageWire,
+    );
+    assert.equal(messageWire.fromLoc?.startLine, 6);
+    assert.equal(messageWire.fromLoc?.startColumn, 16);
+    assert.equal(messageWire.fallbacks?.[0]?.loc?.startLine, 6);
+    assert.equal(messageWire.fallbacks?.[0]?.loc?.startColumn, 40);
+    assert.equal(messageWire.catchLoc?.startLine, 6);
+    assert.equal(messageWire.catchLoc?.startColumn, 66);
+  });
 });

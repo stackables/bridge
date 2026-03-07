@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
   BridgeAbortError,
   BridgePanicError,
+  BridgeRuntimeError,
   ExecutionTree,
   type BridgeDocument,
   type NodeRef,
@@ -39,7 +40,18 @@ describe("ExecutionTree edge cases", () => {
   test("applyPath respects rootSafe and throws when not rootSafe", () => {
     const tree = new ExecutionTree(TRUNK, DOC);
     assert.equal((tree as any).applyPath(null, ref(["x"], true)), undefined);
-    assert.throws(() => (tree as any).applyPath(null, ref(["x"])), TypeError);
+    assert.throws(
+      () => (tree as any).applyPath(null, ref(["x"])),
+      (err: unknown) => {
+        assert.ok(err instanceof BridgeRuntimeError);
+        assert.ok(err.cause instanceof TypeError);
+        assert.match(
+          err.message,
+          /Cannot read properties of null \(reading 'x'\)/,
+        );
+        return true;
+      },
+    );
   });
 
   test("applyPath warns when using object-style access on arrays", () => {

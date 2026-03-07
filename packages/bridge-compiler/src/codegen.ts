@@ -30,6 +30,7 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
+import type { SourceLocation } from "@stackables/bridge-types";
 import { assertBridgeCompilerCompatible } from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
@@ -694,12 +695,42 @@ class CodegenContext {
     lines.push(
       `  const __BridgeTimeoutError = __opts?.__BridgeTimeoutError ?? class extends Error { constructor(n, ms) { super('Tool "' + n + '" timed out after ' + ms + 'ms'); this.name = "BridgeTimeoutError"; } };`,
     );
+    lines.push(
+      `  const __BridgeRuntimeError = __opts?.__BridgeRuntimeError ?? class extends Error { constructor(message, options) { super(message, options && "cause" in options ? { cause: options.cause } : undefined); this.name = "BridgeRuntimeError"; this.bridgeLoc = options?.bridgeLoc; this.bridgeSource = options?.bridgeSource; this.bridgeFilename = options?.bridgeFilename; } };`,
+    );
     lines.push(`  const __signal = __opts?.signal;`);
     lines.push(`  const __timeoutMs = __opts?.toolTimeoutMs ?? 0;`);
+    lines.push(`  const __bridgeSource = __opts?.source;`);
+    lines.push(`  const __bridgeFilename = __opts?.filename;`);
     lines.push(
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
     lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(`  function __rethrowBridgeError(err, loc) {`);
+    lines.push(
+      `    if (err?.name === "BridgePanicError" || err?.name === "BridgeAbortError") throw err;`,
+    );
+    lines.push(
+      `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc !== undefined) throw err;`,
+    );
+    lines.push(
+      `    throw new __BridgeRuntimeError(err instanceof Error ? err.message : String(err), { cause: err, bridgeLoc: loc, bridgeSource: __bridgeSource, bridgeFilename: __bridgeFilename });`,
+    );
+    lines.push(`  }`);
+    lines.push(`  function __wrapBridgeError(fn, loc) {`);
+    lines.push(`    try {`);
+    lines.push(`      return fn();`);
+    lines.push(`    } catch (err) {`);
+    lines.push(`      __rethrowBridgeError(err, loc);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  async function __wrapBridgeErrorAsync(fn, loc) {`);
+    lines.push(`    try {`);
+    lines.push(`      return await fn();`);
+    lines.push(`    } catch (err) {`);
+    lines.push(`      __rethrowBridgeError(err, loc);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
@@ -2222,9 +2253,9 @@ class CodegenContext {
 
     // Pull wire
     if ("from" in w) {
-      let expr = this.refToExpr(w.from);
+      let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Conditional wire (ternary)
@@ -2244,7 +2275,7 @@ class CodegenContext {
             : "undefined";
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Logical AND
@@ -2258,7 +2289,7 @@ class CodegenContext {
         expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     // Logical OR
@@ -2272,7 +2303,7 @@ class CodegenContext {
         expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
-      return expr;
+      return this.wrapWireExpr(w, expr);
     }
 
     return "undefined";
@@ -2284,11 +2315,32 @@ class CodegenContext {
     this.elementVarStack.push(elVar);
     this.currentElVar = elVar;
     try {
-      return this._elementWireToExprInner(w, elVar);
+      return this.wrapWireExpr(w, this._elementWireToExprInner(w, elVar));
     } finally {
       this.elementVarStack.pop();
       this.currentElVar = prevElVar;
     }
+  }
+
+  private wrapWireExpr(w: Wire, expr: string): string {
+    const loc = this.serializeLoc(w.loc);
+    if (expr.includes("await ")) {
+      return `await __wrapBridgeErrorAsync(async () => (${expr}), ${loc})`;
+    }
+    return `__wrapBridgeError(() => (${expr}), ${loc})`;
+  }
+
+  private serializeLoc(loc?: SourceLocation): string {
+    return JSON.stringify(loc ?? null);
+  }
+
+  private wrapExprWithLoc(expr: string, loc?: SourceLocation): string {
+    if (!loc) return expr;
+    const serializedLoc = this.serializeLoc(loc);
+    if (expr.includes("await ")) {
+      return `await __wrapBridgeErrorAsync(async () => (${expr}), ${serializedLoc})`;
+    }
+    return `__wrapBridgeError(() => (${expr}), ${serializedLoc})`;
   }
 
   private refToElementExpr(ref: NodeRef): string {
@@ -2362,17 +2414,19 @@ class CodegenContext {
               `(${expr})` +
               w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
           }
+          expr = this.wrapExprWithLoc(expr, w.fromLoc);
           expr = this.applyFallbacks(w, expr);
           return expr;
         }
         // Non-element ref inside array mapping — use normal refToExpr
-        let expr = this.refToExpr(w.from);
+        let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
         expr = this.applyFallbacks(w, expr);
         return expr;
       }
       // Element refs: from.element === true, path = ["srcField"]
       let expr =
         elVar + w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+      expr = this.wrapExprWithLoc(expr, w.fromLoc);
       expr = this.applyFallbacks(w, expr);
       return expr;
     }
@@ -2888,7 +2942,7 @@ class CodegenContext {
       for (const fb of w.fallbacks) {
         if (fb.type === "falsy") {
           if (fb.ref) {
-            expr = `(${expr} || ${this.refToExpr(fb.ref)})`; // lgtm [js/code-injection]
+            expr = `(${expr} || ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)})`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -2902,7 +2956,7 @@ class CodegenContext {
         } else {
           // nullish
           if (fb.ref) {
-            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.refToExpr(fb.ref)}))`; // lgtm [js/code-injection]
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)}))`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -2923,7 +2977,10 @@ class CodegenContext {
     if (hasCatchFallback(w)) {
       let catchExpr: string;
       if ("catchFallbackRef" in w && w.catchFallbackRef) {
-        catchExpr = this.refToExpr(w.catchFallbackRef);
+        catchExpr = this.wrapExprWithLoc(
+          this.refToExpr(w.catchFallbackRef),
+          "catchLoc" in w ? w.catchLoc : undefined,
+        );
       } else if ("catchFallback" in w && w.catchFallback != null) {
         catchExpr = emitCoerced(w.catchFallback);
       } else {
