@@ -55,6 +55,12 @@ bridge Query.test {
 
     const ternaryWire = bridge.wires.find((wire) => "cond" in wire);
     assertLoc(ternaryWire, 5, 3);
+    assert.equal(ternaryWire?.condLoc?.startLine, 5);
+    assert.equal(ternaryWire?.condLoc?.startColumn, 13);
+    assert.equal(ternaryWire?.thenLoc?.startLine, 5);
+    assert.equal(ternaryWire?.thenLoc?.startColumn, 22);
+    assert.equal(ternaryWire?.elseLoc?.startLine, 5);
+    assert.equal(ternaryWire?.elseLoc?.startColumn, 36);
   });
 
   it("desugared template wires inherit the originating source loc", () => {

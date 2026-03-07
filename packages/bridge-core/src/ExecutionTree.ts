@@ -510,6 +510,8 @@ export class ExecutionTree implements TreeContext {
     child.tracer = this.tracer;
     child.logger = this.logger;
     child.signal = this.signal;
+    child.source = this.source;
+    child.filename = this.filename;
     return child;
   }
 
@@ -579,7 +581,24 @@ export class ExecutionTree implements TreeContext {
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
         );
       }
-      result = result[segment];
+      const next = result[segment];
+      const isPrimitiveBase =
+        result !== null &&
+        typeof result !== "object" &&
+        typeof result !== "function";
+      if (isPrimitiveBase && next === undefined) {
+        throw wrapBridgeRuntimeError(
+          new TypeError(
+            `Cannot read properties of ${result} (reading '${segment}')`,
+          ),
+          {
+            bridgeLoc,
+            bridgeSource: this.source,
+            bridgeFilename: this.filename,
+          },
+        );
+      }
+      result = next;
     }
     return result;
   }

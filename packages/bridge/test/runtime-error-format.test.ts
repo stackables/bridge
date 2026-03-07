@@ -71,6 +71,41 @@ bridge Query.greet {
   o.message <- i.name ?? panic "Fatale"
 }`;
 
+const bridgeTernaryText = `version 1.5
+
+bridge Query.greet {
+  with input as i
+  with output as o
+
+  o.discount <- i.isPro ? 20 : i.asd.asd.asd
+}`;
+
+const bridgeArrayThrowText = `version 1.5
+
+bridge Query.processCatalog {
+  with input as i
+  with output as o
+
+  o <- i.catalog[] as cat {
+    .name <- cat.name
+    .items <- cat.items[] as item {
+      .sku <- item.sku ?? continue 2
+      .price <- item.price ?? throw "panic"
+    }
+  }
+}`;
+
+const bridgeTernaryConditionErrorText = `version 1.5
+
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.tier <- i.isPro ? "premium" : "basic"
+  o.discount <- i.isPro ? 20 : 5
+  o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice
+}`;
+
 function maxCaretCount(formatted: string): number {
   return Math.max(
     0,
@@ -193,6 +228,94 @@ describe("runtime error formatting", () => {
         assert.match(formatted, /playground\.bridge:7:26/);
         assert.match(formatted, /o\.message <- i\.name \?\? panic "Fatale"/);
         assert.equal(maxCaretCount(formatted), 'panic "Fatale"'.length);
+        return true;
+      },
+    );
+  });
+
+  test("ternary branch errors underline only the failing branch", async () => {
+    const document = parseBridge(bridgeTernaryText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.greet",
+          input: { isPro: false },
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(
+          formatted,
+          /Bridge Execution Error: Cannot read properties of undefined \(reading 'asd'\)/,
+        );
+        assert.match(formatted, /playground\.bridge:7:32/);
+        assert.match(
+          formatted,
+          /o\.discount <- i\.isPro \? 20 : i\.asd\.asd\.asd/,
+        );
+        assert.equal(maxCaretCount(formatted), "i.asd.asd.asd".length);
+        return true;
+      },
+    );
+  });
+
+  test("array-mapped throw fallbacks retain source snippets", async () => {
+    const document = parseBridge(bridgeArrayThrowText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.processCatalog",
+          input: {
+            catalog: [
+              {
+                name: "Cat",
+                items: [{ sku: "ABC", price: null }],
+              },
+            ],
+          },
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(formatted, /Bridge Execution Error: panic/);
+        assert.match(formatted, /playground\.bridge:11:31/);
+        assert.match(formatted, /\.price <- item\.price \?\? throw "panic"/);
+        assert.equal(maxCaretCount(formatted), 'throw "panic"'.length);
+        return true;
+      },
+    );
+  });
+
+  test("ternary condition errors point at the condition and missing segment", async () => {
+    const document = parseBridge(bridgeTernaryConditionErrorText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.pricing",
+          input: { isPro: false, proPrice: 49.99, basicPrice: 9.99 },
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(
+          formatted,
+          /Bridge Execution Error: Cannot read properties of false \(reading 'fail'\)/,
+        );
+        assert.match(formatted, /playground\.bridge:9:14/);
+        assert.match(
+          formatted,
+          /o\.price <- i\.isPro\.fail\.asd \? i\.proPrice : i\.basicPrice/,
+        );
+        assert.equal(maxCaretCount(formatted), "i.isPro.fail.asd".length);
         return true;
       },
     );

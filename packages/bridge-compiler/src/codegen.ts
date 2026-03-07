@@ -760,7 +760,16 @@ class CodegenContext {
       `        throw new TypeError("Cannot read properties of " + result + " (reading '" + segment + "')");`,
     );
     lines.push(`      }`);
-    lines.push(`      result = result[segment];`);
+    lines.push(`      const next = result[segment];`);
+    lines.push(
+      `      const isPrimitiveBase = result !== null && typeof result !== "object" && typeof result !== "function";`,
+    );
+    lines.push(`      if (isPrimitiveBase && next === undefined) {`);
+    lines.push(
+      `        throw new TypeError("Cannot read properties of " + result + " (reading '" + segment + "')");`,
+    );
+    lines.push(`      }`);
+    lines.push(`      result = next;`);
     lines.push(`    }`);
     lines.push(`    return result;`);
     lines.push(`  }`);
@@ -2293,16 +2302,19 @@ class CodegenContext {
 
     // Conditional wire (ternary)
     if ("cond" in w) {
-      const condExpr = this.refToExpr(w.cond);
+      const condExpr = this.wrapExprWithLoc(
+        this.refToExpr(w.cond),
+        w.condLoc ?? w.loc,
+      );
       const thenExpr =
         w.thenRef !== undefined
-          ? this.lazyRefToExpr(w.thenRef)
+          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.thenRef), w.thenLoc)
           : w.thenValue !== undefined
             ? emitCoerced(w.thenValue)
             : "undefined";
       const elseExpr =
         w.elseRef !== undefined
-          ? this.lazyRefToExpr(w.elseRef)
+          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.elseRef), w.elseLoc)
           : w.elseValue !== undefined
             ? emitCoerced(w.elseValue)
             : "undefined";
@@ -2408,24 +2420,28 @@ class CodegenContext {
           condExpr = this.refToExpr(condRef);
         }
       }
+      condExpr = this.wrapExprWithLoc(condExpr, w.condLoc ?? w.loc);
       const resolveBranch = (
         ref: NodeRef | undefined,
         val: string | undefined,
+        loc: SourceLocation | undefined,
       ): string => {
         if (ref !== undefined) {
-          if (ref.element) return this.refToElementExpr(ref);
+          if (ref.element) {
+            return this.wrapExprWithLoc(this.refToElementExpr(ref), loc);
+          }
           const branchKey = refTrunkKey(ref);
           if (this.elementScopedTools.has(branchKey)) {
             let e = this.buildInlineToolExpr(branchKey, elVar);
             if (ref.path.length > 0) e = this.appendPathExpr(`(${e})`, ref);
-            return e;
+            return this.wrapExprWithLoc(e, loc);
           }
-          return this.refToExpr(ref);
+          return this.wrapExprWithLoc(this.refToExpr(ref), loc);
         }
         return val !== undefined ? emitCoerced(val) : "undefined";
       };
-      const thenExpr = resolveBranch(w.thenRef, w.thenValue);
-      const elseExpr = resolveBranch(w.elseRef, w.elseValue);
+      const thenExpr = resolveBranch(w.thenRef, w.thenValue, w.thenLoc);
+      const elseExpr = resolveBranch(w.elseRef, w.elseValue, w.elseLoc);
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -3147,11 +3163,7 @@ class CodegenContext {
       (_, i) =>
         ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false),
     );
-    if (allowMissingBase || safeFlags.some(Boolean)) {
-      return `__path(${baseExpr}, ${JSON.stringify(ref.path)}, ${JSON.stringify(safeFlags)}, ${allowMissingBase ? "true" : "false"})`;
-    }
-
-    return baseExpr + ref.path.map((p) => `[${JSON.stringify(p)}]`).join("");
+    return `__path(${baseExpr}, ${JSON.stringify(ref.path)}, ${JSON.stringify(safeFlags)}, ${allowMissingBase ? "true" : "false"})`;
   }
 
   /**

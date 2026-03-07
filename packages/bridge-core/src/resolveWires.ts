@@ -239,15 +239,19 @@ async function evaluateWireSource(
   pullChain?: Set<string>,
 ): Promise<any> {
   if ("cond" in w) {
-    const condValue = await ctx.pullSingle(w.cond, pullChain);
+    const condValue = await ctx.pullSingle(
+      w.cond,
+      pullChain,
+      w.condLoc ?? w.loc,
+    );
     if (condValue) {
       if (w.thenRef !== undefined) {
-        return ctx.pullSingle(w.thenRef, pullChain, w.loc);
+        return ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
       }
       if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
     } else {
       if (w.elseRef !== undefined) {
-        return ctx.pullSingle(w.elseRef, pullChain, w.loc);
+        return ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
       }
       if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
     }

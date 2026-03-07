@@ -1888,7 +1888,9 @@ function processElementLines(
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  ) =>
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation },
   processLocalBindings: (
     withDecls: CstNode[],
     iterScope: string | string[],
@@ -2023,37 +2025,35 @@ function processElementLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(elemLine, "elemCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
-          if ("literal" in altResult) {
-            catchFallback = altResult.literal;
-          } else if ("control" in altResult) {
-            catchControl = altResult.control;
-          } else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
 
         const lastAttrs = {
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchFallback ? { catchFallback } : {}),
-          ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
+          ...(catchFallback !== undefined ? { catchFallback } : {}),
+          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
 
@@ -2197,6 +2197,13 @@ function processElementLines(
       const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
 
       const elemExprOps = subs(elemLine, "elemExprOp");
+      const elemExprRights = subs(elemLine, "elemExprRight");
+      const elemCondLoc = locFromNodeRange(
+        elemFirstParenNode ?? elemSourceNode,
+        elemExprRights[elemExprRights.length - 1] ??
+          elemFirstParenNode ??
+          elemSourceNode,
+      );
 
       // Compute condition ref (expression chain result or plain source)
       let elemCondRef: NodeRef;
@@ -2210,7 +2217,6 @@ function processElementLines(
           elemSafe || undefined,
         );
         if (elemExprOps.length > 0 && desugarExprChain) {
-          const elemExprRights = subs(elemLine, "elemExprRight");
           elemCondRef = desugarExprChain(
             parenRef,
             elemExprOps,
@@ -2226,7 +2232,6 @@ function processElementLines(
         elemCondIsPipeFork = true;
       } else if (elemExprOps.length > 0 && desugarExprChain) {
         // Expression in element line — desugar then merge with fallback path
-        const elemExprRights = subs(elemLine, "elemExprRight");
         let leftRef: NodeRef;
         const directIterRef =
           elemPipeSegs.length === 0
@@ -2341,9 +2346,12 @@ function processElementLines(
           withLoc(
             {
               cond: elemCondRef,
+              ...(elemCondLoc ? { condLoc: elemCondLoc } : {}),
+              thenLoc: thenBranch.loc,
               ...(thenBranch.kind === "ref"
                 ? { thenRef: thenBranch.ref }
                 : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
               ...(elseBranch.kind === "ref"
                 ? { elseRef: elseBranch.ref }
                 : { elseValue: elseBranch.value }),
@@ -2377,12 +2385,8 @@ function processElementLines(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(altNode, elemLineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
@@ -2391,17 +2395,18 @@ function processElementLines(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
+      let catchLoc: SourceLocation | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(elemLine, "elemCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(catchAlt, elemLineNum);
-        if ("literal" in altResult) {
-          catchFallback = altResult.literal;
-        } else if ("control" in altResult) {
-          catchControl = altResult.control;
-        } else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
@@ -2411,8 +2416,9 @@ function processElementLines(
       const wireAttrs = {
         ...(isPipeFork ? { pipe: true as const } : {}),
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback ? { catchFallback } : {}),
-        ...(catchFallbackRef ? { catchFallbackRef } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
       wires.push(
@@ -2514,7 +2520,9 @@ function processElementScopeLines(
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ) => { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef },
+  ) =>
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation },
   desugarTemplateStringFn?: (
     segs: TemplateSeg[],
     lineNum: number,
@@ -2688,34 +2696,34 @@ function processElementScopeLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-          if ("literal" in altResult) catchFallback = altResult.literal;
-          else if ("control" in altResult) catchControl = altResult.control;
-          else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
         const lastAttrs = {
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchFallback ? { catchFallback } : {}),
-          ...(catchFallbackRef ? { catchFallbackRef } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
+          ...(catchFallback !== undefined ? { catchFallback } : {}),
+          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
         };
         if (segs) {
@@ -2764,6 +2772,13 @@ function processElementScopeLines(
       }
 
       const exprOps = subs(scopeLine, "scopeExprOp");
+      const exprRights = subs(scopeLine, "scopeExprRight");
+      const condLoc = locFromNodeRange(
+        scopeFirstParenNode ?? scopeSourceNode,
+        exprRights[exprRights.length - 1] ??
+          scopeFirstParenNode ??
+          scopeSourceNode,
+      );
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
       if (scopeFirstParenNode && resolveParenExprFn) {
@@ -2775,7 +2790,6 @@ function processElementScopeLines(
           scopeLineLoc,
         );
         if (exprOps.length > 0 && desugarExprChain) {
-          const exprRights = subs(scopeLine, "scopeExprRight");
           condRef = desugarExprChain(
             parenRef,
             exprOps,
@@ -2790,7 +2804,6 @@ function processElementScopeLines(
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0 && desugarExprChain) {
-        const exprRights = subs(scopeLine, "scopeExprRight");
         let leftRef: NodeRef;
         const directIterRef =
           scopePipeSegs.length === 0
@@ -2859,39 +2872,42 @@ function processElementScopeLines(
           const altNode = sub(item, "altValue")!;
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-          if ("literal" in altResult) {
-            fallbacks.push({ type, value: altResult.literal });
-          } else if ("control" in altResult) {
-            fallbacks.push({ type, control: altResult.control });
-          } else {
-            fallbacks.push({ type, ref: altResult.sourceRef });
+          fallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
             fallbackInternalWires.push(...wires.splice(preLen));
           }
         }
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
+        let catchLoc: SourceLocation | undefined;
         let catchFallbackInternalWires: Wire[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
           const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-          if ("literal" in altResult) catchFallback = altResult.literal;
-          else if ("control" in altResult) catchControl = altResult.control;
-          else {
-            catchFallbackRef = altResult.sourceRef;
+          const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+          catchLoc = catchAttrs.catchLoc;
+          catchFallback = catchAttrs.catchFallback;
+          catchControl = catchAttrs.catchControl;
+          catchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
         wires.push({
           cond: condRef,
+          ...(condLoc ? { condLoc } : {}),
+          thenLoc: thenBranch.loc,
           ...(thenBranch.kind === "ref"
             ? { thenRef: thenBranch.ref }
             : { thenValue: thenBranch.value }),
+          elseLoc: elseBranch.loc,
           ...(elseBranch.kind === "ref"
             ? { elseRef: elseBranch.ref }
             : { elseValue: elseBranch.value }),
           ...(fallbacks.length > 0 ? { fallbacks } : {}),
+          ...(catchLoc ? { catchLoc } : {}),
           ...(catchFallback !== undefined ? { catchFallback } : {}),
           ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
           ...(catchControl ? { catchControl } : {}),
@@ -2915,12 +2931,8 @@ function processElementScopeLines(
         const altNode = sub(item, "altValue")!;
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(altNode, scopeLineNum);
-        if ("literal" in altResult) {
-          fallbacks.push({ type, value: altResult.literal });
-        } else if ("control" in altResult) {
-          fallbacks.push({ type, control: altResult.control });
-        } else {
-          fallbacks.push({ type, ref: altResult.sourceRef });
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
           fallbackInternalWires.push(...wires.splice(preLen));
         }
       }
@@ -2928,15 +2940,18 @@ function processElementScopeLines(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
+      let catchLoc: SourceLocation | undefined;
       let catchFallbackInternalWires: Wire[] = [];
       const catchAlt = sub(scopeLine, "scopeCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
         const altResult = extractCoalesceAltIterAware(catchAlt, scopeLineNum);
-        if ("literal" in altResult) catchFallback = altResult.literal;
-        else if ("control" in altResult) catchControl = altResult.control;
-        else {
-          catchFallbackRef = altResult.sourceRef;
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
           catchFallbackInternalWires = wires.splice(preLen);
         }
       }
@@ -2945,8 +2960,9 @@ function processElementScopeLines(
       const wireAttrs = {
         ...(isPipe ? { pipe: true as const } : {}),
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
-        ...(catchFallback ? { catchFallback } : {}),
-        ...(catchFallbackRef ? { catchFallbackRef } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
       wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
@@ -3901,6 +3917,11 @@ function buildBridgeBody(
         : undefined;
       const isSafe = headNode ? !!extractAddressPath(headNode).rootSafe : false;
       const exprOps = subs(wireNode, "exprOp");
+      const exprRights = subs(wireNode, "exprRight");
+      const condLoc = locFromNodeRange(
+        firstParenNode ?? firstSourceNode,
+        exprRights[exprRights.length - 1] ?? firstParenNode ?? firstSourceNode,
+      );
 
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
@@ -3913,7 +3934,6 @@ function buildBridgeBody(
           wireLoc,
         );
         if (exprOps.length > 0) {
-          const exprRights = subs(wireNode, "exprRight");
           condRef = desugarExprChain(
             parenRef,
             exprOps,
@@ -3928,7 +3948,6 @@ function buildBridgeBody(
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0) {
-        const exprRights = subs(wireNode, "exprRight");
         const leftRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
         condRef = desugarExprChain(
           leftRef,
@@ -4002,9 +4021,12 @@ function buildBridgeBody(
           withLoc(
             {
               cond: condRef,
+              ...(condLoc ? { condLoc } : {}),
+              thenLoc: thenBranch.loc,
               ...(thenBranch.kind === "ref"
                 ? { thenRef: thenBranch.ref }
                 : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
               ...(elseBranch.kind === "ref"
                 ? { elseRef: elseBranch.ref }
                 : { elseValue: elseBranch.value }),
@@ -4358,28 +4380,31 @@ function buildBridgeBody(
     branchNode: CstNode,
     lineNum: number,
     iterScope?: string | string[],
-  ): { kind: "literal"; value: string } | { kind: "ref"; ref: NodeRef } {
+  ):
+    | { kind: "literal"; value: string; loc?: SourceLocation }
+    | { kind: "ref"; ref: NodeRef; loc?: SourceLocation } {
     const c = branchNode.children;
+    const branchLoc = locFromNode(branchNode);
     if (c.stringLit) {
       const raw = (c.stringLit as IToken[])[0].image;
       const segs = parseTemplateString(raw.slice(1, -1));
       if (segs)
         return {
           kind: "ref",
-          ref: desugarTemplateString(
-            segs,
-            lineNum,
-            iterScope,
-            locFromNode(branchNode),
-          ),
+          loc: branchLoc,
+          ref: desugarTemplateString(segs, lineNum, iterScope, branchLoc),
         };
-      return { kind: "literal", value: raw };
+      return { kind: "literal", value: raw, loc: branchLoc };
     }
     if (c.numberLit)
-      return { kind: "literal", value: (c.numberLit as IToken[])[0].image };
-    if (c.trueLit) return { kind: "literal", value: "true" };
-    if (c.falseLit) return { kind: "literal", value: "false" };
-    if (c.nullLit) return { kind: "literal", value: "null" };
+      return {
+        kind: "literal",
+        value: (c.numberLit as IToken[])[0].image,
+        loc: branchLoc,
+      };
+    if (c.trueLit) return { kind: "literal", value: "true", loc: branchLoc };
+    if (c.falseLit) return { kind: "literal", value: "false", loc: branchLoc };
+    if (c.nullLit) return { kind: "literal", value: "null", loc: branchLoc };
     if (c.sourceRef) {
       const addrNode = (c.sourceRef as CstNode[])[0];
       const { root, segments, rootSafe, segmentSafe } =
@@ -4388,6 +4413,7 @@ function buildBridgeBody(
       if (iterRef) {
         return {
           kind: "ref",
+          loc: branchLoc,
           ref: {
             ...iterRef,
             ...(rootSafe ? { rootSafe: true } : {}),
@@ -4398,6 +4424,7 @@ function buildBridgeBody(
       const ref = resolveAddress(root, segments, lineNum);
       return {
         kind: "ref",
+        loc: branchLoc,
         ref: {
           ...ref,
           ...(rootSafe ? { rootSafe: true } : {}),
@@ -5072,6 +5099,13 @@ function buildBridgeBody(
         const scopeFirstParenNode = sub(scopeLine, "scopeFirstParenExpr");
         const sourceParts: { ref: NodeRef; isPipeFork: boolean }[] = [];
         const exprOps = subs(scopeLine, "scopeExprOp");
+        const exprRights = subs(scopeLine, "scopeExprRight");
+        const condLoc = locFromNodeRange(
+          scopeFirstParenNode ?? firstSourceNode,
+          exprRights[exprRights.length - 1] ??
+            scopeFirstParenNode ??
+            firstSourceNode,
+        );
 
         // Extract safe flag from head node
         let scopeBlockSafe: boolean = false;
@@ -5092,7 +5126,6 @@ function buildBridgeBody(
             scopeBlockSafe || undefined,
           );
           if (exprOps.length > 0) {
-            const exprRights = subs(scopeLine, "scopeExprRight");
             condRef = desugarExprChain(
               parenRef,
               exprOps,
@@ -5107,7 +5140,6 @@ function buildBridgeBody(
           }
           condIsPipeFork = true;
         } else if (exprOps.length > 0) {
-          const exprRights = subs(scopeLine, "scopeExprRight");
           const leftRef = buildSourceExpr(firstSourceNode!, scopeLineNum);
           condRef = desugarExprChain(
             leftRef,
@@ -5183,9 +5215,12 @@ function buildBridgeBody(
             withLoc(
               {
                 cond: condRef,
+                ...(condLoc ? { condLoc } : {}),
+                thenLoc: thenBranch.loc,
                 ...(thenBranch.kind === "ref"
                   ? { thenRef: thenBranch.ref }
                   : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
                 ...(elseBranch.kind === "ref"
                   ? { elseRef: elseBranch.ref }
                   : { elseValue: elseBranch.value }),
@@ -5381,9 +5416,12 @@ function buildBridgeBody(
             withLoc(
               {
                 cond: sourceRef,
+                ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+                thenLoc: thenBranch.loc,
                 ...(thenBranch.kind === "ref"
                   ? { thenRef: thenBranch.ref }
                   : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
                 ...(elseBranch.kind === "ref"
                   ? { elseRef: elseBranch.ref }
                   : { elseValue: elseBranch.value }),
@@ -5486,9 +5524,12 @@ function buildBridgeBody(
             withLoc(
               {
                 cond: condRef,
+                ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+                thenLoc: thenBranch.loc,
                 ...(thenBranch.kind === "ref"
                   ? { thenRef: thenBranch.ref }
                   : { thenValue: thenBranch.value }),
+                elseLoc: elseBranch.loc,
                 ...(elseBranch.kind === "ref"
                   ? { elseRef: elseBranch.ref }
                   : { elseValue: elseBranch.value }),
@@ -5924,9 +5965,12 @@ function buildBridgeBody(
         withLoc(
           {
             cond: condRef,
+            ...(sourceLoc ? { condLoc: sourceLoc } : {}),
+            thenLoc: thenBranch.loc,
             ...(thenBranch.kind === "ref"
               ? { thenRef: thenBranch.ref }
               : { thenValue: thenBranch.value }),
+            elseLoc: elseBranch.loc,
             ...(elseBranch.kind === "ref"
               ? { elseRef: elseBranch.ref }
               : { elseValue: elseBranch.value }),

@@ -76,10 +76,13 @@ export type Wire =
   | { value: string; to: NodeRef; loc?: SourceLocation }
   | {
       cond: NodeRef;
+      condLoc?: SourceLocation;
       thenRef?: NodeRef;
       thenValue?: string;
+      thenLoc?: SourceLocation;
       elseRef?: NodeRef;
       elseValue?: string;
+      elseLoc?: SourceLocation;
       to: NodeRef;
       loc?: SourceLocation;
       fallbacks?: WireFallback[];
