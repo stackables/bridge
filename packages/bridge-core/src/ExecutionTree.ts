@@ -683,7 +683,12 @@ export class ExecutionTree implements TreeContext {
         }
 
         for (let i = 0; i < chunk.length; i++) {
-          chunk[i]!.resolve(resolved[i]);
+          const value = resolved[i];
+          if (value instanceof Error) {
+            chunk[i]!.reject(value);
+          } else {
+            chunk[i]!.resolve(value);
+          }
         }
       } catch (err) {
         for (const item of chunk) item.reject(err);

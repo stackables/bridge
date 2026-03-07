@@ -178,6 +178,7 @@ Rules:
 - `maxBatchSize` splits very large queues into multiple batch calls.
 - `flush: "microtask"` means compatible calls in the same microtask are coalesced together.
 - Native batching works in both the runtime interpreter and the compiled executor.
+- To fail just one item in a batch, return an `Error` instance at that index. Bridge rejects only that item and routes it through the usual wire-level `catch` fallback.
 
 ### Tracing and Logging
 
