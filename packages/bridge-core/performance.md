@@ -4,23 +4,24 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 
 ## Summary
 
-| #   | Optimisation                       | Date       | Result                                 |
-| --- | ---------------------------------- | ---------- | -------------------------------------- |
-| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)                      |
-| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)                        |
-| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)                     |
-| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)            |
-| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)             |
-| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression)           |
-| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)            |
-| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)                       |
-| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)              |
-| 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)  |
-| 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays) |
-| 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)     |
-| 13  | Share toolDefCache across shadows  | March 2026 | 🔲 Planned                             |
-| 14  | Pre-compute output wire topology   | March 2026 | 🔲 Planned                             |
-| 15  | Cache executeBridge setup per doc  | March 2026 | 🔲 Planned                             |
+| #   | Optimisation                       | Date       | Result                                              |
+| --- | ---------------------------------- | ---------- | --------------------------------------------------- |
+| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)                                   |
+| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)                                     |
+| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)                                  |
+| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)                         |
+| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)                          |
+| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression)                        |
+| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)                         |
+| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)                                    |
+| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)                           |
+| 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)               |
+| 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays)              |
+| 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)                  |
+| 13  | Share toolDefCache across shadows  | March 2026 | 🔲 Planned                                          |
+| 14  | Pre-compute output wire topology   | March 2026 | 🔲 Planned                                          |
+| 15  | Cache executeBridge setup per doc  | March 2026 | 🔲 Planned                                          |
+| 16  | Cheap strict-path hot-path guards  | March 2026 | ✅ Done (partial recovery after error-mapping work) |
 
 ## Baseline (main, March 2026)
 
@@ -731,3 +732,67 @@ passed to successive `executeBridge()` calls. If the same document is
 reused with different tool maps, the cached std resolution may be wrong.
 Safest approach: cache only when no user tools are provided, or use a
 `WeakMap<ToolMap, result>` keyed by the tools object.
+
+### 16. Cheap strict-path hot-path guards
+
+**Date:** March 2026
+**Status:** ✅ Done
+**Target:** Recover part of the runtime hit introduced by precise runtime error source mapping
+
+**Context:**
+
+The source-mapping work added stricter path traversal semantics and more
+precise error attribution. That was expected to cost something, but the
+runtime benchmark rerun showed a larger-than-desired hit on interpreter
+hot paths, especially tool-heavy and array-heavy workloads.
+
+Observed branch-level runtime numbers before this mitigation:
+
+| Benchmark                          | Baseline | Before | Change |
+| ---------------------------------- | -------- | ------ | ------ |
+| exec: passthrough (no tools)       | ~830K    | ~638K  | -23%   |
+| exec: short-circuit                | ~801K    | ~560K  | -30%   |
+| exec: simple chain (1 tool)        | ~558K    | ~318K  | -43%   |
+| exec: flat array 1000              | ~2,980   | ~2,408 | -19%   |
+| exec: array + tool-per-element 100 | ~3,980   | ~2,085 | -48%   |
+
+**Hypothesis:**
+
+Two new costs were landing directly in the hottest interpreter path:
+
+1. Every single-segment path access paid the full generic multi-segment loop.
+2. Array warning checks still evaluated `Array.isArray(...)` and the numeric
+   segment regex even when no logger was configured.
+
+Both are pure overhead on the benchmark path.
+
+**What changed:**
+
+- Added a dedicated single-segment fast path in `ExecutionTree.applyPath()`.
+- Kept the strict primitive-property failure semantics from the source-mapping
+  work, but avoided the multi-segment loop setup for the common case.
+- Gated array warning work behind `this.logger?.warn` so the benchmark fast path
+  skips the branch entirely when logging is disabled.
+
+**Result:**
+
+This did not restore the full pre-source-mapping runtime baseline, but it did
+recover some of the avoidable overhead while preserving the new error behavior.
+
+Current runtime numbers after the mitigation:
+
+| Benchmark                          | Before | After  | Change |
+| ---------------------------------- | ------ | ------ | ------ |
+| exec: passthrough (no tools)       | ~588K  | ~636K  | +8%    |
+| exec: short-circuit                | ~525K  | ~558K  | +6%    |
+| exec: array + tool-per-element 100 | ~1,862 | ~2,102 | +13%   |
+
+**What remains:**
+
+The remaining interpreter regression appears to be real cost from stricter
+error semantics rather than an obvious accidental slowdown. The next sensible
+steps are profiling-driven, not blind micro-optimisation:
+
+- measure `ExecutionTree.applyPath()` in the runtime flamegraph on tool-heavy cases
+- consider additional small-shape fast paths for 2- and 3-segment strict traversal
+- evaluate whether any error-metadata work can be deferred off the success path

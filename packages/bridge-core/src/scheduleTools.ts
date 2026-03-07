@@ -239,7 +239,7 @@ export function schedule(
   // For __local bindings, __define_ pass-throughs, pipe forks backed by
   // sync tools, and logic nodes — resolve bridge wires and return
   // synchronously when all sources are already in state.
-  // See docs/performance.md (#12).
+  // See packages/bridge-core/performance.md (#12).
   const groupEntries = Array.from(wireGroups.entries());
   const nGroups = groupEntries.length;
   const values: MaybePromise<any>[] = new Array(nGroups);
@@ -271,7 +271,7 @@ export function schedule(
  * Assemble input from resolved wire values and either invoke a direct tool
  * function or return the data for pass-through targets (local/define/logic).
  * Returns synchronously when the tool function (if any) returns sync.
- * See docs/performance.md (#12).
+ * See packages/bridge-core/performance.md (#12).
  */
 export function scheduleFinish(
   ctx: SchedulerContext,

@@ -746,6 +746,29 @@ class CodegenContext {
     lines.push(`    }`);
     lines.push(`    return err;`);
     lines.push(`  }`);
+    lines.push(
+      `  // Single-segment access is split out to preserve the compiled-path recovery documented in packages/bridge-compiler/performance.md (#2).`,
+    );
+    lines.push(
+      `  function __get(base, segment, accessSafe, allowMissingBase) {`,
+    );
+    lines.push(`    if (base == null) {`);
+    lines.push(`      if (allowMissingBase || accessSafe) return undefined;`);
+    lines.push(
+      `      throw new TypeError("Cannot read properties of " + base + " (reading '" + segment + "')");`,
+    );
+    lines.push(`    }`);
+    lines.push(`    const next = base[segment];`);
+    lines.push(
+      `    const isPrimitiveBase = base !== null && typeof base !== "object" && typeof base !== "function";`,
+    );
+    lines.push(`    if (isPrimitiveBase && next === undefined) {`);
+    lines.push(
+      `      throw new TypeError("Cannot read properties of " + base + " (reading '" + segment + "')");`,
+    );
+    lines.push(`    }`);
+    lines.push(`    return next;`);
+    lines.push(`  }`);
     lines.push(`  function __path(base, path, safe, allowMissingBase) {`);
     lines.push(`    let result = base;`);
     lines.push(`    for (let i = 0; i < path.length; i++) {`);
@@ -3163,6 +3186,11 @@ class CodegenContext {
       (_, i) =>
         ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false),
     );
+    // Prefer the dedicated single-segment helper on the dominant case.
+    // See packages/bridge-compiler/performance.md (#2).
+    if (ref.path.length === 1) {
+      return `__get(${baseExpr}, ${JSON.stringify(ref.path[0])}, ${safeFlags[0] ? "true" : "false"}, ${allowMissingBase ? "true" : "false"})`;
+    }
     return `__path(${baseExpr}, ${JSON.stringify(ref.path)}, ${JSON.stringify(safeFlags)}, ${allowMissingBase ? "true" : "false"})`;
   }
 

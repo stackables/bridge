@@ -60,7 +60,7 @@ type WireWithGates = Exclude<Wire, { value: string }>;
  * Fast path: single `from` wire with no fallback/catch modifiers, which is
  * the common case for element field wires like `.id <- it.id`.  Delegates to
  * `resolveWiresAsync` for anything more complex.
- * See docs/performance.md (#10).
+ * See packages/bridge-core/performance.md (#10).
  */
 export function resolveWires(
   ctx: TreeContext,

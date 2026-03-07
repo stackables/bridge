@@ -150,7 +150,7 @@ export class ExecutionTree implements TreeContext {
   toolFns?: ToolMap;
   /** Shadow-tree nesting depth (0 for root). */
   private depth: number;
-  /** Pre-computed `trunkKey({ ...this.trunk, element: true })`.  See docs/performance.md (#4). */
+  /** Pre-computed `trunkKey({ ...this.trunk, element: true })`. See packages/bridge-core/performance.md (#4). */
   private elementTrunkKey: string;
   /** Sparse fieldset filter — set by `run()` when requestedFields is provided. */
   requestedFields: string[] | undefined;
@@ -311,7 +311,7 @@ export class ExecutionTree implements TreeContext {
     // When there is no internal tracer, no logger, and OpenTelemetry
     // has its default no-op provider, skip all instrumentation to
     // avoid closure allocation, template-string building, and no-op
-    // metric calls.  See docs/performance.md (#5).
+    // metric calls. See packages/bridge-core/performance.md (#5).
     if (!tracer && !logger && !isOtelActive()) {
       try {
         const result = fnImpl(input, toolContext);
@@ -483,7 +483,7 @@ export class ExecutionTree implements TreeContext {
   shadow(): ExecutionTree {
     // Lightweight: bypass the constructor to avoid redundant work that
     // re-derives data identical to the parent (bridge lookup, pipeHandleMap,
-    // handleVersionMap, constObj, toolFns spread).  See docs/performance.md (#2).
+    // handleVersionMap, constObj, toolFns spread). See packages/bridge-core/performance.md (#2).
     const child = Object.create(ExecutionTree.prototype) as ExecutionTree;
     child.trunk = this.trunk;
     child.document = this.document;
@@ -550,6 +550,58 @@ export class ExecutionTree implements TreeContext {
   private applyPath(resolved: any, ref: NodeRef, bridgeLoc?: Wire["loc"]): any {
     if (!ref.path.length) return resolved;
 
+    // Single-segment access dominates hot paths; keep it on a dedicated branch
+    // to preserve the partial recovery recorded in packages/bridge-core/performance.md (#16).
+    if (ref.path.length === 1) {
+      const segment = ref.path[0]!;
+      const accessSafe = ref.pathSafe?.[0] ?? ref.rootSafe ?? false;
+      if (resolved == null) {
+        if (ref.element || accessSafe) return undefined;
+        throw wrapBridgeRuntimeError(
+          new TypeError(
+            `Cannot read properties of ${resolved} (reading '${segment}')`,
+          ),
+          {
+            bridgeLoc,
+            bridgeSource: this.source,
+            bridgeFilename: this.filename,
+          },
+        );
+      }
+
+      if (UNSAFE_KEYS.has(segment)) {
+        throw new Error(`Unsafe property traversal: ${segment}`);
+      }
+      if (
+        this.logger?.warn &&
+        Array.isArray(resolved) &&
+        !/^\d+$/.test(segment)
+      ) {
+        this.logger?.warn?.(
+          `[bridge] Accessing ".${segment}" on an array (${resolved.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
+        );
+      }
+
+      const next = resolved[segment];
+      const isPrimitiveBase =
+        resolved !== null &&
+        typeof resolved !== "object" &&
+        typeof resolved !== "function";
+      if (isPrimitiveBase && next === undefined) {
+        throw wrapBridgeRuntimeError(
+          new TypeError(
+            `Cannot read properties of ${resolved} (reading '${segment}')`,
+          ),
+          {
+            bridgeLoc,
+            bridgeSource: this.source,
+            bridgeFilename: this.filename,
+          },
+        );
+      }
+      return next;
+    }
+
     let result: any = resolved;
 
     for (let i = 0; i < ref.path.length; i++) {
@@ -576,7 +628,11 @@ export class ExecutionTree implements TreeContext {
 
       if (UNSAFE_KEYS.has(segment))
         throw new Error(`Unsafe property traversal: ${segment}`);
-      if (Array.isArray(result) && !/^\d+$/.test(segment)) {
+      if (
+        this.logger?.warn &&
+        Array.isArray(result) &&
+        !/^\d+$/.test(segment)
+      ) {
         this.logger?.warn?.(
           `[bridge] Accessing ".${segment}" on an array (${result.length} items) — did you mean to use pickFirst or array mapping? Source: ${trunkKey(ref)}.${ref.path.join(".")}`,
         );
@@ -606,7 +662,7 @@ export class ExecutionTree implements TreeContext {
   /**
    * Pull a single value.  Returns synchronously when already in state;
    * returns a Promise only when the value is a pending tool call.
-   * See docs/performance.md (#10).
+   * See packages/bridge-core/performance.md (#10).
    *
    * Public to satisfy `TreeContext` — extracted modules call this via
    * the interface.
@@ -619,7 +675,7 @@ export class ExecutionTree implements TreeContext {
     // Cache trunkKey on the NodeRef via a Symbol key to avoid repeated
     // string allocation.  Symbol keys don't affect V8 hidden classes,
     // so this won't degrade parser allocation-site throughput.
-    // See docs/performance.md (#11).
+    // See packages/bridge-core/performance.md (#11).
     const key: string = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
 
     // ── Cycle detection ─────────────────────────────────────────────
@@ -791,7 +847,7 @@ export class ExecutionTree implements TreeContext {
    * Resolve pre-grouped wires on this shadow tree without re-filtering.
    * Called by the parent's `materializeShadows` to skip per-element wire
    * filtering.  Returns synchronously when the wire resolves sync (hot path).
-   * See docs/performance.md (#8, #10).
+   * See packages/bridge-core/performance.md (#8, #10).
    */
   resolvePreGrouped(wires: Wire[]): MaybePromise<unknown> {
     return this.resolveWires(wires);

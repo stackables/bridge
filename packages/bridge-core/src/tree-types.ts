@@ -93,7 +93,7 @@ export const MAX_EXECUTION_DEPTH = 30;
  * A value that may already be resolved (synchronous) or still pending (asynchronous).
  * Using this instead of always returning `Promise<T>` lets callers skip
  * microtask scheduling when the value is immediately available.
- * See docs/performance.md (#10).
+ * See packages/bridge-core/performance.md (#10).
  */
 export type MaybePromise<T> = T | Promise<T>;
 

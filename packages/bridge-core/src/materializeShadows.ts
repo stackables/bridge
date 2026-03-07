@@ -150,13 +150,13 @@ export async function materializeShadows(
   // Collect all (shadow × field) resolutions.  When every value is already in
   // state (the hot case for element passthrough), resolvePreGrouped returns
   // synchronously and we skip Promise.all entirely.
-  // See docs/performance.md (#9, #10).
+  // See packages/bridge-core/performance.md (#9, #10).
   if (deepPaths.size === 0) {
     const directFieldArray = [...directFields];
     const nFields = directFieldArray.length;
     const nItems = items.length;
     // Pre-compute pathKeys and wire groups — only depend on j, not i.
-    // See docs/performance.md (#11).
+    // See packages/bridge-core/performance.md (#11).
     const preGroups: Wire[][] = new Array(nFields);
     for (let j = 0; j < nFields; j++) {
       const pathKey = [...pathPrefix, directFieldArray[j]!].join("\0");
