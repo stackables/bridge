@@ -25,6 +25,7 @@ const bridgeKeywords = [
   "output",
   "context",
   "as",
+  "memoize",
   "from",
   "force",
   "catch",
@@ -85,6 +86,7 @@ const bridgeTokenSoupArb = fc
 // Generates structurally valid .bridge text for round-trip testing.
 
 const canonicalIdArb = fc.constantFrom("a", "b", "c", "d", "e", "f", "g", "h");
+const toolAliasArb = fc.constantFrom("fetch", "http", "load", "lookup");
 
 const textConstantValueArb = fc.oneof(
   fc.boolean().map((v) => (v ? "true" : "false")),
@@ -368,6 +370,54 @@ const extendedDocSpecArb = fc.record({
   bridge: bridgeTextSpecArb,
 });
 
+const loopScopedToolBridgeSpecArb = fc
+  .record({
+    type: canonicalIdArb,
+    field: canonicalIdArb,
+    names: fc.uniqueArray(canonicalIdArb, {
+      minLength: 6,
+      maxLength: 6,
+    }),
+    outerAlias: toolAliasArb,
+    innerAlias: toolAliasArb,
+    nested: fc.boolean(),
+    memoizeOuter: fc.boolean(),
+    memoizeInner: fc.boolean(),
+    shadowInnerAlias: fc.boolean(),
+  })
+  .map(
+    ({
+      type,
+      field,
+      names,
+      outerAlias,
+      innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+      shadowInnerAlias,
+    }) => ({
+      type,
+      field,
+      srcField: names[0]!,
+      outField: names[1]!,
+      valueField: names[2]!,
+      childField: names[3]!,
+      childOutField: names[4]!,
+      childValueField: names[5]!,
+      outerAlias,
+      innerAlias: shadowInnerAlias ? outerAlias : innerAlias,
+      nested,
+      memoizeOuter,
+      memoizeInner,
+    }),
+  );
+
+const serializableLoopScopedToolBridgeSpecArb =
+  loopScopedToolBridgeSpecArb.filter(
+    (spec) => !spec.nested || spec.innerAlias !== spec.outerAlias,
+  );
+
 function buildExtendedDocText(spec: {
   includeConst: boolean;
   includeTool: boolean;
@@ -387,6 +437,55 @@ function buildExtendedDocText(spec: {
   if (spec.includeTool) parts.push(spec.toolBlock);
   parts.push(buildBridgeBlock(spec.bridge));
   return parts.join("\n\n");
+}
+
+function buildLoopScopedToolBridgeText(spec: {
+  type: string;
+  field: string;
+  srcField: string;
+  outField: string;
+  valueField: string;
+  childField: string;
+  childOutField: string;
+  childValueField: string;
+  outerAlias: string;
+  innerAlias: string;
+  nested: boolean;
+  memoizeOuter: boolean;
+  memoizeInner: boolean;
+}): string {
+  const lines = [
+    "version 1.5",
+    `bridge ${spec.type}.${spec.field} {`,
+    "  with context as ctx",
+    "  with output as o",
+    "",
+    `  o.${spec.outField} <- ctx.${spec.srcField}[] as el {`,
+    `    with std.httpCall as ${spec.outerAlias}${spec.memoizeOuter ? " memoize" : ""}`,
+    "",
+    `    ${spec.outerAlias}.value <- el.${spec.valueField}`,
+    `    .${spec.valueField} <- ${spec.outerAlias}.data`,
+  ];
+
+  if (spec.nested) {
+    lines.push(
+      `    .${spec.childOutField} <- el.${spec.childField}[] as child {`,
+    );
+    lines.push(
+      `      with std.httpCall as ${spec.innerAlias}${spec.memoizeInner ? " memoize" : ""}`,
+    );
+    lines.push("");
+    lines.push(
+      `      ${spec.innerAlias}.value <- child.${spec.childValueField}`,
+    );
+    lines.push(`      .${spec.childValueField} <- ${spec.innerAlias}.data`);
+    lines.push(`      .parent <- el.${spec.valueField}`);
+    lines.push("    }");
+  }
+
+  lines.push("  }");
+  lines.push("}");
+  return lines.join("\n");
 }
 
 describe("parser fuzz — advanced formatter stability (P2-3B)", () => {
@@ -428,6 +527,71 @@ describe("parser fuzz — advanced formatter stability (P2-3B)", () => {
               `prettyPrintToSource produced unparsable output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- FORMATTED ---\n${formatted}`,
             );
           }
+        }),
+        { numRuns: 1_000, endOnFailure: true },
+      );
+    },
+  );
+});
+
+describe("parser fuzz — loop-scoped tool syntax", () => {
+  test(
+    "serializeBridge keeps non-shadowed loop-scoped tool and memoize documents parseable",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(serializableLoopScopedToolBridgeSpecArb, (spec) => {
+          const sourceText = buildLoopScopedToolBridgeText(spec);
+          const parsed = parseBridge(sourceText);
+          const serialized = serializeBridge(parsed);
+
+          let reparsed: BridgeDocument;
+          try {
+            reparsed = parseBridge(serialized);
+          } catch (error) {
+            assert.fail(
+              `serializeBridge produced unparsable loop-scoped tool output: ${String(error)}\n--- SOURCE ---\n${sourceText}\n--- SERIALIZED ---\n${serialized}`,
+            );
+          }
+
+          const originalBridge = parsed.instructions[0];
+          const reparsedBridge = reparsed.instructions[0];
+          assert.ok(originalBridge?.kind === "bridge");
+          assert.ok(reparsedBridge?.kind === "bridge");
+          assert.equal(
+            reparsedBridge.handles.length,
+            originalBridge.handles.length,
+            "handle count must survive round-trip",
+          );
+          assert.equal(
+            reparsedBridge.handles.filter(
+              (handle) => handle.kind === "tool" && handle.memoize,
+            ).length,
+            originalBridge.handles.filter(
+              (handle) => handle.kind === "tool" && handle.memoize,
+            ).length,
+            "memoized handle count must survive round-trip",
+          );
+        }),
+        { numRuns: 1_000, endOnFailure: true },
+      );
+    },
+  );
+
+  test(
+    "prettyPrintToSource is idempotent for loop-scoped tool documents",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(loopScopedToolBridgeSpecArb, (spec) => {
+          const sourceText = buildLoopScopedToolBridgeText(spec);
+          const formatted1 = prettyPrintToSource(sourceText);
+          const formatted2 = prettyPrintToSource(formatted1);
+          assert.equal(formatted2, formatted1);
+
+          assert.doesNotThrow(() => {
+            parseBridge(formatted2);
+          });
         }),
         { numRuns: 1_000, endOnFailure: true },
       );

@@ -156,7 +156,8 @@ function serializeToolBlock(tool: ToolDef): string {
       }
     } else {
       const depVTag = dep.version ? `@${dep.version}` : "";
-      lines.push(`  with ${dep.tool}${depVTag} as ${dep.handle}`);
+      const memoize = "memoize" in dep && dep.memoize ? " memoize" : "";
+      lines.push(`  with ${dep.tool}${depVTag} as ${dep.handle}${memoize}`);
     }
   }
 
@@ -291,10 +292,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const defaultHandle =
           lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
         const vTag = h.version ? `@${h.version}` : "";
+        const memoize = h.memoize ? " memoize" : "";
         if (h.handle === defaultHandle && !vTag) {
-          lines.push(`  with ${h.name}`);
+          lines.push(`  with ${h.name}${memoize}`);
         } else {
-          lines.push(`  with ${h.name}${vTag} as ${h.handle}`);
+          lines.push(`  with ${h.name}${vTag} as ${h.handle}${memoize}`);
         }
         break;
       }

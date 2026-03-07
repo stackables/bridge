@@ -8,13 +8,13 @@ Bridge uses [fast-check](https://github.com/dubzzz/fast-check) (^4.5.3) for prop
 
 ### Test files
 
-| File                                 | Package           | Purpose                                                             |
-| ------------------------------------ | ----------------- | ------------------------------------------------------------------- |
-| `test/fuzz-compile.test.ts`          | `bridge-compiler` | JS syntax validity, determinism, flat-path AOT/runtime parity       |
-| `test/fuzz-runtime-parity.test.ts`   | `bridge-compiler` | Deep-path parity, array mapping parity, tool-call timeout parity    |
-| `test/fuzz-regressions.todo.test.ts` | `bridge-compiler` | Backlog of known fuzz-discovered divergences as `test.todo` entries |
-| `test/fuzz-stdlib.test.ts`           | `bridge-stdlib`   | Array and string tool crash-safety                                  |
-| `test/fuzz-parser.test.ts`           | `bridge`          | Parser crash-safety, serializer round-trip, formatter stability     |
+| File                                 | Package           | Purpose                                                                                         |
+| ------------------------------------ | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `test/fuzz-compile.test.ts`          | `bridge-compiler` | JS syntax validity, determinism, flat-path AOT/runtime parity                                   |
+| `test/fuzz-runtime-parity.test.ts`   | `bridge-compiler` | Deep-path parity, array mapping parity, loop-tool parity and fallback, tool-call timeout parity |
+| `test/fuzz-regressions.todo.test.ts` | `bridge-compiler` | Backlog of known fuzz-discovered divergences as `test.todo` entries                             |
+| `test/fuzz-stdlib.test.ts`           | `bridge-stdlib`   | Array and string tool crash-safety                                                              |
+| `test/fuzz-parser.test.ts`           | `bridge`          | Parser crash-safety, serializer round-trip, formatter stability, loop-scoped tool syntax        |
 
 ---
 
@@ -27,11 +27,14 @@ Bridge uses [fast-check](https://github.com/dubzzz/fast-check) (^4.5.3) for prop
 - AOT/runtime parity on flat single-segment paths (`fc.jsonValue()` inputs)
 - AOT/runtime parity on deep multi-segment paths with chaotic inputs (`NaN`, `Infinity`, `-0`, `undefined`, deeply nested objects)
 - AOT/runtime parity on array-mapping bridges (`[] as el { ... }`) with chaotic element data
+- AOT/runtime parity on compiler-compatible loop-scoped tool bridges
+- Fallback parity for compiler-incompatible loop-scoped tool bridges that use nested loop-local tools, memoized handles, or shadowed loop-local tool aliases
 - AOT/runtime parity on tool-call timeout (`BridgeTimeoutError` class and message match)
 - Parser round-trip: text → parse → serialize → reparse → execute parity
 - `parseBridge` never throws unstructured errors on random input
 - `parseBridgeDiagnostics` never throws (LSP/IDE safety)
 - `prettyPrintToSource` idempotence and output parseability (bridge, tool, const blocks)
+- `prettyPrintToSource` stability for loop-scoped `with ... memoize` declarations inside array mappings, plus `serializeBridge` round-trip coverage for non-shadowed loop-scoped handles
 - `arr.filter`, `arr.find`, `arr.first`, `arr.toArray` crash-safety on any input type
 - `str.toLowerCase`, `str.toUpperCase`, `str.trim`, `str.length` crash-safety on any input type
 
@@ -39,6 +42,7 @@ Bridge uses [fast-check](https://github.com/dubzzz/fast-check) (^4.5.3) for prop
 
 - `Symbol`, `BigInt`, circular-ref handling across all stdlib tools
 - `parseBridgeDiagnostics` completeness: valid input should produce zero error-severity diagnostics
+- Randomized fallback/nullish edge cases for every compiler-incompatible shape beyond loop-scoped tool handles
 
 ---
 
@@ -48,6 +52,8 @@ Bridge uses [fast-check](https://github.com/dubzzz/fast-check) (^4.5.3) for prop
 | ---------------------------------------------------- | ----- |
 | Deep-path AOT/runtime parity                         | 3,000 |
 | Array mapping parity                                 | 1,000 |
+| Loop-scoped tool AOT/runtime parity                  | 400   |
+| Loop-scoped tool fallback parity                     | 300   |
 | Tool-call timeout parity                             | 500   |
 | `parseBridge` never panics                           | 5,000 |
 | `parseBridgeDiagnostics` never throws                | 5,000 |
@@ -56,6 +62,7 @@ Bridge uses [fast-check](https://github.com/dubzzz/fast-check) (^4.5.3) for prop
 | `prettyPrintToSource` parseability (basic)           | 2,000 |
 | `prettyPrintToSource` idempotence (extended blocks)  | 1,000 |
 | `prettyPrintToSource` parseability (extended blocks) | 1,000 |
+| Loop-scoped tool round-trip / formatter properties   | 1,000 |
 | stdlib tool crash-safety (per tool)                  | 2,000 |
 
 ---
