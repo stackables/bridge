@@ -561,11 +561,7 @@ export class ExecutionTree implements TreeContext {
           new TypeError(
             `Cannot read properties of ${resolved} (reading '${segment}')`,
           ),
-          {
-            bridgeLoc,
-            bridgeSource: this.source,
-            bridgeFilename: this.filename,
-          },
+          { bridgeLoc },
         );
       }
 
@@ -592,11 +588,7 @@ export class ExecutionTree implements TreeContext {
           new TypeError(
             `Cannot read properties of ${resolved} (reading '${segment}')`,
           ),
-          {
-            bridgeLoc,
-            bridgeSource: this.source,
-            bridgeFilename: this.filename,
-          },
+          { bridgeLoc },
         );
       }
       return next;
@@ -618,11 +610,7 @@ export class ExecutionTree implements TreeContext {
           new TypeError(
             `Cannot read properties of ${result} (reading '${segment}')`,
           ),
-          {
-            bridgeLoc,
-            bridgeSource: this.source,
-            bridgeFilename: this.filename,
-          },
+          { bridgeLoc },
         );
       }
 
@@ -647,11 +635,7 @@ export class ExecutionTree implements TreeContext {
           new TypeError(
             `Cannot read properties of ${result} (reading '${segment}')`,
           ),
-          {
-            bridgeLoc,
-            bridgeSource: this.source,
-            bridgeFilename: this.filename,
-          },
+          { bridgeLoc },
         );
       }
       result = next;

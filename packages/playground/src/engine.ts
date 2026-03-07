@@ -260,7 +260,12 @@ export async function runBridge(
     };
   } catch (err: unknown) {
     return {
-      errors: [formatBridgeError(err)],
+      errors: [
+        formatBridgeError(err, {
+          source: document.source,
+          filename: document.filename,
+        }),
+      ],
     };
   } finally {
     _onCacheHit = null;
@@ -658,7 +663,12 @@ export async function runBridgeStandalone(
     };
   } catch (err: unknown) {
     return {
-      errors: [formatBridgeError(err)],
+      errors: [
+        formatBridgeError(err, {
+          source: document.source,
+          filename: document.filename,
+        }),
+      ],
     };
   } finally {
     _onCacheHit = null;

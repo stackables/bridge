@@ -1,9 +1,14 @@
-import type { SourceLocation } from "./types.ts";
+import type { BridgeDocument, SourceLocation } from "./types.ts";
 
 export type FormatBridgeErrorOptions = {
   source?: string;
   filename?: string;
 };
+
+export type BridgeErrorDocumentContext = Pick<
+  BridgeDocument,
+  "source" | "filename"
+>;
 
 function getMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -23,6 +28,31 @@ function getBridgeMetadata(err: unknown): {
     bridgeSource?: string;
     bridgeFilename?: string;
   };
+}
+
+export function attachBridgeErrorDocumentContext<T>(
+  err: T,
+  document?: BridgeErrorDocumentContext,
+): T {
+  if (
+    !document ||
+    !err ||
+    (typeof err !== "object" && typeof err !== "function")
+  ) {
+    return err;
+  }
+
+  const carrier = err as {
+    bridgeSource?: string;
+    bridgeFilename?: string;
+  };
+  if (carrier.bridgeSource === undefined) {
+    carrier.bridgeSource = document.source;
+  }
+  if (carrier.bridgeFilename === undefined) {
+    carrier.bridgeFilename = document.filename;
+  }
+  return err;
 }
 
 function getBridgeLoc(err: unknown): SourceLocation | undefined {

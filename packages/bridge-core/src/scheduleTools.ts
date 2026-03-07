@@ -44,10 +44,6 @@ export interface SchedulerContext extends ToolLookupContext {
   readonly handleVersionMap: ReadonlyMap<string, string>;
   /** Tool trunks marked with `memoize`. */
   readonly memoizedToolKeys: ReadonlySet<string>;
-  /** Optional original bridge source used for formatted runtime errors. */
-  readonly source?: string;
-  /** Optional bridge filename used for formatted runtime errors. */
-  readonly filename?: string;
 
   // ── Methods ────────────────────────────────────────────────────────────
   /** Recursive entry point — parent delegation calls this. */
@@ -339,8 +335,6 @@ export function scheduleFinish(
 
   throw wrapBridgeRuntimeError(new Error(`No tool found for "${toolName}"`), {
     bridgeLoc,
-    bridgeSource: ctx.source,
-    bridgeFilename: ctx.filename,
   });
 }
 
@@ -388,8 +382,6 @@ export async function scheduleToolDef(
       new Error(`Tool function "${toolDef.fn}" not registered`),
       {
         bridgeLoc,
-        bridgeSource: ctx.source,
-        bridgeFilename: ctx.filename,
       },
     );
   }

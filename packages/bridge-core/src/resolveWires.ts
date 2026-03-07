@@ -119,8 +119,6 @@ async function resolveWiresAsync(
 
       lastError = wrapBridgeRuntimeError(err, {
         bridgeLoc: w.loc,
-        bridgeSource: ctx.source,
-        bridgeFilename: ctx.filename,
       });
     }
   }
@@ -154,11 +152,7 @@ export async function applyFallbackGates(
 
     if (isFalsyGateOpen || isNullishGateOpen) {
       if (fallback.control) {
-        return applyControlFlowWithLoc(
-          ctx,
-          fallback.control,
-          fallback.loc ?? w.loc,
-        );
+        return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
       if (fallback.ref) {
         value = await ctx.pullSingle(
@@ -191,7 +185,7 @@ export async function applyCatchGate(
   pullChain?: Set<string>,
 ): Promise<unknown> {
   if (w.catchControl) {
-    return applyControlFlowWithLoc(ctx, w.catchControl, w.catchLoc ?? w.loc);
+    return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
   }
   if (w.catchFallbackRef) {
     return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
@@ -201,7 +195,6 @@ export async function applyCatchGate(
 }
 
 function applyControlFlowWithLoc(
-  ctx: TreeContext,
   control: ControlFlowInstruction,
   bridgeLoc: Wire["loc"],
 ): symbol | import("./tree-types.ts").LoopControlSignal {
@@ -211,15 +204,11 @@ function applyControlFlowWithLoc(
     if (err instanceof BridgePanicError) {
       throw attachBridgeErrorMetadata(err, {
         bridgeLoc,
-        bridgeSource: ctx.source,
-        bridgeFilename: ctx.filename,
       });
     }
     if (isFatalError(err)) throw err;
     throw wrapBridgeRuntimeError(err, {
       bridgeLoc,
-      bridgeSource: ctx.source,
-      bridgeFilename: ctx.filename,
     });
   }
 }

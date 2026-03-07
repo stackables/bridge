@@ -696,12 +696,10 @@ class CodegenContext {
       `  const __BridgeTimeoutError = __opts?.__BridgeTimeoutError ?? class extends Error { constructor(n, ms) { super('Tool "' + n + '" timed out after ' + ms + 'ms'); this.name = "BridgeTimeoutError"; } };`,
     );
     lines.push(
-      `  const __BridgeRuntimeError = __opts?.__BridgeRuntimeError ?? class extends Error { constructor(message, options) { super(message, options && "cause" in options ? { cause: options.cause } : undefined); this.name = "BridgeRuntimeError"; this.bridgeLoc = options?.bridgeLoc; this.bridgeSource = options?.bridgeSource; this.bridgeFilename = options?.bridgeFilename; } };`,
+      `  const __BridgeRuntimeError = __opts?.__BridgeRuntimeError ?? class extends Error { constructor(message, options) { super(message, options && "cause" in options ? { cause: options.cause } : undefined); this.name = "BridgeRuntimeError"; this.bridgeLoc = options?.bridgeLoc; } };`,
     );
     lines.push(`  const __signal = __opts?.signal;`);
     lines.push(`  const __timeoutMs = __opts?.toolTimeoutMs ?? 0;`);
-    lines.push(`  const __bridgeSource = __opts?.source;`);
-    lines.push(`  const __bridgeFilename = __opts?.filename;`);
     lines.push(
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
@@ -715,7 +713,7 @@ class CodegenContext {
       `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc !== undefined) throw err;`,
     );
     lines.push(
-      `    throw new __BridgeRuntimeError(err instanceof Error ? err.message : String(err), { cause: err, bridgeLoc: loc, bridgeSource: __bridgeSource, bridgeFilename: __bridgeFilename });`,
+      `    throw new __BridgeRuntimeError(err instanceof Error ? err.message : String(err), { cause: err, bridgeLoc: loc });`,
     );
     lines.push(`  }`);
     lines.push(`  function __wrapBridgeError(fn, loc) {`);
@@ -737,12 +735,6 @@ class CodegenContext {
       `    if (err && (typeof err === "object" || typeof err === "function")) {`,
     );
     lines.push(`      if (err.bridgeLoc === undefined) err.bridgeLoc = loc;`);
-    lines.push(
-      `      if (err.bridgeSource === undefined) err.bridgeSource = __bridgeSource;`,
-    );
-    lines.push(
-      `      if (err.bridgeFilename === undefined) err.bridgeFilename = __bridgeFilename;`,
-    );
     lines.push(`    }`);
     lines.push(`    return err;`);
     lines.push(`  }`);

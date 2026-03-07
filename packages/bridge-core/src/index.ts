@@ -35,8 +35,14 @@ export { mergeBridgeDocuments } from "./merge-documents.ts";
 export { ExecutionTree } from "./ExecutionTree.ts";
 export { TraceCollector, boundedClone } from "./tracing.ts";
 export type { ToolTrace, TraceLevel } from "./tracing.ts";
-export { formatBridgeError } from "./formatBridgeError.ts";
-export type { FormatBridgeErrorOptions } from "./formatBridgeError.ts";
+export {
+  formatBridgeError,
+  attachBridgeErrorDocumentContext,
+} from "./formatBridgeError.ts";
+export type {
+  FormatBridgeErrorOptions,
+  BridgeErrorDocumentContext,
+} from "./formatBridgeError.ts";
 export {
   BridgeAbortError,
   BridgePanicError,

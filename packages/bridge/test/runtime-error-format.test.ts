@@ -118,8 +118,6 @@ describe("runtime error formatting", () => {
     const sourceLine = "o.message <- i.empty.array.error";
     const formatted = formatBridgeError(
       new BridgeRuntimeError("boom", {
-        bridgeSource: sourceLine,
-        bridgeFilename: "playground.bridge",
         bridgeLoc: {
           startLine: 1,
           startColumn: 14,
@@ -127,6 +125,10 @@ describe("runtime error formatting", () => {
           endColumn: 32,
         },
       }),
+      {
+        source: sourceLine,
+        filename: "playground.bridge",
+      },
     );
 
     assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);

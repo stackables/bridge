@@ -273,7 +273,13 @@ export function bridgeTransform(
           }
           return data;
         } catch (err) {
-          throw new Error(formatBridgeError(err), { cause: err });
+          throw new Error(
+            formatBridgeError(err, {
+              source: activeDoc.source,
+              filename: activeDoc.filename,
+            }),
+            { cause: err },
+          );
         }
       }
 
@@ -406,7 +412,13 @@ export function bridgeTransform(
             try {
               result = await source.response(info.path, array);
             } catch (err) {
-              throw new Error(formatBridgeError(err), { cause: err });
+              throw new Error(
+                formatBridgeError(err, {
+                  source: source.source,
+                  filename: source.filename,
+                }),
+                { cause: err },
+              );
             }
 
             // Scalar return types (JSON, JSONObject, etc.) won't trigger
@@ -417,7 +429,13 @@ export function bridgeTransform(
                 try {
                   return result.collectOutput();
                 } catch (err) {
-                  throw new Error(formatBridgeError(err), { cause: err });
+                  throw new Error(
+                    formatBridgeError(err, {
+                      source: result.source,
+                      filename: result.filename,
+                    }),
+                    { cause: err },
+                  );
                 }
               }
               if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
@@ -428,7 +446,13 @@ export function bridgeTransform(
                     ),
                   );
                 } catch (err) {
-                  throw new Error(formatBridgeError(err), { cause: err });
+                  throw new Error(
+                    formatBridgeError(err, {
+                      source: source.source,
+                      filename: source.filename,
+                    }),
+                    { cause: err },
+                  );
                 }
               }
             }
@@ -443,7 +467,13 @@ export function bridgeTransform(
                   source.getForcedExecution(),
                 ]).then(([data]) => data);
               } catch (err) {
-                throw new Error(formatBridgeError(err), { cause: err });
+                throw new Error(
+                  formatBridgeError(err, {
+                    source: source.source,
+                    filename: source.filename,
+                  }),
+                  { cause: err },
+                );
               }
             }
             return result;

@@ -19,6 +19,7 @@ import {
   BridgeAbortError,
   BridgeRuntimeError,
   BridgeTimeoutError,
+  attachBridgeErrorDocumentContext,
   executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
@@ -331,6 +332,11 @@ export async function executeBridge<T = unknown>(
         }
       : undefined,
   };
-  const data = await fn(input, flatTools, context, opts);
+  let data: unknown;
+  try {
+    data = await fn(input, flatTools, context, opts);
+  } catch (err) {
+    throw attachBridgeErrorDocumentContext(err, document);
+  }
   return { data: data as T, traces: tracer?.traces ?? [] };
 }

@@ -1,4 +1,5 @@
 import { ExecutionTree } from "./ExecutionTree.ts";
+import { attachBridgeErrorDocumentContext } from "./formatBridgeError.ts";
 import { TraceCollector } from "./tracing.ts";
 import type { Logger } from "./tree-types.ts";
 import type { ToolTrace, TraceLevel } from "./tracing.ts";
@@ -158,7 +159,12 @@ export async function executeBridge<T = unknown>(
     tree.tracer = new TraceCollector(traceLevel);
   }
 
-  const data = await tree.run(input, options.requestedFields);
+  let data: unknown;
+  try {
+    data = await tree.run(input, options.requestedFields);
+  } catch (err) {
+    throw attachBridgeErrorDocumentContext(err, doc);
+  }
 
   return { data: data as T, traces: tree.getTraces() };
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
-import { executeBridge } from "@stackables/bridge-core";
+import { executeBridge, formatBridgeError } from "@stackables/bridge-core";
 import type { BridgeDocument } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
@@ -1268,6 +1268,38 @@ bridge Query.secure {
 // ── Phase: Abort signal & timeout ────────────────────────────────────────────
 
 describe("executeAot: abort signal & timeout", () => {
+  test("runtime errors retain document formatting context", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.name <- i.missing.value
+}`;
+    const document = parseBridgeFormat(bridgeText);
+    document.source = bridgeText;
+    document.filename = "playground.bridge";
+
+    await assert.rejects(
+      () =>
+        executeAot({
+          document,
+          operation: "Query.test",
+          input: {},
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(
+          formatted,
+          /Bridge Execution Error: Cannot read properties of undefined \(reading '(missing|value)'\)/,
+        );
+        assert.match(formatted, /playground\.bridge:6:13/);
+        assert.match(formatted, /o\.name <- i\.missing\.value/);
+        return true;
+      },
+    );
+  });
+
   test("abort signal prevents tool execution", async () => {
     const document = parseBridgeFormat(`version 1.5
 bridge Query.test {

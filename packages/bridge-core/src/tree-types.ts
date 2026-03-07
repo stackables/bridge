@@ -41,30 +41,22 @@ export class BridgeTimeoutError extends Error {
 /** Runtime error enriched with the originating Bridge wire location. */
 export class BridgeRuntimeError extends Error {
   bridgeLoc?: SourceLocation;
-  bridgeSource?: string;
-  bridgeFilename?: string;
 
   constructor(
     message: string,
     options: {
       bridgeLoc?: SourceLocation;
-      bridgeSource?: string;
-      bridgeFilename?: string;
       cause?: unknown;
     } = {},
   ) {
     super(message, "cause" in options ? { cause: options.cause } : undefined);
     this.name = "BridgeRuntimeError";
     this.bridgeLoc = options.bridgeLoc;
-    this.bridgeSource = options.bridgeSource;
-    this.bridgeFilename = options.bridgeFilename;
   }
 }
 
 type BridgeErrorMetadataCarrier = {
   bridgeLoc?: SourceLocation;
-  bridgeSource?: string;
-  bridgeFilename?: string;
 };
 
 // ── Sentinels ───────────────────────────────────────────────────────────────
@@ -141,10 +133,6 @@ export interface TreeContext {
   ): MaybePromise<any>;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
-  /** Optional original bridge source used for formatted runtime errors. */
-  source?: string;
-  /** Optional bridge filename used for formatted runtime errors. */
-  filename?: string;
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */
@@ -170,32 +158,21 @@ export function wrapBridgeRuntimeError(
   err: unknown,
   options: {
     bridgeLoc?: SourceLocation;
-    bridgeSource?: string;
-    bridgeFilename?: string;
   } = {},
 ): BridgeRuntimeError {
   if (err instanceof BridgeRuntimeError) {
-    if (
-      err.bridgeLoc ||
-      err.bridgeSource ||
-      err.bridgeFilename ||
-      (!options.bridgeLoc && !options.bridgeSource && !options.bridgeFilename)
-    ) {
+    if (err.bridgeLoc || !options.bridgeLoc) {
       return err;
     }
 
     return new BridgeRuntimeError(err.message, {
       bridgeLoc: options.bridgeLoc,
-      bridgeSource: options.bridgeSource,
-      bridgeFilename: options.bridgeFilename,
       cause: err.cause ?? err,
     });
   }
 
   return new BridgeRuntimeError(errorMessage(err), {
     bridgeLoc: options.bridgeLoc,
-    bridgeSource: options.bridgeSource,
-    bridgeFilename: options.bridgeFilename,
     cause: err,
   });
 }
@@ -204,8 +181,6 @@ export function attachBridgeErrorMetadata<T>(
   err: T,
   options: {
     bridgeLoc?: SourceLocation;
-    bridgeSource?: string;
-    bridgeFilename?: string;
   } = {},
 ): T {
   if (!err || (typeof err !== "object" && typeof err !== "function")) {
@@ -215,12 +190,6 @@ export function attachBridgeErrorMetadata<T>(
   const carrier = err as BridgeErrorMetadataCarrier;
   if (carrier.bridgeLoc === undefined) {
     carrier.bridgeLoc = options.bridgeLoc;
-  }
-  if (carrier.bridgeSource === undefined) {
-    carrier.bridgeSource = options.bridgeSource;
-  }
-  if (carrier.bridgeFilename === undefined) {
-    carrier.bridgeFilename = options.bridgeFilename;
   }
   return err;
 }
