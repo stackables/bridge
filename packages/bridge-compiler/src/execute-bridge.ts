@@ -20,7 +20,10 @@ import {
   BridgeTimeoutError,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
-import { compileBridge } from "./codegen.ts";
+import { compileBridge, BridgeCompilerIncompatibleError } from "./codegen.ts";
+import {
+  executeBridge as coreExecuteBridge,
+} from "@stackables/bridge-core";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -232,7 +235,19 @@ export async function executeBridge<T = unknown>(
     logger,
   } = options;
 
-  const fn = getOrCompile(document, operation, options.requestedFields);
+  let fn: BridgeFn;
+  try {
+    fn = getOrCompile(document, operation, options.requestedFields);
+  } catch (err) {
+    if (err instanceof BridgeCompilerIncompatibleError) {
+      // Fall back to core runtime for incompatible operations
+      logger?.warn?.(
+        `${err.message} Falling back to core runtime interpreter.`,
+      );
+      return coreExecuteBridge<T>(options);
+    }
+    throw err;
+  }
 
   // Merge built-in std namespace with user-provided tools, then flatten
   // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].

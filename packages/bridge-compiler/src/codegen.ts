@@ -31,6 +31,23 @@ import type {
   ToolDef,
 } from "@stackables/bridge-core";
 
+/**
+ * Thrown when the compiler encounters an AST construct it cannot yet
+ * translate to JavaScript (e.g. cross-scope iterator references with
+ * `elementScope`).  The caller can catch this and fall back to the
+ * core runtime interpreter.
+ */
+export class BridgeCompilerIncompatibleError extends Error {
+  constructor(
+    /** The affected operation in `"Type.field"` format. */
+    public readonly operation: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BridgeCompilerIncompatibleError";
+  }
+}
+
 const SELF_MODULE = "_";
 
 function matchesRequestedFields(
@@ -108,6 +125,17 @@ export function compileBridge(
   );
   if (!bridge)
     throw new Error(`No bridge definition found for operation: ${operation}`);
+
+  // ── Compatibility check: reject AST features the compiler cannot handle ──
+  for (const w of bridge.wires) {
+    if ("from" in w && (w.from as NodeRef).elementScope) {
+      throw new BridgeCompilerIncompatibleError(
+        operation,
+        `Operation "${operation}" uses cross-scope iterator references ` +
+          `(elementScope) which the AOT compiler does not yet support.`,
+      );
+    }
+  }
 
   // Collect const definitions from the document
   const constDefs = new Map<string, string>();

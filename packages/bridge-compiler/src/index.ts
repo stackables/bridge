@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-export { compileBridge } from "./codegen.ts";
+export { compileBridge, BridgeCompilerIncompatibleError } from "./codegen.ts";
 export type { CompileResult, CompileOptions } from "./codegen.ts";
 
 export { executeBridge } from "./execute-bridge.ts";
