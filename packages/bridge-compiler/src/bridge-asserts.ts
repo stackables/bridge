@@ -12,6 +12,17 @@ export class BridgeCompilerIncompatibleError extends Error {
 
 export function assertBridgeCompilerCompatible(bridge: Bridge): void {
   const operation = `${bridge.type}.${bridge.field}`;
+  const memoizedHandles = bridge.handles
+    .filter((handle) => handle.kind === "tool" && handle.memoize)
+    .map((handle) => handle.handle);
+
+  if (memoizedHandles.length > 0) {
+    throw new BridgeCompilerIncompatibleError(
+      operation,
+      `[bridge-compiler] ${operation}: memoized tool handles are not supported by AOT compilation yet (${memoizedHandles.join(", ")}).`,
+    );
+  }
+
   const seenHandles = new Set<string>();
   const shadowedHandles = new Set<string>();
 

@@ -42,6 +42,8 @@ export interface SchedulerContext extends ToolLookupContext {
     | undefined;
   /** Handle version tags (`@version`) for versioned tool lookups. */
   readonly handleVersionMap: ReadonlyMap<string, string>;
+  /** Tool trunks marked with `memoize`. */
+  readonly memoizedToolKeys: ReadonlySet<string>;
 
   // ── Methods ────────────────────────────────────────────────────────────
   /** Recursive entry point — parent delegation calls this. */
@@ -150,7 +152,14 @@ export function schedule(
 
   // ── Async path: tool definition requires resolveToolWires + callTool ──
   if (toolDef) {
-    return scheduleToolDef(ctx, toolName, toolDef, wireGroups, pullChain);
+    return scheduleToolDef(
+      ctx,
+      target,
+      toolName,
+      toolDef,
+      wireGroups,
+      pullChain,
+    );
   }
 
   // ── Sync-capable path: no tool definition ──
@@ -227,7 +236,10 @@ export function scheduleFinish(
     directFn = lookupToolFn(ctx, toolName);
   }
   if (directFn) {
-    return ctx.callTool(toolName, toolName, directFn, input);
+    const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
+      ? trunkKey(target)
+      : undefined;
+    return ctx.callTool(toolName, toolName, directFn, input, memoizeKey);
   }
 
   // Define pass-through: synthetic trunks created by define inlining
@@ -263,6 +275,7 @@ export function scheduleFinish(
  */
 export async function scheduleToolDef(
   ctx: SchedulerContext,
+  target: Trunk,
   toolName: string,
   toolDef: ToolDef,
   wireGroups: Map<string, Wire[]>,
@@ -295,7 +308,10 @@ export async function scheduleToolDef(
   // on error: wrap the tool call with fallback from onError wire
   const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
   try {
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+    const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
+      ? trunkKey(target)
+      : undefined;
+    return await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
   } catch (err) {
     if (!onErrorWire) throw err;
     if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);

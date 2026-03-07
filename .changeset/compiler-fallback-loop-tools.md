@@ -1,11 +1,17 @@
 ---
 "@stackables/bridge": patch
+"@stackables/bridge-core": patch
 "@stackables/bridge-compiler": patch
+"@stackables/bridge-parser": patch
 ---
 
-Add compiler compatibility fallback for nested loop-scoped tools.
+Add memoized tool handles with compiler fallback.
 
-The AOT compiler now throws a dedicated incompatibility error for bridges whose
-nested array outputs depend on loop-scoped tool instances. The compiler
-`executeBridge` catches that incompatibility and falls back to the core
-ExecutionTree interpreter automatically.
+Bridge `with` declarations now support `memoize` for tool handles, including
+loop-scoped tool handles inside array mappings. Memoized handles reuse the same
+result for repeated calls with identical inputs, and each declared handle keeps
+its own cache.
+
+The AOT compiler does not compile memoized tool handles yet. It now throws a
+dedicated incompatibility error for those bridges, and compiler `executeBridge`
+automatically falls back to the core ExecutionTree interpreter.

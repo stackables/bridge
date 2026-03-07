@@ -41,6 +41,7 @@ export interface ToolLookupContext {
     fnName: string,
     fnImpl: (...args: any[]) => any,
     input: Record<string, any>,
+    memoizeKey?: string,
   ): MaybePromise<any>;
 }
 

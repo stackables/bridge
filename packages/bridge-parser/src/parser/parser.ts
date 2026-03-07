@@ -15,6 +15,7 @@ import {
   ConstKw,
   WithKw,
   AsKw,
+  MemoizeKw,
   FromKw,
   InputKw,
   OutputKw,
@@ -90,6 +91,7 @@ const RESERVED_KEYWORDS = new Set([
   "bridge",
   "with",
   "as",
+  "memoize",
   "from",
   "const",
   "tool",
@@ -459,6 +461,9 @@ class BridgeParser extends CstParser {
         },
       },
     ]);
+    this.OPTION7(() => {
+      this.CONSUME(MemoizeKw, { LABEL: "memoizeKw" });
+    });
   });
 
   /**
@@ -599,6 +604,9 @@ class BridgeParser extends CstParser {
     this.OPTION2(() => {
       this.CONSUME(AsKw);
       this.SUBRULE(this.nameToken, { LABEL: "refAlias" });
+    });
+    this.OPTION3(() => {
+      this.CONSUME(MemoizeKw, { LABEL: "memoizeKw" });
     });
   });
 
@@ -3201,6 +3209,11 @@ function buildBridgeBody(
     };
 
     if (wc.inputKw) {
+      if (wc.memoizeKw) {
+        throw new Error(
+          `Line ${lineNum}: memoize is only valid for tool references`,
+        );
+      }
       const handle = wc.inputAlias
         ? extractNameToken((wc.inputAlias as CstNode[])[0])
         : "input";
@@ -3212,6 +3225,11 @@ function buildBridgeBody(
         field: bridgeField,
       });
     } else if (wc.outputKw) {
+      if (wc.memoizeKw) {
+        throw new Error(
+          `Line ${lineNum}: memoize is only valid for tool references`,
+        );
+      }
       const handle = wc.outputAlias
         ? extractNameToken((wc.outputAlias as CstNode[])[0])
         : "output";
@@ -3223,6 +3241,11 @@ function buildBridgeBody(
         field: bridgeField,
       });
     } else if (wc.contextKw) {
+      if (wc.memoizeKw) {
+        throw new Error(
+          `Line ${lineNum}: memoize is only valid for tool references`,
+        );
+      }
       const handle = wc.contextAlias
         ? extractNameToken((wc.contextAlias as CstNode[])[0])
         : "context";
@@ -3234,6 +3257,11 @@ function buildBridgeBody(
         field: "context",
       });
     } else if (wc.constKw) {
+      if (wc.memoizeKw) {
+        throw new Error(
+          `Line ${lineNum}: memoize is only valid for tool references`,
+        );
+      }
       const handle = wc.constAlias
         ? extractNameToken((wc.constAlias as CstNode[])[0])
         : "const";
@@ -3254,6 +3282,7 @@ function buildBridgeBody(
       const handle = wc.refAlias
         ? extractNameToken((wc.refAlias as CstNode[])[0])
         : defaultHandle;
+      const memoize = !!wc.memoizeKw;
 
       checkDuplicate(handle);
       if (wc.refAlias) assertNotReserved(handle, lineNum, "handle alias");
@@ -3264,6 +3293,11 @@ function buildBridgeBody(
           inst.kind === "define" && inst.name === name,
       );
       if (defineDef) {
+        if (memoize) {
+          throw new Error(
+            `Line ${lineNum}: memoize is only valid for tool references`,
+          );
+        }
         handleBindings.push({ handle, kind: "define", name });
         handleRes.set(handle, {
           module: `__define_${handle}`,
@@ -3280,6 +3314,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
         handleRes.set(handle, {
@@ -3296,6 +3331,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
         handleRes.set(handle, {
@@ -3519,6 +3555,7 @@ function buildBridgeBody(
       const handle = wc.refAlias
         ? extractNameToken((wc.refAlias as CstNode[])[0])
         : defaultHandle;
+      const memoize = !!wc.memoizeKw;
 
       if (shadowedHandles.has(handle)) {
         throw new Error(`Line ${lineNum}: Duplicate handle name "${handle}"`);
@@ -3538,6 +3575,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
         handleRes.set(handle, {
@@ -3554,6 +3592,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
         handleRes.set(handle, {

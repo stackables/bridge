@@ -59,6 +59,25 @@ import {
 } from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 
+function stableMemoizeKey(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableMemoizeKey(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([left], [right]) => left.localeCompare(right),
+  );
+  return `{${entries
+    .map(
+      ([key, entryValue]) =>
+        `${JSON.stringify(key)}:${stableMemoizeKey(entryValue)}`,
+    )
+    .join(",")}}`;
+}
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
@@ -86,6 +105,11 @@ export class ExecutionTree implements TreeContext {
    * Public to satisfy `SchedulerContext` — used by `scheduleTools.ts`.
    */
   handleVersionMap: Map<string, string> = new Map();
+  /** Tool trunks marked with `memoize`. Shared with shadow trees. */
+  memoizedToolKeys: Set<string> = new Set();
+  /** Per-tool memoization caches keyed by stable input fingerprints. */
+  private toolMemoCache: Map<string, Map<string, MaybePromise<any>>> =
+    new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
@@ -172,9 +196,12 @@ export class ExecutionTree implements TreeContext {
         }
         const instance = (instanceCounters.get(counterKey) ?? 0) + 1;
         instanceCounters.set(counterKey, instance);
+        const key = trunkKey({ module, type, field, instance });
         if (h.version) {
-          const key = trunkKey({ module, type, field, instance });
           this.handleVersionMap.set(key, h.version);
+        }
+        if (h.memoize) {
+          this.memoizedToolKeys.add(key);
         }
       }
     }
@@ -222,7 +249,37 @@ export class ExecutionTree implements TreeContext {
     fnName: string,
     fnImpl: (...args: any[]) => any,
     input: Record<string, any>,
+    memoizeKey?: string,
   ): MaybePromise<any> {
+    if (memoizeKey) {
+      const cacheKey = stableMemoizeKey(input);
+      let toolCache = this.toolMemoCache.get(memoizeKey);
+      if (!toolCache) {
+        toolCache = new Map();
+        this.toolMemoCache.set(memoizeKey, toolCache);
+      }
+
+      const cached = toolCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+
+      try {
+        const result = this.callTool(toolName, fnName, fnImpl, input);
+        if (isPromise(result)) {
+          const pending = Promise.resolve(result).catch((error) => {
+            toolCache.delete(cacheKey);
+            throw error;
+          });
+          toolCache.set(cacheKey, pending);
+          return pending;
+        }
+        toolCache.set(cacheKey, result);
+        return result;
+      } catch (error) {
+        toolCache.delete(cacheKey);
+        throw error;
+      }
+    }
+
     // Short-circuit before starting if externally aborted
     if (this.signal?.aborted) {
       throw new BridgeAbortError();
@@ -433,6 +490,8 @@ export class ExecutionTree implements TreeContext {
     child.bridge = this.bridge;
     child.pipeHandleMap = this.pipeHandleMap;
     child.handleVersionMap = this.handleVersionMap;
+    child.memoizedToolKeys = this.memoizedToolKeys;
+    child.toolMemoCache = this.toolMemoCache;
     child.toolFns = this.toolFns;
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
