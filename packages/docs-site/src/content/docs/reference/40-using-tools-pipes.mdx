@@ -7,6 +7,38 @@ import { Aside } from "@astrojs/starlight/components";
 
 Once you have brought a tool into scope using `with`, you need to pass data into it and read the result. There are two ways to do this in The Bridge: **Explicit Wiring** and **Pipes**.
 
+## Memoized Handles
+
+Tool handles can opt into per-handle memoization directly on the `with` line.
+
+```bridge
+with std.httpCall as fetchItem memoize
+```
+
+When a handle is marked `memoize`, Bridge reuses the earlier result whenever
+that exact handle receives the same resolved input object again.
+
+- Same inputs produce the same cached output.
+- Each declared handle owns its own cache.
+- Different handles do not share cache entries, even if they point to the same tool function.
+
+This is especially useful inside array mappings where repeated values would
+otherwise trigger duplicate network calls.
+
+```bridge
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    with std.httpCall as fetchItem memoize
+
+    fetchItem.value <- cat.id
+    .item <- fetchItem.data
+  }
+}
+```
+
 ## 1. Explicit Wiring
 
 The most explicit way to use a tool is to wire a source into its input parameters, and then wire its output to your target.

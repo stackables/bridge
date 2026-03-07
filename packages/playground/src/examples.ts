@@ -209,6 +209,62 @@ bridge Query.location {
     context: `{}`,
   },
   {
+    id: "memoized-loop-tools",
+    name: "Memoized Fanout",
+    description:
+      "Reuse repeated loop-scoped tool calls with memoize so duplicate inputs do not trigger duplicate requests",
+    schema: `
+type CatalogItem {
+  id: ID!
+  item: String
+}
+
+type Query {
+  processCatalog: [CatalogItem!]!
+}
+    `,
+    bridge: `version 1.5
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    with std.audit as tools memoize
+
+    tools.value <- cat.id
+    .id <- cat.id
+    .item <- tools.data
+  }
+}`,
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
+  processCatalog {
+    id
+    item
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.processCatalog",
+        outputFields: "",
+        input: {},
+      },
+    ],
+    context: `{
+  "catalog": [
+    { "id": "A" },
+    { "id": "A" },
+    { "id": "B" },
+    { "id": "A" }
+  ]
+}`,
+  },
+  {
     id: "sbb-train-search",
     name: "SBB Train Search",
     description:

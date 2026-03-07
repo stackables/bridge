@@ -30,11 +30,15 @@ The Bridge enforces strict scoping. Before you can read from or write to a depen
 | Declaration           | What it provides                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------ |
 | `with myTool as t`    | A new instance of a tool. Write to it via `t.param`, read its result via `t.result`. |
+| `with myTool as t memoize` | Same as above, but reuses the cached result when that handle sees the same resolved inputs again. |
 | `with input as i`     | The GraphQL query arguments (e.g., `i.argName`).                                     |
 | `with output as o`    | The GraphQL return type. Writing to `o.fieldName` shapes the final API response.     |
 | `with context as ctx` | The server execution context (e.g., auth tokens, request headers).                   |
 | `with const as c`     | Access to named constants declared in the file.                                      |
 | `with myDefine as d`  | A reusable `define` block (macro).                                                   |
+
+`memoize` is valid only for tool handles. Each declared memoized handle owns its
+own cache.
 
 ### Passthrough Shorthand
 

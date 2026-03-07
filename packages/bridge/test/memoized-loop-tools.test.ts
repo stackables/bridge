@@ -231,6 +231,12 @@ bridge Query.processCatalog {
     // If the cache key relies on the string "fetch", the inner loop
     // will accidentally hit the outer loop's cache and calls will be 1.
     // Because we securely use TrunkKeys, it should be exactly 2!
+    assert.deepStrictEqual(result.data, [
+      {
+        outer: "item:collision",
+        inner: [{ item: "item:collision" }],
+      },
+    ]);
     assert.equal(calls, 2);
   });
 });
