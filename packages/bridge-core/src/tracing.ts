@@ -8,6 +8,7 @@
 import { metrics, trace } from "@opentelemetry/api";
 import type { Span } from "@opentelemetry/api";
 import type { ToolMetadata } from "@stackables/bridge-types";
+import type { BatchToolMetadata } from "@stackables/bridge-types";
 import type { Logger } from "./tree-types.ts";
 import { roundMs } from "./tree-utils.ts";
 
@@ -248,6 +249,8 @@ export type EffectiveToolLog = {
 export type ResolvedToolMeta = {
   /** Whether the tool declares synchronous execution. */
   sync: boolean;
+  /** Batch mode contract, when declared. */
+  batch?: BatchToolMetadata;
   /** Emit an OTel span for this call. Default: `true`. */
   doTrace: boolean;
   log: EffectiveToolLog;
@@ -271,6 +274,12 @@ export function resolveToolMeta(fn: (...args: any[]) => any): ResolvedToolMeta {
   const bridge = (fn as any).bridge as ToolMetadata | undefined;
   return {
     sync: bridge?.sync === true,
+    batch:
+      bridge?.batch === true
+        ? {}
+        : typeof bridge?.batch === "object"
+          ? bridge.batch
+          : undefined,
     doTrace: bridge?.trace !== false,
     log: resolveToolLog(bridge),
   };

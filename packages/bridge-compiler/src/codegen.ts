@@ -703,6 +703,10 @@ class CodegenContext {
     lines.push(
       `  const __ctx = { logger: __opts?.logger ?? {}, signal: __signal };`,
     );
+    lines.push(
+      `  const __queueMicrotask = globalThis.queueMicrotask ?? ((fn) => Promise.resolve().then(fn));`,
+    );
+    lines.push(`  const __batchQueues = new Map();`);
     lines.push(`  const __trace = __opts?.__trace;`);
     lines.push(`  function __rethrowBridgeError(err, loc) {`);
     lines.push(
@@ -787,6 +791,74 @@ class CodegenContext {
     lines.push(`      result = next;`);
     lines.push(`    }`);
     lines.push(`    return result;`);
+    lines.push(`  }`);
+    lines.push(`  function __callBatch(fn, input, toolName) {`);
+    lines.push(
+      `    if (__signal?.aborted) return Promise.reject(new __BridgeAbortError());`,
+    );
+    lines.push(`    let queue = __batchQueues.get(fn);`);
+    lines.push(`    if (!queue) {`);
+    lines.push(
+      `      queue = { items: [], scheduled: false, toolName, maxBatchSize: typeof fn.bridge?.batch === "object" && fn.bridge?.batch?.maxBatchSize > 0 ? Math.floor(fn.bridge.batch.maxBatchSize) : undefined };`,
+    );
+    lines.push(`      __batchQueues.set(fn, queue);`);
+    lines.push(`    }`);
+    lines.push(`    return new Promise((resolve, reject) => {`);
+    lines.push(`      queue.items.push({ input, resolve, reject });`);
+    lines.push(`      if (queue.scheduled) return;`);
+    lines.push(`      queue.scheduled = true;`);
+    lines.push(
+      `      __queueMicrotask(() => { void __flushBatch(fn, queue); });`,
+    );
+    lines.push(`    });`);
+    lines.push(`  }`);
+    lines.push(`  async function __flushBatch(fn, queue) {`);
+    lines.push(
+      `    const pending = queue.items.splice(0, queue.items.length);`,
+    );
+    lines.push(`    queue.scheduled = false;`);
+    lines.push(`    if (pending.length === 0) return;`);
+    lines.push(`    if (__signal?.aborted) {`);
+    lines.push(`      const err = new __BridgeAbortError();`);
+    lines.push(`      for (const item of pending) item.reject(err);`);
+    lines.push(`      return;`);
+    lines.push(`    }`);
+    lines.push(
+      `    const chunkSize = queue.maxBatchSize && queue.maxBatchSize > 0 ? queue.maxBatchSize : pending.length;`,
+    );
+    lines.push(
+      `    for (let start = 0; start < pending.length; start += chunkSize) {`,
+    );
+    lines.push(`      const chunk = pending.slice(start, start + chunkSize);`);
+    lines.push(`      try {`);
+    lines.push(`        const inputs = chunk.map((item) => item.input);`);
+    lines.push(`        const batchPromise = fn(inputs, __ctx);`);
+    lines.push(`        let result;`);
+    lines.push(
+      `        if (__timeoutMs > 0 && batchPromise && typeof batchPromise.then === "function") {`,
+    );
+    lines.push(
+      `          let t; const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new __BridgeTimeoutError(queue.toolName, __timeoutMs)), __timeoutMs); });`,
+    );
+    lines.push(
+      `          try { result = await Promise.race([batchPromise, timeout]); } finally { clearTimeout(t); }`,
+    );
+    lines.push(`        } else {`);
+    lines.push(`          result = await batchPromise;`);
+    lines.push(`        }`);
+    lines.push(
+      `        if (!Array.isArray(result)) throw new Error('Batch tool "' + queue.toolName + '" must return an array of results');`,
+    );
+    lines.push(
+      `        if (result.length !== chunk.length) throw new Error('Batch tool "' + queue.toolName + '" returned ' + result.length + ' results for ' + chunk.length + ' queued calls');`,
+    );
+    lines.push(
+      `        for (let i = 0; i < chunk.length; i++) chunk[i].resolve(result[i]);`,
+    );
+    lines.push(`      } catch (err) {`);
+    lines.push(`        for (const item of chunk) item.reject(err);`);
+    lines.push(`      }`);
+    lines.push(`    }`);
     lines.push(`  }`);
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
@@ -875,7 +947,7 @@ class CodegenContext {
       lines.push(`    if (cached !== undefined) return cached;`);
       lines.push(`    try {`);
       lines.push(
-        `      const result = fn.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
+        `      const result = fn.bridge?.batch ? __callBatch(fn, input, toolName) : fn.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
       );
       lines.push(`      if (result && typeof result.then === "function") {`);
       lines.push(
@@ -1114,7 +1186,7 @@ class CodegenContext {
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `await __callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
     }
-    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
+    return `(${fn}.bridge?.batch ? await __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
   }
 
   /**
@@ -1131,7 +1203,7 @@ class CodegenContext {
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `__callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
     }
-    return `(${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
+    return `(${fn}.bridge?.batch ? __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
   }
 
   /**
