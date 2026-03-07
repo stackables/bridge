@@ -442,7 +442,11 @@ class CodegenContext {
   }
 
   /** Find the instance number for a tool from the wires. */
-  private findNextInstance(module: string, type: string, field: string): number {
+  private findNextInstance(
+    module: string,
+    type: string,
+    field: string,
+  ): number {
     const sig = `${module}:${type}:${field}`;
     const instances: number[] = [];
     for (const w of this.bridge.wires) {
@@ -613,28 +617,31 @@ class CodegenContext {
       }
     }
 
-    // Detect element-scoped tools: tools that receive element wire inputs.
-    // These must be inlined inside array map callbacks, not emitted at the top level.
-    for (const [tk, wires] of toolWires) {
-      for (const w of wires) {
-        if ("from" in w && w.from.element) {
-          this.elementScopedTools.add(tk);
-          break;
-        }
-      }
-    }
-    // Also detect define containers (aliases) that depend on element wires
-    for (const [tk, wires] of defineWires) {
-      for (const w of wires) {
-        if ("from" in w && w.from.element) {
-          this.elementScopedTools.add(tk);
-          break;
-        }
-        // Check if any source ref in the wire is an element-scoped tool
-        if ("from" in w && !w.from.element) {
-          const srcKey = refTrunkKey(w.from);
-          if (this.elementScopedTools.has(srcKey)) {
+    // Detect element-scoped tools/containers: any node that directly receives
+    // element input, or depends on another element-scoped node, must be emitted
+    // inside the array callback rather than at the top level.
+    const elementScopeEntries = [
+      ...toolWires.entries(),
+      ...defineWires.entries(),
+    ];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [tk, wires] of elementScopeEntries) {
+        if (this.elementScopedTools.has(tk)) continue;
+        for (const w of wires) {
+          if ("from" in w && w.from.element) {
             this.elementScopedTools.add(tk);
+            changed = true;
+            break;
+          }
+          if (
+            this.getSourceTrunks(w).some((srcKey) =>
+              this.elementScopedTools.has(srcKey),
+            )
+          ) {
+            this.elementScopedTools.add(tk);
+            changed = true;
             break;
           }
         }
@@ -1797,7 +1804,7 @@ class CodegenContext {
       const directShifted = shifted.filter((w) => w.to.path.length === 1);
       const currentScopeShifted = this.filterCurrentElementWires(
         shifted,
-        arrayIterators,
+        this.relativeArrayIterators(arrayIterators, arrayField),
       );
       const cf = detectControlFlow(directShifted);
       const anyCf = detectControlFlow(shifted);
@@ -1826,11 +1833,14 @@ class CodegenContext {
             syncPreamble,
             true,
           );
-          const syncBody = this.buildElementBody(shifted, arrayIterators, 0, 6);
+          const shiftedIterators = this.relativeArrayIterators(
+            arrayIterators,
+            arrayField,
+          );
           const syncMapExpr =
             syncPreamble.length > 0
-              ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${syncBody}; }) ?? null`
-              : `(${arrayExpr})?.map((_el0) => (${syncBody})) ?? null`;
+              ? `(${arrayExpr})?.map((_el0) => { ${syncPreamble.join(" ")} return ${this.buildElementBody(shifted, shiftedIterators, 0, 6)}; }) ?? null`
+              : `(${arrayExpr})?.map((_el0) => (${this.buildElementBody(shifted, shiftedIterators, 0, 6)})) ?? null`;
           this.elementLocalVars.clear();
 
           // Async branch — for...of inside an async IIFE
@@ -1841,7 +1851,7 @@ class CodegenContext {
             "_el0",
             preambleLines,
           );
-          const asyncBody = `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+          const asyncBody = `      _result.push(${this.buildElementBody(shifted, shiftedIterators, 0, 8)});`;
           const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
           const asyncExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
           this.elementLocalVars.clear();
@@ -1856,16 +1866,20 @@ class CodegenContext {
             "_el0",
             preambleLines,
           );
+          const shiftedIterators = this.relativeArrayIterators(
+            arrayIterators,
+            arrayField,
+          );
 
           const asyncBody = cf
             ? this.buildElementBodyWithControlFlow(
                 shifted,
-                arrayIterators,
+                shiftedIterators,
                 0,
                 8,
                 cf.kind === "continue" ? "for-continue" : "break",
               )
-            : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+            : `      _result.push(${this.buildElementBody(shifted, shiftedIterators, 0, 8)});`;
 
           const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
           mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
@@ -1874,7 +1888,7 @@ class CodegenContext {
       } else if (cf?.kind === "continue" && cf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
-          arrayIterators,
+          this.relativeArrayIterators(arrayIterators, arrayField),
           0,
           6,
           "continue",
@@ -1890,15 +1904,20 @@ class CodegenContext {
         const loopBody = cf
           ? this.buildElementBodyWithControlFlow(
               shifted,
-              arrayIterators,
+              this.relativeArrayIterators(arrayIterators, arrayField),
               0,
               8,
               cf.kind === "continue" ? "for-continue" : "break",
             )
-          : `      _result.push(${this.buildElementBody(shifted, arrayIterators, 0, 8)});`;
+          : `      _result.push(${this.buildElementBody(shifted, this.relativeArrayIterators(arrayIterators, arrayField), 0, 8)});`;
         mapExpr = `(() => { const _src = ${arrayExpr}; if (!Array.isArray(_src)) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${loopBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n      } return _result; })()`;
       } else {
-        const body = this.buildElementBody(shifted, arrayIterators, 0, 6);
+        const body = this.buildElementBody(
+          shifted,
+          this.relativeArrayIterators(arrayIterators, arrayField),
+          0,
+          6,
+        );
         mapExpr = `((__s) => Array.isArray(__s) ? __s.map((_el0) => (${body})) ?? null : null)(${arrayExpr})`;
       }
 
@@ -2037,6 +2056,10 @@ class CodegenContext {
 
       const srcExpr = this.elementWireToExpr(sourceW, elVar);
       const innerElVar = `_el${depth + 1}`;
+      const innerArrayIterators = this.relativeArrayIterators(
+        arrayIterators,
+        field,
+      );
       const innerCf = detectControlFlow(shifted);
       // Check if inner loop needs async (element-scoped tools or catch fallbacks)
       const innerNeedsAsync = shifted.some((w) => this.wireNeedsAwait(w));
@@ -2045,7 +2068,7 @@ class CodegenContext {
         mapExpr = this.withElementLocalVarScope(() => {
           const innerCurrentScope = this.filterCurrentElementWires(
             shifted,
-            arrayIterators,
+            innerArrayIterators,
           );
           const innerPreambleLines: string[] = [];
           this.collectElementPreamble(
@@ -2056,12 +2079,12 @@ class CodegenContext {
           const innerBody = innerCf
             ? this.buildElementBodyWithControlFlow(
                 shifted,
-                arrayIterators,
+                innerArrayIterators,
                 depth + 1,
                 indent + 4,
                 innerCf.kind === "continue" ? "for-continue" : "break",
               )
-            : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, arrayIterators, depth + 1, indent + 4)});`;
+            : `${" ".repeat(indent + 4)}_result.push(${this.buildElementBody(shifted, innerArrayIterators, depth + 1, indent + 4)});`;
           const innerPreamble = innerPreambleLines
             .map((line) => `${" ".repeat(indent + 4)}${line}`)
             .join("\n");
@@ -2070,7 +2093,7 @@ class CodegenContext {
       } else if (innerCf?.kind === "continue" && innerCf.levels === 1) {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
-          arrayIterators,
+          innerArrayIterators,
           depth + 1,
           indent + 2,
           "continue",
@@ -2079,7 +2102,7 @@ class CodegenContext {
       } else if (innerCf?.kind === "break" || innerCf?.kind === "continue") {
         const cfBody = this.buildElementBodyWithControlFlow(
           shifted,
-          arrayIterators,
+          innerArrayIterators,
           depth + 1,
           indent + 4,
           innerCf.kind === "continue" ? "for-continue" : "break",
@@ -2088,7 +2111,7 @@ class CodegenContext {
       } else {
         const innerBody = this.buildElementBody(
           shifted,
-          arrayIterators,
+          innerArrayIterators,
           depth + 1,
           indent + 2,
         );
@@ -2372,8 +2395,9 @@ class CodegenContext {
         (w) => refTrunkKey(w.to) === trunkKey,
       );
       if (wires.length === 0) return "undefined";
-      // For aliases with a single wire, inline the wire expression
-      if (wires.length === 1) {
+      // A single root wire can be inlined directly. Field wires must preserve
+      // the define container object shape for later path access.
+      if (wires.length === 1 && wires[0]!.to.path.length === 0) {
         const w = wires[0]!;
         // Check if the wire itself is element-scoped
         if ("from" in w && w.from.element) {
@@ -2392,16 +2416,7 @@ class CodegenContext {
         }
         return this.wireToExpr(w);
       }
-      // Multiple wires — build object
-      const entries: string[] = [];
-      for (const w of wires) {
-        const path = w.to.path;
-        const key = path[path.length - 1]!;
-        entries.push(
-          `${JSON.stringify(key)}: ${this.elementWireToExpr(w, elVar)}`,
-        );
-      }
-      return `{ ${entries.join(", ")} }`;
+      return this.buildElementContainerExpr(wires, elVar);
     }
 
     // Internal tool — rebuild inline
@@ -2610,20 +2625,14 @@ class CodegenContext {
       }
     }
 
-    // Emit in dependency order (simple: real tools first, then define containers)
-    const realTools = [...needed].filter(
-      (tk) => !this.defineContainers.has(tk),
-    );
-    const defines = [...needed].filter((tk) => this.defineContainers.has(tk));
-
-    for (const tk of [...realTools, ...defines]) {
+    for (const tk of this.topologicalSortSubset(needed)) {
       const vn = `_el_${this.elementLocalVars.size}`;
       this.elementLocalVars.set(tk, vn);
 
       if (this.defineContainers.has(tk)) {
         // Define container — build inline object/value
         const wires = this.bridge.wires.filter((w) => refTrunkKey(w.to) === tk);
-        if (wires.length === 1) {
+        if (wires.length === 1 && wires[0]!.to.path.length === 0) {
           const w = wires[0]!;
           const hasCatch = hasCatchFallback(w) || hasCatchControl(w);
           const hasSafe = "from" in w && w.safe;
@@ -2636,16 +2645,9 @@ class CodegenContext {
             lines.push(`const ${vn} = ${expr};`);
           }
         } else {
-          // Multiple wires — build object
-          const entries: string[] = [];
-          for (const w of wires) {
-            const path = w.to.path;
-            const key = path[path.length - 1]!;
-            entries.push(
-              `${JSON.stringify(key)}: ${this.elementWireToExpr(w, elVar)}`,
-            );
-          }
-          lines.push(`const ${vn} = { ${entries.join(", ")} };`);
+          lines.push(
+            `const ${vn} = ${this.buildElementContainerExpr(wires, elVar)};`,
+          );
         }
       } else {
         // Real tool — emit tool call
@@ -2676,6 +2678,55 @@ class CodegenContext {
     }
   }
 
+  private topologicalSortSubset(keys: Iterable<string>): string[] {
+    const needed = new Set(keys);
+    const orderedKeys = [...this.tools.keys(), ...this.defineContainers].filter(
+      (key) => needed.has(key),
+    );
+    const orderIndex = new Map(orderedKeys.map((key, index) => [key, index]));
+    const adj = new Map<string, Set<string>>();
+    const inDegree = new Map<string, number>();
+
+    for (const key of orderedKeys) {
+      adj.set(key, new Set());
+      inDegree.set(key, 0);
+    }
+
+    for (const key of orderedKeys) {
+      const wires = this.bridge.wires.filter((w) => refTrunkKey(w.to) === key);
+      for (const w of wires) {
+        for (const src of this.getSourceTrunks(w)) {
+          if (!needed.has(src) || src === key) continue;
+          const neighbors = adj.get(src);
+          if (!neighbors || neighbors.has(key)) continue;
+          neighbors.add(key);
+          inDegree.set(key, (inDegree.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    const ready = orderedKeys.filter((key) => (inDegree.get(key) ?? 0) === 0);
+    const sorted: string[] = [];
+
+    while (ready.length > 0) {
+      ready.sort(
+        (left, right) =>
+          (orderIndex.get(left) ?? 0) - (orderIndex.get(right) ?? 0),
+      );
+      const key = ready.shift()!;
+      sorted.push(key);
+      for (const neighbor of adj.get(key) ?? []) {
+        const nextDegree = (inDegree.get(neighbor) ?? 1) - 1;
+        inDegree.set(neighbor, nextDegree);
+        if (nextDegree === 0) {
+          ready.push(neighbor);
+        }
+      }
+    }
+
+    return sorted.length === orderedKeys.length ? sorted : orderedKeys;
+  }
+
   private filterCurrentElementWires(
     elemWires: Wire[],
     arrayIterators: Record<string, string>,
@@ -2683,6 +2734,24 @@ class CodegenContext {
     return elemWires.filter(
       (w) => !(w.to.path.length > 1 && w.to.path[0]! in arrayIterators),
     );
+  }
+
+  private relativeArrayIterators(
+    arrayIterators: Record<string, string>,
+    prefix: string,
+  ): Record<string, string> {
+    const relative: Record<string, string> = {};
+    const prefixWithDot = `${prefix}.`;
+
+    for (const [path, alias] of Object.entries(arrayIterators)) {
+      if (path === prefix) {
+        relative[""] = alias;
+      } else if (path.startsWith(prefixWithDot)) {
+        relative[path.slice(prefixWithDot.length)] = alias;
+      }
+    }
+
+    return relative;
   }
 
   private withElementLocalVarScope<T>(fn: () => T): T {
@@ -2764,6 +2833,53 @@ class CodegenContext {
       );
     }
     return `{ ${entries.join(", ")} }`;
+  }
+
+  private buildElementContainerExpr(wires: Wire[], elVar: string): string {
+    if (wires.length === 0) return "undefined";
+
+    let rootExpr: string | undefined;
+    const fieldWires: Wire[] = [];
+
+    for (const w of wires) {
+      if (w.to.path.length === 0) {
+        rootExpr = this.elementWireToExpr(w, elVar);
+      } else {
+        fieldWires.push(w);
+      }
+    }
+
+    if (rootExpr !== undefined && fieldWires.length === 0) {
+      return rootExpr;
+    }
+
+    interface TreeNode {
+      expr?: string;
+      children: Map<string, TreeNode>;
+    }
+
+    const root: TreeNode = { children: new Map() };
+
+    for (const w of fieldWires) {
+      let current = root;
+      for (let index = 0; index < w.to.path.length - 1; index++) {
+        const segment = w.to.path[index]!;
+        if (!current.children.has(segment)) {
+          current.children.set(segment, { children: new Map() });
+        }
+        current = current.children.get(segment)!;
+      }
+      const lastSegment = w.to.path[w.to.path.length - 1]!;
+      if (!current.children.has(lastSegment)) {
+        current.children.set(lastSegment, { children: new Map() });
+      }
+      current.children.get(lastSegment)!.expr = this.elementWireToExpr(
+        w,
+        elVar,
+      );
+    }
+
+    return this.serializeTreeNode(root, 4, rootExpr);
   }
 
   /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */

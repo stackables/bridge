@@ -12,11 +12,7 @@ import {
   executeBridge as executeRuntime,
 } from "@stackables/bridge-core";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
-import {
-  BridgeCompilerIncompatibleError,
-  compileBridge,
-  executeBridge as executeAot,
-} from "../src/index.ts";
+import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
 // ── Shared infrastructure ───────────────────────────────────────────────────
 
@@ -554,7 +550,7 @@ describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
   );
 
   test(
-    "compiler-incompatible loop-scoped tool bridges fall back with runtime-equivalent results",
+    "extended loop-scoped tool bridges match runtime execution",
     { timeout: 120_000 },
     async () => {
       await fc.assert(
@@ -564,14 +560,9 @@ describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
           const operation = `${spec.type}.${spec.field}`;
           const expectedCalls = expectedLoopToolCalls(spec);
 
-          assert.throws(
-            () => compileBridge(document, { operation }),
-            (error: unknown) =>
-              error instanceof BridgeCompilerIncompatibleError &&
-              /(memoize|memoized|shadowed loop-scoped tool handles|nested loop-scoped tool handles)/i.test(
-                error.message,
-              ),
-          );
+          assert.doesNotThrow(() => {
+            compileBridge(document, { operation });
+          });
 
           let runtimeCalls = 0;
           const runtimeResult = await executeRuntime({
@@ -590,7 +581,6 @@ describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
           });
 
           let aotCalls = 0;
-          const warnings: string[] = [];
           const aotResult = await executeAot({
             document,
             operation,
@@ -604,16 +594,11 @@ describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
               },
             },
             context: { catalog: spec.catalog },
-            logger: {
-              warn: (message: string) => warnings.push(message),
-            },
           });
 
           assert.deepEqual(aotResult.data, runtimeResult.data);
           assert.equal(runtimeCalls, expectedCalls);
           assert.equal(aotCalls, expectedCalls);
-          assert.equal(warnings.length, 1);
-          assert.match(warnings[0]!, /Falling back to core executeBridge/i);
         }),
         { numRuns: 300, endOnFailure: true },
       );

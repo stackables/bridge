@@ -3192,19 +3192,6 @@ function buildBridgeBody(
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
 
-  if (bridgeType === "Define") {
-    handleRes.set("in", {
-      module: SELF_MODULE,
-      type: bridgeType,
-      field: bridgeField,
-    });
-    handleRes.set("out", {
-      module: SELF_MODULE,
-      type: bridgeType,
-      field: bridgeField,
-    });
-  }
-
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
   for (const bodyLine of bodyLines) {

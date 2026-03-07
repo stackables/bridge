@@ -112,6 +112,18 @@ export function trunkDependsOnElement(
 ): boolean {
   if (!bridge) return false;
 
+  // The current bridge trunk doubles as the input state container. Do not walk
+  // its incoming output wires when classifying element scope; refs like
+  // `i.category` would otherwise inherit element scope from unrelated output
+  // array mappings on the same bridge.
+  if (
+    target.module === "_" &&
+    target.type === bridge.type &&
+    target.field === bridge.field
+  ) {
+    return false;
+  }
+
   const key = trunkKey(target);
   if (visited.has(key)) return false;
   visited.add(key);

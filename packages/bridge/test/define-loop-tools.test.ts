@@ -9,7 +9,9 @@ test("define handles cannot be memoized at the invocation site", () => {
       parseBridge(`version 1.5
 
 define formatProfile {
-  out.data = null
+  with output as o
+
+  o.data = null
 }
 
 bridge Query.processCatalog {
@@ -35,10 +37,12 @@ forEachEngine("define blocks interacting with loop scopes", (run) => {
     const bridge = `version 1.5
 
 define formatProfile {
+  with input as i
+  with output as o
   with std.httpCall as fetch memoize
 
-  fetch.value <- in.userId
-  out.data <- fetch.data
+  fetch.value <- i.userId
+  o.data <- fetch.data
 }
 
 bridge Query.processCatalog {

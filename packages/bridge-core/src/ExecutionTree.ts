@@ -601,6 +601,13 @@ export class ExecutionTree implements TreeContext {
       );
     }
 
+    // Shadow trees must share cached values for refs that do not depend on the
+    // current element. Otherwise top-level aliases/tools reused inside arrays
+    // are recomputed once per element instead of being memoized at the parent.
+    if (this.parent && !ref.element && !this.isElementScopedTrunk(ref)) {
+      return this.parent.pullSingle(ref, pullChain);
+    }
+
     // Walk the full parent chain — shadow trees may be nested multiple levels
     let value: any = undefined;
     let cursor: ExecutionTree | undefined = this;
@@ -797,7 +804,6 @@ export class ExecutionTree implements TreeContext {
         (w) =>
           "from" in w &&
           ((w.from as NodeRef).element === true ||
-            (w.from as NodeRef).module === "__local" ||
             this.isElementScopedTrunk(w.from as NodeRef) ||
             w.to.element === true) &&
           w.to.module === SELF_MODULE &&
@@ -1020,14 +1026,12 @@ export class ExecutionTree implements TreeContext {
     // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
     // AND element-level wires (from.element === true).  A plain passthrough
     // (`o <- api.user`) only has the root wire.
-    // Local bindings (from.__local) are also element-scoped.
     // Pipe fork output wires in element context (e.g. concat template strings)
     // may have to.element === true instead.
     const hasElementWires = bridge.wires.some(
       (w) =>
         "from" in w &&
         ((w.from as NodeRef).element === true ||
-          (w.from as NodeRef).module === "__local" ||
           this.isElementScopedTrunk(w.from as NodeRef) ||
           w.to.element === true) &&
         w.to.module === SELF_MODULE &&

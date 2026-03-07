@@ -486,6 +486,7 @@ const myTimeout = 30`);
 define myShape {
   with input as inp
   with output as out
+  out.x <- inp.y
 }`);
     // "define myShape {" at line 1 — "myShape" at char 7
     const hover = svc.getHover({ line: 1, character: 7 }); // "myShape"
