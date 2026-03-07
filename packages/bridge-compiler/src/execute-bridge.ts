@@ -221,12 +221,6 @@ function flattenTools(
   return flat;
 }
 
-function hasBatchedTool(flatTools: Record<string, any>): boolean {
-  return Object.values(flatTools).some(
-    (value) => typeof value === "function" && value.bridge?.batch,
-  );
-}
-
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -265,30 +259,6 @@ export async function executeBridge<T = unknown>(
     maxDepth,
   } = options;
 
-  // Prototype limitation: runtime batching exists, but compiled batching still
-  // needs dedicated scheduling codegen to coalesce loop-scoped awaits. Fall
-  // back to the interpreter when any tool opts into `.bridge.batch`.
-  const allTools: ToolMap = { std: bundledStd, ...userTools };
-  const flatTools = flattenTools(allTools as Record<string, any>);
-  if (hasBatchedTool(flatTools)) {
-    logger?.warn?.(
-      "Batched tools currently run through the interpreter. Falling back to core executeBridge.",
-    );
-    return executeCoreBridge<T>({
-      document,
-      operation,
-      input,
-      tools: userTools,
-      context,
-      signal,
-      toolTimeoutMs,
-      logger,
-      trace: options.trace,
-      requestedFields: options.requestedFields,
-      ...(maxDepth !== undefined ? { maxDepth } : {}),
-    });
-  }
-
   let fn: BridgeFn;
   try {
     fn = getOrCompile(document, operation, options.requestedFields);
@@ -311,6 +281,11 @@ export async function executeBridge<T = unknown>(
     }
     throw err;
   }
+
+  // Merge built-in std namespace with user-provided tools, then flatten
+  // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].
+  const allTools: ToolMap = { std: bundledStd, ...userTools };
+  const flatTools = flattenTools(allTools as Record<string, any>);
 
   // Set up tracing if requested
   const traceLevel = options.trace ?? "off";

@@ -708,6 +708,18 @@ class CodegenContext {
     );
     lines.push(`  const __batchQueues = new Map();`);
     lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(`  function __toolExecutionLogLevel(fn) {`);
+    lines.push(`    const log = fn?.bridge?.log;`);
+    lines.push(`    if (log === false || log == null) return false;`);
+    lines.push(`    if (log === true) return "info";`);
+    lines.push(`    return log.execution === "info" ? "info" : log.execution ? "debug" : false;`);
+    lines.push(`  }`);
+    lines.push(`  function __toolErrorLogLevel(fn) {`);
+    lines.push(`    const log = fn?.bridge?.log;`);
+    lines.push(`    if (log === false) return false;`);
+    lines.push(`    if (log == null || log === true) return "error";`);
+    lines.push(`    return log.errors === false ? false : log.errors === "warn" ? "warn" : "error";`);
+    lines.push(`  }`);
     lines.push(`  function __rethrowBridgeError(err, loc) {`);
     lines.push(
       `    if (err?.name === "BridgePanicError") throw __attachBridgeMeta(err, loc);`,
@@ -832,6 +844,7 @@ class CodegenContext {
     lines.push(`      const chunk = pending.slice(start, start + chunkSize);`);
     lines.push(`      try {`);
     lines.push(`        const inputs = chunk.map((item) => item.input);`);
+    lines.push(`        const startTime = (__trace || __ctx.logger) ? performance.now() : 0;`);
     lines.push(`        const batchPromise = fn(inputs, __ctx);`);
     lines.push(`        let result;`);
     lines.push(
@@ -846,6 +859,9 @@ class CodegenContext {
     lines.push(`        } else {`);
     lines.push(`          result = await batchPromise;`);
     lines.push(`        }`);
+    lines.push(`        if (__trace) __trace(queue.toolName, startTime, performance.now(), inputs, result, null);`);
+    lines.push(`        const __execLevel = __toolExecutionLogLevel(fn);`);
+    lines.push(`        if (__execLevel) __ctx.logger?.[__execLevel]?.({ tool: queue.toolName, fn: queue.toolName, durationMs: Math.round((performance.now() - startTime) * 1000) / 1000 }, "[bridge] tool completed");`);
     lines.push(
       `        if (!Array.isArray(result)) throw new Error('Batch tool "' + queue.toolName + '" must return an array of results');`,
     );
@@ -856,6 +872,9 @@ class CodegenContext {
       `        for (let i = 0; i < chunk.length; i++) chunk[i].resolve(result[i]);`,
     );
     lines.push(`      } catch (err) {`);
+    lines.push(`        if (__trace) __trace(queue.toolName, startTime, performance.now(), inputs, null, err);`);
+    lines.push(`        const __errorLevel = __toolErrorLogLevel(fn);`);
+    lines.push(`        if (__errorLevel) __ctx.logger?.[__errorLevel]?.({ tool: queue.toolName, fn: queue.toolName, err: err instanceof Error ? err.message : String(err) }, "[bridge] tool failed");`);
     lines.push(`        for (const item of chunk) item.reject(err);`);
     lines.push(`      }`);
     lines.push(`    }`);
@@ -872,11 +891,15 @@ class CodegenContext {
     lines.push(
       `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
     );
+    lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
+    lines.push(`      if (__execLevel) __ctx.logger?.[__execLevel]?.({ tool: toolName, fn: toolName, durationMs: Math.round((performance.now() - start) * 1000) / 1000 }, "[bridge] tool completed");`);
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
       `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
     );
+    lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
+    lines.push(`      if (__errorLevel) __ctx.logger?.[__errorLevel]?.({ tool: toolName, fn: toolName, err: err instanceof Error ? err.message : String(err) }, "[bridge] tool failed");`);
     lines.push(`      throw err;`);
     lines.push(`    }`);
     lines.push(`  }`);
@@ -906,11 +929,15 @@ class CodegenContext {
     lines.push(
       `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
     );
+    lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
+    lines.push(`      if (__execLevel) __ctx.logger?.[__execLevel]?.({ tool: toolName, fn: toolName, durationMs: Math.round((performance.now() - start) * 1000) / 1000 }, "[bridge] tool completed");`);
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
       `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
     );
+    lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
+    lines.push(`      if (__errorLevel) __ctx.logger?.[__errorLevel]?.({ tool: toolName, fn: toolName, err: err instanceof Error ? err.message : String(err) }, "[bridge] tool failed");`);
     lines.push(`      throw err;`);
     lines.push(`    }`);
     lines.push(`  }`);
@@ -1724,7 +1751,8 @@ class CodegenContext {
       if (needsAsync) {
         // Check if async is only from element-scoped tools (no catch fallbacks).
         // If so, generate a dual sync/async path with a runtime check.
-        const canDualPath = !cf && this.asyncOnlyFromTools(elemWires);
+        const canDualPath =
+          !cf && !requiresLabeledLoop && this.asyncOnlyFromTools(elemWires);
         const toolRefs = canDualPath
           ? this.collectElementToolRefs(currentScopeElemWires)
           : [];
@@ -1765,7 +1793,9 @@ class CodegenContext {
           this.elementLocalVars.clear();
         }
 
-        // Async branch — for...of loop with await
+        // Async branch — Promise.all over async element callbacks so batched
+        // tool calls can coalesce before the first microtask flush. Control
+        // flow still requires an explicit loop.
         const preambleLines: string[] = [];
         this.elementLocalVars.clear();
         this.collectElementPreamble(
@@ -1774,31 +1804,42 @@ class CodegenContext {
           preambleLines,
         );
 
-        const body = cf
-          ? this.buildElementBodyWithControlFlow(
-              elemWires,
-              arrayIterators,
-              0,
-              4,
-              cf.kind === "continue" ? "for-continue" : "break",
-            )
-          : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
+        if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+          const body = cf
+            ? this.buildElementBodyWithControlFlow(
+                elemWires,
+                arrayIterators,
+                0,
+                4,
+                cf.kind === "continue" ? "for-continue" : "break",
+              )
+            : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
 
-        lines.push(`  const _result = [];`);
-        lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
-        lines.push(`    try {`);
-        for (const pl of preambleLines) {
-          lines.push(`      ${pl}`);
+          lines.push(`  const _result = [];`);
+          lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
+          lines.push(`    try {`);
+          for (const pl of preambleLines) {
+            lines.push(`      ${pl}`);
+          }
+          lines.push(`    ${body.trimStart()}`);
+          lines.push(`    } catch (_ctrl) {`);
+          lines.push(
+            `      if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; }`,
+          );
+          lines.push(`      throw _ctrl;`);
+          lines.push(`    }`);
+          lines.push(`  }`);
+          lines.push(`  return _result;`);
+        } else {
+          lines.push(`  return await Promise.all((${arrayExpr} ?? []).map(async (_el0) => {`);
+          for (const pl of preambleLines) {
+            lines.push(`    ${pl}`);
+          }
+          lines.push(
+            `    return ${this.buildElementBody(elemWires, arrayIterators, 0, 4)};`,
+          );
+          lines.push(`  }));`);
         }
-        lines.push(`    ${body.trimStart()}`);
-        lines.push(`    } catch (_ctrl) {`);
-        lines.push(
-          `      if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; }`,
-        );
-        lines.push(`      throw _ctrl;`);
-        lines.push(`    }`);
-        lines.push(`  }`);
-        lines.push(`  return _result;`);
         this.elementLocalVars.clear();
       } else if (cf?.kind === "continue" && cf.levels === 1) {
         // Use flatMap — skip elements that trigger continue (sync only)
@@ -1974,7 +2015,8 @@ class CodegenContext {
       let mapExpr: string;
       if (needsAsync) {
         // Check if we can generate a dual sync/async path
-        const canDualPath = !cf && this.asyncOnlyFromTools(shifted);
+        const canDualPath =
+          !cf && !requiresLabeledLoop && this.asyncOnlyFromTools(shifted);
         const toolRefs = canDualPath
           ? this.collectElementToolRefs(currentScopeShifted)
           : [];
@@ -2011,14 +2053,15 @@ class CodegenContext {
             "_el0",
             preambleLines,
           );
-          const asyncBody = `      _result.push(${this.buildElementBody(shifted, shiftedIterators, 0, 8)});`;
           const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-          const asyncExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
+          const asyncExpr = `await ((async (__s) => Array.isArray(__s) ? Promise.all(__s.map(async (_el0) => {\n${preamble}${preamble ? "\n" : ""}      return ${this.buildElementBody(shifted, shiftedIterators, 0, 8)};\n    })) : null)(${arrayExpr}))`;
           this.elementLocalVars.clear();
 
           mapExpr = `(${syncCheck}) ? ${syncMapExpr} : ${asyncExpr}`;
         } else {
-          // Standard async path — for...of inside an async IIFE
+          // Standard async path — Promise.all over async element callbacks so
+          // batched tools can queue together before the first flush. Control
+          // flow still requires an explicit loop.
           const preambleLines: string[] = [];
           this.elementLocalVars.clear();
           this.collectElementPreamble(
@@ -2031,18 +2074,21 @@ class CodegenContext {
             arrayField,
           );
 
-          const asyncBody = cf
-            ? this.buildElementBodyWithControlFlow(
-                shifted,
-                shiftedIterators,
-                0,
-                8,
-                cf.kind === "continue" ? "for-continue" : "break",
-              )
-            : `      _result.push(${this.buildElementBody(shifted, shiftedIterators, 0, 8)});`;
-
           const preamble = preambleLines.map((l) => `      ${l}`).join("\n");
-          mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
+          if (cf?.kind === "break" || cf?.kind === "continue" || requiresLabeledLoop) {
+            const asyncBody = cf
+              ? this.buildElementBodyWithControlFlow(
+                  shifted,
+                  shiftedIterators,
+                  0,
+                  8,
+                  cf.kind === "continue" ? "for-continue" : "break",
+                )
+              : `      _result.push(${this.buildElementBody(shifted, shiftedIterators, 0, 8)});`;
+            mapExpr = `await (async () => { const _src = ${arrayExpr}; if (_src == null) return null; const _result = []; __loop0: for (const _el0 of _src) {\n      try {\n${preamble}\n${asyncBody}\n      } catch (_ctrl) { if (__isLoopCtrl(_ctrl)) { if (_ctrl.levels > 1) throw __nextLoopCtrl(_ctrl); if (_ctrl.__bridgeControl === "break") break; continue; } throw _ctrl; }\n    } return _result; })()`;
+          } else {
+            mapExpr = `await ((async (__s) => Array.isArray(__s) ? Promise.all(__s.map(async (_el0) => {\n${preamble}${preamble ? "\n" : ""}      return ${this.buildElementBody(shifted, shiftedIterators, 0, 8)};\n    })) : null)(${arrayExpr}))`;
+          }
           this.elementLocalVars.clear();
         }
       } else if (cf?.kind === "continue" && cf.levels === 1) {

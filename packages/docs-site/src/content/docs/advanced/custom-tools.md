@@ -177,6 +177,7 @@ Rules:
 - Bridge fans the results back out to the original wire sites automatically.
 - `maxBatchSize` splits very large queues into multiple batch calls.
 - `flush: "microtask"` means compatible calls in the same microtask are coalesced together.
+- Native batching works in both the runtime interpreter and the compiled executor.
 
 ### Tracing and Logging
 
