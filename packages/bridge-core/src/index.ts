@@ -56,6 +56,7 @@ export type {
   HandleBinding,
   Instruction,
   NodeRef,
+  SourceLocation,
   ToolCallFn,
   ToolContext,
   ToolDef,

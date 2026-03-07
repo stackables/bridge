@@ -1,3 +1,5 @@
+type SourceLocation = import("@stackables/bridge-types").SourceLocation;
+
 /**
  * Structured node reference — identifies a specific data point in the execution graph.
  *
@@ -58,6 +60,7 @@ export type Wire =
   | {
       from: NodeRef;
       to: NodeRef;
+      loc?: SourceLocation;
       pipe?: true;
       /** When true, this wire merges source properties into target (from `...source` syntax). */
       spread?: true;
@@ -67,7 +70,7 @@ export type Wire =
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
     }
-  | { value: string; to: NodeRef }
+  | { value: string; to: NodeRef; loc?: SourceLocation }
   | {
       cond: NodeRef;
       thenRef?: NodeRef;
@@ -75,6 +78,7 @@ export type Wire =
       elseRef?: NodeRef;
       elseValue?: string;
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -90,6 +94,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -105,6 +110,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchFallback?: string;
       catchFallbackRef?: NodeRef;
@@ -246,6 +252,7 @@ export type {
   ToolMap,
   ToolMetadata,
   CacheStore,
+  SourceLocation,
 } from "@stackables/bridge-types";
 
 /**

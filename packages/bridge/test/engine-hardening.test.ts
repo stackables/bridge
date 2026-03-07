@@ -217,7 +217,11 @@ bridge Query.test {
         return true;
       },
     );
-    assert.equal(secondCalled, false, "second tool should not have been called");
+    assert.equal(
+      secondCalled,
+      false,
+      "second tool should not have been called",
+    );
   });
 
   test("pre-aborted signal throws immediately", async () => {

@@ -26,10 +26,12 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [{
-      type: "falsy",
-      control: { kind: "throw", message: "name is required" },
-    }]);
+    assert.deepStrictEqual(pullWire.fallbacks, [
+      {
+        type: "falsy",
+        control: { kind: "throw", message: "name is required" },
+      },
+    ]);
   });
 
   test("panic on ?? gate", () => {
@@ -45,10 +47,12 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [{
-      type: "nullish",
-      control: { kind: "panic", message: "fatal: name cannot be null" },
-    }]);
+    assert.deepStrictEqual(pullWire.fallbacks, [
+      {
+        type: "nullish",
+        control: { kind: "panic", message: "fatal: name cannot be null" },
+      },
+    ]);
   });
 
   test("continue on ?? gate", () => {
@@ -69,7 +73,9 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "continue" } }]);
+    assert.deepStrictEqual(elemWire.fallbacks, [
+      { type: "nullish", control: { kind: "continue" } },
+    ]);
   });
 
   test("break on ?? gate", () => {
@@ -90,7 +96,9 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "break" } }]);
+    assert.deepStrictEqual(elemWire.fallbacks, [
+      { type: "nullish", control: { kind: "break" } },
+    ]);
   });
 
   test("break/continue with levels on ?? gate", () => {
@@ -195,10 +203,12 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [{
-      type: "falsy",
-      control: { kind: "throw", message: "name is required" },
-    }]);
+    assert.deepStrictEqual(pullWire.fallbacks, [
+      {
+        type: "falsy",
+        control: { kind: "throw", message: "name is required" },
+      },
+    ]);
   });
 
   test("panic on ?? gate round-trips", () => {
@@ -221,10 +231,12 @@ bridge Query.test {
         "from" in w && w.to.path.join(".") === "name",
     );
     assert.ok(pullWire);
-    assert.deepStrictEqual(pullWire.fallbacks, [{
-      type: "nullish",
-      control: { kind: "panic", message: "fatal" },
-    }]);
+    assert.deepStrictEqual(pullWire.fallbacks, [
+      {
+        type: "nullish",
+        control: { kind: "panic", message: "fatal" },
+      },
+    ]);
   });
 
   test("continue on ?? gate round-trips", () => {
@@ -252,7 +264,9 @@ bridge Query.test {
         w.to.path.join(".") === "items.name",
     );
     assert.ok(elemWire);
-    assert.deepStrictEqual(elemWire.fallbacks, [{ type: "nullish", control: { kind: "continue" } }]);
+    assert.deepStrictEqual(elemWire.fallbacks, [
+      { type: "nullish", control: { kind: "continue" } },
+    ]);
   });
 
   test("break on catch gate round-trips", () => {
@@ -563,7 +577,13 @@ bridge Query.test {
       const tools = {
         api: async () => ({
           orders: [
-            { id: 1, items: [{ sku: "A", price: 10 }, { sku: null, price: 99 }] },
+            {
+              id: 1,
+              items: [
+                { sku: "A", price: 10 },
+                { sku: null, price: 99 },
+              ],
+            },
             { id: 2, items: [{ sku: "B", price: 20 }] },
           ],
         }),
@@ -571,7 +591,9 @@ bridge Query.test {
       const { data } = (await run(src, "Query.test", {}, tools)) as {
         data: any[];
       };
-      assert.deepStrictEqual(data, [{ id: 2, items: [{ sku: "B", price: 20 }] }]);
+      assert.deepStrictEqual(data, [
+        { id: 2, items: [{ sku: "B", price: 20 }] },
+      ]);
     });
 
     test("break 2 breaks out of parent loop", async () => {
@@ -591,7 +613,13 @@ bridge Query.test {
         api: async () => ({
           orders: [
             { id: 1, items: [{ sku: "A", price: 10 }] },
-            { id: 2, items: [{ sku: "B", price: null }, { sku: "C", price: 30 }] },
+            {
+              id: 2,
+              items: [
+                { sku: "B", price: null },
+                { sku: "C", price: 30 },
+              ],
+            },
             { id: 3, items: [{ sku: "D", price: 40 }] },
           ],
         }),
@@ -599,7 +627,9 @@ bridge Query.test {
       const { data } = (await run(src, "Query.test", {}, tools)) as {
         data: any[];
       };
-      assert.deepStrictEqual(data, [{ id: 1, items: [{ sku: "A", price: 10 }] }]);
+      assert.deepStrictEqual(data, [
+        { id: 1, items: [{ sku: "A", price: 10 }] },
+      ]);
     });
   });
 
