@@ -10,6 +10,7 @@ import type {
   ControlFlowInstruction,
   NodeRef,
   SourceLocation,
+  Wire,
 } from "./types.ts";
 
 // ── Error classes ───────────────────────────────────────────────────────────
@@ -131,6 +132,8 @@ export interface TreeContext {
     pullChain?: Set<string>,
     bridgeLoc?: SourceLocation,
   ): MaybePromise<any>;
+  /** Classify an overdefined wire by marginal execution cost (lower = cheaper). */
+  classifyOverdefinitionWire?(wire: Wire): number;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
 }

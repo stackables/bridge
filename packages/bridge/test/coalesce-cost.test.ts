@@ -9,7 +9,7 @@ import { createGateway } from "./_gateway.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 // v2.0 Execution Semantics:
 //   • || chains evaluate sequentially (left to right) with short-circuit
-//   • Overdefinition uses cost-based ordering (cheap → expensive)
+//   • Overdefinition uses cost-based ordering (zero-cost/already-resolved → expensive)
 //   • Backup tools are NEVER called when a earlier source returns a truthy value
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -278,8 +278,8 @@ o.label <- p.label || b.label || "null-default" catch "error-default"
 
 // ── Cost-based resolution: overdefinition ────────────────────────────────
 
-describe("overdefinition: authored order respected", () => {
-  test("first wire wins when both are non-null (left-to-right)", async () => {
+describe("overdefinition: cost-based prioritization", () => {
+  test("input beats tool even when tool wire is authored first", async () => {
     const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
@@ -305,12 +305,11 @@ o.label <- i.hint
     const result: any = await executor({
       document: parse(`{ lookup(q: "x", hint: "cheap") { label } }`),
     });
-    // Authored order: api.label is first → wins
-    assert.equal(result.data.lookup.label, "expensive");
+    assert.equal(result.data.lookup.label, "cheap");
     assertDeepStrictEqualIgnoringLoc(
       callLog,
-      ["expensiveApi"],
-      "first wire evaluated first",
+      [],
+      "zero-cost input should short-circuit before the API is called",
     );
   });
 
@@ -345,47 +344,11 @@ o.label <- i.hint
     assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["expensiveApi"],
-      "API called when input is null",
+      "API should run only when zero-cost sources are nullish",
     );
   });
 
-  test("overdefinition respects authored order — first wire wins", async () => {
-    // The expensive tool wire is written FIRST, so it is evaluated first.
-    // Left-to-right semantics mean the tool result wins.
-    const bridgeText = `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.label <- api.label
-o.label <- i.hint
-
-}`;
-    const callLog: string[] = [];
-    const tools = {
-      expensiveApi: async () => {
-        callLog.push("expensiveApi");
-        return { label: "expensive" };
-      },
-    };
-    const doc = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, doc, { tools });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ lookup(q: "x", hint: "from-input") { label } }`),
-    });
-    assert.equal(result.data.lookup.label, "expensive");
-    assertDeepStrictEqualIgnoringLoc(
-      callLog,
-      ["expensiveApi"],
-      "first wire wins — authored order matters",
-    );
-  });
-
-  test("authored order: tool before context — tool wins", async () => {
+  test("context beats tool even when tool wire is authored first", async () => {
     const bridgeText = `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
@@ -401,7 +364,7 @@ o.label <- ctx.defaultLabel
     const callLog: string[] = [];
     const tools = {
       expensiveApi: async () => {
-        callLog.push("api");
+        callLog.push("expensiveApi");
         return { label: "expensive" };
       },
     };
@@ -415,16 +378,50 @@ o.label <- ctx.defaultLabel
     const result: any = await executor({
       document: parse(`{ lookup(q: "x") { label } }`),
     });
-    // api.label is first wire → evaluated first → wins
-    assert.equal(result.data.lookup.label, "expensive");
+    assert.equal(result.data.lookup.label, "from-context");
     assertDeepStrictEqualIgnoringLoc(
       callLog,
-      ["api"],
-      "authored order: api first, context second",
+      [],
+      "zero-cost context should short-circuit before the API is called",
     );
   });
 
-  test("two tool sources with same cost — file order preserved", async () => {
+  test("resolved alias beats tool even when tool wire is authored first", async () => {
+    const bridgeText = `version 1.5
+bridge Query.lookup {
+  with expensiveApi as api
+  with input as i
+  with output as o
+
+alias i.hint as cached
+api.q <- i.q
+o.label <- api.label
+o.label <- cached
+
+}`;
+    const callLog: string[] = [];
+    const tools = {
+      expensiveApi: async () => {
+        callLog.push("api");
+        return { label: "expensive" };
+      },
+    };
+    const doc = parseBridge(bridgeText);
+    const gateway = createGateway(typeDefs, doc, { tools });
+    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+
+    const result: any = await executor({
+      document: parse(`{ lookup(q: "x", hint: "cached") { label } }`),
+    });
+    assert.equal(result.data.lookup.label, "cached");
+    assertDeepStrictEqualIgnoringLoc(
+      callLog,
+      [],
+      "resolved aliases should be treated like zero-cost values",
+    );
+  });
+
+  test("two tool sources with same cost preserve authored order as tie-break", async () => {
     const bridgeText = `version 1.5
 bridge Query.lookup {
   with svcA as a
@@ -456,12 +453,11 @@ o.label <- b.label
     const result: any = await executor({
       document: parse(`{ lookup(q: "x") { label } }`),
     });
-    // Authored order: A is first in the bridge → wins.
     assert.equal(result.data.lookup.label, "from-A");
     assertDeepStrictEqualIgnoringLoc(
       callLog,
       ["A"],
-      "B never called — A is first, short-circuits",
+      "same-cost tool sources should still use authored order as a tie-break",
     );
   });
 });

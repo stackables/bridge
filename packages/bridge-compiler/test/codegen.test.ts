@@ -1399,7 +1399,7 @@ bridge Query.test {
     assert.deepStrictEqual(callLog, ["expensiveApi"], "tool should be called");
   });
 
-  test("tool before input — tool always called (primary position)", async () => {
+  test("tool before input — zero-cost input still wins", async () => {
     const callLog: string[] = [];
     const result = await compileAndRun(
       `version 1.5
@@ -1420,9 +1420,8 @@ bridge Query.test {
         },
       },
     );
-    // Tool is first (primary) → always called → wins
-    assert.equal(result.label, "from-api");
-    assert.deepStrictEqual(callLog, ["api"]);
+    assert.equal(result.label, "from-input");
+    assert.deepStrictEqual(callLog, []);
   });
 
   test("two tools — second skipped when first resolves non-null", async () => {
@@ -1530,6 +1529,48 @@ bridge Query.test {
       tools,
     });
     assert.deepStrictEqual(aotNoCache.data, rtNoCache.data);
+  });
+
+  test("overdefinition parity — zero-cost sources win before tool calls", async () => {
+    const bridgeText = `version 1.5
+bridge Query.test {
+  with expensiveApi
+  with input as i
+  with output as o
+
+  o.val <- expensiveApi.data
+  o.val <- i.cached
+}`;
+    const document = parseBridgeFormat(bridgeText);
+    const callLog: string[] = [];
+    const tools = {
+      expensiveApi: () => {
+        callLog.push("expensiveApi");
+        return { data: "expensive" };
+      },
+    };
+
+    const rtWithCache = await executeBridge({
+      document,
+      operation: "Query.test",
+      input: { cached: "hit" },
+      tools,
+    });
+    const rtLog = [...callLog];
+    callLog.length = 0;
+
+    const aotWithCache = await executeAot({
+      document,
+      operation: "Query.test",
+      input: { cached: "hit" },
+      tools,
+    });
+    const aotLog = [...callLog];
+
+    assert.deepStrictEqual(rtWithCache.data, { val: "hit" });
+    assert.deepStrictEqual(aotWithCache.data, { val: "hit" });
+    assert.deepStrictEqual(rtLog, []);
+    assert.deepStrictEqual(aotLog, []);
   });
 
   test("constant overdefinition parity — first constant remains terminal", async () => {
