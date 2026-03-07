@@ -106,6 +106,25 @@ bridge Query.pricing {
   o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice
 }`;
 
+const bridgePeekCycleText = `version 1.5
+
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .path = "/search"
+  .format = "json"
+  .limit = "1"
+}
+
+bridge Query.location {
+  with geo
+  with input as i
+  with output as o
+
+  geo.q <- peek geo[0].city
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}`;
+
 function maxCaretCount(formatted: string): number {
   return Math.max(
     0,
@@ -382,6 +401,32 @@ describe("runtime error formatting", () => {
           formatted,
           /o\.message <- i\.empty\.array\?\.error \?\? i\.empty\.array\.error/,
         );
+        return true;
+      },
+    );
+  });
+
+  test("peek cycles retain the originating wire source location", async () => {
+    const document = parseBridge(bridgePeekCycleText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Query.location",
+          input: {},
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(
+          formatted,
+          /Bridge Execution Error: Circular dependency detected: "_:Tools:geo:1" depends on itself/,
+        );
+        assert.match(formatted, /playground\.bridge:15:17/);
+        assert.match(formatted, /geo\.q <- peek geo\[0\]\.city/);
+        assert.equal(maxCaretCount(formatted), "geo[0].city".length);
         return true;
       },
     );

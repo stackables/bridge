@@ -29,6 +29,7 @@ import type {
 } from "./tree-types.ts";
 import {
   BREAK_SYM,
+  attachBridgeErrorMetadata,
   BridgeAbortError,
   BridgePanicError,
   wrapBridgeRuntimeError,
@@ -881,8 +882,11 @@ export class ExecutionTree implements TreeContext {
 
     // ── Cycle detection ─────────────────────────────────────────────
     if (pullChain.has(key)) {
-      throw new BridgePanicError(
-        `Circular dependency detected: "${key}" depends on itself`,
+      throw attachBridgeErrorMetadata(
+        new BridgePanicError(
+          `Circular dependency detected: "${key}" depends on itself`,
+        ),
+        { bridgeLoc },
       );
     }
 
@@ -890,7 +894,7 @@ export class ExecutionTree implements TreeContext {
     // current element. Otherwise top-level aliases/tools reused inside arrays
     // are recomputed once per element instead of being memoized at the parent.
     if (this.parent && !ref.element && !this.isElementScopedTrunk(ref)) {
-      return this.parent.pullSingle(ref, pullChain);
+      return this.parent.pullSingle(ref, pullChain, bridgeLoc);
     }
 
     // Walk the full parent chain — shadow trees may be nested multiple levels
