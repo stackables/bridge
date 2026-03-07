@@ -232,6 +232,7 @@ export class ExecutionTree implements TreeContext {
    * Public to satisfy `ToolLookupContext` — called by `toolLookup.ts`.
    */
   callTool(
+    nodeKey: string,
     toolName: string,
     fnName: string,
     fnImpl: (...args: any[]) => any,
@@ -253,7 +254,20 @@ export class ExecutionTree implements TreeContext {
     const shouldMemoize = !!(memoMeta || memoize) && !isSyncTool;
     if (shouldMemoize) {
       const keyFn = memoMeta?.keyFn ?? JSON.stringify;
-      const cacheKey = `${fnName}:${keyFn(input)}`;
+      // Build the cache key using both the scope qualifier (from nodeKey)
+      // and the function name.  Two handles at the same scope level
+      // pointing to the same function share the cache (deduplication),
+      // but an element-scoped tool and a root-scoped tool with the same
+      // name are isolated.
+      //
+      // nodeKey format: "module:type:field:instance"
+      // Element-scoped tools have instance >= 100000, root tools < 100000.
+      // We use the function name + scope qualifier so same-function
+      // handles share the cache while cross-scope handles don't.
+      const isElementScoped = nodeKey.includes(":") &&
+        parseInt(nodeKey.split(":").pop()!, 10) >= 100000;
+      const scopeQualifier = isElementScoped ? "elem" : "root";
+      const cacheKey = `${scopeQualifier}:${fnName}:${keyFn(input)}`;
       const cached = this.memoCache.get(cacheKey);
       if (cached) return cached;
       const result = this._callToolCore(

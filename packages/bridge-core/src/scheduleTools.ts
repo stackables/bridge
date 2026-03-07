@@ -150,7 +150,7 @@ export function schedule(
 
   // ── Async path: tool definition requires resolveToolWires + callTool ──
   if (toolDef) {
-    return scheduleToolDef(ctx, toolName, toolDef, wireGroups, pullChain);
+    return scheduleToolDef(ctx, targetKey, toolName, toolDef, wireGroups, pullChain);
   }
 
   // ── Sync-capable path: no tool definition ──
@@ -231,7 +231,8 @@ export function scheduleFinish(
     const handleMemoize = ctx.bridge?.handles.some(
       (h) => h.kind === "tool" && h.memoize && h.name === toolName,
     );
-    return ctx.callTool(toolName, toolName, directFn, input, handleMemoize);
+    const nodeKey = trunkKey(target);
+    return ctx.callTool(nodeKey, toolName, toolName, directFn, input, handleMemoize);
   }
 
   // Define pass-through: synthetic trunks created by define inlining
@@ -267,6 +268,7 @@ export function scheduleFinish(
  */
 export async function scheduleToolDef(
   ctx: SchedulerContext,
+  nodeKey: string,
   toolName: string,
   toolDef: ToolDef,
   wireGroups: Map<string, Wire[]>,
@@ -304,7 +306,7 @@ export async function scheduleToolDef(
   );
   const shouldMemoize = toolDef.memoize || handleMemoize;
   try {
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input, shouldMemoize);
+    return await ctx.callTool(nodeKey, toolName, toolDef.fn!, fn, input, shouldMemoize);
   } catch (err) {
     if (!onErrorWire) throw err;
     if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);

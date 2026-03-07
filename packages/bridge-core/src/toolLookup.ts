@@ -37,6 +37,7 @@ export interface ToolLookupContext {
   readonly parent?: ToolLookupContext | undefined;
   readonly state: Record<string, any>;
   callTool(
+    nodeKey: string,
     toolName: string,
     fnName: string,
     fnImpl: (...args: any[]) => any,
@@ -294,7 +295,7 @@ export function resolveToolDep(
     const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
     try {
       return await ctx.callTool(
-        toolName, toolDef.fn!, fn, input, toolDef.memoize,
+        toolName, toolName, toolDef.fn!, fn, input, toolDef.memoize,
       );
     } catch (err) {
       if (!onErrorWire) throw err;
