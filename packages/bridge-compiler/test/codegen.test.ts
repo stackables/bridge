@@ -1718,6 +1718,72 @@ bridge Query.test {
     assert.deepStrictEqual(result.traces, []);
     assert.equal(result.data.name, "Alice");
   });
+
+  test("batched tools execute natively in compiled mode", async () => {
+    const document = parseBridgeFormat(`version 1.5
+bridge Query.users {
+  with context as ctx
+  with output as o
+
+  o <- ctx.userIds[] as userId {
+    with app.fetchUser as user
+
+    user.id <- userId
+    .id <- userId
+    .name <- user.name
+  }
+}`);
+
+    let batchCalls = 0;
+    const warnings: string[] = [];
+    const infos: Array<{ tool: string; fn: string; durationMs: number }> = [];
+
+    const fetchUser = Object.assign(
+      async (inputs: Array<{ id: string }>) => {
+        batchCalls++;
+        return inputs.map((input) => ({ name: `user:${input.id}` }));
+      },
+      {
+        bridge: {
+          batch: true,
+          log: { execution: "info" as const },
+        },
+      },
+    );
+
+    const result = await executeAot<any>({
+      document,
+      operation: "Query.users",
+      tools: {
+        app: { fetchUser },
+      },
+      context: {
+        userIds: ["u1", "u2", "u3"],
+      },
+      trace: "full",
+      logger: {
+        warn: (message: string) => warnings.push(message),
+        info: (meta: { tool: string; fn: string; durationMs: number }) => {
+          infos.push(meta);
+        },
+      },
+    });
+
+    assert.deepStrictEqual(result.data, [
+      { id: "u1", name: "user:u1" },
+      { id: "u2", name: "user:u2" },
+      { id: "u3", name: "user:u3" },
+    ]);
+    assert.equal(batchCalls, 1);
+    assert.deepStrictEqual(warnings, []);
+    assert.equal(result.traces.length, 1);
+    assert.deepStrictEqual(result.traces[0]!.input, [
+      { id: "u1" },
+      { id: "u2" },
+      { id: "u3" },
+    ]);
+    assert.equal(infos.length, 1);
+  });
 });
 
 // ── Parallel scheduling ──────────────────────────────────────────────────────

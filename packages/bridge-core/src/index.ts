@@ -58,6 +58,8 @@ export { SELF_MODULE } from "./types.ts";
 export type {
   Bridge,
   BridgeDocument,
+  BatchToolCallFn,
+  BatchToolFn,
   CacheStore,
   ConstDef,
   ControlFlowInstruction,
@@ -66,6 +68,8 @@ export type {
   Instruction,
   NodeRef,
   SourceLocation,
+  ScalarToolCallFn,
+  ScalarToolFn,
   ToolCallFn,
   ToolContext,
   ToolDef,

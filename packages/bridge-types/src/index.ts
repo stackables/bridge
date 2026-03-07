@@ -27,7 +27,7 @@ export type ToolContext = {
 };
 
 /**
- * Tool call function — the signature for registered tool functions.
+ * Scalar tool call function — the default signature for registered tools.
  *
  * Receives a fully-built nested input object and an optional `ToolContext`
  * providing access to the engine's logger and other services.
@@ -36,10 +36,35 @@ export type ToolContext = {
  *   input = { baseUrl: "https://...", method: "GET", path: "/geocode",
  *             headers: { apiKey: "..." }, q: "Berlin" }
  */
-export type ToolCallFn = (
-  input: Record<string, any>,
-  context?: ToolContext,
-) => Promise<Record<string, any>>;
+export type ScalarToolCallFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = (input: Input, context?: ToolContext) => Output | Promise<Output>;
+
+/**
+ * Batch tool call function — opt-in signature for tools declared with
+ * `{ batch: true }` or `{ batch: { ... } }` metadata.
+ *
+ * The engine passes a plain array of input objects to the tool. The returned
+ * array must preserve the same ordering and length.
+ */
+export type BatchToolCallFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = (inputs: Input[], context?: ToolContext) => Output[] | Promise<Output[]>;
+
+/** Backward-compatible alias for the standard scalar tool signature. */
+export type ToolCallFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = ScalarToolCallFn<Input, Output>;
+
+export interface BatchToolMetadata {
+  /** Maximum number of queued calls to flush in a single engine batch. */
+  maxBatchSize?: number;
+  /** Flush strategy for queued calls. Prototype only supports microtasks. */
+  flush?: "microtask";
+}
 
 /**
  * Optional metadata that can be attached to any tool function as a `.bridge` property.
@@ -63,6 +88,15 @@ export interface ToolMetadata {
    * Default: false
    */
   sync?: boolean;
+
+  /**
+   * If set, the tool is invoked in batch mode and always receives an array of
+   * input objects instead of a single input object.
+   *
+   * The tool must return an array of results with the same ordering and
+   * length as the input batch.
+   */
+  batch?: true | BatchToolMetadata;
 
   // ─── Observability ────────────────────────────────────────────────────
 
@@ -95,6 +129,22 @@ export interface ToolMetadata {
       };
 }
 
+/** Scalar tool function with optional `.bridge` metadata attached. */
+export type ScalarToolFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = ScalarToolCallFn<Input, Output> & {
+  bridge?: ToolMetadata;
+};
+
+/** Batch tool function with optional `.bridge` metadata attached. */
+export type BatchToolFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = BatchToolCallFn<Input, Output> & {
+  bridge?: ToolMetadata;
+};
+
 /**
  * Recursive tool map — supports namespaced tools via nesting.
  *
@@ -104,7 +154,13 @@ export interface ToolMetadata {
  * Lookup is dot-separated: "std.str.toUpperCase" → tools.std.str.toUpperCase
  */
 export type ToolMap = {
-  [key: string]: ToolCallFn | ((...args: any[]) => any) | ToolMap;
+  [key: string]:
+    | ToolCallFn
+    | BatchToolCallFn
+    | ScalarToolFn
+    | BatchToolFn
+    | ((...args: any[]) => any)
+    | ToolMap;
 };
 
 /**

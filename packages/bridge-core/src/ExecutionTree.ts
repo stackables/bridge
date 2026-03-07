@@ -5,7 +5,7 @@ import {
   trunkDependsOnElement,
 } from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
-import type { ToolTrace } from "./tracing.ts";
+import type { EffectiveToolLog, ToolTrace } from "./tracing.ts";
 import {
   isOtelActive,
   logToolError,
@@ -89,6 +89,20 @@ function stableMemoizeKey(value: unknown): string {
     .join(",")}}`;
 }
 
+type PendingBatchToolCall = {
+  input: Record<string, any>;
+  resolve: (value: any) => void;
+  reject: (err: unknown) => void;
+};
+
+type BatchToolQueue = {
+  items: PendingBatchToolCall[];
+  scheduled: boolean;
+  toolName: string;
+  fnName: string;
+  maxBatchSize?: number;
+};
+
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
@@ -122,6 +136,9 @@ export class ExecutionTree implements TreeContext {
   memoizedToolKeys: Set<string> = new Set();
   /** Per-tool memoization caches keyed by stable input fingerprints. */
   private toolMemoCache: Map<string, Map<string, MaybePromise<any>>> =
+    new Map();
+  /** Per-request batch queues for tools declared with `.bridge.batch`. */
+  private toolBatchQueues: Map<(...args: any[]) => any, BatchToolQueue> =
     new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
@@ -305,7 +322,21 @@ export class ExecutionTree implements TreeContext {
     };
 
     const timeoutMs = this.toolTimeoutMs;
-    const { sync: isSyncTool, doTrace, log } = resolveToolMeta(fnImpl);
+    const { sync: isSyncTool, batch, doTrace, log } = resolveToolMeta(fnImpl);
+
+    if (batch) {
+      return this.callBatchedTool(
+        toolName,
+        fnName,
+        fnImpl,
+        input,
+        timeoutMs,
+        toolContext,
+        doTrace,
+        log,
+        batch.maxBatchSize,
+      );
+    }
 
     // ── Fast path: no instrumentation configured ──────────────────
     // When there is no internal tracer, no logger, and OpenTelemetry
@@ -480,6 +511,191 @@ export class ExecutionTree implements TreeContext {
     );
   }
 
+  private callBatchedTool(
+    toolName: string,
+    fnName: string,
+    fnImpl: (...args: any[]) => any,
+    input: Record<string, any>,
+    timeoutMs: number,
+    toolContext: ToolContext,
+    doTrace: boolean,
+    log: EffectiveToolLog,
+    maxBatchSize?: number,
+  ): Promise<any> {
+    let queue = this.toolBatchQueues.get(fnImpl);
+    if (!queue) {
+      queue = {
+        items: [],
+        scheduled: false,
+        toolName,
+        fnName,
+        maxBatchSize,
+      };
+      this.toolBatchQueues.set(fnImpl, queue);
+    }
+
+    if (maxBatchSize !== undefined) {
+      queue.maxBatchSize = maxBatchSize;
+    }
+
+    return new Promise((resolve, reject) => {
+      queue!.items.push({ input, resolve, reject });
+      if (queue!.scheduled) return;
+      queue!.scheduled = true;
+      queueMicrotask(() => {
+        void this.flushBatchedToolQueue(
+          fnImpl,
+          toolContext,
+          timeoutMs,
+          doTrace,
+          log,
+        );
+      });
+    });
+  }
+
+  private async flushBatchedToolQueue(
+    fnImpl: (...args: any[]) => any,
+    toolContext: ToolContext,
+    timeoutMs: number,
+    doTrace: boolean,
+    log: EffectiveToolLog,
+  ): Promise<void> {
+    const queue = this.toolBatchQueues.get(fnImpl);
+    if (!queue) return;
+
+    const pending = queue.items.splice(0, queue.items.length);
+    queue.scheduled = false;
+    if (pending.length === 0) return;
+
+    if (this.signal?.aborted) {
+      const abortErr = new BridgeAbortError();
+      for (const item of pending) item.reject(abortErr);
+      return;
+    }
+
+    const chunkSize =
+      queue.maxBatchSize && queue.maxBatchSize > 0
+        ? Math.floor(queue.maxBatchSize)
+        : pending.length;
+
+    for (let start = 0; start < pending.length; start += chunkSize) {
+      const chunk = pending.slice(start, start + chunkSize);
+      const batchInput = chunk.map((item) => item.input);
+      const tracer = this.tracer;
+      const logger = this.logger;
+      const metricAttrs = {
+        "bridge.tool.name": queue.toolName,
+        "bridge.tool.fn": queue.fnName,
+      };
+
+      try {
+        const executeBatch = async () => {
+          const batchResult = fnImpl(batchInput, toolContext);
+          return timeoutMs > 0 && isPromise(batchResult)
+            ? await raceTimeout(batchResult, timeoutMs, queue.toolName)
+            : await batchResult;
+        };
+
+        const resolved =
+          !tracer && !logger && !isOtelActive()
+            ? await executeBatch()
+            : await withSpan(
+                doTrace,
+                `bridge.tool.${queue.toolName}.${queue.fnName}`,
+                metricAttrs,
+                async (span) => {
+                  const traceStart = tracer?.now();
+                  const wallStart = performance.now();
+                  try {
+                    const result = await executeBatch();
+                    const durationMs = roundMs(performance.now() - wallStart);
+                    toolCallCounter.add(1, metricAttrs);
+                    toolDurationHistogram.record(durationMs, metricAttrs);
+                    if (tracer && traceStart != null) {
+                      tracer.record(
+                        tracer.entry({
+                          tool: queue.toolName,
+                          fn: queue.fnName,
+                          input: batchInput,
+                          output: result,
+                          durationMs: roundMs(tracer.now() - traceStart),
+                          startedAt: traceStart,
+                        }),
+                      );
+                    }
+                    logToolSuccess(
+                      logger,
+                      log.execution,
+                      queue.toolName,
+                      queue.fnName,
+                      durationMs,
+                    );
+                    return result;
+                  } catch (err) {
+                    const durationMs = roundMs(performance.now() - wallStart);
+                    toolCallCounter.add(1, metricAttrs);
+                    toolDurationHistogram.record(durationMs, metricAttrs);
+                    toolErrorCounter.add(1, metricAttrs);
+                    if (tracer && traceStart != null) {
+                      tracer.record(
+                        tracer.entry({
+                          tool: queue.toolName,
+                          fn: queue.fnName,
+                          input: batchInput,
+                          error: (err as Error).message,
+                          durationMs: roundMs(tracer.now() - traceStart),
+                          startedAt: traceStart,
+                        }),
+                      );
+                    }
+                    recordSpanError(span, err as Error);
+                    logToolError(
+                      logger,
+                      log.errors,
+                      queue.toolName,
+                      queue.fnName,
+                      err as Error,
+                    );
+                    if (
+                      this.signal?.aborted &&
+                      err instanceof DOMException &&
+                      err.name === "AbortError"
+                    ) {
+                      throw new BridgeAbortError();
+                    }
+                    throw err;
+                  } finally {
+                    span?.end();
+                  }
+                },
+              );
+
+        if (!Array.isArray(resolved)) {
+          throw new Error(
+            `Batch tool "${queue.fnName}" must return an array of results`,
+          );
+        }
+        if (resolved.length !== chunk.length) {
+          throw new Error(
+            `Batch tool "${queue.fnName}" returned ${resolved.length} results for ${chunk.length} queued calls`,
+          );
+        }
+
+        for (let i = 0; i < chunk.length; i++) {
+          const value = resolved[i];
+          if (value instanceof Error) {
+            chunk[i]!.reject(value);
+          } else {
+            chunk[i]!.resolve(value);
+          }
+        }
+      } catch (err) {
+        for (const item of chunk) item.reject(err);
+      }
+    }
+  }
+
   shadow(): ExecutionTree {
     // Lightweight: bypass the constructor to avoid redundant work that
     // re-derives data identical to the parent (bridge lookup, pipeHandleMap,
@@ -505,6 +721,7 @@ export class ExecutionTree implements TreeContext {
     child.handleVersionMap = this.handleVersionMap;
     child.memoizedToolKeys = this.memoizedToolKeys;
     child.toolMemoCache = this.toolMemoCache;
+    child.toolBatchQueues = this.toolBatchQueues;
     child.toolFns = this.toolFns;
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;

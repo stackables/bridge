@@ -256,7 +256,11 @@ export type ToolWire =
 // Re-exported from @stackables/bridge-types to break circular dependency
 // with bridge-stdlib while maintaining backward-compatible imports.
 export type {
+  BatchToolCallFn,
+  BatchToolFn,
   ToolContext,
+  ScalarToolCallFn,
+  ScalarToolFn,
   ToolCallFn,
   ToolMap,
   ToolMetadata,
