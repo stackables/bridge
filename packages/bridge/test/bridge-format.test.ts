@@ -238,6 +238,7 @@ o.results <- p.items[] as item {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "name"],
       },
     });
@@ -253,6 +254,7 @@ o.results <- p.items[] as item {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "lat"],
       },
     });

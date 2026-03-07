@@ -1980,6 +1980,7 @@ function processElementLines(
         module: SELF_MODULE,
         type: bridgeType,
         field: bridgeField,
+        element: true,
         path: elemToPath,
       };
 
@@ -2412,6 +2413,7 @@ function processElementScopeLines(
         module: SELF_MODULE,
         type: bridgeType,
         field: bridgeField,
+        element: true,
         path: elemToPath,
       };
 

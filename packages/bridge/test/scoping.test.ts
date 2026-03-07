@@ -709,7 +709,6 @@ bridge Query.test {
         { result: "result-c" },
       ],
     },
-    pending: "element-scoped tool wires not yet executed by runtime",
   },
   {
     name: "element-scoped tool coexists with root-level tool",
@@ -739,7 +738,6 @@ bridge Query.test {
         { local: "local-y", global: "shared" },
       ],
     },
-    pending: "element-scoped tool wires not yet executed by runtime",
   },
 ];
 
