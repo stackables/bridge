@@ -512,6 +512,21 @@ bridge Query.pricing {
     tools: { api: () => ({ proPrice: 99, basicPrice: 49 }) },
     expected: { price: 99 },
   },
+  {
+    name: "ternary branch preserves segment-local ?. semantics",
+    bridgeText: `version 1.5
+bridge Query.pricing {
+  with api as a
+  with input as i
+  with output as o
+
+  o.price <- i.isPro ? a.user?.profile.name : "basic"
+}`,
+    operation: "Query.pricing",
+    input: { isPro: true },
+    tools: { api: () => ({ user: null }) },
+    expectedError: /Cannot read properties of undefined \(reading 'name'\)/,
+  },
 ];
 
 runSharedSuite("Shared: ternary / conditional wires", ternaryCases);
@@ -792,6 +807,27 @@ bridge Query.users {
     },
     expected: { users: [] },
   },
+  {
+    name: "ToolDef source paths stay strict after null intermediate",
+    bridgeText: `version 1.5
+tool restApi from myHttp {
+  with context
+  .headers.Authorization <- context.auth.profile.token
+}
+
+bridge Query.data {
+  with restApi as api
+  with output as o
+
+  o.result <- api.body
+}`,
+    operation: "Query.data",
+    tools: {
+      myHttp: async (_: any) => ({ body: { ok: true } }),
+    },
+    context: { auth: { profile: null } },
+    expectedError: /Cannot read properties of null \(reading 'token'\)/,
+  },
 ];
 
 runSharedSuite("Shared: ToolDef support", toolDefCases);
@@ -848,6 +884,20 @@ bridge Query.locate {
     input: { q: "unknown" },
     tools: { geoApi: () => ({ lat: null, lon: null }) },
     expected: { lat: 0, lon: 0 },
+  },
+  {
+    name: "const path traversal stays strict after null intermediate",
+    bridgeText: `version 1.5
+const defaults = { "user": null }
+
+bridge Query.consts {
+  with const as c
+  with output as o
+
+  o.name <- c.defaults.user.profile.name
+}`,
+    operation: "Query.consts",
+    expectedError: /Cannot read properties of null \(reading 'profile'\)/,
   },
 ];
 

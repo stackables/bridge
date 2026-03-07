@@ -258,7 +258,7 @@ export async function resolveToolSource(
   }
 
   for (const segment of restPath) {
-    value = value?.[segment];
+    value = value[segment];
   }
   return value;
 }

@@ -4382,15 +4382,28 @@ function buildBridgeBody(
     if (c.nullLit) return { kind: "literal", value: "null" };
     if (c.sourceRef) {
       const addrNode = (c.sourceRef as CstNode[])[0];
-      const { root, segments } = extractAddressPath(addrNode);
+      const { root, segments, rootSafe, segmentSafe } =
+        extractAddressPath(addrNode);
       const iterRef = resolveIterRef(root, segments, iterScope);
       if (iterRef) {
         return {
           kind: "ref",
-          ref: iterRef,
+          ref: {
+            ...iterRef,
+            ...(rootSafe ? { rootSafe: true } : {}),
+            ...(segmentSafe ? { pathSafe: segmentSafe } : {}),
+          },
         };
       }
-      return { kind: "ref", ref: resolveAddress(root, segments, lineNum) };
+      const ref = resolveAddress(root, segments, lineNum);
+      return {
+        kind: "ref",
+        ref: {
+          ...ref,
+          ...(rootSafe ? { rootSafe: true } : {}),
+          ...(segmentSafe ? { pathSafe: segmentSafe } : {}),
+        },
+      };
     }
     throw new Error(`Line ${lineNum}: Invalid ternary branch`);
   }

@@ -1471,7 +1471,7 @@ class CodegenContext {
           if (restPath.length === 1) return base;
           const tail = restPath
             .slice(1)
-            .map((p) => `?.[${JSON.stringify(p)}]`)
+            .map((p) => `[${JSON.stringify(p)}]`)
             .join("");
           return `(${base})${tail}`;
         }
@@ -1496,7 +1496,7 @@ class CodegenContext {
     }
 
     if (restPath.length === 0) return baseExpr;
-    return baseExpr + restPath.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    return baseExpr + restPath.map((p) => `[${JSON.stringify(p)}]`).join("");
   }
 
   /** Find a tool info by tool name. */
@@ -2402,9 +2402,7 @@ class CodegenContext {
         if (this.elementScopedTools.has(condKey)) {
           condExpr = this.buildInlineToolExpr(condKey, elVar);
           if (condRef.path.length > 0) {
-            condExpr =
-              `(${condExpr})` +
-              condRef.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+            condExpr = this.appendPathExpr(`(${condExpr})`, condRef);
           }
         } else {
           condExpr = this.refToExpr(condRef);
@@ -2419,10 +2417,7 @@ class CodegenContext {
           const branchKey = refTrunkKey(ref);
           if (this.elementScopedTools.has(branchKey)) {
             let e = this.buildInlineToolExpr(branchKey, elVar);
-            if (ref.path.length > 0)
-              e =
-                `(${e})` +
-                ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+            if (ref.path.length > 0) e = this.appendPathExpr(`(${e})`, ref);
             return e;
           }
           return this.refToExpr(ref);
@@ -2443,9 +2438,7 @@ class CodegenContext {
         if (this.elementScopedTools.has(srcKey)) {
           let expr = this.buildInlineToolExpr(srcKey, elVar);
           if (w.from.path.length > 0) {
-            expr =
-              `(${expr})` +
-              w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+            expr = this.appendPathExpr(`(${expr})`, w.from);
           }
           expr = this.wrapExprWithLoc(expr, w.fromLoc);
           expr = this.applyFallbacks(w, expr);
@@ -2457,8 +2450,7 @@ class CodegenContext {
         return expr;
       }
       // Element refs: from.element === true, path = ["srcField"]
-      let expr =
-        elVar + w.from.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+      let expr = this.appendPathExpr(elVar, w.from, true);
       expr = this.wrapExprWithLoc(expr, w.fromLoc);
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -3103,7 +3095,7 @@ class CodegenContext {
         if (ref.path.length === 1) return base;
         const tail = ref.path
           .slice(1)
-          .map((p) => `?.[${JSON.stringify(p)}]`)
+          .map((p) => `[${JSON.stringify(p)}]`)
           .join("");
         return `(${base})${tail}`;
       }
@@ -3218,8 +3210,7 @@ class CodegenContext {
           ? `(await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(key)}))`
           : `(await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}))`;
         if (ref.path.length > 0) {
-          expr =
-            expr + ref.path.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+          expr = this.appendPathExpr(expr, ref);
         }
         return expr;
       }
