@@ -222,7 +222,7 @@
         },
         {
           "comment": "catch error boundary",
-          "match": "\\bcatch\\b",
+          "match": "\\b(catch|peek)\\b",
           "name": "keyword.control.bridge"
         },
         { "include": "#reserved-handles" },

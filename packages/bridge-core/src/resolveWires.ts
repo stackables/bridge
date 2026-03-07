@@ -75,7 +75,8 @@ export function resolveWires(
     if ("value" in w) return coerceConstant(w.value);
     const ref = getSimplePullRef(w);
     if (ref) {
-      return ctx.pullSingle(
+      return pullRef(
+        ctx,
         ref,
         pullChain,
         "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
@@ -84,6 +85,17 @@ export function resolveWires(
   }
   const orderedWires = orderOverdefinedWires(ctx, wires);
   return resolveWiresAsync(ctx, orderedWires, pullChain);
+}
+
+function pullRef(
+  ctx: TreeContext,
+  ref: NodeRef,
+  pullChain?: Set<string>,
+  bridgeLoc?: Wire["loc"],
+): MaybePromise<any> {
+  return ref.peek
+    ? ctx.peekSingle(ref, pullChain, bridgeLoc)
+    : ctx.pullSingle(ref, pullChain, bridgeLoc);
 }
 
 function orderOverdefinedWires(ctx: TreeContext, wires: Wire[]): Wire[] {
@@ -177,7 +189,8 @@ export async function applyFallbackGates(
         return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
       if (fallback.ref) {
-        value = await ctx.pullSingle(
+        value = await pullRef(
+          ctx,
           fallback.ref,
           pullChain,
           fallback.loc ?? w.loc,
@@ -210,7 +223,7 @@ export async function applyCatchGate(
     return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
   }
   if (w.catchFallbackRef) {
-    return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
+    return pullRef(ctx, w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
   }
   if (w.catchFallback != null) return coerceConstant(w.catchFallback);
   return undefined;
@@ -250,19 +263,15 @@ async function evaluateWireSource(
   pullChain?: Set<string>,
 ): Promise<any> {
   if ("cond" in w) {
-    const condValue = await ctx.pullSingle(
-      w.cond,
-      pullChain,
-      w.condLoc ?? w.loc,
-    );
+    const condValue = await pullRef(ctx, w.cond, pullChain, w.condLoc ?? w.loc);
     if (condValue) {
       if (w.thenRef !== undefined) {
-        return ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
+        return pullRef(ctx, w.thenRef, pullChain, w.thenLoc ?? w.loc);
       }
       if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
     } else {
       if (w.elseRef !== undefined) {
-        return ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
+        return pullRef(ctx, w.elseRef, pullChain, w.elseLoc ?? w.loc);
       }
       if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
     }
@@ -296,13 +305,13 @@ async function evaluateWireSource(
   if ("from" in w) {
     if (w.safe) {
       try {
-        return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
+        return await pullRef(ctx, w.from, pullChain, w.fromLoc ?? w.loc);
       } catch (err: any) {
         if (isFatalError(err)) throw err;
         return undefined;
       }
     }
-    return ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
+    return pullRef(ctx, w.from, pullChain, w.fromLoc ?? w.loc);
   }
 
   return undefined;
@@ -324,13 +333,13 @@ function pullSafe(
 ): MaybePromise<any> {
   // FAST PATH: Unsafe wires bypass the try/catch overhead entirely
   if (!safe) {
-    return ctx.pullSingle(ref, pullChain, bridgeLoc);
+    return pullRef(ctx, ref, pullChain, bridgeLoc);
   }
 
   // SAFE PATH: We must catch synchronous throws during the invocation
   let pull: any;
   try {
-    pull = ctx.pullSingle(ref, pullChain, bridgeLoc);
+    pull = pullRef(ctx, ref, pullChain, bridgeLoc);
   } catch (e: any) {
     // Caught a synchronous error!
     if (isFatalError(e)) throw e;

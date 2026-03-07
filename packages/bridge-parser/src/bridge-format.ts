@@ -56,6 +56,7 @@ const RESERVED_BARE_VALUE_KEYWORDS = new Set([
   "and",
   "or",
   "not",
+  "peek",
 ]);
 
 /** Serialize a ControlFlowInstruction to its textual form. */
@@ -1425,10 +1426,11 @@ function serializeRef(
   outputHandle: string | undefined,
   isFrom: boolean,
 ): string {
+  const prefix = ref.peek && isFrom ? "peek " : "";
   if (ref.element) {
     // Element refs are only serialized inside brace blocks (using the iterator name).
     // This path should not be reached in normal serialization.
-    return "item." + serPath(ref.path);
+    return prefix + "item." + serPath(ref.path);
   }
 
   // Bridge's own trunk (no instance, no element)
@@ -1443,8 +1445,8 @@ function serializeRef(
     if (isFrom && inputHandle) {
       // From side: use input handle (data comes from args)
       return ref.path.length > 0
-        ? inputHandle + "." + serPath(ref.path)
-        : inputHandle;
+        ? prefix + inputHandle + "." + serPath(ref.path)
+        : prefix + inputHandle;
     }
     if (!isFrom && outputHandle) {
       // To side: use output handle
@@ -1453,7 +1455,7 @@ function serializeRef(
         : outputHandle;
     }
     // Fallback (no handle declared — legacy/serializer-only path)
-    return serPath(ref.path);
+    return prefix + serPath(ref.path);
   }
 
   // Lookup by trunk key
@@ -1463,12 +1465,12 @@ function serializeRef(
       : `${ref.module}:${ref.type}:${ref.field}`;
   const handle = handleMap.get(trunkStr);
   if (handle) {
-    if (ref.path.length === 0) return handle;
-    return handle + "." + serPath(ref.path);
+    if (ref.path.length === 0) return prefix + handle;
+    return prefix + handle + "." + serPath(ref.path);
   }
 
   // Fallback: bare path
-  return serPath(ref.path);
+  return prefix + serPath(ref.path);
 }
 
 /** Serialize a path array to dot notation with [n] for numeric indices */

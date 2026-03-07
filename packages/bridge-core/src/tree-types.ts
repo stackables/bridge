@@ -132,6 +132,12 @@ export interface TreeContext {
     pullChain?: Set<string>,
     bridgeLoc?: SourceLocation,
   ): MaybePromise<any>;
+  /** Resolve a NodeRef only when it is already available without scheduling. */
+  peekSingle(
+    ref: NodeRef,
+    pullChain?: Set<string>,
+    bridgeLoc?: SourceLocation,
+  ): MaybePromise<any>;
   /** Classify an overdefined wire by marginal execution cost (lower = cheaper). */
   classifyOverdefinitionWire?(wire: Wire): number;
   /** External abort signal — cancels execution when triggered. */

@@ -70,6 +70,19 @@ o.walletBalance <- billingApi?.balance ?? -1
 
 ```
 
+### Cached-Only Reads with `peek`
+
+Sometimes you want to reuse a value only if some other part of the same request has already fetched it, but you do **not** want that read to schedule the tool on its own.
+
+Use the `peek` prefix for that case:
+
+```bridge
+o.city <- peek geoApi.city ?? i.cityHint
+o.label <- peek profile.nickname ? i.shortLabel : i.fullLabel
+```
+
+`peek` only works on a direct source reference. If the value is already available, Bridge reads it normally. If it is not available yet, Bridge returns `undefined` and continues through the rest of the fallback or ternary logic without scheduling new work.
+
 ## 3. Layer 3: Wire-Level Catch (`catch`)
 
 The `||` and `??` operators **do not catch network errors**. If a strict tool throws an HTTP 500, it blows past the data routing gates entirely.

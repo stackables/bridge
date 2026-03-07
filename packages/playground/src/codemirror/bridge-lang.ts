@@ -318,6 +318,10 @@ function token(stream: StringStream, state: State): string | null {
     state.lineStart = false;
     return "keyword";
   }
+  if (stream.match(/^peek\b/)) {
+    state.lineStart = false;
+    return "keyword";
+  }
   if (stream.match(/^memoize\b/)) {
     state.lineStart = false;
     return "keyword";

@@ -10,17 +10,19 @@ import {
   CONTINUE_SYM,
   isLoopControlSignal,
 } from "../src/tree-types.ts";
-import {
-  applyFallbackGates,
-  applyCatchGate,
-} from "../src/resolveWires.ts";
+import { applyFallbackGates, applyCatchGate } from "../src/resolveWires.ts";
 import type { TreeContext } from "../src/tree-types.ts";
 import type { Wire } from "../src/types.ts";
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 /** Minimal NodeRef for use in test wires */
-const REF: import("../src/types.ts").NodeRef = { module: "m", type: "Query", field: "f", path: [] };
+const REF: import("../src/types.ts").NodeRef = {
+  module: "m",
+  type: "Query",
+  field: "f",
+  path: [],
+};
 
 /** Build a NodeRef with an alternative field name. */
 function ref(field: string): import("../src/types.ts").NodeRef {
@@ -28,13 +30,19 @@ function ref(field: string): import("../src/types.ts").NodeRef {
 }
 
 /** Build a minimal TreeContext that resolves refs from a plain value map. */
-function makeCtx(
-  values: Record<string, unknown> = {},
-): TreeContext {
+function makeCtx(values: Record<string, unknown> = {}): TreeContext {
+  const resolve = (ref: import("../src/types.ts").NodeRef) => {
+    const key = `${ref.module}.${ref.field}`;
+    return (key in values ? values[key] : undefined) as ReturnType<
+      TreeContext["pullSingle"]
+    >;
+  };
   return {
     pullSingle(ref) {
-      const key = `${ref.module}.${ref.field}`;
-      return (key in values ? values[key] : undefined) as ReturnType<TreeContext["pullSingle"]>;
+      return resolve(ref);
+    },
+    peekSingle(ref) {
+      return resolve(ref);
     },
   };
 }
@@ -69,19 +77,23 @@ describe("applyFallbackGates — falsy (||)", () => {
 
   test("returns first truthy ref from falsy fallback refs", async () => {
     const ctx = makeCtx({ "m.a": null, "m.b": "found" });
-    const w = fromWire({ fallbacks: [
-      { type: "falsy", ref: ref("a") },
-      { type: "falsy", ref: ref("b") },
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "falsy", ref: ref("a") },
+        { type: "falsy", ref: ref("b") },
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), "found");
   });
 
   test("skips falsy refs and falls through to falsy constant", async () => {
     const ctx = makeCtx({ "m.a": 0 });
-    const w = fromWire({ fallbacks: [
-      { type: "falsy", ref: ref("a") },
-      { type: "falsy", value: "42" },
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "falsy", ref: ref("a") },
+        { type: "falsy", value: "42" },
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), 42);
   });
 
@@ -95,13 +107,17 @@ describe("applyFallbackGates — falsy (||)", () => {
 
   test("applies falsy control when value is falsy", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "continue" } }] });
+    const w = fromWire({
+      fallbacks: [{ type: "falsy", control: { kind: "continue" } }],
+    });
     assert.equal(await applyFallbackGates(ctx, w, 0), CONTINUE_SYM);
   });
 
   test("falsy control kind=break returns BREAK_SYM", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "break" } }] });
+    const w = fromWire({
+      fallbacks: [{ type: "falsy", control: { kind: "break" } }],
+    });
     assert.equal(await applyFallbackGates(ctx, w, false), BREAK_SYM);
   });
 
@@ -119,7 +135,11 @@ describe("applyFallbackGates — falsy (||)", () => {
 
   test("falsy control kind=throw throws an error", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ fallbacks: [{ type: "falsy", control: { kind: "throw", message: "boom" } }] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "falsy", control: { kind: "throw", message: "boom" } },
+      ],
+    });
     await assert.rejects(() => applyFallbackGates(ctx, w, null), /boom/);
   });
 
@@ -127,6 +147,10 @@ describe("applyFallbackGates — falsy (||)", () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
+        capturedChain = pullChain;
+        return "value";
+      },
+      peekSingle(_ref, pullChain) {
         capturedChain = pullChain;
         return "value";
       },
@@ -159,7 +183,9 @@ describe("applyFallbackGates — nullish (??)", () => {
 
   test("resolves nullish ref when value is null", async () => {
     const ctx = makeCtx({ "m.fallback": "resolved" });
-    const w = fromWire({ fallbacks: [{ type: "nullish", ref: ref("fallback") }] });
+    const w = fromWire({
+      fallbacks: [{ type: "nullish", ref: ref("fallback") }],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), "resolved");
   });
 
@@ -172,16 +198,20 @@ describe("applyFallbackGates — nullish (??)", () => {
 
   test("applies nullish control when value is null", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ fallbacks: [{ type: "nullish", control: { kind: "continue" } }] });
+    const w = fromWire({
+      fallbacks: [{ type: "nullish", control: { kind: "continue" } }],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), CONTINUE_SYM);
   });
 
   test("nullish control takes priority (returns immediately)", async () => {
     const ctx = makeCtx({ "m.f": "should-not-be-used" });
-    const w = fromWire({ fallbacks: [
-      { type: "nullish", control: { kind: "break" } },
-      { type: "nullish", ref: REF },
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "nullish", control: { kind: "break" } },
+        { type: "nullish", ref: REF },
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), BREAK_SYM);
   });
 
@@ -189,6 +219,10 @@ describe("applyFallbackGates — nullish (??)", () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
+        capturedChain = pullChain;
+        return "resolved";
+      },
+      peekSingle(_ref, pullChain) {
         capturedChain = pullChain;
         return "resolved";
       },
@@ -205,47 +239,57 @@ describe("applyFallbackGates — nullish (??)", () => {
 describe("applyFallbackGates — mixed || and ??", () => {
   test("A ?? B || C — nullish then falsy", async () => {
     const ctx = makeCtx({ "m.b": 0, "m.c": "found" });
-    const w = fromWire({ fallbacks: [
-      { type: "nullish", ref: ref("b") },   // ?? B  → 0 (non-nullish, stops ?? but falsy)
-      { type: "falsy", ref: ref("c") },     // || C  → "found"
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "nullish", ref: ref("b") }, // ?? B  → 0 (non-nullish, stops ?? but falsy)
+        { type: "falsy", ref: ref("c") }, // || C  → "found"
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), "found");
   });
 
   test("A || B ?? C — falsy then nullish", async () => {
     const ctx = makeCtx({ "m.b": null, "m.c": "fallback" });
-    const w = fromWire({ fallbacks: [
-      { type: "falsy", ref: ref("b") },     // || B  → null (still falsy)
-      { type: "nullish", ref: ref("c") },   // ?? C  → "fallback"
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "falsy", ref: ref("b") }, // || B  → null (still falsy)
+        { type: "nullish", ref: ref("c") }, // ?? C  → "fallback"
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, ""), "fallback");
   });
 
   test("A ?? B || C ?? D — four-item chain", async () => {
     const ctx = makeCtx({ "m.b": null, "m.c": null });
-    const w = fromWire({ fallbacks: [
-      { type: "nullish", ref: ref("b") },   // ?? B  → null (still nullish)
-      { type: "falsy", ref: ref("c") },     // || C  → null (still falsy)
-      { type: "nullish", value: "final" },   // ?? D  → "final"
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "nullish", ref: ref("b") }, // ?? B  → null (still nullish)
+        { type: "falsy", ref: ref("c") }, // || C  → null (still falsy)
+        { type: "nullish", value: "final" }, // ?? D  → "final"
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), "final");
   });
 
   test("mixed chain stops when value becomes truthy and non-nullish", async () => {
     const ctx = makeCtx({ "m.b": "good" });
-    const w = fromWire({ fallbacks: [
-      { type: "nullish", ref: ref("b") },   // ?? B  → "good"
-      { type: "falsy", value: "unused" },    // || ... gate closed, value is truthy
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "nullish", ref: ref("b") }, // ?? B  → "good"
+        { type: "falsy", value: "unused" }, // || ... gate closed, value is truthy
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, null), "good");
   });
 
   test("falsy gate open but nullish gate closed for 0", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ fallbacks: [
-      { type: "nullish", value: "unused" },  // ?? gate closed: 0 != null
-      { type: "falsy", value: "fallback" },  // || gate open: !0 is true
-    ] });
+    const w = fromWire({
+      fallbacks: [
+        { type: "nullish", value: "unused" }, // ?? gate closed: 0 != null
+        { type: "falsy", value: "fallback" }, // || gate open: !0 is true
+      ],
+    });
     assert.equal(await applyFallbackGates(ctx, w, 0), "fallback");
   });
 });
@@ -296,7 +340,9 @@ describe("applyCatchGate", () => {
 
   test("catchControl kind=throw propagates the error", async () => {
     const ctx = makeCtx();
-    const w = fromWire({ catchControl: { kind: "throw", message: "catch-throw" } });
+    const w = fromWire({
+      catchControl: { kind: "throw", message: "catch-throw" },
+    });
     await assert.rejects(() => applyCatchGate(ctx, w), /catch-throw/);
   });
 
@@ -304,6 +350,10 @@ describe("applyCatchGate", () => {
     let capturedChain: Set<string> | undefined;
     const ctx: TreeContext = {
       pullSingle(_ref, pullChain) {
+        capturedChain = pullChain;
+        return "recovered";
+      },
+      peekSingle(_ref, pullChain) {
         capturedChain = pullChain;
         return "recovered";
       },

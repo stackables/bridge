@@ -28,6 +28,7 @@ import {
   AndKw,
   OrKw,
   NotKw,
+  PeekKw,
   ThrowKw,
   PanicKw,
   ContinueKw,
@@ -103,6 +104,7 @@ const RESERVED_KEYWORDS = new Set([
   "panic",
   "continue",
   "break",
+  "peek",
 ]);
 const SOURCE_IDENTIFIERS = new Set(["input", "output", "context"]);
 
@@ -343,9 +345,12 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // [not] (parenExpr | sourceExpr) [op operand]* [? then : else] as name
+        // [peek] [not] (parenExpr | sourceExpr) [op operand]* [? then : else] as name
         ALT: () => {
           this.OPTION3(() => {
+            this.CONSUME(PeekKw, { LABEL: "aliasPeekPrefix" });
+          });
+          this.OPTION4(() => {
             this.CONSUME(NotKw, { LABEL: "aliasNotPrefix" });
           });
           this.OR2([
@@ -366,7 +371,7 @@ class BridgeParser extends CstParser {
             this.SUBRULE(this.exprOperand, { LABEL: "aliasExprRight" });
           });
           // Optional ternary: ? thenBranch : elseBranch
-          this.OPTION4(() => {
+          this.OPTION6(() => {
             this.CONSUME(QuestionMark, { LABEL: "aliasTernaryOp" });
             this.SUBRULE(this.ternaryBranch, { LABEL: "aliasThenBranch" });
             this.CONSUME(Colon, { LABEL: "aliasTernaryColon" });
@@ -499,6 +504,9 @@ class BridgeParser extends CstParser {
               // Normal source expression with optional `not` prefix
               ALT: () => {
                 this.OPTION4(() => {
+                  this.CONSUME(PeekKw, { LABEL: "peekPrefix" });
+                });
+                this.OPTION8(() => {
                   this.CONSUME(NotKw, { LABEL: "notPrefix" });
                 });
                 this.OR6([
@@ -707,6 +715,9 @@ class BridgeParser extends CstParser {
               // Normal source expression with optional `not` prefix
               ALT: () => {
                 this.OPTION4(() => {
+                  this.CONSUME(PeekKw, { LABEL: "elemPeekPrefix" });
+                });
+                this.OPTION6(() => {
                   this.CONSUME(NotKw, { LABEL: "elemNotPrefix" });
                 });
                 this.OR4([
@@ -812,6 +823,9 @@ class BridgeParser extends CstParser {
             {
               ALT: () => {
                 this.OPTION3(() => {
+                  this.CONSUME(PeekKw, { LABEL: "scopePeekPrefix" });
+                });
+                this.OPTION4(() => {
                   this.CONSUME(NotKw, { LABEL: "scopeNotPrefix" });
                 });
                 this.OR5([
@@ -1020,10 +1034,13 @@ class BridgeParser extends CstParser {
     ]);
   });
 
-  /** Parenthesized sub-expression: ( [not] source [op operand]* ) */
+  /** Parenthesized sub-expression: ( [peek] [not] source [op operand]* ) */
   public parenExpr = this.RULE("parenExpr", () => {
     this.CONSUME(LParen);
     this.OPTION(() => {
+      this.CONSUME(PeekKw, { LABEL: "parenPeekPrefix" });
+    });
+    this.OPTION2(() => {
       this.CONSUME(NotKw, { LABEL: "parenNotPrefix" });
     });
     this.SUBRULE(this.sourceExpr, { LABEL: "parenSource" });
@@ -2209,6 +2226,11 @@ function processElementLines(
       let elemCondRef: NodeRef;
       let elemCondIsPipeFork: boolean;
       if (elemFirstParenNode && resolveParenExprFn) {
+        if ((elemC.elemPeekPrefix as IToken[] | undefined)?.[0]) {
+          throw new Error(
+            `Line ${elemLineNum}: peek only supports direct source references, not parenthesized expressions`,
+          );
+        }
         // First source is a parenthesized sub-expression
         const parenRef = resolveParenExprFn(
           elemFirstParenNode,
@@ -2231,6 +2253,11 @@ function processElementLines(
         }
         elemCondIsPipeFork = true;
       } else if (elemExprOps.length > 0 && desugarExprChain) {
+        if ((elemC.elemPeekPrefix as IToken[] | undefined)?.[0]) {
+          throw new Error(
+            `Line ${elemLineNum}: peek only supports direct source references, not expressions`,
+          );
+        }
         // Expression in element line — desugar then merge with fallback path
         let leftRef: NodeRef;
         const directIterRef =
@@ -2265,8 +2292,24 @@ function processElementLines(
           );
           elemCondIsPipeFork = false;
         }
+        if ((elemC.elemPeekPrefix as IToken[] | undefined)?.[0]) {
+          if (subs(elemSourceNode!, "pipeSegment").length > 0) {
+            throw new Error(
+              `Line ${elemLineNum}: peek only supports direct source references, not pipe chains`,
+            );
+          }
+          elemCondRef = { ...elemCondRef, peek: true };
+        }
       } else {
         elemCondRef = buildSourceExpr(elemSourceNode!, elemLineNum, iterNames);
+        if ((elemC.elemPeekPrefix as IToken[] | undefined)?.[0]) {
+          if (subs(elemSourceNode!, "pipeSegment").length > 0) {
+            throw new Error(
+              `Line ${elemLineNum}: peek only supports direct source references, not pipe chains`,
+            );
+          }
+          elemCondRef = { ...elemCondRef, peek: true };
+        }
         elemCondIsPipeFork =
           elemCondRef.instance != null &&
           elemCondRef.path.length === 0 &&
@@ -2782,6 +2825,11 @@ function processElementScopeLines(
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
       if (scopeFirstParenNode && resolveParenExprFn) {
+        if ((sc.scopePeekPrefix as IToken[] | undefined)?.[0]) {
+          throw new Error(
+            `Line ${scopeLineNum}: peek only supports direct source references, not parenthesized expressions`,
+          );
+        }
         const parenRef = resolveParenExprFn(
           scopeFirstParenNode,
           scopeLineNum,
@@ -2804,6 +2852,11 @@ function processElementScopeLines(
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0 && desugarExprChain) {
+        if ((sc.scopePeekPrefix as IToken[] | undefined)?.[0]) {
+          throw new Error(
+            `Line ${scopeLineNum}: peek only supports direct source references, not expressions`,
+          );
+        }
         let leftRef: NodeRef;
         const directIterRef =
           scopePipeSegs.length === 0
@@ -2833,8 +2886,24 @@ function processElementScopeLines(
           condRef = buildSourceExpr(scopeSourceNode!, scopeLineNum, iterNames);
           condIsPipeFork = false;
         }
+        if ((sc.scopePeekPrefix as IToken[] | undefined)?.[0]) {
+          if (subs(scopeSourceNode!, "pipeSegment").length > 0) {
+            throw new Error(
+              `Line ${scopeLineNum}: peek only supports direct source references, not pipe chains`,
+            );
+          }
+          condRef = { ...condRef, peek: true };
+        }
       } else {
         condRef = buildSourceExpr(scopeSourceNode!, scopeLineNum, iterNames);
+        if ((sc.scopePeekPrefix as IToken[] | undefined)?.[0]) {
+          if (subs(scopeSourceNode!, "pipeSegment").length > 0) {
+            throw new Error(
+              `Line ${scopeLineNum}: peek only supports direct source references, not pipe chains`,
+            );
+          }
+          condRef = { ...condRef, peek: true };
+        }
         condIsPipeFork =
           condRef.instance != null &&
           condRef.path.length === 0 &&
@@ -3926,6 +3995,11 @@ function buildBridgeBody(
       let condRef: NodeRef;
       let condIsPipeFork: boolean;
       if (firstParenNode) {
+        if (wc.peekPrefix) {
+          throw new Error(
+            `Line ${lineNum}: peek only supports direct source references, not parenthesized expressions`,
+          );
+        }
         const parenRef = resolveParenExpr(
           firstParenNode,
           lineNum,
@@ -3948,6 +4022,11 @@ function buildBridgeBody(
         }
         condIsPipeFork = true;
       } else if (exprOps.length > 0) {
+        if (wc.peekPrefix) {
+          throw new Error(
+            `Line ${lineNum}: peek only supports direct source references, not expressions`,
+          );
+        }
         const leftRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
         condRef = desugarExprChain(
           leftRef,
@@ -3962,6 +4041,10 @@ function buildBridgeBody(
       } else {
         const pipeSegs = subs(firstSourceNode!, "pipeSegment");
         condRef = buildSourceExpr(firstSourceNode!, lineNum, iterNames);
+        if (wc.peekPrefix) {
+          assertPeekableSource(firstSourceNode!, lineNum);
+          condRef = applyPeek(condRef);
+        }
         condIsPipeFork =
           condRef.instance != null &&
           condRef.path.length === 0 &&
@@ -4230,6 +4313,18 @@ function buildBridgeBody(
     iterScope?: string | string[],
   ): NodeRef {
     return buildSourceExprSafe(sourceNode, lineNum, iterScope).ref;
+  }
+
+  function assertPeekableSource(sourceNode: CstNode, lineNum: number): void {
+    if (subs(sourceNode, "pipeSegment").length > 0) {
+      throw new Error(
+        `Line ${lineNum}: peek only supports direct source references, not pipe chains`,
+      );
+    }
+  }
+
+  function applyPeek(ref: NodeRef): NodeRef {
+    return { ...ref, peek: true };
   }
 
   // ── Helper: desugar template string into synthetic internal.concat fork ─────
@@ -4559,7 +4654,7 @@ function buildBridgeBody(
   }
 
   /**
-   * Resolve a parenthesized sub-expression `( [not] source [op operand]* )`
+   * Resolve a parenthesized sub-expression `( [peek] [not] source [op operand]* )`
    * into a single NodeRef by recursively desugaring the inner chain.
    */
   function resolveParenExpr(
@@ -4573,7 +4668,17 @@ function buildBridgeBody(
     const innerSourceNode = sub(parenNode, "parenSource")!;
     const innerOps = subs(parenNode, "parenExprOp");
     const innerRights = subs(parenNode, "parenExprRight");
+    const hasPeek = !!(pc.parenPeekPrefix as IToken[] | undefined)?.length;
     const hasNot = !!(pc.parenNotPrefix as IToken[] | undefined)?.length;
+
+    if (hasPeek) {
+      assertPeekableSource(innerSourceNode, lineNum);
+      if (innerOps.length > 0) {
+        throw new Error(
+          `Line ${lineNum}: peek only supports direct source references, not expressions`,
+        );
+      }
+    }
 
     // Build the inner source ref (handling iterator-relative refs)
     let innerRef: NodeRef;
@@ -4608,6 +4713,10 @@ function buildBridgeBody(
       );
     } else {
       resultRef = innerRef;
+    }
+
+    if (hasPeek) {
+      resultRef = applyPeek(resultRef);
     }
 
     // Apply not prefix if present
@@ -5457,6 +5566,15 @@ function buildBridgeBody(
 
         let condRef: NodeRef;
         if (firstParenNode) {
+          if (
+            (
+              nodeAliasNode.children.aliasPeekPrefix as IToken[] | undefined
+            )?.[0]
+          ) {
+            throw new Error(
+              `Line ${lineNum}: peek only supports direct source references, not parenthesized expressions`,
+            );
+          }
           const parenRef = resolveParenExpr(
             firstParenNode,
             lineNum,
@@ -5477,6 +5595,15 @@ function buildBridgeBody(
             condRef = parenRef;
           }
         } else if (exprOps.length > 0) {
+          if (
+            (
+              nodeAliasNode.children.aliasPeekPrefix as IToken[] | undefined
+            )?.[0]
+          ) {
+            throw new Error(
+              `Line ${lineNum}: peek only supports direct source references, not expressions`,
+            );
+          }
           const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
           condRef = desugarExprChain(
             leftRef,
@@ -5491,6 +5618,14 @@ function buildBridgeBody(
           const result = buildSourceExprSafe(firstSourceNode!, lineNum);
           condRef = result.ref;
           aliasSafe = result.safe;
+          if (
+            (
+              nodeAliasNode.children.aliasPeekPrefix as IToken[] | undefined
+            )?.[0]
+          ) {
+            assertPeekableSource(firstSourceNode!, lineNum);
+            condRef = applyPeek(condRef);
+          }
         }
 
         // Apply `not` prefix if present
@@ -5750,6 +5885,11 @@ function buildBridgeBody(
     if (arrayMappingNode) {
       const firstSourceNode = sub(wireNode, "firstSource");
       const firstParenNode = sub(wireNode, "firstParenExpr");
+      if (wc.peekPrefix && firstParenNode) {
+        throw new Error(
+          `Line ${lineNum}: peek only supports direct source references, not parenthesized expressions`,
+        );
+      }
       const srcRef = firstParenNode
         ? resolveParenExpr(
             firstParenNode,
@@ -5758,7 +5898,12 @@ function buildBridgeBody(
             undefined,
             wireLoc,
           )
-        : buildSourceExpr(firstSourceNode!, lineNum);
+        : wc.peekPrefix
+          ? (() => {
+              assertPeekableSource(firstSourceNode!, lineNum);
+              return applyPeek(buildSourceExpr(firstSourceNode!, lineNum));
+            })()
+          : buildSourceExpr(firstSourceNode!, lineNum);
 
       // Process coalesce modifiers on the array wire (same as plain pull wires)
       const arrayFallbacks: WireFallback[] = [];
@@ -5867,6 +6012,11 @@ function buildBridgeBody(
     let condRef: NodeRef;
     let condIsPipeFork: boolean;
     if (firstParenNode) {
+      if (wc.peekPrefix) {
+        throw new Error(
+          `Line ${lineNum}: peek only supports direct source references, not parenthesized expressions`,
+        );
+      }
       // First source is a parenthesized sub-expression
       const parenRef = resolveParenExpr(
         firstParenNode,
@@ -5890,6 +6040,11 @@ function buildBridgeBody(
       }
       condIsPipeFork = true;
     } else if (exprOps.length > 0) {
+      if (wc.peekPrefix) {
+        throw new Error(
+          `Line ${lineNum}: peek only supports direct source references, not expressions`,
+        );
+      }
       // It's a math/comparison expression — desugar it.
       const leftRef = buildSourceExpr(firstSourceNode!, lineNum);
       condRef = desugarExprChain(
@@ -5905,6 +6060,10 @@ function buildBridgeBody(
     } else {
       const pipeSegs = subs(firstSourceNode!, "pipeSegment");
       condRef = buildSourceExpr(firstSourceNode!, lineNum);
+      if (wc.peekPrefix) {
+        assertPeekableSource(firstSourceNode!, lineNum);
+        condRef = applyPeek(condRef);
+      }
       condIsPipeFork =
         condRef.instance != null &&
         condRef.path.length === 0 &&

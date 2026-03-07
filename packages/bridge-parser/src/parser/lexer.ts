@@ -135,6 +135,11 @@ export const NotKw = createToken({
   pattern: /not/,
   longer_alt: Identifier,
 });
+export const PeekKw = createToken({
+  name: "PeekKw",
+  pattern: /peek/,
+  longer_alt: Identifier,
+});
 export const ThrowKw = createToken({
   name: "ThrowKw",
   pattern: /throw/,
@@ -291,6 +296,7 @@ export const allTokens = [
   AndKw,
   OrKw,
   NotKw,
+  PeekKw,
   ThrowKw,
   PanicKw,
   ContinueKw,

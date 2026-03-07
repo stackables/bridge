@@ -943,6 +943,18 @@ export class ExecutionTree implements TreeContext {
     );
   }
 
+  peekSingle(
+    ref: NodeRef,
+    pullChain: Set<string> = new Set(),
+    bridgeLoc?: Wire["loc"],
+  ): MaybePromise<any> {
+    const bareRef = ref.peek ? ({ ...ref, peek: undefined } as NodeRef) : ref;
+    if (!this.canResolveRefWithoutScheduling(bareRef)) {
+      return undefined;
+    }
+    return this.pullSingle(ref, pullChain, bridgeLoc);
+  }
+
   push(args: Record<string, any>) {
     this.state[trunkKey(this.trunk)] = args;
   }
@@ -1132,6 +1144,7 @@ export class ExecutionTree implements TreeContext {
     ref: NodeRef,
     visited = new Set<string>(),
   ): boolean {
+    if (ref.peek) return true;
     if (ref.element) return true;
     if (this.hasCachedRef(ref)) return true;
 

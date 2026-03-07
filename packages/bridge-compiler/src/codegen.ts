@@ -1036,26 +1036,32 @@ class CodegenContext {
     const collectSourceKeys = (wires: Wire[]): Set<string> => {
       const keys = new Set<string>();
       for (const w of wires) {
-        if ("from" in w) keys.add(refTrunkKey(w.from));
+        if ("from" in w && !w.from.peek) keys.add(refTrunkKey(w.from));
         if ("cond" in w) {
-          keys.add(refTrunkKey(w.cond));
-          if (w.thenRef) keys.add(refTrunkKey(w.thenRef));
-          if (w.elseRef) keys.add(refTrunkKey(w.elseRef));
+          if (!w.cond.peek) keys.add(refTrunkKey(w.cond));
+          if (w.thenRef && !w.thenRef.peek) keys.add(refTrunkKey(w.thenRef));
+          if (w.elseRef && !w.elseRef.peek) keys.add(refTrunkKey(w.elseRef));
         }
         if ("condAnd" in w) {
-          keys.add(refTrunkKey(w.condAnd.leftRef));
-          if (w.condAnd.rightRef) keys.add(refTrunkKey(w.condAnd.rightRef));
+          if (!w.condAnd.leftRef.peek) keys.add(refTrunkKey(w.condAnd.leftRef));
+          if (w.condAnd.rightRef && !w.condAnd.rightRef.peek)
+            keys.add(refTrunkKey(w.condAnd.rightRef));
         }
         if ("condOr" in w) {
-          keys.add(refTrunkKey(w.condOr.leftRef));
-          if (w.condOr.rightRef) keys.add(refTrunkKey(w.condOr.rightRef));
+          if (!w.condOr.leftRef.peek) keys.add(refTrunkKey(w.condOr.leftRef));
+          if (w.condOr.rightRef && !w.condOr.rightRef.peek)
+            keys.add(refTrunkKey(w.condOr.rightRef));
         }
         if ("fallbacks" in w && w.fallbacks) {
           for (const fb of w.fallbacks) {
-            if (fb.ref) keys.add(refTrunkKey(fb.ref));
+            if (fb.ref && !fb.ref.peek) keys.add(refTrunkKey(fb.ref));
           }
         }
-        if ("catchFallbackRef" in w && w.catchFallbackRef) {
+        if (
+          "catchFallbackRef" in w &&
+          w.catchFallbackRef &&
+          !w.catchFallbackRef.peek
+        ) {
           keys.add(refTrunkKey(w.catchFallbackRef));
         }
       }
@@ -2364,6 +2370,7 @@ class CodegenContext {
   }
 
   private refIsZeroCost(ref: NodeRef, visited = new Set<string>()): boolean {
+    if (ref.peek) return true;
     if (ref.element) return true;
     if (
       ref.module === SELF_MODULE &&
@@ -2743,7 +2750,7 @@ class CodegenContext {
         condExpr = this.refToElementExpr(condRef);
       } else {
         const condKey = refTrunkKey(condRef);
-        if (this.elementScopedTools.has(condKey)) {
+        if (this.elementScopedTools.has(condKey) && !condRef.peek) {
           condExpr = this.buildInlineToolExpr(condKey, elVar);
           if (condRef.path.length > 0) {
             condExpr = this.appendPathExpr(`(${condExpr})`, condRef);
@@ -2763,7 +2770,7 @@ class CodegenContext {
             return this.wrapExprWithLoc(this.refToElementExpr(ref), loc);
           }
           const branchKey = refTrunkKey(ref);
-          if (this.elementScopedTools.has(branchKey)) {
+          if (this.elementScopedTools.has(branchKey) && !ref.peek) {
             let e = this.buildInlineToolExpr(branchKey, elVar);
             if (ref.path.length > 0) e = this.appendPathExpr(`(${e})`, ref);
             return this.wrapExprWithLoc(e, loc);
@@ -2783,7 +2790,7 @@ class CodegenContext {
       // Check if the source is an element-scoped tool (needs inline computation)
       if (!w.from.element) {
         const srcKey = refTrunkKey(w.from);
-        if (this.elementScopedTools.has(srcKey)) {
+        if (this.elementScopedTools.has(srcKey) && !w.from.peek) {
           let expr = this.buildInlineToolExpr(srcKey, elVar);
           if (w.from.path.length > 0) {
             expr = this.appendPathExpr(`(${expr})`, w.from);
@@ -3445,6 +3452,46 @@ class CodegenContext {
 
   /** Convert a NodeRef to a JavaScript expression. */
   private refToExpr(ref: NodeRef): string {
+    if (ref.peek) {
+      const bareRef = { ...ref };
+      delete bareRef.peek;
+
+      if (bareRef.element) {
+        return this.refToElementExpr(bareRef);
+      }
+
+      if (
+        bareRef.module === SELF_MODULE &&
+        bareRef.type === this.bridge.type &&
+        bareRef.field === this.bridge.field &&
+        !bareRef.element
+      ) {
+        if (bareRef.path.length === 0) return "input";
+        return this.appendPathExpr("input", bareRef);
+      }
+
+      if (
+        bareRef.module === SELF_MODULE &&
+        bareRef.type === "Context" &&
+        bareRef.field === "context"
+      ) {
+        if (bareRef.path.length === 0) return "context";
+        return this.appendPathExpr("context", bareRef);
+      }
+
+      if (bareRef.type === "Const" && bareRef.field === "const") {
+        return this.refToExpr(bareRef);
+      }
+
+      const key = refTrunkKey(bareRef);
+      const varName = this.varMap.get(key);
+      const baseExpr = varName
+        ? `(typeof ${varName} === "undefined" ? undefined : ${varName})`
+        : "undefined";
+      if (bareRef.path.length === 0) return baseExpr;
+      return this.appendPathExpr(baseExpr, bareRef, true);
+    }
+
     // Const access: parse the JSON value at runtime, then access path
     if (ref.type === "Const" && ref.field === "const" && ref.path.length > 0) {
       const constName = ref.path[0]!;
@@ -3519,6 +3566,7 @@ class CodegenContext {
    * This ensures lazy evaluation — only the chosen branch's tool is called.
    */
   private lazyRefToExpr(ref: NodeRef): string {
+    if (ref.peek) return this.refToExpr(ref);
     const key = refTrunkKey(ref);
     if (this.ternaryOnlyTools.has(key)) {
       const tool = this.tools.get(key);
@@ -3931,7 +3979,9 @@ class CodegenContext {
   /** Get all source trunk keys a wire depends on. */
   private getSourceTrunks(w: Wire): string[] {
     const trunks: string[] = [];
-    const collectTrunk = (ref: NodeRef) => trunks.push(refTrunkKey(ref));
+    const collectTrunk = (ref: NodeRef) => {
+      if (!ref.peek) trunks.push(refTrunkKey(ref));
+    };
 
     if ("from" in w) {
       collectTrunk(w.from);

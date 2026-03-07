@@ -1308,6 +1308,70 @@ bridge Query.lookup {
 
 runSharedSuite("Shared: overdefinition", overdefinitionCases);
 
+const peekCases: SharedTestCase[] = [
+  {
+    name: "peek reuses an already fetched tool value",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with api
+  with input as i
+  with output as o
+
+  api.id <- i.id
+  o.full <- api
+  o.city <- peek api.city ?? i.city
+}`,
+    operation: "Query.lookup",
+    input: { id: "1", city: "fallback" },
+    tools: {
+      api: ({ id }: any) => ({ id, city: "Bern" }),
+    },
+    expected: { full: { id: "1", city: "Bern" }, city: "Bern" },
+  },
+  {
+    name: "peek does not schedule a tool by itself",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with api
+  with input as i
+  with output as o
+
+  api.id <- i.id
+  o.city <- peek api.city ?? i.city
+}`,
+    operation: "Query.lookup",
+    input: { id: "1", city: "fallback" },
+    tools: {
+      api: () => {
+        throw new Error("peek should not call api");
+      },
+    },
+    expected: { city: "fallback" },
+  },
+  {
+    name: "peek can guard ternary conditions without scheduling",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with api
+  with input as i
+  with output as o
+
+  api.id <- i.id
+  o.city <- peek api.city ? i.primaryCity : i.city
+}`,
+    operation: "Query.lookup",
+    input: { id: "1", city: "fallback", primaryCity: "preferred" },
+    tools: {
+      api: () => {
+        throw new Error("peek should not call api");
+      },
+    },
+    expected: { city: "fallback" },
+  },
+];
+
+runSharedSuite("Shared: peek", peekCases);
+
 // ── 18. Break/continue in array mapping ─────────────────────────────────────
 
 const breakContinueCases: SharedTestCase[] = [

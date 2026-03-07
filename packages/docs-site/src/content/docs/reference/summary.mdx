@@ -13,6 +13,7 @@ _The core primitives for mapping data from tools to the output._
 | **Constant wires** (`=`)      | `api.method = "GET"`                                                                         |
 | **Nullish coalescing** (`??`) | `out.x <- api.x ?? "default"`                                                                |
 | **Falsy fallback** (`\|\|`)   | `out.x <- api.x \|\| backup.x`                                                               |
+| **Cached-only read** (`peek`) | `out.x <- peek api.x ?? input.x`                                                               |
 | **Conditional (Ternary)**     | `api.mode <- i.premium ? "full" : "basic"`                                                   |
 | **Lazy Evaluation**           | Only the chosen branch in a ternary is executed                                              |
 | **Overdefinition**            | Multiple wires to the same target (`o.x <- a` and `o.x <- b`) resolve as first non-null wins |

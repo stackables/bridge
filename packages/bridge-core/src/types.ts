@@ -26,6 +26,8 @@ export type NodeRef = {
   rootSafe?: boolean;
   /** Per-segment safety flags (same length as `path`); true = `?.` before that segment */
   pathSafe?: boolean[];
+  /** Resolve only if already available without scheduling new work. */
+  peek?: true;
 };
 
 /**

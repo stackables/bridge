@@ -1303,6 +1303,20 @@ bridge Query.test {
     assert.ok(serialized.includes('o.value = "const"'), serialized);
     assert.doesNotThrow(() => parseBridge(serialized));
   });
+
+  test("roundtrips peek source prefixes", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with api
+  with output as o
+
+  o.value <- peek api.value
+}`;
+
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes("o.value <- peek api.value"), serialized);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(serialized), parseBridge(src));
+  });
 });
 
 describe("parser diagnostics and serializer edge cases", () => {
@@ -1345,5 +1359,20 @@ bridge Query.defaults {
     assert.ok(serialized.includes("  with input\n"), serialized);
     assert.ok(serialized.includes("  with output\n"), serialized);
     assert.ok(serialized.includes("  with const\n"), serialized);
+  });
+
+  test("peek rejects pipe chains", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+bridge Query.test {
+  with api
+  with upper
+  with output as o
+
+  o.value <- peek upper:api.value
+}`),
+      /peek only supports direct source references, not pipe chains/i,
+    );
   });
 });
