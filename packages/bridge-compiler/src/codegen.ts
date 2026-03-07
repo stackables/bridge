@@ -575,7 +575,7 @@ class CodegenContext {
     // When requestedFields is provided, drop output wires for fields that
     // weren't requested.  Kahn's algorithm will then naturally eliminate
     // tools that only feed into those dropped wires.
-    const outputWires = this.requestedFields
+    const filteredOutputWires = this.requestedFields
       ? allOutputWires.filter((w) => {
           // Root wires (path length 0) and element wires are always included
           if (w.to.path.length === 0) return true;
@@ -583,6 +583,7 @@ class CodegenContext {
           return matchesRequestedFields(fieldPath, this.requestedFields);
         })
       : allOutputWires;
+    const outputWires = this.reorderOverdefinedOutputWires(filteredOutputWires);
 
     // Ensure force-only tools (no wires targeting them from output) are
     // still included in the tool map for scheduling
@@ -2220,6 +2221,172 @@ class CodegenContext {
 
     const innerPad = " ".repeat(indent - 2);
     return `{\n${entries.join(",\n")},\n${innerPad}}`;
+  }
+
+  private reorderOverdefinedOutputWires(outputWires: Wire[]): Wire[] {
+    if (outputWires.length < 2) return outputWires;
+
+    const groups = new Map<string, Wire[]>();
+    for (const wire of outputWires) {
+      const pathKey = wire.to.path.join(".");
+      const group = groups.get(pathKey) ?? [];
+      group.push(wire);
+      groups.set(pathKey, group);
+    }
+
+    const emitted = new Set<string>();
+    const reordered: Wire[] = [];
+    let changed = false;
+
+    for (const wire of outputWires) {
+      const pathKey = wire.to.path.join(".");
+      if (emitted.has(pathKey)) continue;
+      emitted.add(pathKey);
+
+      const group = groups.get(pathKey)!;
+      if (group.length < 2) {
+        reordered.push(...group);
+        continue;
+      }
+
+      const ranked = group.map((candidate, index) => ({
+        wire: candidate,
+        index,
+        cost: this.classifyOverdefinitionWire(candidate),
+      }));
+      ranked.sort((left, right) => {
+        if (left.cost !== right.cost) {
+          changed = true;
+          return left.cost - right.cost;
+        }
+        return left.index - right.index;
+      });
+      reordered.push(...ranked.map((entry) => entry.wire));
+    }
+
+    return changed ? reordered : outputWires;
+  }
+
+  private classifyOverdefinitionWire(
+    wire: Wire,
+    visited = new Set<string>(),
+  ): number {
+    return this.canResolveWireCheaply(wire, visited) ? 0 : 1;
+  }
+
+  private canResolveWireCheaply(
+    wire: Wire,
+    visited = new Set<string>(),
+  ): boolean {
+    if ("value" in wire) return true;
+
+    if ("from" in wire) {
+      if (!this.refIsZeroCost(wire.from, visited)) return false;
+      for (const fallback of wire.fallbacks ?? []) {
+        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.refIsZeroCost(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("cond" in wire) {
+      if (!this.refIsZeroCost(wire.cond, visited)) return false;
+      if (wire.thenRef && !this.refIsZeroCost(wire.thenRef, visited))
+        return false;
+      if (wire.elseRef && !this.refIsZeroCost(wire.elseRef, visited))
+        return false;
+      for (const fallback of wire.fallbacks ?? []) {
+        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.refIsZeroCost(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("condAnd" in wire) {
+      if (!this.refIsZeroCost(wire.condAnd.leftRef, visited)) return false;
+      if (
+        wire.condAnd.rightRef &&
+        !this.refIsZeroCost(wire.condAnd.rightRef, visited)
+      ) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.refIsZeroCost(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("condOr" in wire) {
+      if (!this.refIsZeroCost(wire.condOr.leftRef, visited)) return false;
+      if (
+        wire.condOr.rightRef &&
+        !this.refIsZeroCost(wire.condOr.rightRef, visited)
+      ) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.refIsZeroCost(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  private refIsZeroCost(ref: NodeRef, visited = new Set<string>()): boolean {
+    if (ref.element) return true;
+    if (
+      ref.module === SELF_MODULE &&
+      ((ref.type === this.bridge.type && ref.field === this.bridge.field) ||
+        (ref.type === "Context" && ref.field === "context") ||
+        (ref.type === "Const" && ref.field === "const"))
+    ) {
+      return true;
+    }
+    if (ref.module.startsWith("__define_")) return false;
+
+    const key = refTrunkKey(ref);
+    if (visited.has(key)) return false;
+    visited.add(key);
+
+    if (ref.module === "__local") {
+      const incoming = this.bridge.wires.filter(
+        (wire) => refTrunkKey(wire.to) === key,
+      );
+      return incoming.some((wire) => this.canResolveWireCheaply(wire, visited));
+    }
+
+    return false;
   }
 
   /**

@@ -1228,7 +1228,7 @@ runSharedSuite("Shared: alias declarations", aliasCases);
 
 const overdefinitionCases: SharedTestCase[] = [
   {
-    name: "first wire wins when both non-null",
+    name: "zero-cost input beats tool even when tool wire is first",
     bridgeText: `version 1.5
 bridge Query.lookup {
   with expensiveApi as api
@@ -1243,10 +1243,10 @@ bridge Query.lookup {
     tools: {
       expensiveApi: async () => ({ label: "from-api" }),
     },
-    expected: { label: "from-api" },
+    expected: { label: "cheap" },
   },
   {
-    name: "first wire null — falls through to second",
+    name: "tool runs when zero-cost input is nullish",
     bridgeText: `version 1.5
 bridge Query.lookup {
   with api
@@ -1262,6 +1262,47 @@ bridge Query.lookup {
       api: async () => ({ label: null }),
     },
     expected: { label: "fallback" },
+  },
+  {
+    name: "zero-cost context beats tool even when tool wire is first",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with expensiveApi as api
+  with context as ctx
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.label <- api.label
+  o.label <- ctx.defaultLabel
+}`,
+    operation: "Query.lookup",
+    input: { q: "x" },
+    context: { defaultLabel: "from-context" },
+    tools: {
+      expensiveApi: async () => ({ label: "from-api" }),
+    },
+    expected: { label: "from-context" },
+  },
+  {
+    name: "same-cost tool sources preserve authored order",
+    bridgeText: `version 1.5
+bridge Query.lookup {
+  with svcA as a
+  with svcB as b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label
+  o.label <- b.label
+}`,
+    operation: "Query.lookup",
+    input: { q: "x" },
+    tools: {
+      svcA: async () => ({ label: "from-A" }),
+      svcB: async () => ({ label: "from-B" }),
+    },
+    expected: { label: "from-A" },
   },
 ];
 

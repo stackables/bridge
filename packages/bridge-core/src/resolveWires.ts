@@ -82,7 +82,29 @@ export function resolveWires(
       );
     }
   }
-  return resolveWiresAsync(ctx, wires, pullChain);
+  const orderedWires = orderOverdefinedWires(ctx, wires);
+  return resolveWiresAsync(ctx, orderedWires, pullChain);
+}
+
+function orderOverdefinedWires(ctx: TreeContext, wires: Wire[]): Wire[] {
+  if (wires.length < 2 || !ctx.classifyOverdefinitionWire) return wires;
+
+  const ranked = wires.map((wire, index) => ({
+    wire,
+    index,
+    cost: ctx.classifyOverdefinitionWire!(wire),
+  }));
+
+  let changed = false;
+  ranked.sort((left, right) => {
+    if (left.cost !== right.cost) {
+      changed = true;
+      return left.cost - right.cost;
+    }
+    return left.index - right.index;
+  });
+
+  return changed ? ranked.map((entry) => entry.wire) : wires;
 }
 
 // ── Async resolution loop ───────────────────────────────────────────────────

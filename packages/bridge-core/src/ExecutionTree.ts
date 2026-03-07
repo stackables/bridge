@@ -1008,6 +1008,174 @@ export class ExecutionTree implements TreeContext {
     return _resolveWires(this, wires, pullChain);
   }
 
+  classifyOverdefinitionWire(wire: Wire): number {
+    return this.canResolveWireWithoutScheduling(wire) ? 0 : 1;
+  }
+
+  private canResolveWireWithoutScheduling(
+    wire: Wire,
+    visited = new Set<string>(),
+  ): boolean {
+    if ("value" in wire) return true;
+
+    if ("from" in wire) {
+      if (!this.canResolveRefWithoutScheduling(wire.from, visited)) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (
+          fallback.ref &&
+          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
+        ) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("cond" in wire) {
+      if (!this.canResolveRefWithoutScheduling(wire.cond, visited))
+        return false;
+      if (
+        wire.thenRef &&
+        !this.canResolveRefWithoutScheduling(wire.thenRef, visited)
+      ) {
+        return false;
+      }
+      if (
+        wire.elseRef &&
+        !this.canResolveRefWithoutScheduling(wire.elseRef, visited)
+      ) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (
+          fallback.ref &&
+          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
+        ) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("condAnd" in wire) {
+      if (!this.canResolveRefWithoutScheduling(wire.condAnd.leftRef, visited)) {
+        return false;
+      }
+      if (
+        wire.condAnd.rightRef &&
+        !this.canResolveRefWithoutScheduling(wire.condAnd.rightRef, visited)
+      ) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (
+          fallback.ref &&
+          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
+        ) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if ("condOr" in wire) {
+      if (!this.canResolveRefWithoutScheduling(wire.condOr.leftRef, visited)) {
+        return false;
+      }
+      if (
+        wire.condOr.rightRef &&
+        !this.canResolveRefWithoutScheduling(wire.condOr.rightRef, visited)
+      ) {
+        return false;
+      }
+      for (const fallback of wire.fallbacks ?? []) {
+        if (
+          fallback.ref &&
+          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
+        ) {
+          return false;
+        }
+      }
+      if (
+        wire.catchFallbackRef &&
+        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  private canResolveRefWithoutScheduling(
+    ref: NodeRef,
+    visited = new Set<string>(),
+  ): boolean {
+    if (ref.element) return true;
+    if (this.hasCachedRef(ref)) return true;
+
+    const key = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
+    if (visited.has(key)) return false;
+    visited.add(key);
+
+    if (ref.module.startsWith("__define_")) return false;
+
+    if (ref.module === "__local") {
+      const incoming =
+        this.bridge?.wires.filter((wire) => sameTrunk(wire.to, ref)) ?? [];
+      for (const wire of incoming) {
+        if (this.canResolveWireWithoutScheduling(wire, visited)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  private hasCachedRef(ref: NodeRef): boolean {
+    if (this.parent && !ref.element && !this.isElementScopedTrunk(ref)) {
+      return this.parent.hasCachedRef(ref);
+    }
+
+    const key: string = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
+    let cursor: ExecutionTree | undefined = this;
+    if (ref.element && ref.elementDepth && ref.elementDepth > 0) {
+      let remaining = ref.elementDepth;
+      while (remaining > 0 && cursor) {
+        cursor = cursor.parent;
+        remaining--;
+      }
+    }
+    while (cursor) {
+      if (cursor.state[key] !== undefined) return true;
+      cursor = cursor.parent;
+    }
+    return false;
+  }
+
   /**
    * Resolve an output field by path for use outside of a GraphQL resolver.
    *
