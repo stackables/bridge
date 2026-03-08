@@ -1,5 +1,21 @@
 # @stackables/bridge-graphql
 
+## 1.2.1
+
+### Patch Changes
+
+- [#111](https://github.com/stackables/bridge/pull/111) [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942) Thanks [@aarne](https://github.com/aarne)! - Move Bridge source metadata onto BridgeDocument.
+
+  Parsed documents now retain their original source text automatically, and can
+  optionally carry a filename from parse time. Runtime execution, compiler
+  fallbacks, GraphQL execution, and playground formatting now read that metadata
+  from the document instead of requiring callers to thread source and filename
+  through execute options.
+
+- Updated dependencies [[`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`375e2b0`](https://github.com/stackables/bridge/commit/375e2b08a16f670cded3aba7d6e2ee52254eab1c), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942)]:
+  - @stackables/bridge-core@1.6.0
+  - @stackables/bridge-stdlib@1.5.3
+
 ## 1.2.0
 
 ### Minor Changes
