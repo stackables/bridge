@@ -1,5 +1,52 @@
 # @stackables/bridge-compiler
 
+## 2.4.1
+
+### Patch Changes
+
+- [#108](https://github.com/stackables/bridge/pull/108) [`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339) Thanks [@aarne](https://github.com/aarne)! - Add memoized tool handles with compiler support.
+
+  Bridge `with` declarations now support `memoize` for tool handles, including
+  loop-scoped tool handles inside array mappings. Memoized handles reuse the same
+  result for repeated calls with identical inputs, and each declared handle keeps
+  its own cache.
+
+  The AOT compiler now compiles memoized tool handles too, including loop-scoped
+  tool handles inside array mappings. Compiled execution preserves request-scoped
+  caching semantics and reuses results for repeated calls with identical inputs.
+
+- [#108](https://github.com/stackables/bridge/pull/108) [`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339) Thanks [@aarne](https://github.com/aarne)! - Compile shadowed loop-scoped tool handles in the AOT compiler.
+
+  Bridges can now redeclare the same tool alias in nested array scopes without
+  triggering `BridgeCompilerIncompatibleError` or falling back to the interpreter.
+  The compiler now assigns distinct tool instances to repeated handle bindings so
+  each nested scope emits and reads from the correct tool call.
+
+- [#111](https://github.com/stackables/bridge/pull/111) [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942) Thanks [@aarne](https://github.com/aarne)! - Move Bridge source metadata onto BridgeDocument.
+
+  Parsed documents now retain their original source text automatically, and can
+  optionally carry a filename from parse time. Runtime execution, compiler
+  fallbacks, GraphQL execution, and playground formatting now read that metadata
+  from the document instead of requiring callers to thread source and filename
+  through execute options.
+
+- [#111](https://github.com/stackables/bridge/pull/111) [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942) Thanks [@aarne](https://github.com/aarne)! - Fix segment-local `?.` traversal so later strict path segments still fail after a guarded null hop, and preserve source formatting for `panic` control-flow errors.
+
+- [#108](https://github.com/stackables/bridge/pull/108) [`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339) Thanks [@aarne](https://github.com/aarne)! - Fix strict nested scope resolution for array mappings.
+
+  Nested scopes can now read iterator aliases from visible parent scopes while
+  still resolving overlapping names to the nearest inner scope. This also keeps
+  invalid nested tool input wiring rejected during parsing.
+
+- [#111](https://github.com/stackables/bridge/pull/111) [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942) Thanks [@aarne](https://github.com/aarne)! - Improve runtime error source mapping for ternary conditions and strict path traversal.
+
+  Runtime and compiled execution now preserve clause-level source spans for ternary conditions and branches, so formatted errors can highlight only the failing condition or selected branch instead of the whole wire.
+  Strict path traversal also now fails consistently on primitive property access in both runtime and AOT execution, keeping error messages and behavior aligned.
+
+- Updated dependencies [[`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`375e2b0`](https://github.com/stackables/bridge/commit/375e2b08a16f670cded3aba7d6e2ee52254eab1c), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942), [`de20ece`](https://github.com/stackables/bridge/commit/de20ece3ca9c42d0def90f512f90900962670339), [`fc836e4`](https://github.com/stackables/bridge/commit/fc836e4ff33f00a078246094b8b12b77ee844942)]:
+  - @stackables/bridge-core@1.6.0
+  - @stackables/bridge-stdlib@1.5.3
+
 ## 2.4.0
 
 ### Minor Changes

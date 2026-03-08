@@ -1,5 +1,12 @@
 # @stackables/bridge-stdlib
 
+## 1.5.3
+
+### Patch Changes
+
+- Updated dependencies [[`375e2b0`](https://github.com/stackables/bridge/commit/375e2b08a16f670cded3aba7d6e2ee52254eab1c)]:
+  - @stackables/bridge-types@1.2.0
+
 ## 1.5.2
 
 ### Patch Changes
