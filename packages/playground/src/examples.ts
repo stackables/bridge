@@ -1339,7 +1339,7 @@ bridge Query.weather {
   weather.longitude <- i.longitude || null
   weather.longitude <- geo[0].lon
 
-  o.coordinateSource <- i?.latitude != null and i?.longitude != null ? "input" : "geocode"
+  o.coordinateSource <- i.latitude and i.longitude ? "input" : "geocode"
   o.temperatureC <- weather.current_weather.temperature
   o.windSpeed <- weather.current_weather.windspeed
 }`,
