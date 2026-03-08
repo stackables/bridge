@@ -4,6 +4,7 @@ description: How to pass data through transform tools and cache the results.
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 Once you have brought a tool into scope using `with`, you need to pass data into it and read the result. There are two ways to do this in The Bridge: **Explicit Wiring** and **Pipes**.
 
@@ -39,6 +40,8 @@ bridge Query.processCatalog {
 }
 ```
 
+<MiniPlaygroundModal client:load exampleId="memoized-loop-tools" autoRun={true} />
+
 ## 1. Explicit Wiring
 
 The most explicit way to use a tool is to wire a source into its input parameters, and then wire its output to your target.
@@ -61,6 +64,8 @@ bridge Query.convertCurrency {
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="http-tool" autoRun={true} />
+
 ## 2. The Pipe Operator (`:`)
 
 If you are using a tool that acts as a simple data transformer (like string manipulation or a single-input conversion), explicit wiring feels unnecessarily verbose.
@@ -73,6 +78,8 @@ o.name <- upperCase:i.rawName
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="string-transform" autoRun={true} />
+
 ### Chained Pipes
 
 You can chain multiple pipe operators together to apply a sequence of transformations.
@@ -81,6 +88,7 @@ You can chain multiple pipe operators together to apply a sequence of transforma
 o.name <- trim:upperCase:i.rawName
 
 ```
+
 
 <Aside>
 **Evaluation Order:** Pipes evaluate from right to left! In the example above,
@@ -110,6 +118,10 @@ bridge Query.convert {
 ```
 
 In this scenario, the `convert` tool receives *both* the explicitly wired `currency` parameter and the piped `rawPrice` payload simultaneously.
+
+
+<MiniPlaygroundModal client:load exampleId="array-filter" autoRun={true} />
+
 
 ## 3. How Pipes Execute (Implicit Forking)
 

@@ -4,6 +4,7 @@ description: The top-level declarations that make up a .bridge file.
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 A `.bridge` file is constructed entirely from top-level structural blocks. There are four primary types of blocks you will use to build your dataflow graph: `bridge`, `tool`, `define`, and `const`.
 
@@ -22,6 +23,8 @@ bridge Query.getUser {
 }
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="http-tool" autoRun={true} />
 
 ### Handle Declarations (`with`)
 
@@ -87,6 +90,8 @@ tool fragileApi from std.httpCall {
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="sbb-train-search" autoRun={false} />
+
 ## 3. Tool Inheritance
 
 Tools can extend other tools. This is a powerful way to organize your API clients, allowing you to define a base configuration and spawn specific endpoints from it.
@@ -110,6 +115,8 @@ tool baseApi.createUser from baseApi {
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="tool-inheritance" autoRun={true} />
+
 ## 4. Const Blocks
 
 `const` blocks define global, static JSON values that are accessible across all bridges and tools in the file. They are perfect for configuration, magic numbers, or shared fallback objects.
@@ -126,6 +133,8 @@ const config = {
 ```
 
 To access them in your graph, bring them into scope: `with const as c`, then wire them using dot notation: `o.lat <- c.fallbackGeo.lat`.
+
+<MiniPlaygroundModal client:load exampleId="const-blocks" autoRun={true} />
 
 ## 5. Define Blocks
 
@@ -167,3 +176,5 @@ bridge Query.me {
   Defines do not add any runtime overhead. The parser unpacks the `define` block
   and injects its wires directly into the host bridge during compilation.
 </Aside>
+
+<MiniPlaygroundModal client:load exampleId="define-blocks" autoRun={true} />

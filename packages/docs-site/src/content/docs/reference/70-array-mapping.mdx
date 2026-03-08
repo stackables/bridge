@@ -4,6 +4,7 @@ description: How to iterate over collections, transform elements, and manage nes
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 When you need to return a list of items in GraphQL, you cannot write standard `for` or `map` loops. Instead, The Bridge provides a declarative syntax for mapping array elements into your expected output shape, complete with explicit control flow to filter or halt the iteration.
 
@@ -26,6 +27,8 @@ bridge Query.getJourneys {
 }
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="sbb-train-search" autoRun={false} />
 
 ### Shadow Scopes
 
@@ -58,6 +61,8 @@ o.items <- api.items[] as item {
   .detail <- fetchItem.data
 }
 ```
+
+<MiniPlaygroundModal client:load exampleId="memoized-loop-tools" autoRun={true} />
 
 Memoization is scoped to that declared handle. A nested loop can declare its
 own memoized handle without sharing the parent cache.
@@ -96,6 +101,8 @@ o.items <- billingApi.items[] as item {
 }
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="control-flow-break-continue" autoRun={true} />
 
 ### Halting the Array (`break`)
 
@@ -144,70 +151,69 @@ When `bridgeTransform` detects this pattern it **automatically falls back to sta
 
 ### Use Case 1: Filtering an Array Before Mapping
 
-While `continue` is great for dropping items based on missing structural fields, sometimes you want to pre-filter a massive array based on explicit logic before mapping it. You can do this using the built-in `std.filterObject` tool.
+While `continue` is great for dropping items based on missing structural fields, sometimes you want to pre-filter a massive array based on explicit logic before mapping it. You can do this using the built-in `std.arr.filter` tool, either as a tool node or by piping an array through it.
 
 ```bridge
 bridge Query.getActiveAdmins {
-  with std.filterObject as filter
-  with usersApi as api
+  with std.arr.filter as filter
+  with context as ctx
   with output as o
 
-  # 1. Provide the array to filter
-  filter.in <- api.users
-
-  # 2. Define the exact criteria to match
   filter.role = "admin"
-  filter.isActive = true
+  filter.active = true
 
-  # 3. Map over ONLY the filtered results!
-  o.admins <- filter[] as admin {
-    .id <- admin.id
-    .name <- admin.name
+  # usage as pipe
+  # alias filter:ctx.users as final
+
+  # usage as tool node
+  filter.in <- ctx.users
+  alias filter as final
+
+  o <- final[] as user {
+    .id <- user.id
+    .name <- user.name
+    .role <- user.role
+    .active <- user.active
   }
 }
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="array-filter" autoRun={true} />
+
 ### Use Case 2: Fanout (API Call Per Element)
 
 If you have an array of IDs and you need to fetch detailed information from an external API for *every single item*, you can perform a "Fanout."
 
-By combining array mapping with a Pipe and an `alias`, the engine will dynamically fork the tool and fire a parallel API request for every element in the array.
+By combining array mapping with a loop-scoped tool handle, the engine will fire a parallel API request for every element in the array.
 
 ```bridge
-tool getUserDetail from std.httpCall {
-  .baseUrl = "https://api.example.com/users"
+tool userDetails from std.httpCall {
+  .baseUrl = "https://jsonplaceholder.typicode.com"
   .method = "GET"
-  # We leave .path blank so we can inject it dynamically!
 }
 
 bridge Query.getEnrichedUsers {
-  with getUserDetail
-  with input as i
+  with context as ctx
   with output as o
 
-  o.enrichedUsers <- i.userIds[] as id {
+  o <- ctx.userIds[] as id {
+    with userDetails as user memoize
 
-    # 1. Dynamically build the path for this specific element
-    # 2. Pipe the path into the HTTP tool
-    # 3. Safely swallow any 500 errors so one bad user doesn't break the list
-    # 4. Cache the result for this element as 'detail'
-    alias getUserDetail?.path:"/{id}" catch null as detail
+    user.path <- "/users/{id}"
 
-    # Map the resulting HTTP response back to the array
-    # If 'detail' is null (from the catch), we skip this user!
     .id <- id
-    .email <- detail.email ?? continue
-    .status <- detail.status
+    .name <- user.name ?? continue
+    .email <- user.email
   }
 }
 
 ```
 
 <Aside>
-**Automatic Parallelism:** Because each element in the array gets its own Shadow Scope, the engine treats every `getUserDetail` alias as an independent node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP requests concurrently!
+**Automatic Parallelism:** Because each element in the array gets its own Shadow Scope, the engine treats every loop-scoped `user` handle as an independent node. If the `userIds` array has 10 items, The Bridge fires all 10 HTTP requests concurrently!
 </Aside>
 
-If duplicate inputs are common, prefer a loop-scoped `with ... memoize` handle
-over a pipe alias so repeated requests can reuse prior results within that
-handle's cache.
+If duplicate inputs are common, add `memoize` to the loop-scoped handle so repeated IDs can reuse the earlier result within that handle's cache.
+
+<MiniPlaygroundModal client:load exampleId="array-fanout" autoRun={false} />

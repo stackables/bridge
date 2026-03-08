@@ -4,6 +4,7 @@ description: How to build resilient data pipelines using fallback chains, error 
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 When wiring external data sources, you must account for missing data and network failures. The Bridge engine handles this natively without requiring imperative `try/catch` or `if/else` blocks.
 
@@ -42,6 +43,8 @@ If the `user` API **throws a 500 Network Error**:
 
 - **Scenario 1:** The `?.` is on the root tool. It intercepts the network crash and yields `undefined`.
 - **Scenario 2:** The root tool is evaluated strictly. The network error **crashes the field!**
+
+<MiniPlaygroundModal client:load exampleId="safe-execution" autoRun={true} />
 
 ## 2. Layer 2: Data-Level Routing (`||` and `??`)
 
@@ -109,6 +112,8 @@ o.secureData <- authApi.token ?? panic "CRITICAL: Unauthorized access"
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="control-flow-throw-panic" autoRun={true} />
+
 ## 5. Cost-Aware Overdefinition
 
 What happens if you define multiple completely separate lines to target the exact same field?
@@ -137,3 +142,5 @@ When a target is overdefined, the engine evaluates the sources **cheapest first*
 3. It stops and returns the very first **non-nullish** result it finds.
 
 _(Note: The engine respects falsy values like `0`, `""`, and `false`. If a cheap source returns `0`, the engine accepts it and short-circuits, saving the cost of evaluating the more expensive sources.)_
+
+<MiniPlaygroundModal client:load exampleId="weather-overdefinition" autoRun={true} />

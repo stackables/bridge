@@ -4,6 +4,7 @@ description: How to format strings, calculate math, and write conditional logic 
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import MiniPlaygroundModal from "../../../components/MiniPlaygroundModal.tsx";
 
 You don't always need to build a custom tool to manipulate data. The Bridge provides built-in syntax for formatting strings, executing math, and branching logic inline.
 
@@ -29,6 +30,8 @@ bridge Query.userOrders {
 }
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="string-interpolation" autoRun={true} />
 
 ### Constant Wires vs. Pull Wires
 
@@ -58,6 +61,8 @@ o.isActive <- i.status == "active"
 
 ```
 
+<MiniPlaygroundModal client:load exampleId="expressions" autoRun={true} />
+
 ### Supported Operators
 
 | Category | Operators | Description |
@@ -86,6 +91,8 @@ o.requireMFA <- not (i.isTrusted)
 o.total <- (i.price + i.discount) * i.qty
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="boolean-logic" autoRun={true} />
 
 ### Precedence and Chaining
 
@@ -119,6 +126,8 @@ The conditional wire (ternary operator) allows you to select between two differe
 o.amount <- i.isPro ? i.proPrice : i.basicPrice
 
 ```
+
+<MiniPlaygroundModal client:load exampleId="ternary" autoRun={true} />
 
 The condition can be a direct boolean reference (`i.isPro`), or a full inline expression (`i.age >= 18`). The branches can be tool references, input variables, or literal values (`"premium"`, `true`, `20`).
 

@@ -19,6 +19,59 @@ export type Example = {
 
 export const examples: Example[] = [
   {
+    id: "http-tool",
+    name: "HTTP Tool",
+    description:
+      "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
+    schema: `
+type Query {
+  location(city: String!): Location
+}
+
+type Location {
+  lat: Float
+  lon: Float
+}
+    `,
+    bridge: `version 1.5
+
+tool geo from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .path = "/search"
+  .format = "json"
+  .limit = "1"
+}
+
+bridge Query.location {
+  with geo
+  with input as i
+  with output as o
+
+  geo.q <- i.city
+  o.lat <- geo[0].lat
+  o.lon <- geo[0].lon
+}`,
+    queries: [
+      {
+        name: "Query 1",
+        query: `{
+  location(city: "Berlin") {
+    lat
+    lon
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.location",
+        outputFields: "",
+        input: { city: "Berlin" },
+      },
+    ],
+    context: `{}`,
+  },
+  {
     id: "string-transform",
     name: "String Transform",
     description:
@@ -63,45 +116,6 @@ bridge Query.greet {
         operation: "Query.greet",
         outputFields: "",
         input: { name: "Hello Bridge" },
-      },
-    ],
-    context: `{}`,
-  },
-  {
-    id: "constants",
-    name: "Constants",
-    description:
-      "Hardcode constant values directly in bridge files using the = assignment syntax",
-    schema: `
-type Query {
-  config: Config
-}
-
-type Config {
-  version: String
-  env: String
-  label: String
-}
-    `,
-    bridge: `version 1.5
-
-bridge Query.config {
-  with output as o
-
-  o.version = "1.0.0"
-  o.env = "browser"
-  o.label = "Bridge Playground"
-}`,
-    queries: [
-      {
-        name: "Query 1",
-        query: `{
-  config {
-    version
-    env
-    label
-  }
-}`,
       },
     ],
     context: `{}`,
@@ -154,59 +168,6 @@ bridge Query.profile {
     "role": "admin"
   }
 }`,
-  },
-  {
-    id: "http-tool",
-    name: "HTTP Tool",
-    description:
-      "Declare a reusable HTTP tool and wire its response to GraphQL output fields",
-    schema: `
-type Query {
-  location(city: String!): Location
-}
-
-type Location {
-  lat: Float
-  lon: Float
-}
-    `,
-    bridge: `version 1.5
-
-tool geo from std.httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .path = "/search"
-  .format = "json"
-  .limit = "1"
-}
-
-bridge Query.location {
-  with geo
-  with input as i
-  with output as o
-
-  geo.q <- i.city
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
-}`,
-    queries: [
-      {
-        name: "Query 1",
-        query: `{
-  location(city: "Berlin") {
-    lat
-    lon
-  }
-}`,
-      },
-    ],
-    standaloneQueries: [
-      {
-        operation: "Query.location",
-        outputFields: "",
-        input: { city: "Berlin" },
-      },
-    ],
-    context: `{}`,
   },
   {
     id: "memoized-loop-tools",
@@ -309,7 +270,7 @@ tool sbbApi from std.httpCall {
   .method = GET
   .path = "/connections"
   .cache = 60
-  on error = { "connections": [] }
+  on error = {"connections": []}
 }
 
 bridge Query.searchTrains {
@@ -337,15 +298,20 @@ bridge Query.searchTrains {
       .origin.delayMinutes <- s.departure.delay || 0
       .origin.platform <- s.departure.platform
 
-      .destination.station.id <- s.arrival.station.id
-      .destination.station.name <- s.arrival.station.name
-      .destination.plannedTime <- s.arrival.arrival
-      .destination.actualTime <- s.arrival.arrival
-      .destination.delayMinutes <- s.arrival.delay || 0
-      .destination.platform <- s.arrival.platform
+      .destination {
+        .station {
+          .id <- s.arrival.station.id
+          .name <- s.arrival.station.name
+        }
+        .plannedTime <- s.arrival.arrival
+        .actualTime <- s.arrival.arrival
+        .delayMinutes <- s.arrival.delay || 0
+        .platform <- s.arrival.platform
+      }
     }
   }
-}`,
+}
+`,
     queries: [
       {
         name: "Bern \u2192 Z\u00fcrich",
@@ -394,50 +360,6 @@ bridge Query.searchTrains {
         operation: "Query.searchTrains",
         outputFields: "departureTime,arrivalTime,transfers",
         input: { from: "Zürich", to: "Genève" },
-      },
-    ],
-    context: `{}`,
-  },
-  {
-    id: "passthrough",
-    name: "Passthrough",
-    description:
-      "Pass input arguments directly to output fields with no transformation",
-    schema: `
-type Query {
-  echo(text: String!, count: Int): EchoResult
-}
-
-type EchoResult {
-  text: String
-  count: Int
-}
-    `,
-    bridge: `version 1.5
-
-bridge Query.echo {
-  with input as i
-  with output as o
-
-  o.text <- i.text
-  o.count <- i.count
-}`,
-    queries: [
-      {
-        name: "Query 1",
-        query: `{
-  echo(text: "Hello Bridge!", count: 42) {
-    text
-    count
-  }
-}`,
-      },
-    ],
-    standaloneQueries: [
-      {
-        operation: "Query.echo",
-        outputFields: "",
-        input: { text: "Hello Bridge!", count: 42 },
       },
     ],
     context: `{}`,
@@ -1093,6 +1015,499 @@ bridge Query.processCatalog {
       ]
     }
   ]
+}`,
+  },
+  {
+    id: "const-blocks",
+    name: "Const Blocks",
+    description:
+      "Declare reusable JSON constants once and pull them into a bridge with 'with const as c'",
+    schema: `
+type Query {
+  checkout(total: Float!): CheckoutPreview
+}
+
+type CheckoutPreview {
+  currency: String
+  couponCode: String
+  shippingCents: Int
+  message: String
+}
+    `,
+    bridge: `version 1.5
+
+const defaults = {
+  "currency":"EUR",
+  "coupons": {
+    "welcome":"HELLO-10"
+  }
+}
+
+const shippingCents = 490
+
+bridge Query.checkout {
+  with const as c
+  with input as i
+  with output as o
+
+  o.currency <- c.defaults.currency
+  o.couponCode <- c.defaults.coupons.welcome
+  o.shippingCents <- c.shippingCents
+  o.message <- "Charging {i.total} {c.defaults.currency}"
+}
+`,
+    queries: [
+      {
+        name: "Checkout preview",
+        query: `{
+  checkout(total: 29.99) {
+    currency
+    couponCode
+    shippingCents
+    message
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.checkout",
+        outputFields: "currency,couponCode,shippingCents,message",
+        input: { total: 29.99 },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "define-blocks",
+    name: "Define Blocks",
+    description:
+      "Reuse a named subgraph with 'define' to standardize mapping logic across bridges",
+    schema: `
+type Query {
+  profile(first: String!, last: String!, city: String!): ProfileCard
+}
+
+type ProfileCard {
+  displayName: String
+  locationLabel: String
+  upperName: String
+}
+    `,
+    bridge: `version 1.5
+
+define formatProfile {
+  with input as i
+  with output as o
+  with std.str.toUpperCase as uc
+
+  alias "{i.first} {i.last}" as fullName
+
+  o.displayName <- fullName
+  o.locationLabel <- "Based in {i.city}"
+  o.upperName <- uc:fullName
+}
+
+bridge Query.profile {
+  with formatProfile as profile
+  with input as i
+  with output as o
+
+  profile.first <- i.first
+  profile.last <- i.last
+  profile.city <- i.city
+
+  o.displayName <- profile.displayName
+  o.locationLabel <- profile.locationLabel
+  o.upperName <- profile.upperName
+}`,
+    queries: [
+      {
+        name: "Format profile",
+        query: `{
+  profile(first: "Ada", last: "Lovelace", city: "London") {
+    displayName
+    locationLabel
+    upperName
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.profile",
+        outputFields: "displayName,locationLabel,upperName",
+        input: { first: "Ada", last: "Lovelace", city: "London" },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "tool-inheritance",
+    name: "Tool Inheritance",
+    description:
+      "Extend a preconfigured base tool so child tools inherit shared wires and override only what changes",
+    schema: `
+type Query {
+  requestConfig(userId: ID!): RequestConfig
+}
+
+type RequestConfig {
+  baseUrl: String
+  path: String
+  auth: String
+  method: String
+  userId: ID
+}
+    `,
+    bridge: `version 1.5
+
+tool apiBase from std.audit {
+  .baseUrl = "https://api.example.com"
+  .headers.Authorization = "Bearer demo-token"
+  .method = "GET"
+}
+
+tool userDetail from apiBase {
+  .path = "/users"
+}
+
+bridge Query.requestConfig {
+  with userDetail as api
+  with input as i
+  with output as o
+
+  api.userId <- i.userId
+
+  o.baseUrl <- api.baseUrl
+  o.path <- api.path
+  o.auth <- api.headers.Authorization
+  o.method <- api.method
+  o.userId <- api.userId
+}`,
+    queries: [
+      {
+        name: "Inherited child tool",
+        query: `{
+  requestConfig(userId: "42") {
+    baseUrl
+    path
+    auth
+    method
+    userId
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.requestConfig",
+        outputFields: "baseUrl,path,auth,method,userId",
+        input: { userId: "42" },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "safe-execution",
+    name: "Safe Access & Catch",
+    description:
+      "Compare safe access with '?.' against explicit catch fallbacks on tool calls and nested path traversal",
+    schema: `
+input UserCandidateInput {
+  name: String
+}
+
+input ProfileInfoInput {
+  name: String
+}
+
+input ProfileInput {
+  info: ProfileInfoInput
+}
+
+type SafeResult {
+  safeTool: String
+  caughtTool: String
+  rootAccess: String
+  segmentAccess: String
+}
+
+type Query {
+  inspectSafety(users: [UserCandidateInput!], profile: ProfileInput): SafeResult
+}
+    `,
+    bridge: `version 1.5
+
+bridge Query.inspectSafety {
+  with std.arr.first as first
+  with input as i
+  with output as o
+
+  first.strict = true
+  first.in <- i.users
+
+  o.safeTool <- first?.name ?? "safe fallback"
+  o.caughtTool <- first.name catch "caught fallback"
+  o.rootAccess <- i.profile?.info.name catch "root tail crash"
+  o.segmentAccess <- i.profile.info?.name ?? "segment fallback"
+}`,
+    queries: [
+      {
+        name: "Safe access and catch on missing tool input",
+        query: `{
+  inspectSafety(users: [], profile: { info: { name: "Ada" } }) {
+    safeTool
+    caughtTool
+    rootAccess
+    segmentAccess
+  }
+}`,
+      },
+      {
+        name: "Path placement nuance",
+        query: `{
+  inspectSafety(users: [{ name: "Ada" }], profile: {}) {
+    safeTool
+    caughtTool
+    rootAccess
+    segmentAccess
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.inspectSafety",
+        outputFields: "safeTool,caughtTool,rootAccess,segmentAccess",
+        input: { users: [], profile: { info: { name: "Ada" } } },
+      },
+      {
+        operation: "Query.inspectSafety",
+        outputFields: "safeTool,caughtTool,rootAccess,segmentAccess",
+        input: { users: [{ name: "Ada" }], profile: {} },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "weather-overdefinition",
+    name: "Weather With Coordinate Fallback",
+    description:
+      "Fetch weather with user-provided coordinates when available, otherwise fall back to geocoded coordinates via overdefinition",
+    schema: `
+type Query {
+  weather(city: String, latitude: Float, longitude: Float): WeatherResult
+}
+
+type WeatherResult {
+  coordinateSource: String
+  temperatureC: Float
+  windSpeed: Float
+}
+    `,
+    bridge: `version 1.5
+
+tool geocode from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .path = "/search"
+  .format = "json"
+  .limit = "1"
+  .cache = 60
+}
+
+tool weatherApi from std.httpCall {
+  .baseUrl = "https://api.open-meteo.com/v1"
+  .method = GET
+  .path = "/forecast"
+  .cache = 60
+  .current_weather = true
+}
+
+bridge Query.weather {
+  with geocode as geo
+  with weatherApi as weather
+  with input as i
+  with output as o
+
+  geo.q <- i.city || panic "No way to get coordinates"
+
+  # convert "" to null
+  weather.latitude <- i.latitude || null
+  weather.latitude <- geo[0].lat
+
+  weather.longitude <- i.longitude || null
+  weather.longitude <- geo[0].lon
+
+  o.coordinateSource <- i?.latitude != null and i?.longitude != null ? "input" : "geocode"
+  o.temperatureC <- weather.current_weather.temperature
+  o.windSpeed <- weather.current_weather.windspeed
+}`,
+    queries: [
+      {
+        name: "Input coordinates only",
+        query: `{
+  weather(latitude: 46.948, longitude: 7.4474) {
+    coordinateSource
+    temperatureC
+    windSpeed
+  }
+}`,
+      },
+      {
+        name: "Geocode fallback",
+        query: `{
+  weather(city: "Zurich") {
+    coordinateSource
+    temperatureC
+    windSpeed
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.weather",
+        outputFields: "coordinateSource,temperatureC,windSpeed",
+        input: { latitude: 46.948, longitude: 7.4474 },
+      },
+      {
+        operation: "Query.weather",
+        outputFields: "coordinateSource,temperatureC,windSpeed",
+        input: { city: "Zurich" },
+      },
+    ],
+    context: `{}`,
+  },
+  {
+    id: "array-filter",
+    name: "Array Filtering",
+    description:
+      "Use std.arr.filter either as a tool node or as a pipe before mapping the remaining elements",
+    schema: `
+type User {
+  id: ID!
+  name: String
+  role: String
+  active: Boolean
+}
+
+type Query {
+  activeAdmins: [User!]!
+}
+    `,
+    bridge: `version 1.5
+
+bridge Query.activeAdmins {
+  with std.arr.filter as filter
+  with context as ctx
+  with output as o
+
+  filter.role = "admin"
+  filter.active = true
+
+  # usage as pipe
+  # alias filter:ctx.users as final
+
+  # usage as tool node
+  filter.in <- ctx.users
+  alias filter as final
+
+  o <- final[] as user {
+    .id <- user.id
+    .name <- user.name
+    .role <- user.role
+    .active <- user.active
+  }
+}`,
+    queries: [
+      {
+        name: "Only active admins",
+        query: `{
+  activeAdmins {
+    id
+    name
+    role
+    active
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.activeAdmins",
+        outputFields: "id,name,role,active",
+        input: {},
+      },
+    ],
+    context: `{
+  "users": [
+    { "id": "1", "name": "Ada", "role": "admin", "active": true },
+    { "id": "2", "name": "Grace", "role": "admin", "active": false },
+    { "id": "3", "name": "Linus", "role": "user", "active": true },
+    { "id": "4", "name": "Margaret", "role": "admin", "active": true }
+  ]
+}`,
+  },
+  {
+    id: "array-fanout",
+    name: "Array Fanout",
+    description:
+      "Fork a remote HTTP call per array element and continue past items whose detail lookup fails",
+    schema: `
+type UserDetail {
+  id: ID!
+  name: String
+  email: String
+}
+
+type Query {
+  enrichedUsers: [UserDetail!]!
+}
+    `,
+    bridge: `version 1.5
+
+tool getUserDetail from std.httpCall {
+  .path = "/users"
+  .baseUrl = "https://jsonplaceholder.typicode.com"
+  .method = GET
+}
+
+bridge Query.enrichedUsers {
+  with context as ctx
+  with output as o
+
+  o <- ctx.userIds[] as id {
+    with getUserDetail as user memoize
+
+    user.path <- "/users/{id}"
+
+    .id <- id
+    .name <- user.name ?? continue
+    .email <- user.email
+  }
+}`,
+    queries: [
+      {
+        name: "Fan out by ID",
+        query: `{
+  enrichedUsers {
+    id
+    name
+    email
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.enrichedUsers",
+        outputFields: "id,name,email",
+        input: {},
+      },
+    ],
+    context: `{
+  "userIds": [1, 2, 999]
 }`,
   },
 ];
