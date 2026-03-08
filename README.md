@@ -23,7 +23,7 @@ You write the topology; the engine handles the execution.
 
 ### Why a language instead of code?
 
-- **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
+- **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all`, DataLoader plumbing, or batching glue required.
 - **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
 - **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
 - **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
@@ -39,6 +39,11 @@ Because The Bridge strictly controls how data flows from inputs to tools to outp
    Funnel external third-party API calls through a single point. Swap providers (e.g., SendGrid ↔ AWS SES) by changing a `.bridge` file without ever touching the calling service's code.
 1. **[The Rule Engine / Policy Evaluator](https://bridge.sdk42.com/guides/rule-engine/)**
    Encapsulate complex conditional business logic and data enrichment into a single, highly readable file that returns a boolean. Perfect for authorization checks or fraud detection flows.
+
+### Feature Highlights
+
+- **Human-Readable Runtime Errors:** `formatBridgeError(err)` renders Rust-style source snippets with filename, line/column, and carets pointing at the failing wire.
+- **Native DataLoader Pattern:** Mark a custom tool with `bridge.batch` and Bridge batches loop-scoped calls automatically in both the interpreter and the compiler.
 
 ## The Playground
 

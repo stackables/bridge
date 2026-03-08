@@ -51,6 +51,7 @@ _Zero-allocation iteration using native JavaScript loops._
 | **Nested Control Flow**     | `break 1`/`continue 2` scopes correctly in sub-arrays |
 | **Interpolation in arrays** | `o <- items[] as it { .url <- "/items/{it.id}" }`     |
 | **Null array preservation** | If source is `null`, output is `null` (not `[]`)      |
+| **Native batching**         | `fetchUsers.bridge = { batch: true }`                 | Built-in DataLoader-style batching for loop-scoped tool calls |
 
 ### 4. Error Handling & Control Flow
 
@@ -87,3 +88,4 @@ _Under-the-hood engine features that ensure stability and performance._
 | **Cycle Detection**       | Compile-time detection of circular tool dependencies (Kahn's algorithm) throws an immediate initialization error.  |
 | **Abort Signals**         | Pre-tool `signal.aborted` checks throw `BridgeAbortError`, which safely bypasses standard `catch` blocks.          |
 | **Telemetry Injection**   | Automatically passes `{ logger, signal }` via `ctx` to custom tool functions.                                      |
+| **Human-readable errors** | `formatBridgeError(err)` renders filename, line/column, and a careted source snippet for runtime failures.         |

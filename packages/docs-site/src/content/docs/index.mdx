@@ -61,6 +61,8 @@ bridge Query.should_i_go_outside {
 ### Why a language instead of code?
 
 - **Zero Orchestration Boilerplate:** The engine inherently knows which tools can run concurrently. No manual `Promise.all` or batching logic required.
+- **Readable Failures:** Runtime errors can be rendered as Rust-style source snippets with filename, line/column, and carets pointing at the exact failing wire.
+- **Native DataLoader:** Custom tools can opt into built-in batching, so list resolvers avoid N+1 calls without manual DataLoader plumbing.
 - **Separation of Concerns:** Keep your core business logic inside isolated TypeScript tools, completely separate from your routing, mapping, and orchestration logic.
 - **Safe for LLM Automation:** Because The Bridge is a strictly declarative, constrained dataflow language, it is much safer for AI generation than general-purpose code. You can confidently let an LLM wire up your API mappings without the risk of it hallucinating infinite loops, memory leaks, or rogue system calls.
 - **Hot-Reloadable Logic:** Since `.bridge` files are just text parsed into an execution graph, you don't need to recompile, rebuild, or redeploy your entire Node application to change a data mapping or swap an API provider. You can update and hot-reload your rules on the fly.
