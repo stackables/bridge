@@ -134,6 +134,8 @@ export interface TreeContext {
   ): MaybePromise<any>;
   /** Classify an overdefined wire by marginal execution cost (lower = cheaper). */
   classifyOverdefinitionWire?(wire: Wire): number;
+  /** Record a resolved wire branch when traversal-id collection is enabled. */
+  recordSnapshotStep?(wire: Wire, outcome: string): void;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
 }

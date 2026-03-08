@@ -70,7 +70,7 @@ export function resolveWires(
   // Abort discipline — honour pre-aborted signal even on the fast path
   if (ctx.signal?.aborted) throw new BridgeAbortError();
 
-  if (wires.length === 1) {
+  if (wires.length === 1 && !ctx.recordSnapshotStep) {
     const w = wires[0]!;
     if ("value" in w) return coerceConstant(w.value);
     const ref = getSimplePullRef(w);
@@ -121,23 +121,48 @@ async function resolveWiresAsync(
     if (ctx.signal?.aborted) throw new BridgeAbortError();
 
     // Constant wire — always wins, no modifiers
-    if ("value" in w) return coerceConstant(w.value);
+    if ("value" in w) {
+      ctx.recordSnapshotStep?.(w, "constant>return");
+      return coerceConstant(w.value);
+    }
+
+    const branchParts: string[] = [];
 
     try {
       // Layer 1: Execution
-      let value = await evaluateWireSource(ctx, w, pullChain);
+      const source = await evaluateWireSource(ctx, w, pullChain);
+      branchParts.push(source.outcome);
+      let value = await source.value;
 
       // Layer 2: Fallback Gates (unified || and ?? chain)
-      value = await applyFallbackGates(ctx, w, value, pullChain);
+      value = await applyFallbackGates(ctx, w, value, pullChain, branchParts);
 
       // Overdefinition Boundary
-      if (value != null) return value;
+      if (value != null) {
+        branchParts.push("return");
+        ctx.recordSnapshotStep?.(w, branchParts.join(">"));
+        return value;
+      }
+      branchParts.push("fallthrough:nullish");
+      ctx.recordSnapshotStep?.(w, branchParts.join(">"));
     } catch (err: unknown) {
       // Layer 3: Catch Gate
       if (isFatalError(err)) throw err;
 
-      const recoveredValue = await applyCatchGate(ctx, w, pullChain);
-      if (recoveredValue !== undefined) return recoveredValue;
+      const recoveredValue = await applyCatchGate(
+        ctx,
+        w,
+        pullChain,
+        branchParts,
+      );
+      if (recoveredValue !== undefined) {
+        branchParts.push("return");
+        ctx.recordSnapshotStep?.(w, branchParts.join(">"));
+        return recoveredValue;
+      }
+
+      branchParts.push("error");
+      ctx.recordSnapshotStep?.(w, branchParts.join(">"));
 
       lastError = wrapBridgeRuntimeError(err, {
         bridgeLoc: w.loc,
@@ -165,24 +190,30 @@ export async function applyFallbackGates(
   w: WireWithGates,
   value: unknown,
   pullChain?: Set<string>,
+  branchParts?: string[],
 ): Promise<unknown> {
   if (!w.fallbacks?.length) return value;
 
-  for (const fallback of w.fallbacks) {
+  for (const [index, fallback] of w.fallbacks.entries()) {
     const isFalsyGateOpen = fallback.type === "falsy" && !value;
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
       if (fallback.control) {
+        branchParts?.push(
+          `fallback:${index}:${fallback.type}:control:${fallback.control.kind}`,
+        );
         return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
       if (fallback.ref) {
+        branchParts?.push(`fallback:${index}:${fallback.type}:ref`);
         value = await ctx.pullSingle(
           fallback.ref,
           pullChain,
           fallback.loc ?? w.loc,
         );
       } else if (fallback.value !== undefined) {
+        branchParts?.push(`fallback:${index}:${fallback.type}:value`);
         value = coerceConstant(fallback.value);
       }
     }
@@ -205,14 +236,20 @@ export async function applyCatchGate(
   ctx: TreeContext,
   w: WireWithGates,
   pullChain?: Set<string>,
+  branchParts?: string[],
 ): Promise<unknown> {
   if (w.catchControl) {
+    branchParts?.push(`catch:control:${w.catchControl.kind}`);
     return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
   }
   if (w.catchFallbackRef) {
+    branchParts?.push("catch:ref");
     return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
   }
-  if (w.catchFallback != null) return coerceConstant(w.catchFallback);
+  if (w.catchFallback != null) {
+    branchParts?.push("catch:value");
+    return coerceConstant(w.catchFallback);
+  }
   return undefined;
 }
 
@@ -248,7 +285,7 @@ async function evaluateWireSource(
   ctx: TreeContext,
   w: Wire,
   pullChain?: Set<string>,
-): Promise<any> {
+): Promise<{ value: any; outcome: string }> {
   if ("cond" in w) {
     const condValue = await ctx.pullSingle(
       w.cond,
@@ -257,55 +294,96 @@ async function evaluateWireSource(
     );
     if (condValue) {
       if (w.thenRef !== undefined) {
-        return ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
+        return {
+          value: ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc),
+          outcome: "source:cond:then:ref",
+        };
       }
-      if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
+      if (w.thenValue !== undefined) {
+        return {
+          value: coerceConstant(w.thenValue),
+          outcome: "source:cond:then:value",
+        };
+      }
+      return { value: undefined, outcome: "source:cond:then:undefined" };
     } else {
       if (w.elseRef !== undefined) {
-        return ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
+        return {
+          value: ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc),
+          outcome: "source:cond:else:ref",
+        };
       }
-      if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
+      if (w.elseValue !== undefined) {
+        return {
+          value: coerceConstant(w.elseValue),
+          outcome: "source:cond:else:value",
+        };
+      }
+      return { value: undefined, outcome: "source:cond:else:undefined" };
     }
-    return undefined;
   }
 
   if ("condAnd" in w) {
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
     const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
-    if (!leftVal) return false;
-    if (rightRef !== undefined)
-      return Boolean(
-        await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
-      );
-    if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-    return Boolean(leftVal);
+    if (!leftVal) return { value: false, outcome: "source:and:left-false" };
+    if (rightRef !== undefined) {
+      return {
+        value: Boolean(
+          await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
+        ),
+        outcome: "source:and:right:ref",
+      };
+    }
+    if (rightValue !== undefined) {
+      return {
+        value: Boolean(coerceConstant(rightValue)),
+        outcome: "source:and:right:value",
+      };
+    }
+    return { value: Boolean(leftVal), outcome: "source:and:left-true" };
   }
 
   if ("condOr" in w) {
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
     const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
-    if (leftVal) return true;
-    if (rightRef !== undefined)
-      return Boolean(
-        await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
-      );
-    if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-    return Boolean(leftVal);
+    if (leftVal) return { value: true, outcome: "source:or:left-true" };
+    if (rightRef !== undefined) {
+      return {
+        value: Boolean(
+          await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
+        ),
+        outcome: "source:or:right:ref",
+      };
+    }
+    if (rightValue !== undefined) {
+      return {
+        value: Boolean(coerceConstant(rightValue)),
+        outcome: "source:or:right:value",
+      };
+    }
+    return { value: Boolean(leftVal), outcome: "source:or:left-false" };
   }
 
   if ("from" in w) {
     if (w.safe) {
       try {
-        return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
+        return {
+          value: await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc),
+          outcome: "source:from",
+        };
       } catch (err: any) {
         if (isFatalError(err)) throw err;
-        return undefined;
+        return { value: undefined, outcome: "source:from:safe-error" };
       }
     }
-    return ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
+    return {
+      value: ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc),
+      outcome: "source:from",
+    };
   }
 
-  return undefined;
+  return { value: undefined, outcome: "source:unknown" };
 }
 
 // ── Safe-navigation helper ──────────────────────────────────────────────────

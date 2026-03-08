@@ -1,4 +1,5 @@
 import { materializeShadows as _materializeShadows } from "./materializeShadows.ts";
+import { TraversalIdCollector } from "./execution-snapshot.ts";
 import { resolveWires as _resolveWires } from "./resolveWires.ts";
 import {
   schedule as _schedule,
@@ -145,6 +146,8 @@ export class ExecutionTree implements TreeContext {
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
   tracer?: TraceCollector;
+  /** Shared traversal collector — present only when traversal id collection is enabled. */
+  traversalCollector?: TraversalIdCollector;
   /** Structured logger passed from BridgeOptions. Defaults to no-ops. */
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
@@ -726,6 +729,7 @@ export class ExecutionTree implements TreeContext {
     child.toolFns = this.toolFns;
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
+    child.traversalCollector = this.traversalCollector;
     child.logger = this.logger;
     child.signal = this.signal;
     child.source = this.source;
@@ -759,6 +763,20 @@ export class ExecutionTree implements TreeContext {
   /** Returns collected traces (empty array when tracing is disabled). */
   getTraces(): ToolTrace[] {
     return this.tracer?.traces ?? [];
+  }
+
+  beginTraversalIdCollection(operation: string): void {
+    if (!this.bridge) return;
+    this.traversalCollector ??= new TraversalIdCollector(this.bridge);
+    this.traversalCollector.begin({ operation });
+  }
+
+  recordSnapshotStep(wire: Wire, outcome: string): void {
+    this.traversalCollector?.record(wire, outcome);
+  }
+
+  getTraversalId(): string | undefined {
+    return this.traversalCollector?.traversalId();
   }
 
   /**

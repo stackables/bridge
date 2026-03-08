@@ -8,6 +8,8 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
   executeBridge,
+  enumerateTraversalIds,
+  explainTraversalPlan,
   formatBridgeError,
   prettyPrintToSource,
 } from "@stackables/bridge";
@@ -19,10 +21,12 @@ import type {
   ToolTrace,
   Logger,
   CacheStore,
+  TraversalPlanExplanation,
 } from "@stackables/bridge";
 import {
   bridgeTransform,
   std,
+  getBridgeTraversalId,
   getBridgeTraces,
   createHttpCall,
 } from "@stackables/bridge";
@@ -75,6 +79,7 @@ export type LogEntry = {
 export type RunResult = {
   data?: unknown;
   errors?: string[];
+  traversalId?: string;
   traces?: ToolTrace[];
   logs?: LogEntry[];
 };
@@ -186,6 +191,7 @@ export async function runBridge(
         std: { ...std, httpCall: playgroundHttpCall },
       },
       trace: "full",
+      traversalId: true,
       logger: collectingLogger,
     });
   } catch (err: unknown) {
@@ -252,9 +258,11 @@ export async function runBridge(
     });
 
     const traces = getBridgeTraces(contextValue);
+    const traversalId = getBridgeTraversalId(contextValue);
     return {
       data: result.data,
       errors,
+      traversalId,
       traces: traces.length > 0 ? traces : undefined,
       logs: logs.length > 0 ? logs : undefined,
     };
@@ -306,6 +314,11 @@ export type OutputFieldNode = {
   depth: number;
   /** Whether this path has children */
   hasChildren: boolean;
+};
+
+export type TraversalOperationPlans = {
+  operation: string;
+  plans: TraversalPlanExplanation[];
 };
 
 /**
@@ -373,6 +386,27 @@ export function extractOutputFields(
         hasChildren: allPaths.some((other) => other.startsWith(p + ".")),
       };
     });
+  } catch {
+    return [];
+  }
+}
+
+export function extractTraversalPlans(
+  bridgeText: string,
+): TraversalOperationPlans[] {
+  try {
+    const { document } = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
+
+    return document.instructions
+      .filter((instruction): instruction is Bridge => instruction.kind === "bridge")
+      .map((bridge) => ({
+        operation: `${bridge.type}.${bridge.field}`,
+        plans: enumerateTraversalIds(bridge)
+          .map((plan) => explainTraversalPlan(plan))
+          .sort((left, right) => left.traversalId.localeCompare(right.traversalId)),
+      }));
   } catch {
     return [];
   }
@@ -652,12 +686,14 @@ export async function runBridgeStandalone(
       tools: { std: { ...std, httpCall: playgroundHttpCall } },
       context,
       trace: "full",
+      traversalId: true,
       logger: collectingLogger,
       ...(fields.length > 0 ? { requestedFields: fields } : {}),
     });
 
     return {
       data: result.data,
+      traversalId: result.traversalId,
       traces: result.traces.length > 0 ? result.traces : undefined,
       logs: logs.length > 0 ? logs : undefined,
     };

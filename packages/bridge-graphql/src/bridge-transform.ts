@@ -99,6 +99,8 @@ export type BridgeOptions = {
    *  - `"basic"` — tool, fn, timing, errors; no input/output
    *  - `"full"` — everything including input and output */
   trace?: TraceLevel;
+  /** Capture a stable traversal id and expose it on GraphQL extensions. */
+  traversalId?: boolean;
   /**
    * Structured logger for engine-level events (tool errors, warnings, debug).
    * Accepts any logger with `debug`, `info`, `warn`, and `error` methods —
@@ -252,13 +254,14 @@ export function bridgeTransform(
       ): Promise<unknown> {
         const requestedFields = collectRequestedFields(info);
         try {
-          const { data, traces } = await executeBridgeFn({
+          const { data, traces, traversalId } = await executeBridgeFn({
             document: activeDoc,
             operation: `${typeName}.${fieldName}`,
             input: args,
             context: bridgeContext,
             tools: userTools,
             ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
+            ...(options?.traversalId ? { traversalId: true } : {}),
             logger,
             ...(options?.toolTimeoutMs !== undefined
               ? { toolTimeoutMs: options.toolTimeoutMs }
@@ -270,6 +273,9 @@ export function bridgeTransform(
           });
           if (traceLevel !== "off") {
             context.__bridgeTracer = { traces };
+          }
+          if (traversalId) {
+            context.__bridgeTraversalId = traversalId;
           }
           return data;
         } catch (err) {
@@ -381,6 +387,10 @@ export function bridgeTransform(
               source.tracer = new TraceCollector(traceLevel);
               // Stash tracer on GQL context so the tracing plugin can read it
               context.__bridgeTracer = source.tracer;
+            }
+            if (options?.traversalId) {
+              source.beginTraversalIdCollection(`${typeName}.${fieldName}`);
+              context.__bridgeTraversalId = source;
             }
           }
 
@@ -496,6 +506,22 @@ export function getBridgeTraces(context: any): ToolTrace[] {
 }
 
 /**
+ * Read the traversal id collected during the current request.
+ * Returns `undefined` when traversal collection is disabled.
+ */
+export function getBridgeTraversalId(context: any): string | undefined {
+  const carrier = context?.__bridgeTraversalId as
+    | string
+    | { getTraversalId?: () => string | undefined }
+    | undefined;
+  if (!carrier) return undefined;
+  if (typeof carrier === "object" && "getTraversalId" in carrier) {
+    return carrier.getTraversalId?.();
+  }
+  return carrier as string;
+}
+
+/**
  * Envelop-compatible plugin for GraphQL Yoga (or any Envelop-based server).
  * When bridge tracing is enabled, this plugin copies the recorded traces into
  * the GraphQL response `extensions.traces` field.
@@ -517,12 +543,18 @@ export function useBridgeTracing() {
           setResult: (r: any) => void;
         }) {
           const traces = getBridgeTraces(args.contextValue);
-          if (traces.length > 0 && result && "data" in result) {
+          const traversalId = getBridgeTraversalId(args.contextValue);
+          if (
+            (traces.length > 0 || traversalId) &&
+            result &&
+            "data" in result
+          ) {
             setResult({
               ...result,
               extensions: {
                 ...(result.extensions ?? {}),
-                traces,
+                ...(traces.length > 0 ? { traces } : {}),
+                ...(traversalId ? { traversalId } : {}),
               },
             });
           }

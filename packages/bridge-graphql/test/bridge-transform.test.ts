@@ -6,6 +6,7 @@ import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import {
   bridgeTransform,
+  getBridgeTraversalId,
   getBridgeTraces,
   useBridgeTracing,
 } from "../src/index.ts";
@@ -76,14 +77,18 @@ bridge Query.slow {
     const schema = bridgeTransform(rawSchema, instructions, {
       tools: {
         waitTool: async () =>
-          new Promise((resolve) => setTimeout(() => resolve({ value: "ok" }), 30)),
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ value: "ok" }), 30),
+          ),
       },
       toolTimeoutMs: 1,
       maxDepth: 3,
     });
     const yoga = createYoga({ schema, graphqlEndpoint: "*" });
     const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
-    const result: any = await executor({ document: parse(`{ slow { value } }`) });
+    const result: any = await executor({
+      document: parse(`{ slow { value } }`),
+    });
     assert.ok(result.errors?.length > 0, JSON.stringify(result));
   });
 });
@@ -92,6 +97,11 @@ describe("bridge tracing helpers", () => {
   test("getBridgeTraces returns empty array when tracer is absent", () => {
     assert.deepEqual(getBridgeTraces(undefined), []);
     assert.deepEqual(getBridgeTraces({}), []);
+  });
+
+  test("getBridgeTraversalId returns undefined when traversal is absent", () => {
+    assert.equal(getBridgeTraversalId(undefined), undefined);
+    assert.equal(getBridgeTraversalId({}), undefined);
   });
 
   test("useBridgeTracing adds traces into GraphQL extensions", () => {
@@ -110,5 +120,23 @@ describe("bridge tracing helpers", () => {
     });
 
     assert.deepEqual(updated.extensions.traces, traces);
+  });
+
+  test("useBridgeTracing adds traversalId into GraphQL extensions", () => {
+    const traversalId = "path_deadbeefdeadbeef";
+    const plugin = useBridgeTracing();
+    const execHooks = plugin.onExecute({
+      args: { contextValue: { __bridgeTraversalId: traversalId } },
+    } as any);
+    let updated: any;
+
+    execHooks?.onExecuteDone?.({
+      result: { data: { ok: true } },
+      setResult: (r: any) => {
+        updated = r;
+      },
+    });
+
+    assert.equal(updated.extensions.traversalId, traversalId);
   });
 });

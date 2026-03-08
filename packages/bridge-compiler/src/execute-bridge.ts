@@ -45,6 +45,8 @@ export type ExecuteBridgeOptions = {
   tools?: ToolMap;
   /** Context available via `with context as ctx` inside the bridge. */
   context?: Record<string, unknown>;
+  /** Capture a stable traversal id for this execution. */
+  traversalId?: boolean;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
   /**
@@ -83,6 +85,7 @@ export type ExecuteBridgeOptions = {
 export type ExecuteBridgeResult<T = unknown> = {
   data: T;
   traces: ToolTrace[];
+  traversalId?: string;
 };
 
 // ── Cache ───────────────────────────────────────────────────────────────────
@@ -253,11 +256,30 @@ export async function executeBridge<T = unknown>(
     input = {},
     tools: userTools = {},
     context = {},
+    traversalId,
     signal,
     toolTimeoutMs,
     logger,
     maxDepth,
   } = options;
+
+  if (traversalId) {
+    logger?.info?.("[bridge-compiler] traversal ids use the interpreter path");
+    return executeCoreBridge<T>({
+      document,
+      operation,
+      input,
+      tools: userTools,
+      context,
+      signal,
+      toolTimeoutMs,
+      logger,
+      trace: options.trace,
+      traversalId: true,
+      requestedFields: options.requestedFields,
+      ...(maxDepth !== undefined ? { maxDepth } : {}),
+    });
+  }
 
   let fn: BridgeFn;
   try {

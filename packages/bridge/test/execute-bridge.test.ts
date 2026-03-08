@@ -6,6 +6,7 @@ import {
   checkStdVersion,
   checkHandleVersions,
   collectVersionedHandles,
+  enumerateTraversalIds,
   getBridgeVersion,
   hasVersionedToolFn,
   mergeBridgeDocuments,
@@ -929,6 +930,420 @@ bridge Query.echo {
       assert.deepEqual(data, { result: 10 });
       assert.ok(traces.length > 0);
       assert.ok(traces.some((t) => t.tool === "myTool"));
+    });
+
+    test("traversal ids stay stable per path and change across branches", async () => {
+      const document = parseBridge(`version 1.5
+bridge Query.lookup {
+  with primary as p
+  with backup as b
+  with catcher as c
+  with input as i
+  with output as o
+
+  p.q <- i.q
+  b.q <- i.q
+  c.q <- i.q
+  o.label <- p.label || b.label catch c.label
+}`);
+
+      const primary = await ctx.executeFn({
+        document,
+        operation: "Query.lookup",
+        input: { q: "x" },
+        traversalId: true,
+        tools: {
+          primary: async () => ({ label: "P" }),
+          backup: async () => ({ label: "B" }),
+          catcher: async () => ({ label: "C" }),
+        },
+      });
+
+      const fallback = await ctx.executeFn({
+        document,
+        operation: "Query.lookup",
+        input: { q: "x" },
+        traversalId: true,
+        tools: {
+          primary: async () => ({ label: null }),
+          backup: async () => ({ label: "B" }),
+          catcher: async () => ({ label: "C" }),
+        },
+      });
+
+      const caught = await ctx.executeFn({
+        document,
+        operation: "Query.lookup",
+        input: { q: "x" },
+        traversalId: true,
+        tools: {
+          primary: async () => {
+            throw new Error("boom");
+          },
+          backup: async () => ({ label: "B" }),
+          catcher: async () => ({ label: "C" }),
+        },
+      });
+
+      const primaryRepeat = await ctx.executeFn({
+        document,
+        operation: "Query.lookup",
+        input: { q: "another-input" },
+        traversalId: true,
+        tools: {
+          primary: async () => ({ label: "still-primary" }),
+          backup: async () => ({ label: "B" }),
+          catcher: async () => ({ label: "C" }),
+        },
+      });
+
+      assert.ok(primary.traversalId);
+      assert.ok(fallback.traversalId);
+      assert.ok(caught.traversalId);
+      assert.ok(primaryRepeat.traversalId);
+
+      assert.equal(primary.traversalId, primaryRepeat.traversalId);
+      assert.notEqual(primary.traversalId, fallback.traversalId);
+      assert.notEqual(fallback.traversalId, caught.traversalId);
+    });
+
+    test("traversal ids ignore repeated array iterations when outcomes stay the same", async () => {
+      const document = parseBridge(`version 1.5
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+  with output as o
+
+  gc.q <- i.search
+  o <- gc.items[] as item {
+    .name <- item.title
+    .lat <- item.position.lat
+    .lon <- item.position.lng
+  }
+}`);
+
+      const fewResults = await ctx.executeFn({
+        document,
+        operation: "Query.geocode",
+        input: { search: "Ber" },
+        traversalId: true,
+        tools: {
+          "hereapi.geocode": async () => ({
+            items: [
+              { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
+              { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
+            ],
+          }),
+        },
+      });
+
+      const moreResults = await ctx.executeFn({
+        document,
+        operation: "Query.geocode",
+        input: { search: "Ber" },
+        traversalId: true,
+        tools: {
+          "hereapi.geocode": async () => ({
+            items: [
+              { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
+              { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
+              { title: "Bergen", position: { lat: 60.39, lng: 5.32 } },
+            ],
+          }),
+        },
+      });
+
+      assert.ok(fewResults.traversalId);
+      assert.equal(fewResults.traversalId, moreResults.traversalId);
+    });
+
+    test("pricing bridge exposes 16 static traversal ids", () => {
+      const document = parseBridge(`version 1.5
+bridge Query.pricing {
+  with input as i
+  with output as o
+
+  o.tier <- i.isPro ? "premium" : "basic"
+  o.discount <- i.isPro ? 20 : 5
+  o.price <- i.isPro ? i.proPrice : i.basicPrice
+}`);
+
+      const bridge = document.instructions.find(
+        (instruction) => instruction.kind === "bridge",
+      ) as any;
+      assert.ok(bridge);
+
+      const plans = enumerateTraversalIds(bridge);
+
+      assert.equal(plans.length, 16);
+      assert.equal(
+        new Set(plans.map((plan) => plan.traversalId)).size,
+        16,
+      );
+    });
+
+    test("large bridges still have a finite auditable traversal-id search space", async () => {
+      const document = parseBridge(`version 1.5
+
+tool sbbApi from mockSbbHttp {
+  .baseUrl = "https://transport.opendata.ch/v1"
+  .method = GET
+  .path = "/connections"
+  .cache = 60
+  on error = {"connections": []}
+}
+
+bridge Query.searchTrains {
+  with sbbApi as api
+  with input as i
+  with output as o
+
+  api.from <- i.from
+  api.to <- i.to
+
+  o <- api.connections[] as c {
+    .id <- c.from.station.id
+    .provider = "SBB"
+    .departureTime <- c.from.departure
+    .arrivalTime <- c.to.arrival
+    .transfers <- c.transfers || 0
+
+    .legs <- c.sections[] as s {
+      .trainName <- s.journey.name || s.journey.category || "Walk"
+
+      .origin.station.id <- s.departure.station.id
+      .origin.station.name <- s.departure.station.name
+      .origin.plannedTime <- s.departure.departure
+      .origin.actualTime <- s.departure.departure
+      .origin.delayMinutes <- s.departure.delay || 0
+      .origin.platform <- s.departure.platform
+
+      .destination {
+        .station {
+          .id <- s.arrival.station.id
+          .name <- s.arrival.station.name
+        }
+        .plannedTime <- s.arrival.arrival
+        .actualTime <- s.arrival.arrival
+        .delayMinutes <- s.arrival.delay || 0
+        .platform <- s.arrival.platform
+      }
+    }
+  }
+}`);
+
+      const bridge = document.instructions.find(
+        (instruction) => instruction.kind === "bridge",
+      ) as any;
+      assert.ok(bridge);
+
+      const plannedTraversalIds = enumerateTraversalIds(bridge);
+
+      function nonEmptySubsets<T>(items: readonly T[]): T[][] {
+        const subsets: T[][] = [];
+        const limit = 1 << items.length;
+        for (let mask = 1; mask < limit; mask++) {
+          const subset: T[] = [];
+          for (let index = 0; index < items.length; index++) {
+            if (mask & (1 << index)) {
+              subset.push(items[index]!);
+            }
+          }
+          subsets.push(subset);
+        }
+        return subsets;
+      }
+
+      function selectionKey(selection: Record<string, string[]>): string {
+        return JSON.stringify(
+          Object.fromEntries(
+            Object.entries(selection).map(([key, values]) => [
+              key,
+              [...values].sort(),
+            ]),
+          ),
+        );
+      }
+
+      type TransferMode = "primary" | "fallback";
+      type TrainNameMode = "name" | "category" | "walk";
+      type DelayMode = "primary" | "fallback";
+
+      assert.equal(plannedTraversalIds.length, 189);
+
+      const plannedByTraversalId = new Map(
+        plannedTraversalIds.map((plan) => [
+          plan.traversalId,
+          Object.fromEntries(
+            plan.sites.map((site) => [
+              site.targetPath.join("."),
+              [...site.observedOutcomes].sort(),
+            ]),
+          ),
+        ]),
+      );
+
+      assert.deepEqual([...plannedByTraversalId.keys()].length, 189);
+
+      function buildSection(
+        trainName: TrainNameMode,
+        originDelay: DelayMode,
+        destinationDelay: DelayMode,
+        sectionIndex: number,
+      ): Record<string, unknown> {
+        const journey =
+          trainName === "name"
+            ? { name: `IC ${sectionIndex}`, category: "IC" }
+            : trainName === "category"
+              ? { name: "", category: "IR" }
+              : { name: "", category: "" };
+
+        return {
+          journey,
+          departure: {
+            station: {
+              id: `origin-${sectionIndex}`,
+              name: `Origin ${sectionIndex}`,
+            },
+            departure: `2026-03-08T0${sectionIndex % 10}:00:00Z`,
+            delay: originDelay === "primary" ? sectionIndex + 1 : 0,
+            platform: `${(sectionIndex % 9) + 1}`,
+          },
+          arrival: {
+            station: {
+              id: `destination-${sectionIndex}`,
+              name: `Destination ${sectionIndex}`,
+            },
+            arrival: `2026-03-08T1${sectionIndex % 10}:00:00Z`,
+            delay: destinationDelay === "primary" ? sectionIndex + 2 : 0,
+            platform: `${(sectionIndex % 9) + 2}`,
+          },
+        };
+      }
+
+      function buildConnections(selection: {
+        transfers: TransferMode[];
+        trainName: TrainNameMode[];
+        originDelay: DelayMode[];
+        destinationDelay: DelayMode[];
+      }): Array<Record<string, unknown>> {
+        const sections: Array<Record<string, unknown>> = [];
+        let sectionIndex = 0;
+
+        for (const trainName of selection.trainName) {
+          for (const originDelay of selection.originDelay) {
+            for (const destinationDelay of selection.destinationDelay) {
+              sections.push(
+                buildSection(
+                  trainName,
+                  originDelay,
+                  destinationDelay,
+                  sectionIndex,
+                ),
+              );
+              sectionIndex += 1;
+            }
+          }
+        }
+
+        return selection.transfers.map((transfers, connectionIndex) => ({
+          from: {
+            station: { id: `from-${connectionIndex}` },
+            departure: `2026-03-08T08:0${connectionIndex}:00Z`,
+          },
+          to: {
+            arrival: `2026-03-08T09:0${connectionIndex}:00Z`,
+          },
+          transfers: transfers === "primary" ? connectionIndex + 1 : 0,
+          sections,
+        }));
+      }
+
+      const transferSelections = nonEmptySubsets([
+        "primary",
+        "fallback",
+      ] as const);
+      const trainNameSelections = nonEmptySubsets([
+        "name",
+        "category",
+        "walk",
+      ] as const);
+      const delaySelections = nonEmptySubsets(["primary", "fallback"] as const);
+
+      const bruteForcedSelections = new Map<string, string>();
+      const actualTraversalIds = new Set<string>();
+      let targetTraversalId: string | undefined;
+
+      for (const transfers of transferSelections) {
+        for (const trainName of trainNameSelections) {
+          for (const originDelay of delaySelections) {
+            for (const destinationDelay of delaySelections) {
+              const selection = {
+                transfers: [...transfers],
+                trainName: [...trainName],
+                originDelay: [...originDelay],
+                destinationDelay: [...destinationDelay],
+              };
+
+              const result = await ctx.executeFn({
+                document,
+                operation: "Query.searchTrains",
+                input: { from: "Bern", to: "Zürich" },
+                traversalId: true,
+                tools: {
+                  mockSbbHttp: async () => ({
+                    connections: buildConnections(selection),
+                  }),
+                },
+              });
+
+              assert.ok(result.traversalId);
+              bruteForcedSelections.set(
+                result.traversalId,
+                selectionKey(selection),
+              );
+              actualTraversalIds.add(result.traversalId!);
+
+              if (
+                selection.transfers.length === 2 &&
+                selection.transfers.includes("fallback") &&
+                selection.transfers.includes("primary") &&
+                selection.trainName.length === 2 &&
+                selection.trainName.includes("walk") &&
+                selection.trainName.includes("category") &&
+                selection.originDelay.length === 1 &&
+                selection.originDelay[0] === "fallback" &&
+                selection.destinationDelay.length === 2 &&
+                selection.destinationDelay.includes("fallback") &&
+                selection.destinationDelay.includes("primary")
+              ) {
+                targetTraversalId = result.traversalId;
+              }
+            }
+          }
+        }
+      }
+
+      assert.equal(bruteForcedSelections.size, plannedTraversalIds.length);
+      assert.equal(actualTraversalIds.size, 189);
+      assert.ok(targetTraversalId);
+      assert.deepEqual(plannedByTraversalId.get(targetTraversalId), {
+        transfers: [
+          "source:from>fallback:0:falsy:value>return",
+          "source:from>return",
+        ],
+        "legs.trainName": [
+          "source:from>fallback:0:falsy:ref>fallback:1:falsy:value>return",
+          "source:from>fallback:0:falsy:ref>return",
+        ],
+        "legs.origin.delayMinutes": [
+          "source:from>fallback:0:falsy:value>return",
+        ],
+        "legs.destination.delayMinutes": [
+          "source:from>fallback:0:falsy:value>return",
+          "source:from>return",
+        ],
+      });
     });
   });
 

@@ -38,6 +38,8 @@ export type ExecuteBridgeOptions = {
   tools?: ToolMap;
   /** Context available via `with context as ctx` inside the bridge. */
   context?: Record<string, unknown>;
+  /** Capture a stable traversal id for this execution. */
+  traversalId?: boolean;
   /**
    * Enable tool-call tracing.
    * - `"off"` (default) — no collection, zero overhead
@@ -78,6 +80,7 @@ export type ExecuteBridgeOptions = {
 export type ExecuteBridgeResult<T = unknown> = {
   data: T;
   traces: ToolTrace[];
+  traversalId?: string;
 };
 
 /**
@@ -158,6 +161,9 @@ export async function executeBridge<T = unknown>(
   if (traceLevel !== "off") {
     tree.tracer = new TraceCollector(traceLevel);
   }
+  if (options.traversalId) {
+    tree.beginTraversalIdCollection(operation);
+  }
 
   let data: unknown;
   try {
@@ -166,5 +172,9 @@ export async function executeBridge<T = unknown>(
     throw attachBridgeErrorDocumentContext(err, doc);
   }
 
-  return { data: data as T, traces: tree.getTraces() };
+  return {
+    data: data as T,
+    traces: tree.getTraces(),
+    ...(options.traversalId ? { traversalId: tree.getTraversalId() } : {}),
+  };
 }

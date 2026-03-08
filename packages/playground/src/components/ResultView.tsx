@@ -13,6 +13,7 @@ type Props = {
   result: unknown | null;
   errors: string[] | undefined;
   loading: boolean;
+  traversalId?: string;
   traces?: ToolTrace[];
   logs?: LogEntry[];
   onClearCache?: () => void;
@@ -24,6 +25,7 @@ export function ResultView({
   result,
   errors,
   loading,
+  traversalId,
   traces,
   logs,
   onClearCache,
@@ -92,8 +94,18 @@ export function ResultView({
       </div>
 
       {/* Badges row + expanded panel pinned to bottom */}
-      {(hasTraces || hasLogs || onClearCache) && (
+      {(traversalId || hasTraces || hasLogs || onClearCache) && (
         <div className="shrink-0 pt-2.5 space-y-2">
+          {traversalId && (
+            <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/40 px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
+                Traversal ID
+              </div>
+              <div className="mt-1 font-mono text-[12px] text-emerald-200 break-all">
+                {traversalId}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             {hasTraces && (
               <TracesToggle

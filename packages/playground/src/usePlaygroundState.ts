@@ -7,11 +7,12 @@ import {
   getDiagnostics,
   extractBridgeOperations,
   extractOutputFields,
+  extractTraversalPlans,
   extractInputSkeleton,
   mergeInputSkeleton,
   prettyPrintToSource,
 } from "./engine";
-import type { RunResult } from "./engine";
+import type { RunResult, TraversalOperationPlans } from "./engine";
 import { buildSchema, type GraphQLSchema } from "graphql";
 import type { PlaygroundMode, SharePayload } from "./share";
 
@@ -319,6 +320,11 @@ export function usePlaygroundState(
     [bridge, activeOperation],
   );
 
+  const traversalPlans = useMemo<TraversalOperationPlans[]>(
+    () => extractTraversalPlans(bridge),
+    [bridge],
+  );
+
   // When the bridge DSL changes in standalone mode, merge input fields and prune output fields
   const prevBridgeRef = useRef(bridge);
   useEffect(() => {
@@ -404,5 +410,6 @@ export function usePlaygroundState(
     graphqlSchema,
     bridgeOperations,
     availableOutputFields,
+    traversalPlans,
   };
 }

@@ -6,10 +6,16 @@ import {
   useDefaultLayout,
 } from "react-resizable-panels";
 import { Editor } from "./components/Editor";
+import { BridgeDslPanel } from "./components/BridgeDslPanel";
 import { ResultView } from "./components/ResultView";
 import { StandaloneQueryPanel } from "./components/StandaloneQueryPanel";
 import { clearHttpCache } from "./engine";
-import type { RunResult, BridgeOperation, OutputFieldNode } from "./engine";
+import type {
+  RunResult,
+  BridgeOperation,
+  OutputFieldNode,
+  TraversalOperationPlans,
+} from "./engine";
 import type { GraphQLSchema } from "graphql";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,8 +28,8 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
       className={cn(
         "shrink-0 outline-none",
         direction === "horizontal"
-          ? "w-2 cursor-[col-resize]"
-          : "h-2 cursor-[row-resize]",
+          ? "w-2 cursor-col-resize"
+          : "h-2 cursor-row-resize",
       )}
     />
   );
@@ -217,17 +223,6 @@ function QueryTabBar({
   );
 }
 
-// ── bridge DSL panel header (label only) ─────────────────────────────────────
-function BridgeDslHeader() {
-  return (
-    <div className="content-center shrink-0 px-5 h-10 flex items-center">
-      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-widest">
-        Bridge DSL
-      </span>
-    </div>
-  );
-}
-
 // ── schema panel header with mode toggle ─────────────────────────────────────
 function SchemaHeader({
   mode,
@@ -322,6 +317,7 @@ export type PlaygroundProps = {
   graphqlSchema?: GraphQLSchema;
   bridgeOperations: BridgeOperation[];
   availableOutputFields: OutputFieldNode[];
+  traversalPlans: TraversalOperationPlans[];
   hideGqlSwitch?: boolean;
 };
 
@@ -351,6 +347,7 @@ export function Playground({
   graphqlSchema,
   bridgeOperations,
   availableOutputFields,
+  traversalPlans,
   hideGqlSwitch,
 }: PlaygroundProps) {
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
@@ -395,17 +392,13 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader />
-          <div className="px-3 pb-3">
-            <Editor
-              label=""
-              value={bridge}
-              onChange={onBridgeChange}
-              language="bridge"
-              autoHeight
-              onFormat={onFormatBridge}
-            />
-          </div>
+          <BridgeDslPanel
+            bridge={bridge}
+            onBridgeChange={onBridgeChange}
+            onFormatBridge={onFormatBridge}
+            traversalPlans={traversalPlans}
+            autoHeight
+          />
         </div>
 
         {/* Query / Context panel */}
@@ -487,6 +480,7 @@ export function Playground({
               result={displayResult?.data}
               errors={displayResult?.errors}
               loading={displayRunning}
+              traversalId={displayResult?.traversalId}
               traces={displayResult?.traces}
               logs={displayResult?.logs}
               onClearCache={clearHttpCache}
@@ -519,16 +513,12 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader />
-                  <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor
-                      label=""
-                      value={bridge}
-                      onChange={onBridgeChange}
-                      language="bridge"
-                      onFormat={onFormatBridge}
-                    />
-                  </div>
+                  <BridgeDslPanel
+                    bridge={bridge}
+                    onBridgeChange={onBridgeChange}
+                    onFormatBridge={onFormatBridge}
+                    traversalPlans={traversalPlans}
+                  />
                 </PanelBox>
               </div>
             ) : (
@@ -563,16 +553,12 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader />
-                    <div className="flex-1 min-h-0 px-3 pb-3">
-                      <Editor
-                        label=""
-                        value={bridge}
-                        onChange={onBridgeChange}
-                        language="bridge"
-                        onFormat={onFormatBridge}
-                      />
-                    </div>
+                    <BridgeDslPanel
+                      bridge={bridge}
+                      onBridgeChange={onBridgeChange}
+                      onFormatBridge={onFormatBridge}
+                      traversalPlans={traversalPlans}
+                    />
                   </PanelBox>
                 </Panel>
               </Group>
@@ -663,6 +649,7 @@ export function Playground({
                       result={displayResult?.data}
                       errors={displayResult?.errors}
                       loading={displayRunning}
+                      traversalId={displayResult?.traversalId}
                       traces={displayResult?.traces}
                       logs={displayResult?.logs}
                       onClearCache={clearHttpCache}

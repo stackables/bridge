@@ -9,6 +9,7 @@
 
 export {
   bridgeTransform,
+  getBridgeTraversalId,
   getBridgeTraces,
   useBridgeTracing,
   BridgeGraphQLIncompatibleError,

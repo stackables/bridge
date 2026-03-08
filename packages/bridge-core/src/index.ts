@@ -34,7 +34,13 @@ export { mergeBridgeDocuments } from "./merge-documents.ts";
 
 export { ExecutionTree } from "./ExecutionTree.ts";
 export { TraceCollector, boundedClone } from "./tracing.ts";
+export { enumerateTraversalIds, explainTraversalPlan } from "./traversal-space.ts";
 export type { ToolTrace, TraceLevel } from "./tracing.ts";
+export type {
+  TraversalBranchSite,
+  TraversalIdPlan,
+  TraversalPlanExplanation,
+} from "./traversal-space.ts";
 export {
   formatBridgeError,
   attachBridgeErrorDocumentContext,
