@@ -42,14 +42,17 @@ export default defineConfig({
     starlight({
       title: "The Bridge",
       customCss: ["./src/styles/custom.css"],
+      components: {
+        SocialIcons: "./src/components/SocialIcons.astro",
+      },
       logo: {
         src: "./src/assets/logo.svg",
       },
       social: [
         {
-          label: "Blog",
-          icon: "rss",
-          href: "/blog",
+          label: "Playground",
+          icon: "rocket",
+          href: "/playground",
         },
         {
           icon: "github",
