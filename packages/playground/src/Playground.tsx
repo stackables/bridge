@@ -400,7 +400,10 @@ function ManifestView({
           >
             {showAllPaths ? "Show alternatives only" : "Show all paths"}
           </button>
-          <span className="text-[10px] text-slate-600">
+          <span
+            className="text-[10px] text-slate-600"
+            aria-label={`Showing ${visibleGroups.length} of ${groups.length} wire groups`}
+          >
             {visibleGroups.length}/{groups.length} groups
           </span>
         </div>
