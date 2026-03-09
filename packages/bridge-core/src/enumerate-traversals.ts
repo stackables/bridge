@@ -122,6 +122,10 @@ function addCatchEntry(
  * Returns a flat list of {@link TraversalEntry} objects, one per
  * unique code-path through the bridge's wires.  The total length
  * of the returned array is a useful proxy for bridge complexity.
+ *
+ * `bitIndex` is initially set to `-1` during construction and
+ * assigned sequentially (0, 1, 2, …) at the end.  No entry is
+ * exposed with `bitIndex === -1`.
  */
 export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
   const entries: TraversalEntry[] = [];
@@ -241,6 +245,8 @@ export function decodeExecutionTrace(
 ): TraversalEntry[] {
   const result: TraversalEntry[] = [];
   for (const entry of manifest) {
+    // Check if the bit at position `entry.bitIndex` is set in the trace,
+    // indicating this path was taken during execution.
     if (trace & (1 << entry.bitIndex)) {
       result.push(entry);
     }

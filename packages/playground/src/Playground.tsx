@@ -480,7 +480,7 @@ export function Playground({
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
   const isStandalone = mode === "standalone";
-  const [dslTab, setDslTab] = useState<"dsl" | "manifest">("dsl");
+  const [activeDslTab, setActiveDslTab] = useState<"dsl" | "manifest">("dsl");
 
   // Determine which operation to use for manifest
   const manifestOperation = useMemo(() => {
@@ -524,9 +524,9 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
+          <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
           <div className="px-3 pb-3">
-            {dslTab === "dsl" ? (
+            {activeDslTab === "dsl" ? (
               <Editor
                 label=""
                 value={bridge}
@@ -658,9 +658,9 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
+                  <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    {dslTab === "dsl" ? (
+                    {activeDslTab === "dsl" ? (
                       <Editor
                         label=""
                         value={bridge}
@@ -710,9 +710,9 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
+                    <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
                     <div className="flex-1 min-h-0 px-3 pb-3">
-                      {dslTab === "dsl" ? (
+                      {activeDslTab === "dsl" ? (
                         <Editor
                           label=""
                           value={bridge}

@@ -176,13 +176,13 @@ export async function applyFallbackGates(
 ): Promise<unknown> {
   if (!w.fallbacks?.length) return value;
 
-  for (let fi = 0; fi < w.fallbacks.length; fi++) {
-    const fallback = w.fallbacks[fi];
+  for (let fallbackIndex = 0; fallbackIndex < w.fallbacks.length; fallbackIndex++) {
+    const fallback = w.fallbacks[fallbackIndex];
     const isFalsyGateOpen = fallback.type === "falsy" && !value;
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
-      recordFallback(ctx, w, fi);
+      recordFallback(ctx, w, fallbackIndex);
       if (fallback.control) {
         return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
@@ -373,6 +373,9 @@ function pullSafe(
 // These are designed for minimal overhead: when `traceBits` is not set on the
 // context (tracing disabled), the functions return immediately after a single
 // falsy check.  When enabled, one Map.get + one bitwise OR is the hot path.
+//
+// INVARIANT: `traceMask` is always set when `traceBits` is set — both are
+// initialised together by `ExecutionTree.enableExecutionTrace()`.
 
 function recordPrimary(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
