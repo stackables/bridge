@@ -1,5 +1,15 @@
 # @stackables/bridge-types
 
+## 1.2.0
+
+### Minor Changes
+
+- [#112](https://github.com/stackables/bridge/pull/112) [`375e2b0`](https://github.com/stackables/bridge/commit/375e2b08a16f670cded3aba7d6e2ee52254eab1c) Thanks [@aarne](https://github.com/aarne)! - Improve native batched tool authoring by documenting the feature, exporting dedicated batch tool types, and simplifying the batch contract to plain input arrays.
+
+  Batch tools now receive `Input[]` and must return `Output[]` in matching order. Batched tool tracing and logging are also emitted once per flushed batch call instead of once per queued item.
+
+  Native batching now works in compiled execution as well as the runtime interpreter. Batch tools can also signal partial failures by returning an `Error` at a specific result index, which rejects only that item and allows normal wire-level `catch` fallbacks to handle it.
+
 ## 1.1.0
 
 ### Minor Changes
