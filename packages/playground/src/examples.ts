@@ -1510,4 +1510,96 @@ bridge Query.enrichedUsers {
   "userIds": [1, 2, 999]
 }`,
   },
+  {
+    id: "deepseek-sync",
+    name: "Deepseek Sync",
+    description:
+      "Integrate with the Deepseek API to power a synchronous chatbot that accepts a message history and returns a response",
+    schema: `scalar JSONObejct
+
+type Query {
+  _: Boolean
+}
+
+type Mutation {
+  deepseekChat(messages: JSONObejct): [Message]
+}
+
+type Message {
+  role: String!
+  content: String!
+}`,
+    bridge: `version 1.5
+
+# 1. Define the reusable HTTP tool
+tool deepseekApi from std.httpCall {
+  .baseUrl = "https://api.deepseek.com"
+  .method = POST
+  .path = "/chat/completions"
+  .headers.Content-Type = "application/json"  
+}
+
+# 2. Define the GraphQL endpoint / Bridge operation
+bridge Mutation.deepseekChat {
+  with deepseekApi as api
+  with input as i
+  with context as ctx
+  with output as o
+
+  # Securely pass the API key from context (so it isn't logged in the input)
+  api.headers.Authorization <- "Bearer {ctx.DEEPSEEK_API_KEY}"
+
+  # Construct the JSON body payload
+  api.model = "deepseek-chat"
+  api.stream = false
+  
+  # Build the messages array dynamically using the user's prompt
+  api.messages <- i.messages
+
+  # Map the response directly to the output object
+  o <- api.choices[] as c {
+     .role <- c.message.role
+     .content <- c.message.content
+  }
+}`,
+    queries: [
+      {
+        name: "Deepseek Chat",
+        query: `mutation {
+  deepseekChat(messages: [
+    {
+      role: "system",
+      content: "You are a helpful assistant."
+    },
+    {
+      role: "user",
+      content: "Tell me a joke"
+    }
+  ]) {
+    content
+    role
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Mutation.deepseekChat",
+        outputFields: "",
+        input: {
+          messages: [
+            {
+              role: "system",
+              content: "You are a helpful assistant.",
+            },
+            {
+              role: "user",
+              content: "Tell me a joke",
+            },
+          ],
+        },
+      },
+    ],
+    context: `{ "DEEPSEEK_API_KEY": "" }`,
+  },
 ];
