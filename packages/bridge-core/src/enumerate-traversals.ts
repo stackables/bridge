@@ -9,8 +9,10 @@
  *   `o <- i.arr[] as a { .data <- a.a ?? a.b }`  →  3 traversals
  *      (empty-array, primary for .data, nullish fallback for .data)
  *
- * Used for complexity assessment and will integrate into the execution
- * engine for monitoring.
+ * The traversal manifest is a static analysis result. At runtime, the
+ * execution engine produces a compact numeric `executionTrace` (bitmask)
+ * that records which traversal paths were actually taken. Use
+ * {@link decodeExecutionTrace} to map the bitmask back to entries.
  */
 
 import type { Bridge, Wire, WireFallback } from "./types.ts";
@@ -40,6 +42,8 @@ export interface TraversalEntry {
   fallbackIndex?: number;
   /** Gate type (only when kind is `"fallback"`): `"falsy"` for `||`, `"nullish"` for `??`. */
   gateType?: "falsy" | "nullish";
+  /** Bit position in the execution trace bitmask (0-based). */
+  bitIndex: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ function addFallbackEntries(
       kind: "fallback",
       fallbackIndex: i,
       gateType: fallbacks[i].type,
+      bitIndex: -1, // assigned after enumeration
     });
   }
 }
@@ -105,7 +110,7 @@ function addCatchEntry(
   w: Wire,
 ): void {
   if (hasCatch(w)) {
-    entries.push({ id: `${base}/catch`, wireIndex, target, kind: "catch" });
+    entries.push({ id: `${base}/catch`, wireIndex, target, kind: "catch", bitIndex: -1 });
   }
 }
 
@@ -137,7 +142,7 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
 
     // ── Constant wire ───────────────────────────────────────────────
     if ("value" in w) {
-      entries.push({ id: `${base}/const`, wireIndex: i, target, kind: "const" });
+      entries.push({ id: `${base}/const`, wireIndex: i, target, kind: "const", bitIndex: -1 });
       continue;
     }
 
@@ -151,6 +156,7 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
           wireIndex: i,
           target,
           kind: "primary",
+          bitIndex: -1,
         });
         addFallbackEntries(entries, base, i, target, w.fallbacks);
         addCatchEntry(entries, base, i, target, w);
@@ -160,8 +166,8 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
 
     // ── Conditional (ternary) wire ──────────────────────────────────
     if ("cond" in w) {
-      entries.push({ id: `${base}/then`, wireIndex: i, target, kind: "then" });
-      entries.push({ id: `${base}/else`, wireIndex: i, target, kind: "else" });
+      entries.push({ id: `${base}/then`, wireIndex: i, target, kind: "then", bitIndex: -1 });
+      entries.push({ id: `${base}/else`, wireIndex: i, target, kind: "else", bitIndex: -1 });
       addFallbackEntries(entries, base, i, target, w.fallbacks);
       addCatchEntry(entries, base, i, target, w);
       continue;
@@ -173,6 +179,7 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
       wireIndex: i,
       target,
       kind: "primary",
+      bitIndex: -1,
     });
     if ("condAnd" in w) {
       addFallbackEntries(entries, base, i, target, w.fallbacks);
@@ -194,9 +201,110 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
         wireIndex: -1,
         target: key ? key.split(".") : [],
         kind: "empty-array",
+        bitIndex: -1,
       });
     }
   }
 
+  // Assign sequential bit indices
+  for (let i = 0; i < entries.length; i++) {
+    entries[i].bitIndex = i;
+  }
+
   return entries;
+}
+
+// ── New public API ──────────────────────────────────────────────────────────
+
+/**
+ * Build the static traversal manifest for a bridge.
+ *
+ * Alias for {@link enumerateTraversalIds} with the recommended naming.
+ * Returns the ordered array of {@link TraversalEntry} objects. Each entry
+ * carries a `bitIndex` that maps it to a bit position in the runtime
+ * execution trace bitmask.
+ */
+export const buildTraversalManifest = enumerateTraversalIds;
+
+/**
+ * Decode a runtime execution trace bitmask against a traversal manifest.
+ *
+ * Returns the subset of {@link TraversalEntry} objects whose bits are set
+ * in the trace — i.e. the paths that were actually taken during execution.
+ *
+ * @param manifest  The static manifest from {@link buildTraversalManifest}.
+ * @param trace     The numeric bitmask produced by the execution engine.
+ */
+export function decodeExecutionTrace(
+  manifest: TraversalEntry[],
+  trace: number,
+): TraversalEntry[] {
+  const result: TraversalEntry[] = [];
+  for (const entry of manifest) {
+    if (trace & (1 << entry.bitIndex)) {
+      result.push(entry);
+    }
+  }
+  return result;
+}
+
+// ── Runtime trace helpers ───────────────────────────────────────────────────
+
+/**
+ * Per-wire bit positions used by the execution engine to record which
+ * traversal paths were taken.  Built once per bridge from the manifest.
+ */
+export interface TraceWireBits {
+  /** Bit index for the primary / then / const path. */
+  primary?: number;
+  /** Bit index for the else branch (conditional wires only). */
+  else?: number;
+  /** Bit indices for each fallback gate (same order as `fallbacks` array). */
+  fallbacks?: number[];
+  /** Bit index for the catch path. */
+  catch?: number;
+}
+
+/**
+ * Build a lookup map from Wire objects to their trace bit positions.
+ *
+ * This is called once per bridge at setup time.  The returned map is
+ * used by `resolveWires` to flip bits in the shared trace mask with
+ * minimal overhead (one Map.get + one bitwise OR per decision).
+ */
+export function buildTraceBitsMap(
+  bridge: Bridge,
+  manifest: TraversalEntry[],
+): Map<Wire, TraceWireBits> {
+  const map = new Map<Wire, TraceWireBits>();
+  for (const entry of manifest) {
+    if (entry.wireIndex < 0) continue; // synthetic entries (empty-array)
+    const wire = bridge.wires[entry.wireIndex];
+    if (!wire) continue;
+
+    let bits = map.get(wire);
+    if (!bits) {
+      bits = {};
+      map.set(wire, bits);
+    }
+
+    switch (entry.kind) {
+      case "primary":
+      case "then":
+      case "const":
+        bits.primary = entry.bitIndex;
+        break;
+      case "else":
+        bits.else = entry.bitIndex;
+        break;
+      case "fallback":
+        if (!bits.fallbacks) bits.fallbacks = [];
+        bits.fallbacks[entry.fallbackIndex ?? 0] = entry.bitIndex;
+        break;
+      case "catch":
+        bits.catch = entry.bitIndex;
+        break;
+    }
+  }
+  return map;
 }

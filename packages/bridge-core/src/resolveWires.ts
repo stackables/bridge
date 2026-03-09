@@ -21,6 +21,7 @@ import {
   wrapBridgeRuntimeError,
 } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
+import type { TraceWireBits } from "./enumerate-traversals.ts";
 
 // ── Wire type helpers ────────────────────────────────────────────────────────
 
@@ -72,9 +73,13 @@ export function resolveWires(
 
   if (wires.length === 1) {
     const w = wires[0]!;
-    if ("value" in w) return coerceConstant(w.value);
+    if ("value" in w) {
+      recordPrimary(ctx, w);
+      return coerceConstant(w.value);
+    }
     const ref = getSimplePullRef(w);
     if (ref) {
+      recordPrimary(ctx, w);
       return ctx.pullSingle(
         ref,
         pullChain,
@@ -121,7 +126,10 @@ async function resolveWiresAsync(
     if (ctx.signal?.aborted) throw new BridgeAbortError();
 
     // Constant wire — always wins, no modifiers
-    if ("value" in w) return coerceConstant(w.value);
+    if ("value" in w) {
+      recordPrimary(ctx, w);
+      return coerceConstant(w.value);
+    }
 
     try {
       // Layer 1: Execution
@@ -168,11 +176,13 @@ export async function applyFallbackGates(
 ): Promise<unknown> {
   if (!w.fallbacks?.length) return value;
 
-  for (const fallback of w.fallbacks) {
+  for (let fi = 0; fi < w.fallbacks.length; fi++) {
+    const fallback = w.fallbacks[fi];
     const isFalsyGateOpen = fallback.type === "falsy" && !value;
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
+      recordFallback(ctx, w, fi);
       if (fallback.control) {
         return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
@@ -207,12 +217,17 @@ export async function applyCatchGate(
   pullChain?: Set<string>,
 ): Promise<unknown> {
   if (w.catchControl) {
+    recordCatch(ctx, w);
     return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
   }
   if (w.catchFallbackRef) {
+    recordCatch(ctx, w);
     return ctx.pullSingle(w.catchFallbackRef, pullChain, w.catchLoc ?? w.loc);
   }
-  if (w.catchFallback != null) return coerceConstant(w.catchFallback);
+  if (w.catchFallback != null) {
+    recordCatch(ctx, w);
+    return coerceConstant(w.catchFallback);
+  }
   return undefined;
 }
 
@@ -256,11 +271,13 @@ async function evaluateWireSource(
       w.condLoc ?? w.loc,
     );
     if (condValue) {
+      recordPrimary(ctx, w); // "then" branch → primary bit
       if (w.thenRef !== undefined) {
         return ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
       }
       if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
     } else {
+      recordElse(ctx, w); // "else" branch
       if (w.elseRef !== undefined) {
         return ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
       }
@@ -270,6 +287,7 @@ async function evaluateWireSource(
   }
 
   if ("condAnd" in w) {
+    recordPrimary(ctx, w);
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
     const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
     if (!leftVal) return false;
@@ -282,6 +300,7 @@ async function evaluateWireSource(
   }
 
   if ("condOr" in w) {
+    recordPrimary(ctx, w);
     const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
     const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
     if (leftVal) return true;
@@ -294,6 +313,7 @@ async function evaluateWireSource(
   }
 
   if ("from" in w) {
+    recordPrimary(ctx, w);
     if (w.safe) {
       try {
         return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
@@ -347,4 +367,30 @@ function pullSafe(
     if (isFatalError(e)) throw e;
     return undefined;
   });
+}
+
+// ── Trace recording helpers ─────────────────────────────────────────────────
+// These are designed for minimal overhead: when `traceBits` is not set on the
+// context (tracing disabled), the functions return immediately after a single
+// falsy check.  When enabled, one Map.get + one bitwise OR is the hot path.
+
+function recordPrimary(ctx: TreeContext, w: Wire): void {
+  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
+  if (bits?.primary != null) ctx.traceMask![0] |= 1 << bits.primary;
+}
+
+function recordElse(ctx: TreeContext, w: Wire): void {
+  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
+  if (bits?.else != null) ctx.traceMask![0] |= 1 << bits.else;
+}
+
+function recordFallback(ctx: TreeContext, w: Wire, index: number): void {
+  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
+  const fb = bits?.fallbacks;
+  if (fb && fb[index] != null) ctx.traceMask![0] |= 1 << fb[index];
+}
+
+function recordCatch(ctx: TreeContext, w: Wire): void {
+  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
+  if (bits?.catch != null) ctx.traceMask![0] |= 1 << bits.catch;
 }

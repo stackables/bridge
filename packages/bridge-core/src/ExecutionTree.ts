@@ -63,6 +63,8 @@ import {
   matchesRequestedFields,
 } from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
+import type { TraceWireBits } from "./enumerate-traversals.ts";
+import { buildTraceBitsMap, enumerateTraversalIds } from "./enumerate-traversals.ts";
 
 function stableMemoizeKey(value: unknown): string {
   if (value === undefined) {
@@ -145,6 +147,16 @@ export class ExecutionTree implements TreeContext {
   private forcedExecution?: Promise<void>;
   /** Shared trace collector — present only when tracing is enabled. */
   tracer?: TraceCollector;
+  /**
+   * Per-wire bit positions for execution trace recording.
+   * Built once from the bridge manifest.  Shared across shadow trees.
+   */
+  traceBits?: Map<Wire, TraceWireBits>;
+  /**
+   * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
+   * array so shadow trees can share the same mutable reference.
+   */
+  traceMask?: [number];
   /** Structured logger passed from BridgeOptions. Defaults to no-ops. */
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
@@ -726,6 +738,8 @@ export class ExecutionTree implements TreeContext {
     child.toolFns = this.toolFns;
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
+    child.traceBits = this.traceBits;
+    child.traceMask = this.traceMask;
     child.logger = this.logger;
     child.signal = this.signal;
     child.source = this.source;
@@ -759,6 +773,23 @@ export class ExecutionTree implements TreeContext {
   /** Returns collected traces (empty array when tracing is disabled). */
   getTraces(): ToolTrace[] {
     return this.tracer?.traces ?? [];
+  }
+
+  /** Returns the execution trace bitmask (0 when tracing is disabled). */
+  getExecutionTrace(): number {
+    return this.traceMask?.[0] ?? 0;
+  }
+
+  /**
+   * Enable execution trace recording.
+   * Builds the wire-to-bit map from the bridge manifest and initialises
+   * the shared mutable bitmask.  Safe to call before `run()`.
+   */
+  enableExecutionTrace(): void {
+    if (!this.bridge) return;
+    const manifest = enumerateTraversalIds(this.bridge);
+    this.traceBits = buildTraceBitsMap(this.bridge, manifest);
+    this.traceMask = [0];
   }
 
   /**
