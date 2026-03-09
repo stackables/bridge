@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Declarative dataflow for GraphQL",
   "main": "./build/index.js",
   "type": "module",

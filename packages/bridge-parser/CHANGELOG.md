@@ -1,5 +1,12 @@
 # @stackables/bridge-parser
 
+## 1.4.2
+
+### Patch Changes
+
+- Updated dependencies [[`d6907a2`](https://github.com/stackables/bridge/commit/d6907a2d263f9f23397e2073dc5f0a2bd7248062)]:
+  - @stackables/bridge-core@1.6.1
+
 ## 1.4.1
 
 ### Patch Changes
