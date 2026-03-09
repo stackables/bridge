@@ -289,6 +289,32 @@ export async function executeBridge<T = unknown>(
   const allTools: ToolMap = { std: bundledStd, ...userTools };
   const flatTools = flattenTools(allTools as Record<string, any>);
 
+  // Stream tools (async generators with `.bridge.stream`) are unsupported by
+  // the compiled code path.  Fall back to the core interpreter which wraps
+  // them in StreamHandle / eagerly consumes them.
+  for (const val of Object.values(flatTools)) {
+    if (
+      typeof val === "function" &&
+      val.bridge &&
+      typeof val.bridge === "object" &&
+      (val as { bridge: { stream?: boolean } }).bridge.stream === true
+    ) {
+      return executeCoreBridge<T>({
+        document,
+        operation,
+        input,
+        tools: userTools,
+        context,
+        signal,
+        toolTimeoutMs,
+        logger,
+        trace: options.trace,
+        requestedFields: options.requestedFields,
+        ...(maxDepth !== undefined ? { maxDepth } : {}),
+      });
+    }
+  }
+
   // Set up tracing if requested
   const traceLevel = options.trace ?? "off";
   let tracer: TraceCollector | undefined;

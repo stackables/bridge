@@ -261,6 +261,8 @@ export type {
   ToolContext,
   ScalarToolCallFn,
   ScalarToolFn,
+  StreamToolCallFn,
+  StreamToolFn,
   ToolCallFn,
   ToolMap,
   ToolMetadata,

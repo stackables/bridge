@@ -15,6 +15,18 @@ export type {
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
 
+export {
+  executeBridgeStream,
+  StreamHandle,
+  isStreamHandle,
+} from "./execute-bridge-stream.ts";
+export type {
+  StreamInitialPayload,
+  StreamIncrementalItem,
+  StreamIncrementalPayload,
+  StreamPayload,
+} from "./execute-bridge-stream.ts";
+
 // ── Version check ───────────────────────────────────────────────────────────
 
 export {
@@ -70,6 +82,8 @@ export type {
   SourceLocation,
   ScalarToolCallFn,
   ScalarToolFn,
+  StreamToolCallFn,
+  StreamToolFn,
   ToolCallFn,
   ToolContext,
   ToolDef,

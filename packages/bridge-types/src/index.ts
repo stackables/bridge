@@ -98,6 +98,26 @@ export interface ToolMetadata {
    */
   batch?: true | BatchToolMetadata;
 
+  /**
+   * If true, the tool is an async generator that yields incremental results.
+   *
+   * Stream tools must return an `AsyncGenerator` (use `async function*`).
+   * Each yielded value is delivered as an incremental patch via
+   * `executeBridgeStream()`. The engine collects yielded items into an
+   * array at the target output path.
+   *
+   * ```ts
+   * async function* aiStream(input) {
+   *   yield { token: "Hello" };
+   *   yield { token: " world" };
+   * }
+   * aiStream.bridge = { stream: true };
+   * ```
+   *
+   * Mutually exclusive with `batch` and `sync`.
+   */
+  stream?: boolean;
+
   // ─── Observability ────────────────────────────────────────────────────
 
   /**
@@ -146,6 +166,29 @@ export type BatchToolFn<
 };
 
 /**
+ * Stream tool call function — async generator signature for tools
+ * declared with `{ stream: true }` metadata.
+ *
+ * The engine iterates the generator, collecting each yielded value as
+ * an incremental patch delivered through `executeBridgeStream()`.
+ */
+export type StreamToolCallFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = (
+  input: Input,
+  context?: ToolContext,
+) => AsyncGenerator<Output, void, undefined>;
+
+/** Stream tool function with optional `.bridge` metadata attached. */
+export type StreamToolFn<
+  Input extends Record<string, any> = Record<string, any>,
+  Output = any,
+> = StreamToolCallFn<Input, Output> & {
+  bridge?: ToolMetadata;
+};
+
+/**
  * Recursive tool map — supports namespaced tools via nesting.
  *
  * Example:
@@ -157,8 +200,10 @@ export type ToolMap = {
   [key: string]:
     | ToolCallFn
     | BatchToolCallFn
+    | StreamToolCallFn
     | ScalarToolFn
     | BatchToolFn
+    | StreamToolFn
     | ((...args: any[]) => any)
     | ToolMap;
 };

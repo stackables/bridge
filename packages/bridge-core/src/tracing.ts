@@ -251,6 +251,8 @@ export type ResolvedToolMeta = {
   sync: boolean;
   /** Batch mode contract, when declared. */
   batch?: BatchToolMetadata;
+  /** Whether the tool is an async generator yielding incremental results. */
+  stream: boolean;
   /** Emit an OTel span for this call. Default: `true`. */
   doTrace: boolean;
   log: EffectiveToolLog;
@@ -280,6 +282,7 @@ export function resolveToolMeta(fn: (...args: any[]) => any): ResolvedToolMeta {
         : typeof bridge?.batch === "object"
           ? bridge.batch
           : undefined,
+    stream: bridge?.stream === true,
     doTrace: bridge?.trace !== false,
     log: resolveToolLog(bridge),
   };

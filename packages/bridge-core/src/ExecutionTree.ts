@@ -5,6 +5,7 @@ import {
   trunkDependsOnElement,
 } from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
+import { StreamHandle, isStreamHandle } from "./execute-bridge-stream.ts";
 import type { EffectiveToolLog, ToolTrace } from "./tracing.ts";
 import {
   isOtelActive,
@@ -64,7 +65,10 @@ import {
 } from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
-import { buildTraceBitsMap, enumerateTraversalIds } from "./enumerate-traversals.ts";
+import {
+  buildTraceBitsMap,
+  enumerateTraversalIds,
+} from "./enumerate-traversals.ts";
 
 function stableMemoizeKey(value: unknown): string {
   if (value === undefined) {
@@ -179,6 +183,12 @@ export class ExecutionTree implements TreeContext {
    * Public to satisfy `ToolLookupContext` — used by `toolLookup.ts`.
    */
   toolFns?: ToolMap;
+  /**
+   * When true, stream tools (`{ stream: true }`) return `StreamHandle`
+   * sentinels instead of being eagerly consumed.  Set by
+   * `executeBridgeStream()`.
+   */
+  streamMode: boolean = false;
   /** Shadow-tree nesting depth (0 for root). */
   private depth: number;
   /** Pre-computed `trunkKey({ ...this.trunk, element: true })`. See packages/bridge-core/performance.md (#4). */
@@ -336,7 +346,13 @@ export class ExecutionTree implements TreeContext {
     };
 
     const timeoutMs = this.toolTimeoutMs;
-    const { sync: isSyncTool, batch, doTrace, log } = resolveToolMeta(fnImpl);
+    const {
+      sync: isSyncTool,
+      batch,
+      stream: isStreamTool,
+      doTrace,
+      log,
+    } = resolveToolMeta(fnImpl);
 
     if (batch) {
       return this.callBatchedTool(
@@ -350,6 +366,26 @@ export class ExecutionTree implements TreeContext {
         log,
         batch.maxBatchSize,
       );
+    }
+
+    // ── Stream tool handling ──────────────────────────────────────
+    // Stream tools return async generators.  In stream mode, wrap the
+    // generator in a StreamHandle sentinel so executeBridgeStream can
+    // iterate it incrementally.  In normal mode, eagerly consume the
+    // generator into an array for backward compatibility.
+    if (isStreamTool) {
+      const generator = fnImpl(input, toolContext);
+      if (this.streamMode) {
+        return new StreamHandle(generator, toolName);
+      }
+      // Eager consumption: collect all yielded values into an array
+      return (async () => {
+        const items: unknown[] = [];
+        for await (const item of generator) {
+          items.push(item);
+        }
+        return items;
+      })();
     }
 
     // ── Fast path: no instrumentation configured ──────────────────
@@ -745,7 +781,30 @@ export class ExecutionTree implements TreeContext {
     child.signal = this.signal;
     child.source = this.source;
     child.filename = this.filename;
+    child.streamMode = this.streamMode;
     return child;
+  }
+
+  /**
+   * Wrap a StreamHandle generator so that each yielded item is transformed
+   * through array-mapping wires (shadow-tree creation + materialisation).
+   * Returns a new StreamHandle whose generator yields mapped objects.
+   */
+  private wrapStreamWithMapping(
+    handle: StreamHandle,
+    prefix: string[],
+  ): StreamHandle {
+    const parent = this;
+    async function* mappedGenerator() {
+      for await (const item of handle.generator) {
+        const shadow = parent.shadow();
+        shadow.state[parent.elementTrunkKey] = item;
+        const materialized = await parent.materializeShadows([shadow], prefix);
+        const mapped = (materialized as unknown[])?.[0];
+        yield mapped ?? item;
+      }
+    }
+    return new StreamHandle(mappedGenerator(), handle.toolName);
   }
 
   /**
@@ -1235,6 +1294,9 @@ export class ExecutionTree implements TreeContext {
     const result = this.resolveWires(matches);
     if (!array) return result;
     const resolved = await result;
+    if (isStreamHandle(resolved)) {
+      return this.wrapStreamWithMapping(resolved, path);
+    }
     if (isLoopControlSignal(resolved)) return [];
     return this.createShadowArray(resolved as any[]);
   }
@@ -1306,6 +1368,9 @@ export class ExecutionTree implements TreeContext {
         // Array mapping on a sub-field: resolve the array source,
         // create shadow trees, and materialise with field mappings.
         const resolved = await this.resolveWires(regularWires);
+        if (isStreamHandle(resolved)) {
+          return this.wrapStreamWithMapping(resolved, prefix);
+        }
         if (!Array.isArray(resolved)) return null;
         const shadows = this.createShadowArray(resolved);
         return this.materializeShadows(shadows, prefix);
@@ -1529,11 +1594,14 @@ export class ExecutionTree implements TreeContext {
     );
 
     if (hasRootWire && hasElementWires) {
-      const [shadows] = await Promise.all([
-        this.pullOutputField([], true) as Promise<ExecutionTree[]>,
+      const [shadowsOrStream] = await Promise.all([
+        this.pullOutputField([], true),
         ...forcePromises,
       ]);
-      return this.materializeShadows(shadows, []);
+      if (isStreamHandle(shadowsOrStream)) {
+        return shadowsOrStream;
+      }
+      return this.materializeShadows(shadowsOrStream as ExecutionTree[], []);
     }
 
     // Whole-object passthrough: `o <- api.user` (non-spread root wire)
