@@ -169,6 +169,10 @@ export async function executeBridge<T = unknown>(
   try {
     data = await tree.run(input, options.requestedFields);
   } catch (err) {
+    if (err && typeof err === "object") {
+      (err as { executionTrace?: bigint }).executionTrace =
+        tree.getExecutionTrace();
+    }
     throw attachBridgeErrorDocumentContext(err, doc);
   }
 

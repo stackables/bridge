@@ -15,7 +15,14 @@
  * {@link decodeExecutionTrace} to map the bitmask back to entries.
  */
 
-import type { Bridge, Wire, WireFallback, NodeRef, ControlFlowInstruction } from "./types.ts";
+import type {
+  Bridge,
+  Wire,
+  WireFallback,
+  NodeRef,
+  ControlFlowInstruction,
+  SourceLocation,
+} from "./types.ts";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -44,6 +51,10 @@ export interface TraversalEntry {
   gateType?: "falsy" | "nullish";
   /** Bit position in the execution trace bitmask (0-based). */
   bitIndex: number;
+  /** Source span for the specific traversal branch, when known. */
+  loc?: SourceLocation;
+  /** Source span covering the entire wire (full line), when known. */
+  wireLoc?: SourceLocation;
   /**
    * Human-readable description of the source for this path.
    * Examples: `"api.username"`, `"|| \"Anonymous\""`, `"catch continue"`, `"= \"SBB\""`.
@@ -116,7 +127,9 @@ function refLabel(ref: NodeRef, hmap: Map<string, string>): string {
   }
   // __local refs are alias variables — use the field name (alias name) directly.
   if (ref.module === "__local") {
-    return ref.path.length > 0 ? `${ref.field}.${ref.path.join(".")}` : ref.field;
+    return ref.path.length > 0
+      ? `${ref.field}.${ref.path.join(".")}`
+      : ref.field;
   }
   let alias: string | undefined;
   if (ref.type === "Tools") {
@@ -132,16 +145,22 @@ function refLabel(ref: NodeRef, hmap: Map<string, string>): string {
 }
 
 function controlLabel(ctrl: ControlFlowInstruction): string {
-  const n = ctrl.kind === "continue" || ctrl.kind === "break"
-    ? (ctrl.levels != null && ctrl.levels > 1 ? ` ${ctrl.levels}` : "")
-    : "";
+  const n =
+    ctrl.kind === "continue" || ctrl.kind === "break"
+      ? ctrl.levels != null && ctrl.levels > 1
+        ? ` ${ctrl.levels}`
+        : ""
+      : "";
   if (ctrl.kind === "throw" || ctrl.kind === "panic") {
     return `${ctrl.kind} "${ctrl.message}"`;
   }
   return `${ctrl.kind}${n}`;
 }
 
-function fallbackDescription(fb: WireFallback, hmap: Map<string, string>): string {
+function fallbackDescription(
+  fb: WireFallback,
+  hmap: Map<string, string>,
+): string {
   const gate = fb.type === "falsy" ? "||" : "??";
   if (fb.value != null) return `${gate} ${fb.value}`;
   if (fb.ref) return `${gate} ${refLabel(fb.ref, hmap)}`;
@@ -169,14 +188,21 @@ function effectiveTarget(w: Wire): string[] {
   return w.to.path;
 }
 
+function primaryLoc(w: Wire): SourceLocation | undefined {
+  if ("value" in w) return w.loc;
+  if ("from" in w) return w.fromLoc ?? w.loc;
+  return w.loc;
+}
+
 function addFallbackEntries(
   entries: TraversalEntry[],
   base: string,
   wireIndex: number,
   target: string[],
-  fallbacks: WireFallback[] | undefined,
+  w: Wire,
   hmap: Map<string, string>,
 ): void {
+  const fallbacks = "fallbacks" in w ? w.fallbacks : undefined;
   if (!fallbacks) return;
   for (let i = 0; i < fallbacks.length; i++) {
     entries.push({
@@ -187,6 +213,8 @@ function addFallbackEntries(
       fallbackIndex: i,
       gateType: fallbacks[i].type,
       bitIndex: -1, // assigned after enumeration
+      loc: fallbacks[i].loc,
+      wireLoc: w.loc,
       description: fallbackDescription(fallbacks[i], hmap),
     });
   }
@@ -207,6 +235,8 @@ function addCatchEntry(
       target,
       kind: "catch",
       bitIndex: -1,
+      loc: "catchLoc" in w ? w.catchLoc : undefined,
+      wireLoc: w.loc,
       description: catchDescription(w, hmap),
     });
   }
@@ -251,6 +281,8 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
         target,
         kind: "const",
         bitIndex: -1,
+        loc: w.loc,
+        wireLoc: w.loc,
         description: `= ${w.value}`,
       });
       continue;
@@ -267,9 +299,11 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
           target,
           kind: "primary",
           bitIndex: -1,
+          loc: primaryLoc(w),
+          wireLoc: w.loc,
           description: refLabel(w.from, hmap),
         });
-        addFallbackEntries(entries, base, i, target, w.fallbacks, hmap);
+        addFallbackEntries(entries, base, i, target, w, hmap);
         addCatchEntry(entries, base, i, target, w, hmap);
       }
       continue;
@@ -277,11 +311,37 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
 
     // ── Conditional (ternary) wire ──────────────────────────────────
     if ("cond" in w) {
-      const thenDesc = w.thenRef ? `? ${refLabel(w.thenRef, hmap)}` : w.thenValue != null ? `? ${w.thenValue}` : "then";
-      const elseDesc = w.elseRef ? `: ${refLabel(w.elseRef, hmap)}` : w.elseValue != null ? `: ${w.elseValue}` : "else";
-      entries.push({ id: `${base}/then`, wireIndex: i, target, kind: "then", bitIndex: -1, description: thenDesc });
-      entries.push({ id: `${base}/else`, wireIndex: i, target, kind: "else", bitIndex: -1, description: elseDesc });
-      addFallbackEntries(entries, base, i, target, w.fallbacks, hmap);
+      const thenDesc = w.thenRef
+        ? `? ${refLabel(w.thenRef, hmap)}`
+        : w.thenValue != null
+          ? `? ${w.thenValue}`
+          : "then";
+      const elseDesc = w.elseRef
+        ? `: ${refLabel(w.elseRef, hmap)}`
+        : w.elseValue != null
+          ? `: ${w.elseValue}`
+          : "else";
+      entries.push({
+        id: `${base}/then`,
+        wireIndex: i,
+        target,
+        kind: "then",
+        bitIndex: -1,
+        loc: w.thenLoc ?? w.loc,
+        wireLoc: w.loc,
+        description: thenDesc,
+      });
+      entries.push({
+        id: `${base}/else`,
+        wireIndex: i,
+        target,
+        kind: "else",
+        bitIndex: -1,
+        loc: w.elseLoc ?? w.loc,
+        wireLoc: w.loc,
+        description: elseDesc,
+      });
+      addFallbackEntries(entries, base, i, target, w, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
       continue;
     }
@@ -293,8 +353,17 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
         : w.condAnd.rightValue != null
           ? `${refLabel(w.condAnd.leftRef, hmap)} && ${w.condAnd.rightValue}`
           : refLabel(w.condAnd.leftRef, hmap);
-      entries.push({ id: `${base}/primary`, wireIndex: i, target, kind: "primary", bitIndex: -1, description: desc });
-      addFallbackEntries(entries, base, i, target, w.fallbacks, hmap);
+      entries.push({
+        id: `${base}/primary`,
+        wireIndex: i,
+        target,
+        kind: "primary",
+        bitIndex: -1,
+        loc: primaryLoc(w),
+        wireLoc: w.loc,
+        description: desc,
+      });
+      addFallbackEntries(entries, base, i, target, w, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
     } else {
       // condOr
@@ -304,8 +373,17 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
         : wo.condOr.rightValue != null
           ? `${refLabel(wo.condOr.leftRef, hmap)} || ${wo.condOr.rightValue}`
           : refLabel(wo.condOr.leftRef, hmap);
-      entries.push({ id: `${base}/primary`, wireIndex: i, target, kind: "primary", bitIndex: -1, description: desc });
-      addFallbackEntries(entries, base, i, target, wo.fallbacks, hmap);
+      entries.push({
+        id: `${base}/primary`,
+        wireIndex: i,
+        target,
+        kind: "primary",
+        bitIndex: -1,
+        loc: primaryLoc(wo),
+        wireLoc: wo.loc,
+        description: desc,
+      });
+      addFallbackEntries(entries, base, i, target, wo, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
     }
   }
@@ -321,7 +399,7 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
       entries.push({
         id,
         // Use unique negative wireIndex per empty-array so they don't group together.
-        wireIndex: -(++emptyIdx),
+        wireIndex: -++emptyIdx,
         target,
         kind: "empty-array",
         bitIndex: -1,

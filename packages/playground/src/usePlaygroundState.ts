@@ -129,6 +129,18 @@ export function usePlaygroundState(
     ? runningIds.has(displayQueryId)
     : false;
 
+  const clearExecutionTrace = useCallback(() => {
+    if (!displayQueryId) return;
+    setResults((prev) => {
+      const cur = prev[displayQueryId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [displayQueryId]: { ...cur, executionTrace: undefined },
+      };
+    });
+  }, [displayQueryId]);
+
   const activeQuery = queries.find((q) => q.id === activeTabId);
 
   const selectExample = useCallback(
@@ -401,6 +413,7 @@ export function usePlaygroundState(
     hasErrors,
     isActiveRunning,
     onRun: handleRun,
+    onClearExecutionTrace: clearExecutionTrace,
     graphqlSchema,
     bridgeOperations,
     availableOutputFields,

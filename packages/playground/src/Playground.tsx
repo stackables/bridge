@@ -11,6 +11,7 @@ import { StandaloneQueryPanel } from "./components/StandaloneQueryPanel";
 import { clearHttpCache } from "./engine";
 import type { RunResult, BridgeOperation, OutputFieldNode } from "./engine";
 import type { GraphQLSchema } from "graphql";
+import type { SourceLocation } from "@stackables/bridge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PlaygroundMode } from "./share";
@@ -22,8 +23,8 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
       className={cn(
         "shrink-0 outline-none",
         direction === "horizontal"
-          ? "w-2 cursor-[col-resize]"
-          : "h-2 cursor-[row-resize]",
+          ? "w-2 cursor-col-resize"
+          : "h-2 cursor-row-resize",
       )}
     />
   );
@@ -217,38 +218,47 @@ function QueryTabBar({
   );
 }
 
-// ── bridge DSL panel header (label only) ─────────────────────────────────────
+// ── bridge DSL header with optional trace badge ─────────────────────────────
 function BridgeDslHeader({
-  dslTab,
-  onDslTabChange,
+  executionTrace,
+  onClearExecutionTrace,
 }: {
-  dslTab: "dsl" | "manifest";
-  onDslTabChange: (t: "dsl" | "manifest") => void;
+  executionTrace?: bigint;
+  onClearExecutionTrace?: () => void;
 }) {
+  const hasTrace = executionTrace != null && executionTrace > 0n;
   return (
     <div className="content-center shrink-0 px-5 h-10 flex items-center gap-4">
-      <button
-        onClick={() => onDslTabChange("dsl")}
-        className={cn(
-          "text-[11px] font-bold uppercase tracking-widest transition-colors",
-          dslTab === "dsl"
-            ? "text-slate-200"
-            : "text-slate-500 hover:text-slate-300",
-        )}
-      >
+      <span className="text-[11px] font-bold uppercase tracking-widest text-slate-200">
         Bridge DSL
-      </button>
-      <button
-        onClick={() => onDslTabChange("manifest")}
-        className={cn(
-          "text-[11px] font-bold uppercase tracking-widest transition-colors",
-          dslTab === "manifest"
-            ? "text-slate-200"
-            : "text-slate-500 hover:text-slate-300",
-        )}
-      >
-        Trace Manifest
-      </button>
+      </span>
+      {hasTrace && (
+        <span
+          title={`Execution trace: ${executionTrace} (decimal)`}
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
+        >
+          trace-id 0x{executionTrace.toString(16)}
+          {onClearExecutionTrace && (
+            <button
+              onClick={onClearExecutionTrace}
+              title="Clear execution trace highlighting"
+              className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
+            >
+              <svg
+                className="w-2.5 h-2.5"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <line x1="2" y1="2" x2="8" y2="8" />
+                <line x1="8" y1="2" x2="2" y2="8" />
+              </svg>
+            </button>
+          )}
+        </span>
+      )}
     </div>
   );
 }
@@ -298,160 +308,65 @@ function SchemaHeader({
   );
 }
 
-// ── manifest view ─────────────────────────────────────────────────────────────
-
 import { getTraversalManifest, decodeExecutionTrace } from "./engine";
-import type { TraversalEntry } from "./engine";
 
-/** Group entries by wireIndex for visual grouping. */
-type ManifestGroup = {
-  label: string;
-  entries: TraversalEntry[];
-  hasAlternatives: boolean;
-};
+function getInactiveTraversalLocations(
+  bridge: string,
+  operation: string,
+  executionTrace?: bigint,
+): SourceLocation[] {
+  if (!operation || executionTrace == null || executionTrace === 0n) {
+    return [];
+  }
 
-function buildGroups(manifest: TraversalEntry[]): ManifestGroup[] {
-  // Group by wireIndex; each unique wireIndex forms one group.
-  // Negative wireIndex values (empty-array entries) are already unique per scope.
-  const byKey = new Map<number, TraversalEntry[]>();
-  const order: number[] = [];
-  for (const e of manifest) {
-    const key = e.wireIndex;
-    let group = byKey.get(key);
+  const manifest = getTraversalManifest(bridge, operation);
+  if (manifest.length === 0) return [];
+
+  const activeIds = new Set(
+    decodeExecutionTrace(manifest, executionTrace).map((entry) => entry.id),
+  );
+
+  // Group entries by wire (wireIndex).
+  const wireGroups = new Map<number, typeof manifest>();
+  for (const entry of manifest) {
+    let group = wireGroups.get(entry.wireIndex);
     if (!group) {
       group = [];
-      byKey.set(key, group);
-      order.push(key);
+      wireGroups.set(entry.wireIndex, group);
     }
-    group.push(e);
-  }
-  return order.map((key) => {
-    const entries = byKey.get(key)!;
-    const label =
-      entries[0].target.length > 0 ? entries[0].target.join(".") : "(root)";
-    return {
-      label,
-      entries,
-    };
-  });
-}
-
-const kindColors: Record<string, string> = {
-  primary: "bg-sky-900/50 text-sky-300 border-sky-700/50",
-  fallback: "bg-amber-900/50 text-amber-300 border-amber-700/50",
-  catch: "bg-red-900/50 text-red-300 border-red-700/50",
-  "empty-array": "bg-slate-700/50 text-slate-400 border-slate-600/50",
-  then: "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
-  else: "bg-orange-900/50 text-orange-300 border-orange-700/50",
-  const: "bg-violet-900/50 text-violet-300 border-violet-700/50",
-};
-
-function ManifestView({
-  bridge,
-  operation,
-  executionTrace,
-  autoHeight = false,
-}: {
-  bridge: string;
-  operation: string;
-  executionTrace?: bigint;
-  autoHeight?: boolean;
-}) {
-  const manifest = useMemo(
-    () => getTraversalManifest(bridge, operation),
-    [bridge, operation],
-  );
-  const activeIds = useMemo(() => {
-    if (
-      executionTrace == null ||
-      executionTrace === 0n ||
-      manifest.length === 0
-    )
-      return new Set<string>();
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
-    return new Set(decoded.map((e) => e.id));
-  }, [manifest, executionTrace]);
-
-  const groups = useMemo(() => buildGroups(manifest), [manifest]);
-
-  if (!operation || manifest.length === 0) {
-    return (
-      <p className="py-4 px-3 font-mono text-[13px] text-slate-700">
-        No bridge operation selected.
-      </p>
-    );
+    group.push(entry);
   }
 
-  return (
-    <div
-      className={cn("overflow-y-auto", autoHeight ? "max-h-[60vh]" : "h-full")}
-    >
-      <div className="px-3 pb-3 pt-1 space-y-2">
-        {groups.map((group) => (
-          <div
-            key={group.entries[0].id}
-            className={cn(
-              "rounded-lg overflow-hidden border border-slate-700/60 bg-slate-900/30",
-            )}
-          >
-            {/* Group header — always show target path */}
-            <div
-              className={cn(
-                "px-2.5 py-1 text-[11px] font-mono font-medium border-b text-slate-300 bg-slate-800/50 border-slate-700/40",
-              )}
-            >
-              {group.label}
-            </div>
+  const seen = new Set<string>();
+  const result: SourceLocation[] = [];
 
-            {/* Entries */}
-            <div className="p-1 space-y-1">
-              {group.entries.map((entry) => {
-                const isActive = activeIds.has(entry.id);
-                return (
-                  <div
-                    key={entry.id}
-                    className={cn(
-                      "flex items-center gap-2 px-2.5 py-1 rounded-md text-[12px] font-mono transition-all",
-                      isActive
-                        ? "bg-slate-700/80"
-                        : "bg-slate-900/40 opacity-60",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full border px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide shrink-0",
-                        kindColors[entry.kind] ??
-                          "bg-slate-700 text-slate-400 border-slate-600",
-                      )}
-                    >
-                      {entry.kind}
-                    </span>
-                    {/* Source description */}
-                    {entry.description && (
-                      <span
-                        className={cn(
-                          "truncate",
-                          isActive ? "text-slate-200" : "text-slate-500",
-                        )}
-                        title={entry.description}
-                      >
-                        {entry.description}
-                      </span>
-                    )}
-                    {isActive && (
-                      <span className="text-indigo-400 shrink-0 ml-auto">
-                        on
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  for (const entries of wireGroups.values()) {
+    const allDead = entries.every((e) => !activeIds.has(e.id));
+
+    if (allDead) {
+      // When all branches of a wire are dead, use the full wire span
+      // so the entire line (including the target on the left of <-) is dimmed.
+      const wl = entries[0]?.wireLoc ?? entries[0]?.loc;
+      if (wl) {
+        const key = `${wl.startLine}:${wl.startColumn}:${wl.endLine}:${wl.endColumn}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push(wl);
+        }
+      }
+    } else {
+      // Only some branches are dead — use individual entry locs.
+      for (const entry of entries) {
+        if (activeIds.has(entry.id) || !entry.loc) continue;
+        const key = `${entry.loc.startLine}:${entry.loc.startColumn}:${entry.loc.endLine}:${entry.loc.endColumn}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(entry.loc);
+      }
+    }
+  }
+
+  return result;
 }
 
 // ── panel wrapper ─────────────────────────────────────────────────────────────
@@ -504,6 +419,7 @@ export type PlaygroundProps = {
   bridgeOperations: BridgeOperation[];
   availableOutputFields: OutputFieldNode[];
   hideGqlSwitch?: boolean;
+  onClearExecutionTrace?: () => void;
 };
 
 export function Playground({
@@ -533,6 +449,7 @@ export function Playground({
   bridgeOperations,
   availableOutputFields,
   hideGqlSwitch,
+  onClearExecutionTrace,
 }: PlaygroundProps) {
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
   const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
@@ -540,7 +457,6 @@ export function Playground({
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
   const isStandalone = mode === "standalone";
-  const [activeDslTab, setActiveDslTab] = useState<"dsl" | "manifest">("dsl");
 
   // Determine which operation to use for manifest
   const manifestOperation = useMemo(() => {
@@ -548,6 +464,16 @@ export function Playground({
     if (bridgeOperations.length > 0) return bridgeOperations[0].label;
     return "";
   }, [isStandalone, activeQuery?.operation, bridgeOperations]);
+
+  const inactiveTraversalLocations = useMemo(
+    () =>
+      getInactiveTraversalLocations(
+        bridge,
+        manifestOperation,
+        displayResult?.executionTrace,
+      ),
+    [bridge, manifestOperation, displayResult?.executionTrace],
+  );
 
   return (
     <>
@@ -585,27 +511,19 @@ export function Playground({
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <BridgeDslHeader
-            dslTab={activeDslTab}
-            onDslTabChange={setActiveDslTab}
+            executionTrace={displayResult?.executionTrace}
+            onClearExecutionTrace={onClearExecutionTrace}
           />
           <div className="px-3 pb-3">
-            {activeDslTab === "dsl" ? (
-              <Editor
-                label=""
-                value={bridge}
-                onChange={onBridgeChange}
-                language="bridge"
-                autoHeight
-                onFormat={onFormatBridge}
-              />
-            ) : (
-              <ManifestView
-                bridge={bridge}
-                operation={manifestOperation}
-                executionTrace={displayResult?.executionTrace}
-                autoHeight
-              />
-            )}
+            <Editor
+              label=""
+              value={bridge}
+              onChange={onBridgeChange}
+              language="bridge"
+              deadCodeLocations={inactiveTraversalLocations}
+              autoHeight
+              onFormat={onFormatBridge}
+            />
           </div>
         </div>
 
@@ -690,7 +608,6 @@ export function Playground({
               loading={displayRunning}
               traces={displayResult?.traces}
               logs={displayResult?.logs}
-              executionTrace={displayResult?.executionTrace}
               onClearCache={clearHttpCache}
               autoHeight
             />
@@ -722,25 +639,18 @@ export function Playground({
                 )}
                 <PanelBox>
                   <BridgeDslHeader
-                    dslTab={activeDslTab}
-                    onDslTabChange={setActiveDslTab}
+                    executionTrace={displayResult?.executionTrace}
+                    onClearExecutionTrace={onClearExecutionTrace}
                   />
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    {activeDslTab === "dsl" ? (
-                      <Editor
-                        label=""
-                        value={bridge}
-                        onChange={onBridgeChange}
-                        language="bridge"
-                        onFormat={onFormatBridge}
-                      />
-                    ) : (
-                      <ManifestView
-                        bridge={bridge}
-                        operation={manifestOperation}
-                        executionTrace={displayResult?.executionTrace}
-                      />
-                    )}
+                    <Editor
+                      label=""
+                      value={bridge}
+                      onChange={onBridgeChange}
+                      language="bridge"
+                      deadCodeLocations={inactiveTraversalLocations}
+                      onFormat={onFormatBridge}
+                    />
                   </div>
                 </PanelBox>
               </div>
@@ -777,25 +687,18 @@ export function Playground({
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
                     <BridgeDslHeader
-                      dslTab={activeDslTab}
-                      onDslTabChange={setActiveDslTab}
+                      executionTrace={displayResult?.executionTrace}
+                      onClearExecutionTrace={onClearExecutionTrace}
                     />
                     <div className="flex-1 min-h-0 px-3 pb-3">
-                      {activeDslTab === "dsl" ? (
-                        <Editor
-                          label=""
-                          value={bridge}
-                          onChange={onBridgeChange}
-                          language="bridge"
-                          onFormat={onFormatBridge}
-                        />
-                      ) : (
-                        <ManifestView
-                          bridge={bridge}
-                          operation={manifestOperation}
-                          executionTrace={displayResult?.executionTrace}
-                        />
-                      )}
+                      <Editor
+                        label=""
+                        value={bridge}
+                        onChange={onBridgeChange}
+                        language="bridge"
+                        deadCodeLocations={inactiveTraversalLocations}
+                        onFormat={onFormatBridge}
+                      />
                     </div>
                   </PanelBox>
                 </Panel>
@@ -889,7 +792,6 @@ export function Playground({
                       loading={displayRunning}
                       traces={displayResult?.traces}
                       logs={displayResult?.logs}
-                      executionTrace={displayResult?.executionTrace}
                       onClearCache={clearHttpCache}
                     />
                   </div>

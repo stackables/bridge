@@ -668,6 +668,10 @@ export async function runBridgeStandalone(
       executionTrace: result.executionTrace,
     };
   } catch (err: unknown) {
+    const trace =
+      err && typeof err === "object" && "executionTrace" in err
+        ? (err as { executionTrace?: bigint }).executionTrace
+        : undefined;
     return {
       errors: [
         formatBridgeError(err, {
@@ -675,6 +679,7 @@ export async function runBridgeStandalone(
           filename: document.filename,
         }),
       ],
+      ...(trace != null ? { executionTrace: trace } : {}),
     };
   } finally {
     _onCacheHit = null;
