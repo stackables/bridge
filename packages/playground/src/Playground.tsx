@@ -14,6 +14,7 @@ import type { GraphQLSchema } from "graphql";
 import type { SourceLocation } from "@stackables/bridge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { collectInactiveTraversalLocations } from "@/lib/trace-highlighting";
 import type { PlaygroundMode } from "./share";
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
@@ -333,47 +334,7 @@ function getInactiveTraversalLocations(
     decodeExecutionTrace(manifest, executionTraceId).map((entry) => entry.id),
   );
 
-  // Group entries by wire (wireIndex).
-  const wireGroups = new Map<number, typeof manifest>();
-  for (const entry of manifest) {
-    let group = wireGroups.get(entry.wireIndex);
-    if (!group) {
-      group = [];
-      wireGroups.set(entry.wireIndex, group);
-    }
-    group.push(entry);
-  }
-
-  const seen = new Set<string>();
-  const result: SourceLocation[] = [];
-
-  for (const entries of wireGroups.values()) {
-    const allDead = entries.every((e) => !activeIds.has(e.id));
-
-    if (allDead) {
-      // When all branches of a wire are dead, use the full wire span
-      // so the entire line (including the target on the left of <-) is dimmed.
-      const wl = entries[0]?.wireLoc ?? entries[0]?.loc;
-      if (wl) {
-        const key = `${wl.startLine}:${wl.startColumn}:${wl.endLine}:${wl.endColumn}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          result.push(wl);
-        }
-      }
-    } else {
-      // Only some branches are dead — use individual entry locs.
-      for (const entry of entries) {
-        if (activeIds.has(entry.id) || !entry.loc) continue;
-        const key = `${entry.loc.startLine}:${entry.loc.startColumn}:${entry.loc.endLine}:${entry.loc.endColumn}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(entry.loc);
-      }
-    }
-  }
-
-  return result;
+  return collectInactiveTraversalLocations(manifest, activeIds);
 }
 
 // ── panel wrapper ─────────────────────────────────────────────────────────────
