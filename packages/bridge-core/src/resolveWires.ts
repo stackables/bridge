@@ -379,21 +379,21 @@ function pullSafe(
 
 function recordPrimary(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.primary != null) ctx.traceMask![0] |= 1 << bits.primary;
+  if (bits?.primary != null) ctx.traceMask![0] |= 1n << BigInt(bits.primary);
 }
 
 function recordElse(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.else != null) ctx.traceMask![0] |= 1 << bits.else;
+  if (bits?.else != null) ctx.traceMask![0] |= 1n << BigInt(bits.else);
 }
 
 function recordFallback(ctx: TreeContext, w: Wire, index: number): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
   const fb = bits?.fallbacks;
-  if (fb && fb[index] != null) ctx.traceMask![0] |= 1 << fb[index];
+  if (fb && fb[index] != null) ctx.traceMask![0] |= 1n << BigInt(fb[index]);
 }
 
 function recordCatch(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.catch != null) ctx.traceMask![0] |= 1 << bits.catch;
+  if (bits?.catch != null) ctx.traceMask![0] |= 1n << BigInt(bits.catch);
 }

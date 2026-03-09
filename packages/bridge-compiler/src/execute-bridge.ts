@@ -84,7 +84,7 @@ export type ExecuteBridgeResult<T = unknown> = {
   data: T;
   traces: ToolTrace[];
   /** Compact bitmask encoding which traversal paths were taken during execution. */
-  executionTrace: number;
+  executionTrace: bigint;
 };
 
 // ── Cache ───────────────────────────────────────────────────────────────────
@@ -340,5 +340,5 @@ export async function executeBridge<T = unknown>(
   } catch (err) {
     throw attachBridgeErrorDocumentContext(err, document);
   }
-  return { data: data as T, traces: tracer?.traces ?? [], executionTrace: 0 };
+  return { data: data as T, traces: tracer?.traces ?? [], executionTrace: 0n };
 }

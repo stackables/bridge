@@ -146,8 +146,9 @@ export interface TreeContext {
    * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
    * array so shadow trees can share the same mutable reference without
    * extra allocation.  Present only when execution tracing is enabled.
+   * Uses `bigint` to support manifests with more than 31 entries.
    */
-  traceMask?: [number];
+  traceMask?: [bigint];
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */

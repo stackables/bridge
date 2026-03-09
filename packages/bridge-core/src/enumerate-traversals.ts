@@ -237,17 +237,17 @@ export const buildTraversalManifest = enumerateTraversalIds;
  * in the trace — i.e. the paths that were actually taken during execution.
  *
  * @param manifest  The static manifest from {@link buildTraversalManifest}.
- * @param trace     The numeric bitmask produced by the execution engine.
+ * @param trace     The bigint bitmask produced by the execution engine.
  */
 export function decodeExecutionTrace(
   manifest: TraversalEntry[],
-  trace: number,
+  trace: bigint,
 ): TraversalEntry[] {
   const result: TraversalEntry[] = [];
   for (const entry of manifest) {
     // Check if the bit at position `entry.bitIndex` is set in the trace,
     // indicating this path was taken during execution.
-    if (trace & (1 << entry.bitIndex)) {
+    if (trace & (1n << BigInt(entry.bitIndex))) {
       result.push(entry);
     }
   }

@@ -365,7 +365,7 @@ bridge Query.demo {
   o.result <- api.label
 }`);
     const manifest = buildTraversalManifest(bridge);
-    const result = decodeExecutionTrace(manifest, 0);
+    const result = decodeExecutionTrace(manifest, 0n);
     assert.equal(result.length, 0);
   });
 
@@ -381,7 +381,7 @@ bridge Query.demo {
     const manifest = buildTraversalManifest(bridge);
     const primary = manifest.find((e) => e.kind === "primary" && e.target.includes("result"));
     assert.ok(primary);
-    const result = decodeExecutionTrace(manifest, 1 << primary.bitIndex);
+    const result = decodeExecutionTrace(manifest, 1n << BigInt(primary.bitIndex));
     assert.equal(result.length, 1);
     assert.equal(result[0].id, primary.id);
   });
@@ -404,9 +404,9 @@ bridge Query.demo {
     assert.equal(labelEntries.length, 3);
 
     // Set all label bits
-    let mask = 0;
+    let mask = 0n;
     for (const e of labelEntries) {
-      mask |= 1 << e.bitIndex;
+      mask |= 1n << BigInt(e.bitIndex);
     }
     const decoded = decodeExecutionTrace(manifest, mask);
     assert.equal(decoded.length, 3);
@@ -428,7 +428,7 @@ bridge Query.demo {
     const manifest = buildTraversalManifest(bridge);
     const thenEntry = manifest.find((e) => e.kind === "then");
     assert.ok(thenEntry);
-    const decoded = decodeExecutionTrace(manifest, 1 << thenEntry.bitIndex);
+    const decoded = decodeExecutionTrace(manifest, 1n << BigInt(thenEntry.bitIndex));
     assert.equal(decoded.length, 1);
     assert.equal(decoded[0].kind, "then");
   });
@@ -458,7 +458,7 @@ bridge Query.demo {
       tools: { api: async () => ({ label: "Hello" }) },
     });
 
-    assert.ok(executionTrace > 0, "trace should have bits set");
+    assert.ok(executionTrace > 0n, "trace should have bits set");
 
     // Decode and verify
     const bridge = doc.instructions.find(
@@ -600,7 +600,7 @@ bridge Query.demo {
     assert.ok(kinds.includes("const"), "should include const path");
   });
 
-  test("executionTrace is a number suitable for hex encoding", async () => {
+  test("executionTrace is a bigint suitable for hex encoding", async () => {
     const doc = getDoc(`version 1.5
 bridge Query.demo {
   with api
@@ -616,7 +616,7 @@ bridge Query.demo {
       tools: { api: async () => ({ label: "Berlin" }) },
     });
 
-    assert.equal(typeof executionTrace, "number");
+    assert.equal(typeof executionTrace, "bigint");
     const hex = `0x${executionTrace.toString(16)}`;
     assert.ok(hex.startsWith("0x"), "should be hex-encodable");
   });

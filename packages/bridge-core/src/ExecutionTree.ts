@@ -155,8 +155,9 @@ export class ExecutionTree implements TreeContext {
   /**
    * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
    * array so shadow trees can share the same mutable reference.
+   * Uses `bigint` to support manifests with more than 31 entries.
    */
-  traceMask?: [number];
+  traceMask?: [bigint];
   /** Structured logger passed from BridgeOptions. Defaults to no-ops. */
   logger?: Logger;
   /** External abort signal — cancels execution when triggered. */
@@ -775,9 +776,9 @@ export class ExecutionTree implements TreeContext {
     return this.tracer?.traces ?? [];
   }
 
-  /** Returns the execution trace bitmask (0 when tracing is disabled). */
-  getExecutionTrace(): number {
-    return this.traceMask?.[0] ?? 0;
+  /** Returns the execution trace bitmask (0n when tracing is disabled). */
+  getExecutionTrace(): bigint {
+    return this.traceMask?.[0] ?? 0n;
   }
 
   /**
@@ -789,7 +790,7 @@ export class ExecutionTree implements TreeContext {
     if (!this.bridge) return;
     const manifest = enumerateTraversalIds(this.bridge);
     this.traceBits = buildTraceBitsMap(this.bridge, manifest);
-    this.traceMask = [0];
+    this.traceMask = [0n];
   }
 
   /**

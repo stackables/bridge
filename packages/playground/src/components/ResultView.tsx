@@ -15,7 +15,7 @@ type Props = {
   loading: boolean;
   traces?: ToolTrace[];
   logs?: LogEntry[];
-  executionTrace?: number;
+  executionTrace?: bigint;
   onClearCache?: () => void;
   /** When true the result view sizes itself to its content instead of filling the parent. */
   autoHeight?: boolean;
@@ -39,7 +39,7 @@ export function ResultView({
 
   const hasTraces = traces && traces.length > 0;
   const hasLogs = logs && logs.length > 0;
-  const hasExecutionTrace = executionTrace != null && executionTrace > 0;
+  const hasExecutionTrace = executionTrace != null && executionTrace > 0n;
 
   function toggle(panel: "traces" | "logs") {
     setActivePanel((v) => (v === panel ? null : panel));

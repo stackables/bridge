@@ -81,7 +81,7 @@ export type RunResult = {
   traces?: ToolTrace[];
   logs?: LogEntry[];
   /** Compact bitmask encoding which traversal paths were taken during execution. */
-  executionTrace?: number;
+  executionTrace?: bigint;
 };
 
 export type DiagnosticResult = {

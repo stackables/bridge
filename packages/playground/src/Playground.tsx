@@ -297,6 +297,49 @@ function SchemaHeader({
 // ── manifest view ─────────────────────────────────────────────────────────────
 
 import { getTraversalManifest, decodeExecutionTrace } from "./engine";
+import type { TraversalEntry } from "./engine";
+
+/** Group entries by target path (wireIndex) for visual grouping. */
+type ManifestGroup = {
+  label: string;
+  entries: TraversalEntry[];
+  hasAlternatives: boolean;
+};
+
+function buildGroups(manifest: TraversalEntry[]): ManifestGroup[] {
+  const byWire = new Map<number, TraversalEntry[]>();
+  const order: number[] = [];
+  for (const e of manifest) {
+    const key = e.wireIndex;
+    let group = byWire.get(key);
+    if (!group) {
+      group = [];
+      byWire.set(key, group);
+      order.push(key);
+    }
+    group.push(e);
+  }
+  return order.map((key) => {
+    const entries = byWire.get(key)!;
+    const label =
+      entries[0].target.length > 0 ? entries[0].target.join(".") : "*";
+    return {
+      label,
+      entries,
+      hasAlternatives: entries.length > 1,
+    };
+  });
+}
+
+const kindColors: Record<string, string> = {
+  primary: "bg-sky-900/50 text-sky-300 border-sky-700/50",
+  fallback: "bg-amber-900/50 text-amber-300 border-amber-700/50",
+  catch: "bg-red-900/50 text-red-300 border-red-700/50",
+  "empty-array": "bg-slate-700/50 text-slate-400 border-slate-600/50",
+  then: "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
+  else: "bg-orange-900/50 text-orange-300 border-orange-700/50",
+  const: "bg-violet-900/50 text-violet-300 border-violet-700/50",
+};
 
 function ManifestView({
   bridge,
@@ -306,7 +349,7 @@ function ManifestView({
 }: {
   bridge: string;
   operation: string;
-  executionTrace?: number;
+  executionTrace?: bigint;
   autoHeight?: boolean;
 }) {
   const manifest = useMemo(
@@ -314,11 +357,15 @@ function ManifestView({
     [bridge, operation],
   );
   const activeIds = useMemo(() => {
-    if (executionTrace == null || executionTrace === 0 || manifest.length === 0)
+    if (executionTrace == null || executionTrace === 0n || manifest.length === 0)
       return new Set<string>();
     const decoded = decodeExecutionTrace(manifest, executionTrace);
     return new Set(decoded.map((e) => e.id));
   }, [manifest, executionTrace]);
+
+  const groups = useMemo(() => buildGroups(manifest), [manifest]);
+  const hasAnyAlternatives = groups.some((g) => g.hasAlternatives);
+  const [showAllPaths, setShowAllPaths] = useState(true);
 
   if (!operation || manifest.length === 0) {
     return (
@@ -328,67 +375,108 @@ function ManifestView({
     );
   }
 
-  const kindColors: Record<string, string> = {
-    primary: "bg-sky-900/50 text-sky-300 border-sky-700/50",
-    fallback: "bg-amber-900/50 text-amber-300 border-amber-700/50",
-    catch: "bg-red-900/50 text-red-300 border-red-700/50",
-    "empty-array": "bg-slate-700/50 text-slate-400 border-slate-600/50",
-    then: "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
-    else: "bg-orange-900/50 text-orange-300 border-orange-700/50",
-    const: "bg-violet-900/50 text-violet-300 border-violet-700/50",
-  };
+  const visibleGroups = showAllPaths
+    ? groups
+    : groups.filter((g) => g.hasAlternatives);
 
   return (
     <div
       className={cn(
         "overflow-y-auto",
-        !autoHeight && "flex-1 min-h-0",
+        autoHeight ? "max-h-[60vh]" : "h-full",
       )}
     >
-      <div className="px-3 pb-3 space-y-1">
-        {manifest.map((entry) => {
-          const isActive = activeIds.has(entry.id);
-          return (
-            <div
-              key={entry.id}
-              className={cn(
-                "flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] font-mono transition-all",
-                isActive
-                  ? "bg-slate-700/80 ring-1 ring-indigo-500/50"
-                  : "bg-slate-900/40 opacity-60",
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full border px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide shrink-0",
-                  kindColors[entry.kind] ?? "bg-slate-700 text-slate-400 border-slate-600",
-                )}
-              >
-                {entry.kind}
-              </span>
-              <span
-                className={cn(
-                  "truncate",
-                  isActive ? "text-slate-200" : "text-slate-500",
-                )}
-                title={entry.id}
-              >
-                {entry.target.length > 0 ? entry.target.join(".") : "*"}
-              </span>
-              {entry.gateType && (
-                <span className="text-[10px] text-slate-600 shrink-0">
-                  {entry.gateType === "falsy" ? "||" : "??"}
-                </span>
-              )}
-              <span className="ml-auto text-[9px] text-slate-700 shrink-0 tabular-nums">
-                bit {entry.bitIndex}
-              </span>
-              {isActive && (
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
-              )}
+      {/* Filter toggle */}
+      {hasAnyAlternatives && (
+        <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-2 border-b border-slate-700/50">
+          <button
+            onClick={() => setShowAllPaths((v) => !v)}
+            className={cn(
+              "text-[10px] font-medium uppercase tracking-wide transition-colors",
+              showAllPaths
+                ? "text-slate-500 hover:text-slate-300"
+                : "text-indigo-400 hover:text-indigo-300",
+            )}
+          >
+            {showAllPaths ? "Show alternatives only" : "Show all paths"}
+          </button>
+          <span className="text-[10px] text-slate-600">
+            {visibleGroups.length}/{groups.length} groups
+          </span>
+        </div>
+      )}
+
+      <div className="px-3 pb-3 pt-1 space-y-2">
+        {visibleGroups.map((group) => (
+          <div
+            key={group.entries[0].id}
+            className={cn(
+              "rounded-lg overflow-hidden",
+              group.hasAlternatives
+                ? "border border-slate-700/60 bg-slate-900/30"
+                : "",
+            )}
+          >
+            {/* Group header — target path (only for groups with alternatives) */}
+            {group.hasAlternatives && (
+              <div className="px-2.5 py-1 text-[11px] font-mono font-medium text-slate-300 bg-slate-800/50 border-b border-slate-700/40">
+                {group.label}
+              </div>
+            )}
+
+            {/* Entries */}
+            <div className={group.hasAlternatives ? "p-1 space-y-0.5" : "space-y-0.5"}>
+              {group.entries.map((entry) => {
+                const isActive = activeIds.has(entry.id);
+                return (
+                  <div
+                    key={entry.id}
+                    className={cn(
+                      "flex items-center gap-2 px-2.5 py-1 rounded-md text-[12px] font-mono transition-all",
+                      isActive
+                        ? "bg-slate-700/80 ring-1 ring-indigo-500/50"
+                        : group.hasAlternatives
+                          ? "bg-slate-900/40 opacity-60"
+                          : "bg-slate-900/20 opacity-50",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide shrink-0",
+                        kindColors[entry.kind] ??
+                          "bg-slate-700 text-slate-400 border-slate-600",
+                      )}
+                    >
+                      {entry.kind}
+                    </span>
+                    {/* Show target label for entries without group header */}
+                    {!group.hasAlternatives && (
+                      <span
+                        className={cn(
+                          "truncate",
+                          isActive ? "text-slate-200" : "text-slate-500",
+                        )}
+                        title={entry.id}
+                      >
+                        {entry.target.length > 0
+                          ? entry.target.join(".")
+                          : "*"}
+                      </span>
+                    )}
+                    {entry.gateType && (
+                      <span className="text-[10px] text-slate-600 shrink-0">
+                        {entry.gateType === "falsy" ? "||" : "??"}
+                      </span>
+                    )}
+                    {isActive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 ml-auto" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );

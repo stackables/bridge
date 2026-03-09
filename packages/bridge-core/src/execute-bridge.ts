@@ -79,7 +79,7 @@ export type ExecuteBridgeResult<T = unknown> = {
   data: T;
   traces: ToolTrace[];
   /** Compact bitmask encoding which traversal paths were taken during execution. */
-  executionTrace: number;
+  executionTrace: bigint;
 };
 
 /**
