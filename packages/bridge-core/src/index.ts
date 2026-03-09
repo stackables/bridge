@@ -84,8 +84,13 @@ export type {
 
 // ── Traversal enumeration ───────────────────────────────────────────────────
 
-export { enumerateTraversalIds } from "./enumerate-traversals.ts";
-export type { TraversalEntry } from "./enumerate-traversals.ts";
+export {
+  enumerateTraversalIds,
+  buildTraversalManifest,
+  decodeExecutionTrace,
+  buildTraceBitsMap,
+} from "./enumerate-traversals.ts";
+export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";
 
 // ── Utilities ───────────────────────────────────────────────────────────────
 

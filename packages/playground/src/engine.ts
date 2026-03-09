@@ -10,6 +10,8 @@ import {
   executeBridge,
   formatBridgeError,
   prettyPrintToSource,
+  buildTraversalManifest,
+  decodeExecutionTrace,
 } from "@stackables/bridge";
 export { prettyPrintToSource };
 import type {
@@ -19,6 +21,7 @@ import type {
   ToolTrace,
   Logger,
   CacheStore,
+  TraversalEntry,
 } from "@stackables/bridge";
 import {
   bridgeTransform,
@@ -77,6 +80,8 @@ export type RunResult = {
   errors?: string[];
   traces?: ToolTrace[];
   logs?: LogEntry[];
+  /** Compact bitmask encoding which traversal paths were taken during execution. */
+  executionTrace?: bigint;
 };
 
 export type DiagnosticResult = {
@@ -660,8 +665,13 @@ export async function runBridgeStandalone(
       data: result.data,
       traces: result.traces.length > 0 ? result.traces : undefined,
       logs: logs.length > 0 ? logs : undefined,
+      executionTrace: result.executionTrace,
     };
   } catch (err: unknown) {
+    const trace =
+      err && typeof err === "object" && "executionTrace" in err
+        ? (err as { executionTrace?: bigint }).executionTrace
+        : undefined;
     return {
       errors: [
         formatBridgeError(err, {
@@ -669,8 +679,50 @@ export async function runBridgeStandalone(
           filename: document.filename,
         }),
       ],
+      ...(trace != null ? { executionTrace: trace } : {}),
     };
   } finally {
     _onCacheHit = null;
   }
 }
+
+// ── Traversal manifest helpers ──────────────────────────────────────────────
+
+export type { TraversalEntry };
+
+/**
+ * Build the static traversal manifest for a bridge operation.
+ *
+ * Returns the ordered array of TraversalEntry objects describing every
+ * possible execution path through the bridge's wires.
+ */
+export function getTraversalManifest(
+  bridgeText: string,
+  operation: string,
+): TraversalEntry[] {
+  try {
+    const { document } = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
+    const [type, field] = operation.split(".");
+    if (!type || !field) return [];
+
+    const bridge = document.instructions.find(
+      (i): i is Bridge =>
+        i.kind === "bridge" && i.type === type && i.field === field,
+    );
+    if (!bridge) return [];
+
+    return buildTraversalManifest(bridge);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Decode a runtime execution trace bitmask against a traversal manifest.
+ *
+ * Returns the subset of TraversalEntry objects whose bits are set in
+ * the trace — i.e. the paths that were actually taken during execution.
+ */
+export { decodeExecutionTrace };
