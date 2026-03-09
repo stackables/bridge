@@ -82,6 +82,16 @@ export type {
   WireFallback,
 } from "./types.ts";
 
+// ── Traversal enumeration ───────────────────────────────────────────────────
+
+export {
+  enumerateTraversalIds,
+  buildTraversalManifest,
+  decodeExecutionTrace,
+  buildTraceBitsMap,
+} from "./enumerate-traversals.ts";
+export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";
+
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 export { parsePath } from "./utils.ts";

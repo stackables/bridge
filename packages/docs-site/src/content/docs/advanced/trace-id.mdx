@@ -1,0 +1,97 @@
+---
+title: Execution Trace IDs
+description: Deterministic, zero-data representation of a bridge's execution path.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Trace IDs provide a deterministic, zero-data representation of a bridge's execution path. Returned as a compact integer or hex string (e.g., `0x2a`), the ID encodes every control flow decision—such as fallbacks, ternaries, and error catches—made during a request.
+
+Because Trace IDs contain only topological data (which code branches executed) and zero runtime values, they are completely free of Personally Identifiable Information (PII) and are safe to log to external observability platforms.
+
+## Architecture & Mechanics
+
+Bridge utilizes a statically analyzable, pull-based graph. The Trace ID relies on the separation of a **Static Manifest** and a **Runtime Bitmask**.
+
+### 1. The Static Manifest
+
+At build time, the compiler evaluates the AST of a `.bridge` file and assigns a strict, zero-indexed integer to every possible branching path (e.g., `primary`, `fallback`, `catch`, `then`, `else`).
+
+For example, a ternary operation generates two distinct indices in the manifest:
+
+```bridge
+o.price <- i.isPro ? i.proPrice : i.basicPrice
+# Index 4: i.proPrice (then)
+# Index 5: i.basicPrice (else)
+
+```
+
+### 2. The Runtime Bitmask
+
+During execution, the `ExecutionTree` maintains a shared numeric mask initialized to `0`. As the engine resolves wires, it performs a bitwise `OR` operation to flip the bit corresponding to the executed path index.
+
+At the end of the request, the final integer is returned as the Trace ID.
+
+### 3. O(1) Array Coverage Masking
+
+For array iterations (`items[] as item`), the trace acts as a **Coverage Bitmask**. Instead of appending a new trace for every element, the engine simply records which paths were taken *at least once* across the entire array. This guarantees that processing an array of 10,000 items produces a Trace ID of the exact same byte size as an array of 1 item.
+
+---
+
+## Runtime Usage
+
+The Trace ID is returned alongside your standard data payload from the `executeBridge` function.
+
+```typescript
+import { executeBridge } from "@stackables/bridge-core";
+
+const { data, executionTraceId } = await executeBridge({
+  bridge: Query.pricing,
+  input: { isPro: false }
+});
+
+// data: { tier: "basic", discount: 5, price: 9.99 }
+// executionTraceId: 42 (or "0x2a")
+
+// Safe to log without scrubbing PII
+logger.info("Bridge executed", { 
+  operation: "Query.pricing",
+  trace: executionTraceId 
+});
+
+```
+
+### Telemetry Bucketing
+
+Because every `.bridge` file has a finite, mathematically bounded number of execution paths, Trace IDs serve as perfect bucketing keys in platforms like Datadog or Sentry. You can group logs by Trace ID to instantly monitor the distribution of "happy path" requests versus fallback/error paths.
+
+### API Reference: Decoding Traces
+
+If you are building custom tooling or UI visualizers, you can decode a trace programmatically using the core library:
+
+```typescript
+import { 
+  enumerateTraversalIds, 
+  decodeExecutionTrace 
+} from "@stackables/bridge-core";
+
+// 1. Generate the static map of all branches
+const manifest = enumerateTraversalIds(bridgeAst); 
+
+// 2. Decode the runtime trace against the manifest
+const activePaths = decodeExecutionTrace(manifest, 42);
+
+console.log(activePaths);
+/* Returns:
+[
+  { target: ["tier"], kind: "else", label: '"basic"' },
+  { target: ["discount"], kind: "else", label: '5' },
+  ...
+]
+*/
+
+```
+
+<Aside type="caution">
+For the `traceId` to work, you must generate the enumeration manifest from the exact same `.bridge` file. Always log a bridge file hash or version alongside the `traceId` so you can accurately reconstruct the execution path later.
+</Aside>

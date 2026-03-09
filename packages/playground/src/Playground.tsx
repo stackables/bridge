@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import {
   Panel,
   Group,
@@ -11,6 +11,7 @@ import { StandaloneQueryPanel } from "./components/StandaloneQueryPanel";
 import { clearHttpCache } from "./engine";
 import type { RunResult, BridgeOperation, OutputFieldNode } from "./engine";
 import type { GraphQLSchema } from "graphql";
+import type { SourceLocation } from "@stackables/bridge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PlaygroundMode } from "./share";
@@ -22,8 +23,8 @@ function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
       className={cn(
         "shrink-0 outline-none",
         direction === "horizontal"
-          ? "w-2 cursor-[col-resize]"
-          : "h-2 cursor-[row-resize]",
+          ? "w-2 cursor-col-resize"
+          : "h-2 cursor-row-resize",
       )}
     />
   );
@@ -217,13 +218,47 @@ function QueryTabBar({
   );
 }
 
-// ── bridge DSL panel header (label only) ─────────────────────────────────────
-function BridgeDslHeader() {
+// ── bridge DSL header with optional trace badge ─────────────────────────────
+function BridgeDslHeader({
+  executionTraceId,
+  onClearExecutionTraceId,
+}: {
+  executionTraceId?: bigint;
+  onClearExecutionTraceId?: () => void;
+}) {
+  const hasTrace = executionTraceId != null && executionTraceId > 0n;
   return (
-    <div className="content-center shrink-0 px-5 h-10 flex items-center">
-      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-widest">
+    <div className="content-center shrink-0 px-5 h-10 flex items-center gap-4">
+      <span className="text-[11px] font-bold uppercase tracking-widest text-slate-200">
         Bridge DSL
       </span>
+      {hasTrace && (
+        <span
+          title={`Execution trace ID: ${executionTraceId} (decimal)`}
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
+        >
+          trace-id 0x{executionTraceId.toString(16)}
+          {onClearExecutionTraceId && (
+            <button
+              onClick={onClearExecutionTraceId}
+              title="Clear execution trace ID highlighting"
+              className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
+            >
+              <svg
+                className="w-2.5 h-2.5"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <line x1="2" y1="2" x2="8" y2="8" />
+                <line x1="8" y1="2" x2="2" y2="8" />
+              </svg>
+            </button>
+          )}
+        </span>
+      )}
     </div>
   );
 }
@@ -271,6 +306,67 @@ function SchemaHeader({
       )}
     </div>
   );
+}
+
+import { getTraversalManifest, decodeExecutionTrace } from "./engine";
+
+function getInactiveTraversalLocations(
+  bridge: string,
+  operation: string,
+  executionTraceId?: bigint,
+): SourceLocation[] {
+  if (!operation || executionTraceId == null || executionTraceId === 0n) {
+    return [];
+  }
+
+  const manifest = getTraversalManifest(bridge, operation);
+  if (manifest.length === 0) return [];
+
+  const activeIds = new Set(
+    decodeExecutionTrace(manifest, executionTraceId).map((entry) => entry.id),
+  );
+
+  // Group entries by wire (wireIndex).
+  const wireGroups = new Map<number, typeof manifest>();
+  for (const entry of manifest) {
+    let group = wireGroups.get(entry.wireIndex);
+    if (!group) {
+      group = [];
+      wireGroups.set(entry.wireIndex, group);
+    }
+    group.push(entry);
+  }
+
+  const seen = new Set<string>();
+  const result: SourceLocation[] = [];
+
+  for (const entries of wireGroups.values()) {
+    const allDead = entries.every((e) => !activeIds.has(e.id));
+
+    if (allDead) {
+      // When all branches of a wire are dead, use the full wire span
+      // so the entire line (including the target on the left of <-) is dimmed.
+      const wl = entries[0]?.wireLoc ?? entries[0]?.loc;
+      if (wl) {
+        const key = `${wl.startLine}:${wl.startColumn}:${wl.endLine}:${wl.endColumn}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push(wl);
+        }
+      }
+    } else {
+      // Only some branches are dead — use individual entry locs.
+      for (const entry of entries) {
+        if (activeIds.has(entry.id) || !entry.loc) continue;
+        const key = `${entry.loc.startLine}:${entry.loc.startColumn}:${entry.loc.endLine}:${entry.loc.endColumn}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(entry.loc);
+      }
+    }
+  }
+
+  return result;
 }
 
 // ── panel wrapper ─────────────────────────────────────────────────────────────
@@ -323,6 +419,7 @@ export type PlaygroundProps = {
   bridgeOperations: BridgeOperation[];
   availableOutputFields: OutputFieldNode[];
   hideGqlSwitch?: boolean;
+  onClearExecutionTraceId?: () => void;
 };
 
 export function Playground({
@@ -352,6 +449,7 @@ export function Playground({
   bridgeOperations,
   availableOutputFields,
   hideGqlSwitch,
+  onClearExecutionTraceId,
 }: PlaygroundProps) {
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
   const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
@@ -359,6 +457,23 @@ export function Playground({
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
   const isStandalone = mode === "standalone";
+
+  // Determine which operation to use for manifest
+  const manifestOperation = useMemo(() => {
+    if (isStandalone && activeQuery?.operation) return activeQuery.operation;
+    if (bridgeOperations.length > 0) return bridgeOperations[0].label;
+    return "";
+  }, [isStandalone, activeQuery?.operation, bridgeOperations]);
+
+  const inactiveTraversalLocations = useMemo(
+    () =>
+      getInactiveTraversalLocations(
+        bridge,
+        manifestOperation,
+        displayResult?.executionTraceId,
+      ),
+    [bridge, manifestOperation, displayResult?.executionTraceId],
+  );
 
   return (
     <>
@@ -395,13 +510,17 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader />
+          <BridgeDslHeader
+            executionTraceId={displayResult?.executionTraceId}
+            onClearExecutionTraceId={onClearExecutionTraceId}
+          />
           <div className="px-3 pb-3">
             <Editor
               label=""
               value={bridge}
               onChange={onBridgeChange}
               language="bridge"
+              deadCodeLocations={inactiveTraversalLocations}
               autoHeight
               onFormat={onFormatBridge}
             />
@@ -519,13 +638,17 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader />
+                  <BridgeDslHeader
+                    executionTraceId={displayResult?.executionTraceId}
+                    onClearExecutionTraceId={onClearExecutionTraceId}
+                  />
                   <div className="flex-1 min-h-0 px-3 pb-3">
                     <Editor
                       label=""
                       value={bridge}
                       onChange={onBridgeChange}
                       language="bridge"
+                      deadCodeLocations={inactiveTraversalLocations}
                       onFormat={onFormatBridge}
                     />
                   </div>
@@ -563,13 +686,17 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader />
+                    <BridgeDslHeader
+                      executionTraceId={displayResult?.executionTraceId}
+                      onClearExecutionTraceId={onClearExecutionTraceId}
+                    />
                     <div className="flex-1 min-h-0 px-3 pb-3">
                       <Editor
                         label=""
                         value={bridge}
                         onChange={onBridgeChange}
                         language="bridge"
+                        deadCodeLocations={inactiveTraversalLocations}
                         onFormat={onFormatBridge}
                       />
                     </div>

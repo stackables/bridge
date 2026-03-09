@@ -7,10 +7,12 @@ import { diagnosticCount, lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
 import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
 import type { GraphQLSchema } from "graphql";
+import type { SourceLocation } from "@stackables/bridge";
 import { Paintbrush } from "lucide-react";
 import { bridgeLanguage } from "@/codemirror/bridge-lang";
 import { bridgeLinter } from "@/codemirror/bridge-lint";
 import { bridgeAutocomplete } from "@/codemirror/bridge-completion";
+import { deadCodeRangesExtension } from "@/codemirror/dead-code";
 import { graphqlSchemaLinter } from "@/codemirror/graphql-schema-lint";
 import { playgroundTheme } from "@/codemirror/theme";
 import { cn } from "@/lib/utils";
@@ -43,6 +45,8 @@ type Props = {
   graphqlSchema?: GraphQLSchema;
   /** Optional callback to format the code. When provided, shows a format button. */
   onFormat?: () => void;
+  /** Source ranges to render as dimmed dead code. */
+  deadCodeLocations?: SourceLocation[];
 };
 
 function languageExtension(
@@ -72,6 +76,7 @@ export function Editor({
   autoHeight = false,
   graphqlSchema,
   onFormat,
+  deadCodeLocations = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -95,6 +100,7 @@ export function Editor({
 
   // Compartment lets us toggle readOnly after creation (e.g. when result arrives)
   const readOnlyCompartment = useRef(new Compartment());
+  const deadCodeCompartment = useRef(new Compartment());
 
   // Create the editor once
   useEffect(() => {
@@ -112,6 +118,9 @@ export function Editor({
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
         ]),
+        deadCodeCompartment.current.of(
+          deadCodeRangesExtension(deadCodeLocations),
+        ),
       ],
     });
 
@@ -143,6 +152,17 @@ export function Editor({
       });
     }
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+
+    view.dispatch({
+      effects: deadCodeCompartment.current.reconfigure(
+        deadCodeRangesExtension(deadCodeLocations),
+      ),
+    });
+  }, [deadCodeLocations]);
 
   return (
     <div className={cn(!autoHeight && "flex flex-col h-full")}>

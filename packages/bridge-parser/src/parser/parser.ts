@@ -2620,18 +2620,23 @@ function processElementScopeLines(
         const actualNode =
           pipeNodes.length > 0 ? pipeNodes[pipeNodes.length - 1]! : headNode;
         const { safe: spreadSafe } = extractAddressPath(actualNode);
-        wires.push({
-          from: fromRef,
-          to: {
-            module: SELF_MODULE,
-            type: bridgeType,
-            field: bridgeField,
-            element: true,
-            path: spreadToPath,
-          },
-          spread: true as const,
-          ...(spreadSafe ? { safe: true as const } : {}),
-        });
+        wires.push(
+          withLoc(
+            {
+              from: fromRef,
+              to: {
+                module: SELF_MODULE,
+                type: bridgeType,
+                field: bridgeField,
+                element: true,
+                path: spreadToPath,
+              },
+              spread: true as const,
+              ...(spreadSafe ? { safe: true as const } : {}),
+            },
+            locFromNode(spreadLine),
+          ),
+        );
       }
       processElementScopeLines(
         nestedScopeLines,
@@ -2657,16 +2662,21 @@ function processElementScopeLines(
     // ── Constant wire: .field = value ──
     if (sc.scopeEquals) {
       const value = extractBareValue(sub(scopeLine, "scopeValue")!);
-      wires.push({
-        value,
-        to: {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
-          element: true,
-          path: elemToPath,
-        },
-      });
+      wires.push(
+        withLoc(
+          {
+            value,
+            to: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              element: true,
+              path: elemToPath,
+            },
+          },
+          scopeLineLoc,
+        ),
+      );
       continue;
     }
 
@@ -2895,24 +2905,29 @@ function processElementScopeLines(
             catchFallbackInternalWires = wires.splice(preLen);
           }
         }
-        wires.push({
-          cond: condRef,
-          ...(condLoc ? { condLoc } : {}),
-          thenLoc: thenBranch.loc,
-          ...(thenBranch.kind === "ref"
-            ? { thenRef: thenBranch.ref }
-            : { thenValue: thenBranch.value }),
-          elseLoc: elseBranch.loc,
-          ...(elseBranch.kind === "ref"
-            ? { elseRef: elseBranch.ref }
-            : { elseValue: elseBranch.value }),
-          ...(fallbacks.length > 0 ? { fallbacks } : {}),
-          ...(catchLoc ? { catchLoc } : {}),
-          ...(catchFallback !== undefined ? { catchFallback } : {}),
-          ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
-          ...(catchControl ? { catchControl } : {}),
-          to: elemToRef,
-        });
+        wires.push(
+          withLoc(
+            {
+              cond: condRef,
+              ...(condLoc ? { condLoc } : {}),
+              thenLoc: thenBranch.loc,
+              ...(thenBranch.kind === "ref"
+                ? { thenRef: thenBranch.ref }
+                : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
+              ...(elseBranch.kind === "ref"
+                ? { elseRef: elseBranch.ref }
+                : { elseValue: elseBranch.value }),
+              ...(fallbacks.length > 0 ? { fallbacks } : {}),
+              ...(catchLoc ? { catchLoc } : {}),
+              ...(catchFallback !== undefined ? { catchFallback } : {}),
+              ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+              ...(catchControl ? { catchControl } : {}),
+              to: elemToRef,
+            },
+            scopeLineLoc,
+          ),
+        );
         wires.push(...fallbackInternalWires);
         wires.push(...catchFallbackInternalWires);
         continue;
@@ -2959,13 +2974,16 @@ function processElementScopeLines(
       const { ref: fromRef, isPipeFork: isPipe } = sourceParts[0];
       const wireAttrs = {
         ...(isPipe ? { pipe: true as const } : {}),
+        ...(condLoc ? { fromLoc: condLoc } : {}),
         ...(fallbacks.length > 0 ? { fallbacks } : {}),
         ...(catchLoc ? { catchLoc } : {}),
         ...(catchFallback !== undefined ? { catchFallback } : {}),
         ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
         ...(catchControl ? { catchControl } : {}),
       };
-      wires.push({ from: fromRef, to: elemToRef, ...wireAttrs });
+      wires.push(
+        withLoc({ from: fromRef, to: elemToRef, ...wireAttrs }, scopeLineLoc),
+      );
       wires.push(...fallbackInternalWires);
       wires.push(...catchFallbackInternalWires);
     }
