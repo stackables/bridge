@@ -1632,8 +1632,15 @@ tool deepseekApi from std.httpCallSSE {
   .headers.Content-Type = "application/json"
 }
 
+# Accumulator — deep-merges SSE deltas into a single state.
+# Throttled to emit at most once per 100ms to avoid flooding the client.
+tool buf from std.accumulate {
+  .interval = 100
+}
+
 bridge Mutation.deepseekStream {
   with deepseekApi as api
+  with buf
   with input as i
   with context as ctx
   with output as o
@@ -1644,11 +1651,13 @@ bridge Mutation.deepseekStream {
   api.stream = true
   api.messages <- i.messages
 
-  # Each SSE event yields a chunk with choices[].delta
-  o <- api[] as chunk {
+  # Map SSE deltas before accumulation, dispatch to index 0
+  buf <- api[] as chunk {
     .role <- chunk.choices[0].delta.role
     .content <- chunk.choices[0].delta.content
   }
+
+  o[0] <- buf
 }`,
     queries: [
       {

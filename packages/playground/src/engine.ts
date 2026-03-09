@@ -193,7 +193,11 @@ export async function runBridge(
   try {
     transformedSchema = bridgeTransform(schema, instructions, {
       tools: {
-        std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE },
+        std: {
+          ...std,
+          httpCall: playgroundHttpCall,
+          httpCallSSE: playgroundHttpCallSSE,
+        },
       },
       trace: "full",
       logger: collectingLogger,
@@ -659,7 +663,13 @@ export async function runBridgeStandalone(
       document,
       operation,
       input,
-      tools: { std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE } },
+      tools: {
+        std: {
+          ...std,
+          httpCall: playgroundHttpCall,
+          httpCallSSE: playgroundHttpCallSSE,
+        },
+      },
       context,
       trace: "full",
       logger: collectingLogger,
@@ -696,9 +706,10 @@ export async function runBridgeStandalone(
 /**
  * Apply incremental stream patches to a mutable data tree.
  *
- * Each patch has `items` (values to append) and `path` (JSON pointer
+ * Each patch has `items` (values to insert) and `path` (JSON pointer
  * where the last segment is the array index).  We navigate to the
- * parent array and push the items.
+ * parent array and set items at the target index.  This works for both
+ * append mode (sequential indices) and dispatch mode (fixed index 0).
  */
 function applyIncrementalPatches(
   data: unknown,
@@ -714,7 +725,10 @@ function applyIncrementalPatches(
       target = target[seg];
     }
     if (Array.isArray(target)) {
-      target.push(...patch.items);
+      const index = patch.path[patch.path.length - 1] as number;
+      for (let i = 0; i < patch.items.length; i++) {
+        target[index + i] = patch.items[i];
+      }
     }
   }
 }
@@ -844,7 +858,13 @@ export async function runBridgeStreamStandalone(
       document,
       operation,
       input,
-      tools: { std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE } },
+      tools: {
+        std: {
+          ...std,
+          httpCall: playgroundHttpCall,
+          httpCallSSE: playgroundHttpCallSSE,
+        },
+      },
       context,
       trace: "full",
       logger: collectingLogger,
@@ -864,6 +884,9 @@ export async function runBridgeStreamStandalone(
       } else {
         // Incremental payload — apply patches in-place
         applyIncrementalPatches(data, payload.incremental);
+        if (payload.executionTraceId != null) {
+          executionTraceId = payload.executionTraceId;
+        }
       }
 
       const partial: RunResult = {

@@ -1749,6 +1749,9 @@ class CodegenContext {
       const elemWires = outputWires.filter(
         (w) => w !== rootWire && w.to.path.length > 0,
       );
+      const dispatchIndexExpr = rootWire.dispatchIndexRef
+        ? this.refToExprInElementScope(rootWire.dispatchIndexRef, "_el0")
+        : undefined;
       let arrayExpr = this.wireToExpr(rootWire);
       // Check for catch control on root wire (e.g., `catch continue` returns [])
       const rootCatchCtrl =
@@ -1839,8 +1842,11 @@ class CodegenContext {
                 0,
                 4,
                 cf.kind === "continue" ? "for-continue" : "break",
+                dispatchIndexExpr,
               )
-            : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
+            : dispatchIndexExpr
+              ? `    _result[${dispatchIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, 0, 4)};`
+              : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
 
           lines.push(`  const _result = [];`);
           lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
@@ -1857,7 +1863,7 @@ class CodegenContext {
           lines.push(`    }`);
           lines.push(`  }`);
           lines.push(`  return _result;`);
-        } else {
+        } else if (!dispatchIndexExpr) {
           lines.push(
             `  return await Promise.all((${arrayExpr} ?? []).map(async (_el0) => {`,
           );
@@ -1868,6 +1874,17 @@ class CodegenContext {
             `    return ${this.buildElementBody(elemWires, arrayIterators, 0, 4)};`,
           );
           lines.push(`  }));`);
+        } else {
+          lines.push(`  const _result = [];`);
+          lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+          for (const pl of preambleLines) {
+            lines.push(`    ${pl}`);
+          }
+          lines.push(
+            `    _result[${dispatchIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, 0, 4)};`,
+          );
+          lines.push(`  }`);
+          lines.push(`  return _result;`);
         }
         this.elementLocalVars.clear();
       } else if (cf?.kind === "continue" && cf.levels === 1) {
@@ -1879,9 +1896,22 @@ class CodegenContext {
           4,
           "continue",
         );
-        lines.push(`  return (${arrayExpr} ?? []).flatMap((_el0) => {`);
-        lines.push(body);
-        lines.push(`  });`);
+        if (!dispatchIndexExpr) {
+          lines.push(`  return (${arrayExpr} ?? []).flatMap((_el0) => {`);
+          lines.push(body);
+          lines.push(`  });`);
+        } else {
+          lines.push(`  const _result = [];`);
+          lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+          lines.push(`    const _entry = (() => {`);
+          lines.push(body.replace(/^[ ]{4}/gm, "      "));
+          lines.push(`    })();`);
+          lines.push(`    if (Array.isArray(_entry) && _entry.length > 0) {`);
+          lines.push(`      _result[${dispatchIndexExpr}] = _entry[0];`);
+          lines.push(`    }`);
+          lines.push(`  }`);
+          lines.push(`  return _result;`);
+        }
       } else if (
         cf?.kind === "break" ||
         cf?.kind === "continue" ||
@@ -1899,8 +1929,11 @@ class CodegenContext {
               0,
               4,
               cf.kind === "continue" ? "for-continue" : "break",
+              dispatchIndexExpr,
             )
-          : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
+          : dispatchIndexExpr
+            ? `    _result[${dispatchIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, 0, 4)};`
+            : `    _result.push(${this.buildElementBody(elemWires, arrayIterators, 0, 4)});`;
         lines.push(`  const _result = [];`);
         lines.push(`  __loop0: for (const _el0 of (${arrayExpr} ?? [])) {`);
         lines.push(`    try {`);
@@ -1915,7 +1948,15 @@ class CodegenContext {
         lines.push(`  return _result;`);
       } else {
         const body = this.buildElementBody(elemWires, arrayIterators, 0, 4);
-        lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
+        if (!dispatchIndexExpr) {
+          lines.push(`  return (${arrayExpr} ?? []).map((_el0) => (${body}));`);
+        } else {
+          lines.push(`  const _result = [];`);
+          lines.push(`  for (const _el0 of (${arrayExpr} ?? [])) {`);
+          lines.push(`    _result[${dispatchIndexExpr}] = ${body};`);
+          lines.push(`  }`);
+          lines.push(`  return _result;`);
+        }
       }
       return;
     }
@@ -2182,6 +2223,29 @@ class CodegenContext {
     spreadExprs?: string[],
   ): string {
     const pad = " ".repeat(indent);
+    const keys = [...node.children.keys()];
+
+    if (
+      !spreadExprs?.length &&
+      keys.length > 0 &&
+      keys.every((key) => /^\d+$/.test(key))
+    ) {
+      const assignments: string[] = [];
+      for (const [key, child] of node.children) {
+        const childSpreadExprs = (child as { spreadExprs?: string[] })
+          .spreadExprs;
+        const valueExpr =
+          child.expr != null && child.children.size === 0 && !childSpreadExprs
+            ? child.expr
+            : childSpreadExprs || child.children.size > 0
+              ? this.serializeOutputTree(child, indent + 2, childSpreadExprs)
+              : (child.expr ?? "undefined");
+        assignments.push(`${pad}_result[${key}] = ${valueExpr};`);
+      }
+      const innerPad = " ".repeat(indent - 2);
+      return `(() => {\n${pad}const _result = [];\n${assignments.join("\n")}\n${pad}return _result;\n${innerPad}})()`;
+    }
+
     const entries: string[] = [];
 
     // Add spread expressions first (they come before field overrides)
@@ -2544,6 +2608,7 @@ class CodegenContext {
     depth: number,
     indent: number,
     mode: "break" | "continue" | "for-continue",
+    resultIndexExpr?: string,
   ): string {
     const elVar = `_el${depth}`;
     const pad = " ".repeat(indent);
@@ -2568,7 +2633,9 @@ class CodegenContext {
       if (mode === "continue") {
         return `${pad}  return [${body}];`;
       }
-      return `${pad}  _result.push(${body});`;
+      return resultIndexExpr
+        ? `${pad}  _result[${resultIndexExpr}] = ${body};`
+        : `${pad}  _result.push(${body});`;
     }
 
     // Build the check expression using elementWireToExpr to include fallbacks
@@ -2606,16 +2673,16 @@ class CodegenContext {
     // mode === "for-continue" — same as break but uses native 'continue' keyword
     if (mode === "for-continue") {
       if (isNullish) {
-        return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+        return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${resultIndexExpr ? `${pad}  _result[${resultIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, depth, indent)};` : `${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`}`;
       }
-      return `${pad}  if (!${checkExpr}) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      return `${pad}  if (!${checkExpr}) ${controlStatement}\n${resultIndexExpr ? `${pad}  _result[${resultIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, depth, indent)};` : `${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`}`;
     }
 
     // mode === "break"
     if (isNullish) {
-      return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+      return `${pad}  if (${checkExpr} == null) ${controlStatement}\n${resultIndexExpr ? `${pad}  _result[${resultIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, depth, indent)};` : `${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`}`;
     }
-    return `${pad}  if (!${checkExpr}) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
+    return `${pad}  if (!${checkExpr}) ${controlStatement}\n${resultIndexExpr ? `${pad}  _result[${resultIndexExpr}] = ${this.buildElementBody(elemWires, arrayIterators, depth, indent)};` : `${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`}`;
   }
 
   // ── Wire → expression ────────────────────────────────────────────────────
@@ -3197,6 +3264,18 @@ class CodegenContext {
       return fn();
     } finally {
       this.elementLocalVars = previous;
+    }
+  }
+
+  private refToExprInElementScope(ref: NodeRef, elVar: string): string {
+    const prevElVar = this.currentElVar;
+    this.elementVarStack.push(elVar);
+    this.currentElVar = elVar;
+    try {
+      return ref.element ? this.refToElementExpr(ref) : this.refToExpr(ref);
+    } finally {
+      this.elementVarStack.pop();
+      this.currentElVar = prevElVar;
     }
   }
 

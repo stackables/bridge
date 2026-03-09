@@ -7,6 +7,7 @@ import {
   parsePath,
   serializeBridge,
 } from "../src/index.ts";
+import type { Bridge } from "../src/index.ts";
 import { createGateway } from "./_gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -373,7 +374,7 @@ describe("array index in output path", () => {
     assert.deepStrictEqual(segments, ["results", "0", "lat"]);
   });
 
-  test("explicit index on output LHS should either error at parse or work at runtime", () => {
+  test("explicit index on output LHS is allowed for dispatch syntax", () => {
     const bridgeText = `version 1.5
 bridge Query.thing {
   with api as a
@@ -385,30 +386,54 @@ o.items[0].name <- a.firstName
 
 }`;
 
-    // Currently: parses fine but wire path ["items","0","name"] never matches
-    // at runtime because response() strips indices from the GraphQL path.
-    // This is the silent-failure scenario — the worst option.
-    //
-    // Expected: either throw at parse time (Option A — preferred)
-    // or make it work at runtime (Option B).
-    let parsed = false;
-    let parseError: Error | undefined;
-    try {
-      parseBridge(bridgeText);
-      parsed = true;
-    } catch (e) {
-      parseError = e as Error;
-    }
+    // Numeric indices on the target side are now allowed to support
+    // dispatch syntax: `o[0] <- stream[] as chunk { ... }`.
+    // The parser produces path ["items","0","name"] on the target.
+    const doc = parseBridge(bridgeText);
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const wire = bridge.wires.find(
+      (w) =>
+        "from" in w &&
+        w.to.path.length === 3 &&
+        w.to.path[0] === "items" &&
+        w.to.path[1] === "0" &&
+        w.to.path[2] === "name",
+    );
+    assert.ok(wire, "wire with numeric index in target path should exist");
+  });
 
-    if (parsed) {
-      assert.fail(
-        "KNOWN ISSUE: explicit index on output LHS parses but silently produces null at runtime. " +
-          "Parser should reject `o.items[0].name` — use array mapping blocks instead.",
-      );
-    } else {
-      // Fixed: parser rejects explicit indices on the target side
-      assert.ok(parseError!.message.length > 0, "should give a useful error");
-    }
+  test("computed index on root output array mapping is preserved", () => {
+    const bridgeText = `version 1.5
+bridge Query.thing {
+  with api as a
+  with output as o
+
+  o[c.index] <- a.items[] as c {
+    .name <- c.name
+  }
+
+}`;
+
+    const doc = parseBridge(bridgeText);
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const wire = bridge.wires.find(
+      (w) => "from" in w && w.to.path.length === 0,
+    );
+    assert.ok(wire, "root array mapping wire should exist");
+    assert.deepEqual(wire.dispatchIndexRef, {
+      module: "_",
+      type: "Query",
+      field: "thing",
+      element: true,
+      path: ["index"],
+    });
+
+    const serialized = serializeBridge(doc);
+    assert.match(serialized, /o\[c\.index\] <- a\.items\[\] as c \{/);
   });
 });
 

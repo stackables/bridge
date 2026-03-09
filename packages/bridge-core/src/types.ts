@@ -61,6 +61,7 @@ export type Wire =
   | {
       from: NodeRef;
       to: NodeRef;
+      dispatchIndexRef?: NodeRef;
       loc?: SourceLocation;
       fromLoc?: SourceLocation;
       pipe?: true;
@@ -73,7 +74,12 @@ export type Wire =
       catchFallbackRef?: NodeRef;
       catchControl?: ControlFlowInstruction;
     }
-  | { value: string; to: NodeRef; loc?: SourceLocation }
+  | {
+      value: string;
+      to: NodeRef;
+      dispatchIndexRef?: NodeRef;
+      loc?: SourceLocation;
+    }
   | {
       cond: NodeRef;
       condLoc?: SourceLocation;
@@ -84,6 +90,7 @@ export type Wire =
       elseValue?: string;
       elseLoc?: SourceLocation;
       to: NodeRef;
+      dispatchIndexRef?: NodeRef;
       loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchLoc?: SourceLocation;
@@ -101,6 +108,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      dispatchIndexRef?: NodeRef;
       loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchLoc?: SourceLocation;
@@ -118,6 +126,7 @@ export type Wire =
         rightSafe?: true;
       };
       to: NodeRef;
+      dispatchIndexRef?: NodeRef;
       loc?: SourceLocation;
       fallbacks?: WireFallback[];
       catchLoc?: SourceLocation;

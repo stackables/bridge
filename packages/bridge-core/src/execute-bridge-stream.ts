@@ -42,6 +42,30 @@ export class StreamHandle {
   ) {}
 }
 
+export type DispatchStreamItem = {
+  index: number;
+  item: unknown;
+};
+
+export function createDispatchStreamItem(
+  index: number,
+  item: unknown,
+): DispatchStreamItem {
+  return { index, item };
+}
+
+export function isDispatchStreamItem(
+  value: unknown,
+): value is DispatchStreamItem {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    "index" in value &&
+    "item" in value &&
+    typeof (value as { index: unknown }).index === "number"
+  );
+}
+
 /** Type guard for `StreamHandle` sentinels embedded in resolved data. */
 export function isStreamHandle(value: unknown): value is StreamHandle {
   return value instanceof StreamHandle;
@@ -67,6 +91,7 @@ export interface StreamIncrementalItem {
 export type StreamIncrementalPayload = {
   incremental: StreamIncrementalItem[];
   hasNext: boolean;
+  executionTraceId?: bigint;
 };
 
 /** Union of all payload types yielded by `executeBridgeStream()`. */
@@ -81,6 +106,8 @@ interface FoundStream {
   path: (string | number)[];
 }
 
+const SKIP_STREAM_SLOT = Symbol("bridge.skipStreamSlot");
+
 /**
  * Walk the resolved data tree, replacing `StreamHandle` sentinels with `[]`
  * and collecting them with their paths for later iteration.
@@ -92,15 +119,41 @@ function extractStreams(
 ): unknown {
   if (isStreamHandle(data)) {
     found.push({ handle: data, path: [...path] });
+    const lastSeg = path[path.length - 1];
+    if (typeof lastSeg === "number") return SKIP_STREAM_SLOT;
+    if (typeof lastSeg === "string" && /^\d+$/.test(lastSeg)) {
+      return SKIP_STREAM_SLOT;
+    }
     return [];
   }
   if (Array.isArray(data)) {
-    return data.map((item, i) => extractStreams(item, [...path, i], found));
+    const result: unknown[] = [];
+    for (let i = 0; i < data.length; i++) {
+      const extracted = extractStreams(data[i], [...path, i], found);
+      if (extracted !== SKIP_STREAM_SLOT) {
+        result.push(extracted);
+      }
+    }
+    return result;
   }
   if (data != null && typeof data === "object") {
+    const numericKeys = Object.keys(data).every((key) => /^\d+$/.test(key));
+    if (numericKeys) {
+      const result: unknown[] = [];
+      for (const [key, value] of Object.entries(data)) {
+        const extracted = extractStreams(value, [...path, Number(key)], found);
+        if (extracted !== SKIP_STREAM_SLOT) {
+          result[Number(key)] = extracted;
+        }
+      }
+      return result;
+    }
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
-      result[key] = extractStreams(value, [...path, key], found);
+      const extracted = extractStreams(value, [...path, key], found);
+      if (extracted !== SKIP_STREAM_SLOT) {
+        result[key] = extracted;
+      }
     }
     return result;
   }
@@ -253,14 +306,26 @@ export async function* executeBridgeStream<T = unknown>(
     path: (string | number)[];
     index: number;
     done: boolean;
+    /** When true, yields replace at a fixed index instead of appending. */
+    dispatch: boolean;
   };
 
-  const active: ActiveStream[] = streams.map((s) => ({
-    iterator: s.handle.generator,
-    path: s.path,
-    index: 0,
-    done: false,
-  }));
+  const active: ActiveStream[] = streams.map((s) => {
+    // Dispatch mode: when the stream sits at a numeric path segment
+    // (e.g. o[0]), each yield replaces at that fixed index instead of
+    // appending.  Detected purely from the output path.
+    const lastSeg = s.path[s.path.length - 1];
+    const dispatch =
+      typeof lastSeg === "number" ||
+      (typeof lastSeg === "string" && /^\d+$/.test(lastSeg));
+    return {
+      iterator: s.handle.generator,
+      path: s.path,
+      index: 0,
+      done: false,
+      dispatch,
+    };
+  });
 
   // Pull from all active generators concurrently
   while (active.some((s) => !s.done)) {
@@ -291,20 +356,39 @@ export async function* executeBridgeStream<T = unknown>(
         stream.done = true;
         continue;
       }
+      const dispatchItem = isDispatchStreamItem(result.value)
+        ? result.value
+        : undefined;
       incremental.push({
-        items: [result.value],
-        path: [...stream.path, stream.index],
+        items: [dispatchItem ? dispatchItem.item : result.value],
+        path: dispatchItem
+          ? [...stream.path, dispatchItem.index]
+          : stream.dispatch
+            ? [...stream.path]
+            : [...stream.path, stream.index],
       });
-      stream.index++;
+      // In dispatch mode, index stays at 0 — each yield replaces the
+      // previous value.  In normal mode, index auto-increments for append.
+      if (!stream.dispatch && !dispatchItem) {
+        stream.index++;
+      }
     }
 
     if (incremental.length > 0) {
       const hasNext = active.some((s) => !s.done);
-      yield { incremental, hasNext };
+      yield {
+        incremental,
+        hasNext,
+        executionTraceId: tree.getExecutionTrace(),
+      };
       if (!hasNext) return;
     }
   }
 
   // Final termination signal if we broke out of the loop
-  yield { incremental: [], hasNext: false };
+  yield {
+    incremental: [],
+    hasNext: false,
+    executionTraceId: tree.getExecutionTrace(),
+  };
 }

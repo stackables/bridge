@@ -10,6 +10,7 @@
 import { audit } from "./tools/audit.ts";
 import { createHttpCall } from "./tools/http-call.ts";
 import { createHttpCallSSE } from "./tools/http-call-sse.ts";
+import { createAccumulate } from "./tools/accumulate.ts";
 import * as arrays from "./tools/arrays.ts";
 import * as strings from "./tools/strings.ts";
 
@@ -29,6 +30,7 @@ export const STD_VERSION = "1.5.0";
  */
 const httpCallFn = createHttpCall();
 const httpCallSSEFn = createHttpCallSSE();
+const accumulateFn = createAccumulate();
 
 export const std = {
   str: strings,
@@ -36,6 +38,7 @@ export const std = {
   audit,
   httpCall: httpCallFn,
   httpCallSSE: httpCallSSEFn,
+  accumulate: accumulateFn,
 } as const;
 
 /**

@@ -100,9 +100,7 @@ describe("filter tool", () => {
 
   test("filters by multiple criteria", () => {
     const result = std.arr.filter({ in: data, role: "user", name: "Charlie" });
-    assert.deepEqual(result, [
-      { id: 3, name: "Charlie", role: "user" },
-    ]);
+    assert.deepEqual(result, [{ id: 3, name: "Charlie", role: "user" }]);
   });
 
   test("returns empty array when no match", () => {
@@ -220,12 +218,13 @@ describe("std bundle", () => {
     assert.ok(std.audit, "audit present");
     assert.ok(std.httpCall, "httpCall present");
     assert.ok(std.httpCallSSE, "httpCallSSE present");
+    assert.ok(std.accumulate, "accumulate present");
     assert.ok(std.str.toUpperCase, "upperCase present");
     assert.ok(std.str.toLowerCase, "lowerCase present");
     assert.ok(std.arr.find, "findObject present");
     assert.ok(std.arr.first, "pickFirst present");
     assert.ok(std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(std).length, 5);
+    assert.equal(Object.keys(std).length, 6);
   });
 
   test("httpCall is callable with std. prefix", () => {

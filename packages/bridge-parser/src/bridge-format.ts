@@ -932,6 +932,15 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
+  function serializeDispatchIndexRef(ref: NodeRef, iterName: string): string {
+    if (ref.element) {
+      return ref.path.length > 0
+        ? `${iterName}.${serPath(ref.path)}`
+        : iterName;
+    }
+    return sRef(ref, true);
+  }
+
   // ── Helper: serialize an expression fork tree for a ref (used for cond) ──
   function serializeExprOrRef(ref: NodeRef): string {
     const tk = refTrunkKey(ref);
@@ -1020,7 +1029,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
       serializedArrays.add(arrayKey);
       const iterName = arrayIterators[arrayKey];
       const fromStr = sRef(w.from, true) + "[]";
-      const toStr = sRef(w.to, false);
+      const toStr = w.dispatchIndexRef
+        ? `${sRef(w.to, false)}[${serializeDispatchIndexRef(w.dispatchIndexRef, iterName)}]`
+        : sRef(w.to, false);
       lines.push(`${toStr} <- ${fromStr} as ${iterName} {`);
       serializeArrayElements(w.to.path, iterName, "  ");
       lines.push(`}`);

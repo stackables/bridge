@@ -605,6 +605,53 @@ bridge Query.catalog {
 
       assert.deepEqual(allItems, [{ name: "WIDGET" }, { name: "GADGET" }]);
     });
+
+    test("computed dispatch index emits patches at item-provided positions", async () => {
+      const bridgeText = `version 1.5
+bridge Query.chat {
+  with chunkStream as s
+  with output as o
+
+  o[c.index] <- s[] as c {
+    .role <- c.role
+    .content <- c.content
+  }
+}`;
+      const chunkStream = createStreamTool([
+        { index: 1, role: "assistant", content: "second" },
+        { index: 0, role: "assistant", content: "first" },
+      ]);
+
+      const document = parse(bridgeText);
+      const payloads = await collectPayloads(
+        executeBridgeStream({
+          document,
+          operation: "Query.chat",
+          input: {},
+          tools: { chunkStream },
+        }),
+      );
+
+      const initial = payloads[0]! as StreamInitialPayload;
+      assert.deepEqual(initial.data, []);
+
+      const incrementals = payloads
+        .slice(1)
+        .filter((p): p is StreamIncrementalPayload => "incremental" in p);
+      assert.deepEqual(
+        incrementals.flatMap((p) => p.incremental),
+        [
+          {
+            items: [{ role: "assistant", content: "second" }],
+            path: [1],
+          },
+          {
+            items: [{ role: "assistant", content: "first" }],
+            path: [0],
+          },
+        ],
+      );
+    });
   });
 });
 
@@ -613,6 +660,23 @@ bridge Query.catalog {
 // ══════════════════════════════════════════════════════════════════════════════
 
 forEachEngine("stream tools — eager consumption", (run) => {
+  test("explicit root index materializes as a flat array", async () => {
+    const single = () => ({ role: "assistant", content: "hi" });
+    const { data } = await run(
+      `version 1.5
+bridge Query.chat {
+  with single as s
+  with output as o
+
+  o[0] <- s
+}`,
+      "Query.chat",
+      {},
+      { single },
+    );
+    assert.deepEqual(data, [{ role: "assistant", content: "hi" }]);
+  });
+
   test("direct stream output consumed into array", async () => {
     const itemStream = createStreamTool([{ id: 1 }, { id: 2 }, { id: 3 }]);
     const { data } = await run(
@@ -656,6 +720,32 @@ bridge Query.products {
     });
   });
 
+  test("computed dispatch index materializes stream output by explicit slot", async () => {
+    const chunkStream = createStreamTool([
+      { index: 1, role: "assistant", content: "second" },
+      { index: 0, role: "assistant", content: "first" },
+    ]);
+    const { data } = await run(
+      `version 1.5
+bridge Query.chat {
+  with chunkStream as s
+  with output as o
+
+  o[c.index] <- s[] as c {
+    .role <- c.role
+    .content <- c.content
+  }
+}`,
+      "Query.chat",
+      {},
+      { chunkStream },
+    );
+    assert.deepEqual(data, [
+      { role: "assistant", content: "first" },
+      { role: "assistant", content: "second" },
+    ]);
+  });
+
   test("subtool inside array mapping on stream", async () => {
     const productStream = createStreamTool([
       { rawName: "Widget" },
@@ -686,6 +776,424 @@ bridge Query.catalog {
     assert.deepEqual(data, {
       title: "My Catalog",
       items: [{ name: "WIDGET" }, { name: "GADGET" }],
+    });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Dispatch index (o[0]) + std.accumulate tests
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("dispatch index with accumulation", () => {
+  test("o[0] with std.accumulate accumulates and dispatches to fixed index", async () => {
+    // Simulates SSE streaming: each chunk has a delta with partial content
+    const chunks = [
+      { choices: [{ delta: { role: "assistant", content: "" } }] },
+      { choices: [{ delta: { content: "Hello" } }] },
+      { choices: [{ delta: { content: " world" } }] },
+    ];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.chat {
+  with chatApi as api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+
+  o[0] <- buf
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.chat",
+        tools: { chatApi: streamTool },
+      }),
+    );
+
+    // Initial payload: stream field initialised to []
+    const initial = payloads[0] as StreamInitialPayload;
+    assert.ok("data" in initial);
+    assert.deepStrictEqual(initial.data, []);
+
+    // Incremental payloads with actual items
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    // All incremental items target path [0] (fixed index 0)
+    for (const inc of incrementals) {
+      for (const item of inc.incremental) {
+        assert.deepStrictEqual(
+          item.path,
+          [0],
+          "dispatch should target fixed index 0",
+        );
+      }
+    }
+
+    // Final accumulated state should have merged role + concatenated content
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      role: "assistant",
+      content: "Hello world",
+    });
+  });
+
+  test("o[0] yields executionTraceId on incremental payloads", async () => {
+    const streamTool = createStreamTool([{ val: 1 }, { val: 2 }]);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.items {
+  with api as a
+  with buf
+  with output as o
+
+  buf <- a[] as x {
+    .val <- x.val
+  }
+
+  o[0] <- buf
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.items",
+        tools: { api: streamTool },
+        trace: "full",
+      }),
+    );
+
+    // Initial has executionTraceId
+    const initial = payloads[0] as StreamInitialPayload;
+    assert.ok(initial.executionTraceId != null, "initial should have trace id");
+
+    // Incremental payloads also have executionTraceId
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload => "incremental" in p,
+    );
+    for (const inc of incrementals) {
+      assert.ok(
+        inc.executionTraceId != null,
+        "incremental should have trace id",
+      );
+    }
+  });
+
+  test("mapping before accumulation with element wires", async () => {
+    // Map SSE deltas through element wires before feeding into accumulator.
+    const chunks = [
+      { choices: [{ delta: { role: "assistant", content: "" } }] },
+      { choices: [{ delta: { content: "Hi" } }] },
+      { choices: [{ delta: { content: "!" } }] },
+    ];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.chat {
+  with chatApi as api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+
+  o[0] <- buf[] as a {
+    .role <- a.role
+    .content <- a.content
+  }
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.chat",
+        tools: { chatApi: streamTool },
+      }),
+    );
+
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      role: "assistant",
+      content: "Hi!",
+    });
+  });
+
+  test("interval throttles emissions, final state always emitted", async () => {
+    // All items yield synchronously within the same tick.
+    // With a large interval, only the first + final should be emitted.
+    const chunks = [{ a: "1" }, { b: "2" }, { c: "3" }, { d: "4" }, { e: "5" }];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {
+  .interval = 1000
+}
+
+bridge Query.items {
+  with src as s
+  with buf
+  with output as o
+
+  buf <- s[] as x {
+    .a <- x.a
+    .b <- x.b
+    .c <- x.c
+    .d <- x.d
+    .e <- x.e
+  }
+
+  o[0] <- buf
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.items",
+        tools: { src: streamTool },
+      }),
+    );
+
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    // Large interval + synchronous source → first item emits (Date.now() ≫ 0),
+    // then remaining items are batched.  Final state always emitted.
+    // Expect exactly 2 incremental payloads (first + final).
+    assert.ok(
+      incrementals.length <= 2,
+      `expected at most 2 incremental payloads, got ${incrementals.length}`,
+    );
+
+    // Final accumulated state has all keys merged
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      a: "1",
+      b: "2",
+      c: "3",
+      d: "4",
+      e: "5",
+    });
+  });
+
+  test("o <- buf[] as s maps accumulated stream to auto-indexed array", async () => {
+    const chunks = [
+      { choices: [{ delta: { role: "assistant", content: "" } }] },
+      { choices: [{ delta: { content: "Hi" } }] },
+      { choices: [{ delta: { content: "!" } }] },
+    ];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.chat {
+  with chatApi as api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+
+  o <- buf[] as s {
+    .r <- s.role
+    .c <- s.content
+  }
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.chat",
+        tools: { chatApi: streamTool },
+      }),
+    );
+
+    // Initial payload: stream field initialised to []
+    const initial = payloads[0] as StreamInitialPayload;
+    assert.ok("data" in initial);
+    assert.deepStrictEqual(initial.data, []);
+
+    // Incremental payloads with auto-incrementing indices
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    assert.ok(incrementals.length > 0, "should have incremental payloads");
+
+    // Each incremental should have an auto-incrementing index
+    const indices = incrementals.flatMap((inc) =>
+      inc.incremental.map((item) => item.path[item.path.length - 1]),
+    );
+    // Auto-indexed: 0, 1, 2, ...
+    for (let i = 0; i < indices.length; i++) {
+      assert.strictEqual(indices[i], i, "should auto-increment index");
+    }
+
+    // Last payload should contain mapped accumulated state
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      r: "assistant",
+      c: "Hi!",
+    });
+  });
+
+  test("o[0] <- buf[] as s maps accumulated stream with dispatch", async () => {
+    const chunks = [
+      { choices: [{ delta: { role: "assistant", content: "" } }] },
+      { choices: [{ delta: { content: "Hi" } }] },
+      { choices: [{ delta: { content: "!" } }] },
+    ];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.chat {
+  with chatApi as api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+
+  o[0] <- buf[] as s {
+    .r <- s.role
+    .c <- s.content
+  }
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.chat",
+        tools: { chatApi: streamTool },
+      }),
+    );
+
+    // Incremental payloads with dispatch index
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    assert.ok(incrementals.length > 0, "should have incremental payloads");
+
+    // All items should target fixed index 0 (dispatch mode)
+    for (const inc of incrementals) {
+      for (const item of inc.incremental) {
+        assert.deepStrictEqual(
+          item.path,
+          [0],
+          "dispatch should target fixed index 0",
+        );
+      }
+    }
+
+    // Last payload should contain mapped accumulated state
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      r: "assistant",
+      c: "Hi!",
+    });
+  });
+
+  test("o[c.index] <- buf[] as c maps accumulated stream with computed dispatch", async () => {
+    const chunks = [
+      { choices: [{ delta: { role: "assistant", content: "" } }] },
+      { choices: [{ delta: { content: "Hi" } }] },
+      { choices: [{ delta: { content: "!" } }] },
+    ];
+    const streamTool = createStreamTool(chunks);
+
+    const doc = parse(`version 1.5
+
+tool buf from std.accumulate {}
+
+bridge Query.chat {
+  with chatApi as api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+    .index = 2
+  }
+
+  o[c.index] <- buf[] as c {
+    .role <- c.role
+    .content <- c.content
+  }
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.chat",
+        tools: { chatApi: streamTool },
+      }),
+    );
+
+    const initial = payloads[0] as StreamInitialPayload;
+    assert.ok("data" in initial);
+    assert.deepStrictEqual(initial.data, []);
+
+    const incrementals = payloads.filter(
+      (p): p is StreamIncrementalPayload =>
+        "incremental" in p && p.incremental.length > 0,
+    );
+
+    assert.ok(incrementals.length > 0, "should have incremental payloads");
+    for (const inc of incrementals) {
+      for (const item of inc.incremental) {
+        assert.deepStrictEqual(item.path, [2]);
+      }
+    }
+
+    const lastInc = incrementals[incrementals.length - 1]!;
+    const lastItem = lastInc.incremental[lastInc.incremental.length - 1]!;
+    assert.deepStrictEqual(lastItem.items[0], {
+      role: "assistant",
+      content: "Hi!",
     });
   });
 });

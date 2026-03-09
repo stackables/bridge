@@ -5,7 +5,11 @@ import {
   trunkDependsOnElement,
 } from "./scheduleTools.ts";
 import { internal } from "./tools/index.ts";
-import { StreamHandle, isStreamHandle } from "./execute-bridge-stream.ts";
+import {
+  createDispatchStreamItem,
+  StreamHandle,
+  isStreamHandle,
+} from "./execute-bridge-stream.ts";
 import type { EffectiveToolLog, ToolTrace } from "./tracing.ts";
 import {
   isOtelActive,
@@ -44,6 +48,7 @@ import {
   pathEquals,
   roundMs,
   sameTrunk,
+  setNested,
   TRUNK_KEY_CACHE,
   trunkKey,
   UNSAFE_KEYS,
@@ -793,6 +798,7 @@ export class ExecutionTree implements TreeContext {
   private wrapStreamWithMapping(
     handle: StreamHandle,
     prefix: string[],
+    dispatchIndexRef?: NodeRef,
   ): StreamHandle {
     const parent = this;
     async function* mappedGenerator() {
@@ -801,7 +807,163 @@ export class ExecutionTree implements TreeContext {
         shadow.state[parent.elementTrunkKey] = item;
         const materialized = await parent.materializeShadows([shadow], prefix);
         const mapped = (materialized as unknown[])?.[0];
+        if (dispatchIndexRef) {
+          const rawIndex = await shadow.pullSingle(dispatchIndexRef);
+          yield createDispatchStreamItem(
+            parent.normalizeDispatchIndex(rawIndex),
+            mapped ?? item,
+          );
+          continue;
+        }
         yield mapped ?? item;
+      }
+    }
+    return new StreamHandle(mappedGenerator(), handle.toolName);
+  }
+
+  private normalizeDispatchIndex(value: unknown): number {
+    const index = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(
+        `Computed output index must resolve to a non-negative integer, got ${JSON.stringify(value)}`,
+      );
+    }
+    return index;
+  }
+
+  private getRootDispatchIndexRef(): NodeRef | undefined {
+    const bridge = this.bridge;
+    if (!bridge) return undefined;
+    const { type, field } = this.trunk;
+    return bridge.wires.find(
+      (wire) =>
+        wire.to.module === SELF_MODULE &&
+        wire.to.type === type &&
+        wire.to.field === field &&
+        wire.to.path.length === 0 &&
+        wire.dispatchIndexRef !== undefined,
+    )?.dispatchIndexRef;
+  }
+
+  private async materializeDispatchedShadows(
+    shadows: ExecutionTree[],
+    pathPrefix: string[],
+    dispatchIndexRef: NodeRef,
+  ): Promise<unknown[]> {
+    const materialized = await this.materializeShadows(shadows, pathPrefix);
+    if (!Array.isArray(materialized)) return [];
+
+    const result: unknown[] = [];
+    await Promise.all(
+      shadows.map(async (shadow, index) => {
+        const rawDispatchIndex = await shadow.pullSingle(dispatchIndexRef);
+        result[this.normalizeDispatchIndex(rawDispatchIndex)] =
+          materialized[index];
+      }),
+    );
+    return result;
+  }
+
+  /**
+   * Wrap a StreamHandle destined for a tool input with element-wire mapping.
+   *
+   * When a bridge writes `buf <- api[] as chunk { .role <- chunk.x }`, the
+   * element wires target the tool trunk (same as the root wire's target).
+   * This method finds those element wires, creates per-item shadow trees,
+   * resolves them, and yields mapped objects.
+   *
+   * If no element wires are found at `prefix`, returns the handle unchanged.
+   */
+  wrapStreamForToolInput(
+    handle: StreamHandle,
+    prefix: string[],
+    target: Trunk,
+  ): StreamHandle {
+    const bridge = this.bridge;
+    if (!bridge) return handle;
+
+    // Build the set of all array-mapping prefixes from the bridge so we can
+    // attribute each element wire to exactly one mapping.  An element wire
+    // belongs to the mapping with the LONGEST matching prefix.
+    const allPrefixes: string[][] = bridge.arrayIterators
+      ? Object.keys(bridge.arrayIterators).map((k) => (k ? k.split(".") : []))
+      : [];
+
+    // Collect element wires on the tool trunk at the given prefix.
+    // Group by target sub-path for correct multi-wire resolution.
+    // This must include constant and expression-derived wires in addition to
+    // direct element pulls, otherwise fields like `.index = 2` or
+    // `.index <- item.pos + 1` are lost before stream tools such as
+    // `std.accumulate` see the mapped item.
+    const wiresByPath = new Map<string, Wire[]>();
+    for (const w of bridge.wires) {
+      const to = w.to;
+      if (
+        to.module !== target.module ||
+        to.type !== target.type ||
+        to.field !== target.field
+      )
+        continue;
+      if (to.path.length <= prefix.length) continue;
+      if (!prefix.every((seg, i) => to.path[i] === seg)) continue;
+
+      const isElementMappedWire =
+        to.element === true ||
+        "value" in w ||
+        "cond" in w ||
+        "condAnd" in w ||
+        "condOr" in w ||
+        ("from" in w &&
+          (((w as Extract<Wire, { from: NodeRef }>).from?.element ?? false) ||
+            this.isElementScopedTrunk(
+              (w as Extract<Wire, { from: NodeRef }>).from,
+            )));
+      if (!isElementMappedWire) continue;
+
+      // Attribute this wire to its owning mapping (longest matching prefix).
+      // Skip wires that belong to a different (longer) mapping prefix.
+      let longestMatch = -1;
+      for (const p of allPrefixes) {
+        if (
+          p.length > longestMatch &&
+          p.length <= to.path.length &&
+          p.every((seg, i) => to.path[i] === seg)
+        ) {
+          longestMatch = p.length;
+        }
+      }
+      if (longestMatch > prefix.length) continue;
+
+      const subPath = to.path.slice(prefix.length);
+      const key = subPath.join("\0");
+      let group = wiresByPath.get(key);
+      if (!group) {
+        group = [];
+        wiresByPath.set(key, group);
+      }
+      group.push(w);
+    }
+
+    if (wiresByPath.size === 0) return handle;
+
+    const toolElementKey = `${target.module}:${target.type}:${target.field}:*`;
+    const parent = this;
+    const entries = Array.from(wiresByPath.entries());
+
+    async function* mappedGenerator() {
+      for await (const item of handle.generator) {
+        const shadow = parent.shadow();
+        shadow.state[toolElementKey] = item;
+        const obj: Record<string, unknown> = {};
+        const results = await Promise.all(
+          entries.map(([, wires]) => shadow.resolveWires(wires)),
+        );
+        for (let i = 0; i < entries.length; i++) {
+          const subPath = entries[i]![0].split("\0");
+          const val = results[i];
+          if (val !== undefined) setNested(obj, subPath, val);
+        }
+        yield obj;
       }
     }
     return new StreamHandle(mappedGenerator(), handle.toolName);
@@ -911,7 +1073,7 @@ export class ExecutionTree implements TreeContext {
         ref.pathSafe?.[i] ?? (i === 0 ? (ref.rootSafe ?? false) : false);
 
       if (result == null) {
-        if ((i === 0 && ref.element) || accessSafe) {
+        if (ref.element || accessSafe) {
           result = undefined;
           continue;
         }
@@ -1295,7 +1457,9 @@ export class ExecutionTree implements TreeContext {
     if (!array) return result;
     const resolved = await result;
     if (isStreamHandle(resolved)) {
-      return this.wrapStreamWithMapping(resolved, path);
+      const dispatchIndexRef =
+        path.length === 0 ? this.getRootDispatchIndexRef() : undefined;
+      return this.wrapStreamWithMapping(resolved, path, dispatchIndexRef);
     }
     if (isLoopControlSignal(resolved)) return [];
     return this.createShadowArray(resolved as any[]);
@@ -1445,6 +1609,16 @@ export class ExecutionTree implements TreeContext {
     return obj;
   }
 
+  private createOutputContainer(
+    fieldNames: Iterable<string>,
+  ): unknown[] | Record<string, unknown> {
+    const names = [...fieldNames];
+    if (names.length > 0 && names.every((name) => /^\d+$/.test(name))) {
+      return [];
+    }
+    return {};
+  }
+
   /**
    * Materialise all output wires into a plain JS object.
    *
@@ -1487,7 +1661,7 @@ export class ExecutionTree implements TreeContext {
       return this.state[this.elementTrunkKey];
     }
 
-    // Root wire (`o <- src`) — whole-object passthrough
+    // Root wire (`o <- src`) — whole-object passthrough or array-mapped output.
     const hasRootWire = bridge.wires.some(
       (w) =>
         "from" in w &&
@@ -1497,10 +1671,39 @@ export class ExecutionTree implements TreeContext {
         w.to.path.length === 0,
     );
     if (hasRootWire) {
+      // Array-mapped output (`o <- items[] as x { ... }`) has BOTH a root wire
+      // AND element-level wires.  Detect and handle via pullOutputField([], true)
+      // which wraps StreamHandles with element-wire mapping.
+      const hasElementWires = bridge.wires.some(
+        (w) =>
+          "from" in w &&
+          ((w.from as NodeRef).element === true ||
+            this.isElementScopedTrunk(w.from as NodeRef) ||
+            w.to.element === true) &&
+          w.to.module === SELF_MODULE &&
+          w.to.type === type &&
+          w.to.field === field,
+      );
+      if (hasElementWires) {
+        const dispatchIndexRef = this.getRootDispatchIndexRef();
+        const shadowsOrStream = await this.pullOutputField([], true);
+        if (isStreamHandle(shadowsOrStream)) {
+          return shadowsOrStream;
+        }
+        if (dispatchIndexRef) {
+          return this.materializeDispatchedShadows(
+            shadowsOrStream as ExecutionTree[],
+            [],
+            dispatchIndexRef,
+          );
+        }
+        return this.materializeShadows(shadowsOrStream as ExecutionTree[], []);
+      }
       return this.pullOutputField([]);
     }
 
-    // Object output — collect unique top-level field names
+    // Object output — collect unique top-level field names.
+    // Skip element wires — they are consumed inside shadow trees.
     const outputFields = new Set<string>();
     for (const wire of bridge.wires) {
       if (
@@ -1509,13 +1712,14 @@ export class ExecutionTree implements TreeContext {
         wire.to.field === field &&
         wire.to.path.length > 0
       ) {
+        if ("from" in wire && (wire.from as NodeRef).element === true) continue;
         outputFields.add(wire.to.path[0]!);
       }
     }
 
     if (outputFields.size === 0) return undefined;
 
-    const result: Record<string, unknown> = {};
+    const result = this.createOutputContainer(outputFields) as any;
 
     await Promise.all(
       [...outputFields].map(async (name) => {
@@ -1594,12 +1798,20 @@ export class ExecutionTree implements TreeContext {
     );
 
     if (hasRootWire && hasElementWires) {
+      const dispatchIndexRef = this.getRootDispatchIndexRef();
       const [shadowsOrStream] = await Promise.all([
         this.pullOutputField([], true),
         ...forcePromises,
       ]);
       if (isStreamHandle(shadowsOrStream)) {
         return shadowsOrStream;
+      }
+      if (dispatchIndexRef) {
+        return this.materializeDispatchedShadows(
+          shadowsOrStream as ExecutionTree[],
+          [],
+          dispatchIndexRef,
+        );
       }
       return this.materializeShadows(shadowsOrStream as ExecutionTree[], []);
     }
@@ -1613,7 +1825,8 @@ export class ExecutionTree implements TreeContext {
       return result;
     }
 
-    // Object output — collect unique top-level field names
+    // Object output — collect unique top-level field names.
+    // Skip element wires — they are consumed inside shadow trees.
     const outputFields = new Set<string>();
     for (const wire of bridge.wires) {
       if (
@@ -1622,6 +1835,7 @@ export class ExecutionTree implements TreeContext {
         wire.to.field === field &&
         wire.to.path.length > 0
       ) {
+        if ("from" in wire && (wire.from as NodeRef).element === true) continue;
         outputFields.add(wire.to.path[0]!);
       }
     }
@@ -1640,7 +1854,7 @@ export class ExecutionTree implements TreeContext {
     // Apply sparse fieldset filter
     const activeFields = filterOutputFields(outputFields, requestedFields);
 
-    const result: Record<string, unknown> = {};
+    const result = this.createOutputContainer(activeFields) as any;
 
     // First resolve spread wires (in order) to build base object
     // Each spread source's properties are merged into result

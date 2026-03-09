@@ -20,6 +20,7 @@ import {
   resolveToolSource,
   type ToolLookupContext,
 } from "./toolLookup.ts";
+import { isStreamHandle, StreamHandle } from "./execute-bridge-stream.ts";
 
 // ── Context interface ───────────────────────────────────────────────────────
 
@@ -50,6 +51,12 @@ export interface SchedulerContext extends ToolLookupContext {
   schedule(target: Trunk, pullChain?: Set<string>): MaybePromise<any>;
   /** Resolve a set of matched wires (delegates to resolveWires.ts). */
   resolveWires(wires: Wire[], pullChain?: Set<string>): MaybePromise<any>;
+  /** Wrap a stream destined for a tool input with element-wire mapping. */
+  wrapStreamForToolInput(
+    handle: StreamHandle,
+    prefix: string[],
+    target: Trunk,
+  ): StreamHandle;
 }
 
 function getBridgeLocFromGroups(groupEntries: [string, Wire[]][]): Wire["loc"] {
@@ -284,7 +291,19 @@ export function scheduleFinish(
     const path = groupEntries[i]![1][0]!.to.path;
     const value = resolvedValues[i];
     resolved.push([path, value]);
-    if (path.length === 0 && value != null && typeof value === "object") {
+    if (path.length === 0 && isStreamHandle(value)) {
+      // Stream-through: wrap with element mapping (if any) then pass generator
+      const mapped = ctx.wrapStreamForToolInput(
+        value as StreamHandle,
+        path,
+        target,
+      );
+      input._source = mapped.generator;
+    } else if (
+      path.length === 0 &&
+      value != null &&
+      typeof value === "object"
+    ) {
       Object.assign(input, value);
     } else {
       setNested(input, path, value);
@@ -366,7 +385,18 @@ export async function scheduleToolDef(
     }),
   );
   for (const [path, value] of resolved) {
-    if (path.length === 0 && value != null && typeof value === "object") {
+    if (path.length === 0 && isStreamHandle(value)) {
+      const mapped = ctx.wrapStreamForToolInput(
+        value as StreamHandle,
+        path,
+        target,
+      );
+      input._source = mapped.generator;
+    } else if (
+      path.length === 0 &&
+      value != null &&
+      typeof value === "object"
+    ) {
       Object.assign(input, value);
     } else {
       setNested(input, path, value);

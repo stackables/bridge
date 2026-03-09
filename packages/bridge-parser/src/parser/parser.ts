@@ -1076,7 +1076,7 @@ class BridgeParser extends CstParser {
         }
         if (la.tokenType === LSquare) {
           const la2 = this.LA(2);
-          return la2.tokenType === NumberLiteral;
+          return la2.tokenType !== RSquare;
         }
         return false;
       },
@@ -1097,7 +1097,20 @@ class BridgeParser extends CstParser {
           {
             ALT: () => {
               this.CONSUME(LSquare);
-              this.CONSUME(NumberLiteral, { LABEL: "arrayIndex" });
+              this.OR2([
+                {
+                  ALT: () => {
+                    this.CONSUME(NumberLiteral, { LABEL: "arrayIndex" });
+                  },
+                },
+                {
+                  ALT: () => {
+                    this.SUBRULE3(this.addressPath, {
+                      LABEL: "dynamicIndexPath",
+                    });
+                  },
+                },
+              ]);
               this.CONSUME(RSquare);
             },
           },
@@ -1615,12 +1628,24 @@ function extractDottedPathStr(node: CstNode): string {
 function extractAddressPath(node: CstNode): {
   root: string;
   segments: string[];
+  dynamicIndices?: Array<{
+    position: number;
+    root: string;
+    segments: string[];
+  }>;
   safe?: boolean;
   rootSafe?: boolean;
   segmentSafe?: boolean[];
 } {
   const root = extractNameToken(sub(node, "root")!);
-  type Seg = { offset: number; value: string };
+  type Seg =
+    | { offset: number; kind: "static"; value: string }
+    | {
+        offset: number;
+        kind: "dynamic";
+        root: string;
+        segments: string[];
+      };
   const items: Seg[] = [];
   const safeNavTokens = (node.children.safeNav as IToken[] | undefined) ?? [];
   const hasSafeNav = safeNavTokens.length > 0;
@@ -1632,6 +1657,7 @@ function extractAddressPath(node: CstNode): {
     items.push({
       offset:
         seg.location?.startOffset ?? findFirstToken(seg)?.startOffset ?? 0,
+      kind: "static",
       value: extractPathSegment(seg),
     });
   }
@@ -1641,7 +1667,23 @@ function extractAddressPath(node: CstNode): {
         `Line ${idxTok.startLine}: Array indices must be integers, found "${idxTok.image}"`,
       );
     }
-    items.push({ offset: idxTok.startOffset, value: idxTok.image });
+    items.push({
+      offset: idxTok.startOffset,
+      kind: "static",
+      value: idxTok.image,
+    });
+  }
+  for (const dynNode of subs(node, "dynamicIndexPath")) {
+    const dyn = extractAddressPath(dynNode);
+    items.push({
+      offset:
+        dynNode.location?.startOffset ??
+        findFirstToken(dynNode)?.startOffset ??
+        0,
+      kind: "dynamic",
+      root: dyn.root,
+      segments: dyn.segments,
+    });
   }
   items.sort((a, b) => a.offset - b.offset);
 
@@ -1671,9 +1713,28 @@ function extractAddressPath(node: CstNode): {
     segmentSafe.push(isSafe);
   }
 
+  const segments: string[] = [];
+  const dynamicIndices: Array<{
+    position: number;
+    root: string;
+    segments: string[];
+  }> = [];
+  for (const item of items) {
+    if (item.kind === "static") {
+      segments.push(item.value);
+      continue;
+    }
+    dynamicIndices.push({
+      position: segments.length,
+      root: item.root,
+      segments: item.segments,
+    });
+  }
+
   return {
     root,
-    segments: items.map((i) => i.value),
+    segments,
+    ...(dynamicIndices.length > 0 ? { dynamicIndices } : {}),
     ...(hasSafeNav ? { safe: true } : {}),
     ...(rootSafe ? { rootSafe } : {}),
     ...(segmentSafe.some((s) => s) ? { segmentSafe } : {}),
@@ -1858,8 +1919,9 @@ function processElementLines(
   elemLines: CstNode[],
   arrayToPath: string[],
   iterScope: string | string[],
-  bridgeType: string,
-  bridgeField: string,
+  elemTrunkModule: string,
+  elemTrunkType: string,
+  elemTrunkField: string,
   wires: Wire[],
   arrayIterators: Record<string, string>,
   buildSourceExpr: (
@@ -1934,9 +1996,9 @@ function processElementLines(
       if (iterNames[index] !== root) continue;
       const elementDepth = iterNames.length - 1 - index;
       return {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
+        module: elemTrunkModule,
+        type: elemTrunkType,
+        field: elemTrunkField,
         element: true,
         ...(elementDepth > 0 ? { elementDepth } : {}),
         path: segments,
@@ -1989,9 +2051,9 @@ function processElementLines(
           {
             value,
             to: {
-              module: SELF_MODULE,
-              type: bridgeType,
-              field: bridgeField,
+              module: elemTrunkModule,
+              type: elemTrunkType,
+              field: elemTrunkField,
               element: true,
               path: elemToPath,
             },
@@ -2009,9 +2071,9 @@ function processElementLines(
         const segs = parseTemplateString(raw);
 
         const elemToRef: NodeRef = {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
+          module: elemTrunkModule,
+          type: elemTrunkType,
+          field: elemTrunkField,
           path: elemToPath,
         };
 
@@ -2125,9 +2187,9 @@ function processElementLines(
           );
         }
         const innerToRef: NodeRef = {
-          module: SELF_MODULE,
-          type: bridgeType,
-          field: bridgeField,
+          module: elemTrunkModule,
+          type: elemTrunkType,
+          field: elemTrunkField,
           path: elemToPath,
         };
         wires.push(
@@ -2166,8 +2228,9 @@ function processElementLines(
           subs(nestedArrayNode, "elementLine"),
           elemToPath,
           [...iterNames, innerIterName],
-          bridgeType,
-          bridgeField,
+          elemTrunkModule,
+          elemTrunkType,
+          elemTrunkField,
           wires,
           arrayIterators,
           buildSourceExpr,
@@ -2188,9 +2251,9 @@ function processElementLines(
 
       // ── Element pull wire (expression or plain) ──
       const elemToRef: NodeRef = {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
+        module: elemTrunkModule,
+        type: elemTrunkType,
+        field: elemTrunkField,
         path: elemToPath,
       };
 
@@ -2446,9 +2509,9 @@ function processElementLines(
             {
               from: fromRef,
               to: {
-                module: SELF_MODULE,
-                type: bridgeType,
-                field: bridgeField,
+                module: elemTrunkModule,
+                type: elemTrunkType,
+                field: elemTrunkField,
                 element: true,
                 path: elemToPath,
               },
@@ -2464,8 +2527,9 @@ function processElementLines(
         elemToPath,
         [],
         iterNames,
-        bridgeType,
-        bridgeField,
+        elemTrunkModule,
+        elemTrunkType,
+        elemTrunkField,
         wires,
         buildSourceExpr,
         extractCoalesceAlt,
@@ -2491,8 +2555,9 @@ function processElementScopeLines(
   arrayToPath: string[],
   pathPrefix: string[],
   iterScope: string | string[],
-  bridgeType: string,
-  bridgeField: string,
+  elemTrunkModule: string,
+  elemTrunkType: string,
+  elemTrunkField: string,
   wires: Wire[],
   buildSourceExpr: (
     node: CstNode,
@@ -2553,9 +2618,9 @@ function processElementScopeLines(
       if (iterNames[index] !== root) continue;
       const elementDepth = iterNames.length - 1 - index;
       return {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
+        module: elemTrunkModule,
+        type: elemTrunkType,
+        field: elemTrunkField,
         element: true,
         ...(elementDepth > 0 ? { elementDepth } : {}),
         path: segments,
@@ -2625,9 +2690,9 @@ function processElementScopeLines(
             {
               from: fromRef,
               to: {
-                module: SELF_MODULE,
-                type: bridgeType,
-                field: bridgeField,
+                module: elemTrunkModule,
+                type: elemTrunkType,
+                field: elemTrunkField,
                 element: true,
                 path: spreadToPath,
               },
@@ -2643,8 +2708,9 @@ function processElementScopeLines(
         arrayToPath,
         fullSegs,
         iterNames,
-        bridgeType,
-        bridgeField,
+        elemTrunkModule,
+        elemTrunkType,
+        elemTrunkField,
         wires,
         buildSourceExpr,
         extractCoalesceAlt,
@@ -2667,9 +2733,9 @@ function processElementScopeLines(
           {
             value,
             to: {
-              module: SELF_MODULE,
-              type: bridgeType,
-              field: bridgeField,
+              module: elemTrunkModule,
+              type: elemTrunkType,
+              field: elemTrunkField,
               element: true,
               path: elemToPath,
             },
@@ -2683,9 +2749,9 @@ function processElementScopeLines(
     // ── Pull wire: .field <- source [modifiers] ──
     if (sc.scopeArrow) {
       const elemToRef: NodeRef = {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
+        module: elemTrunkModule,
+        type: elemTrunkType,
+        field: elemTrunkField,
         path: elemToPath,
       };
 
@@ -3542,6 +3608,30 @@ function buildBridgeBody(
     return Array.isArray(iterScope) ? iterScope : [iterScope];
   }
 
+  function assertNoDynamicIndices(
+    extracted: {
+      dynamicIndices?: Array<{
+        position: number;
+        root: string;
+        segments: string[];
+      }>;
+    },
+    lineNum: number,
+    context: string,
+  ): void {
+    if (!extracted.dynamicIndices?.length) return;
+    throw new Error(
+      `Line ${lineNum}: Computed indices are only supported on root output array mappings, not in ${context}.`,
+    );
+  }
+
+  // Mutable trunk identity for element wires.  Updated before entering an
+  // array-mapping block so that `resolveIterRef` (and any helper that calls
+  // it, such as `buildSourceExpr` / `desugarTemplateString`) emits element
+  // refs targeting the correct trunk — tool trunk or output trunk depending
+  // on the root wire's target.
+  let elemTrunk = { module: SELF_MODULE, type: bridgeType, field: bridgeField };
+
   function resolveIterRef(
     root: string,
     segments: string[],
@@ -3552,9 +3642,9 @@ function buildBridgeBody(
       if (names[index] !== root) continue;
       const elementDepth = names.length - 1 - index;
       return {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
+        module: elemTrunk.module,
+        type: elemTrunk.type,
+        field: elemTrunk.field,
         element: true,
         ...(elementDepth > 0 ? { elementDepth } : {}),
         path: [...segments],
@@ -3587,14 +3677,6 @@ function buildBridgeBody(
     };
     if (resolution.instance != null) ref.instance = resolution.instance;
     return ref;
-  }
-
-  function assertNoTargetIndices(ref: NodeRef, lineNum: number): void {
-    if (ref.path.some((seg) => /^\d+$/.test(seg))) {
-      throw new Error(
-        `Line ${lineNum}: Explicit array index in wire target is not supported. Use array mapping (\`[] as iter { }\`) instead.`,
-      );
-    }
   }
 
   // ── Helper: process block-scoped with-declarations inside array maps ──
@@ -3837,9 +3919,13 @@ function buildBridgeBody(
       const wc = wireNode.children;
       const lineNum = line(findFirstToken(wireNode));
       const wireLoc = locFromNode(wireNode);
-      const { root: targetRoot, segments: targetSegs } = extractAddressPath(
-        sub(wireNode, "target")!,
+      const extractedTarget = extractAddressPath(sub(wireNode, "target")!);
+      assertNoDynamicIndices(
+        extractedTarget,
+        lineNum,
+        "loop-scoped tool targets",
       );
+      const { root: targetRoot, segments: targetSegs } = extractedTarget;
 
       if (!writableHandles.has(targetRoot)) {
         throw new Error(
@@ -3848,7 +3934,6 @@ function buildBridgeBody(
       }
 
       const toRef = resolveAddress(targetRoot, targetSegs, lineNum);
-      assertNoTargetIndices(toRef, lineNum);
 
       if (wc.equalsOp) {
         const value = extractBareValue(sub(wireNode, "constValue")!);
@@ -4135,8 +4220,9 @@ function buildBridgeBody(
     const pipeNodes = subs(sourceNode, "pipeSegment");
 
     if (pipeNodes.length === 0) {
-      const { root, segments, safe, rootSafe, segmentSafe } =
-        extractAddressPath(headNode);
+      const extracted = extractAddressPath(headNode);
+      assertNoDynamicIndices(extracted, lineNum, "source expression");
+      const { root, segments, safe, rootSafe, segmentSafe } = extracted;
       let ref: NodeRef;
       const iterRef = resolveIterRef(root, segments, iterScope);
       if (iterRef) {
@@ -4162,7 +4248,9 @@ function buildBridgeBody(
 
     // Validate all pipe handles
     for (const pipeNode of pipeChainNodes) {
-      const { root } = extractAddressPath(pipeNode);
+      const extracted = extractAddressPath(pipeNode);
+      assertNoDynamicIndices(extracted, lineNum, "pipe handle");
+      const { root } = extracted;
       if (!handleRes.has(root)) {
         throw new Error(
           `Line ${lineNum}: Undeclared handle in pipe: "${root}". Add 'with <tool> as ${root}' to the bridge header.`,
@@ -4170,13 +4258,15 @@ function buildBridgeBody(
       }
     }
 
+    const extractedSource = extractAddressPath(actualSourceNode);
+    assertNoDynamicIndices(extractedSource, lineNum, "pipe source expression");
     const {
       root: srcRoot,
       segments: srcSegments,
       safe,
       rootSafe: srcRootSafe,
       segmentSafe: srcSegmentSafe,
-    } = extractAddressPath(actualSourceNode);
+    } = extractedSource;
     let prevOutRef: NodeRef;
     const iterRef = resolveIterRef(srcRoot, srcSegments, iterScope);
     if (iterRef) {
@@ -4189,8 +4279,9 @@ function buildBridgeBody(
     const reversed = [...pipeChainNodes].reverse();
     for (let idx = 0; idx < reversed.length; idx++) {
       const pNode = reversed[idx];
-      const { root: handleName, segments: handleSegs } =
-        extractAddressPath(pNode);
+      const extractedHandle = extractAddressPath(pNode);
+      assertNoDynamicIndices(extractedHandle, lineNum, "pipe handle");
+      const { root: handleName, segments: handleSegs } = extractedHandle;
       const fieldName = handleSegs.length > 0 ? handleSegs.join(".") : "in";
       const res = handleRes.get(handleName)!;
       const forkInstance = 100000 + nextForkSeq++;
@@ -4542,7 +4633,9 @@ function buildBridgeBody(
       // Check for element/iterator-relative refs
       const headNode = sub(srcNode, "head")!;
       const pipeSegs = subs(srcNode, "pipeSegment");
-      const { root, segments, safe: sourceSafe } = extractAddressPath(headNode);
+      const extracted = extractAddressPath(headNode);
+      assertNoDynamicIndices(extracted, lineNum, "expression operand");
+      const { root, segments, safe: sourceSafe } = extracted;
       const iterRef =
         pipeSegs.length === 0
           ? resolveIterRef(root, segments, iterScope)
@@ -4598,7 +4691,9 @@ function buildBridgeBody(
     let innerSafe = safe;
     const headNode = sub(innerSourceNode, "head")!;
     const pipeSegs = subs(innerSourceNode, "pipeSegment");
-    const { root, segments, safe: srcSafe } = extractAddressPath(headNode);
+    const extracted = extractAddressPath(headNode);
+    assertNoDynamicIndices(extracted, lineNum, "parenthesized expression");
+    const { root, segments, safe: srcSafe } = extracted;
     const iterRef =
       pipeSegs.length === 0
         ? resolveIterRef(root, segments, iterScope)
@@ -5026,7 +5121,6 @@ function buildBridgeBody(
       }
 
       const toRef = resolveAddress(targetRoot, fullSegs, scopeLineNum);
-      assertNoTargetIndices(toRef, scopeLineNum);
 
       // ── Constant wire: .field = value ──
       if (sc.scopeEquals) {
@@ -5610,11 +5704,9 @@ function buildBridgeBody(
     const wireLoc = locFromNode(wireNode);
 
     // Parse target
-    const { root: targetRoot, segments: targetSegs } = extractAddressPath(
-      sub(wireNode, "target")!,
-    );
+    const extractedTarget = extractAddressPath(sub(wireNode, "target")!);
+    const { root: targetRoot, segments: targetSegs } = extractedTarget;
     const toRef = resolveAddress(targetRoot, targetSegs, lineNum);
-    assertNoTargetIndices(toRef, lineNum);
 
     // ── Constant wire: target = value ──
     if (wc.equalsOp) {
@@ -5766,6 +5858,36 @@ function buildBridgeBody(
     // Array mapping?
     const arrayMappingNode = (wc.arrayMapping as CstNode[] | undefined)?.[0];
     if (arrayMappingNode) {
+      const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
+      let dispatchIndexRef: NodeRef | undefined;
+      if (extractedTarget.dynamicIndices?.length) {
+        if (
+          toRef.module !== SELF_MODULE ||
+          toRef.type !== bridgeType ||
+          toRef.field !== bridgeField ||
+          targetSegs.length !== 0 ||
+          extractedTarget.dynamicIndices.length !== 1 ||
+          extractedTarget.dynamicIndices[0]!.position !== 0
+        ) {
+          throw new Error(
+            `Line ${lineNum}: Computed indices are only supported on root output array mappings like o[item.index] <- src[] as item { ... }`,
+          );
+        }
+
+        const dynamicIndex = extractedTarget.dynamicIndices[0]!;
+        const iterRef = resolveIterRef(
+          dynamicIndex.root,
+          dynamicIndex.segments,
+          iterName,
+        );
+        if (!iterRef) {
+          throw new Error(
+            `Line ${lineNum}: Computed output index must come from the current array iterator.`,
+          );
+        }
+        dispatchIndexRef = iterRef;
+      }
+
       const firstSourceNode = sub(wireNode, "firstSource");
       const firstParenNode = sub(wireNode, "firstParenExpr");
       const srcRef = firstParenNode
@@ -5819,6 +5941,7 @@ function buildBridgeBody(
           ? { catchFallbackRef: arrayCatchFallbackRef }
           : {}),
         ...(arrayCatchControl ? { catchControl: arrayCatchControl } : {}),
+        ...(dispatchIndexRef ? { dispatchIndexRef } : {}),
       };
       wires.push(
         withLoc({ from: srcRef, to: toRef, ...arrayWireAttrs }, wireLoc),
@@ -5826,12 +5949,20 @@ function buildBridgeBody(
       wires.push(...arrayFallbackInternalWires);
       wires.push(...arrayCatchFallbackInternalWires);
 
-      const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
       assertNotReserved(iterName, lineNum, "iterator handle");
       const arrayToPath = toRef.path;
       arrayIterators[arrayToPath.join(".")] = iterName;
 
       // Process element lines (supports nested array mappings recursively)
+      // Set elemTrunk to the root wire's target so that element wires
+      // (and iterator refs resolved via buildSourceExpr) target the
+      // correct trunk — tool trunk or output trunk.
+      const savedElemTrunk = elemTrunk;
+      elemTrunk = {
+        module: toRef.module,
+        type: toRef.type,
+        field: toRef.field,
+      };
       const elemWithDecls = subs(arrayMappingNode, "elementWithDecl");
       const elemToolWithDecls = subs(arrayMappingNode, "elementToolWithDecl");
       const { writableHandles, cleanup: toolCleanup } =
@@ -5846,8 +5977,9 @@ function buildBridgeBody(
         subs(arrayMappingNode, "elementLine"),
         arrayToPath,
         iterName,
-        bridgeType,
-        bridgeField,
+        toRef.module,
+        toRef.type,
+        toRef.field,
         wires,
         arrayIterators,
         buildSourceExpr,
@@ -5863,8 +5995,11 @@ function buildBridgeBody(
       );
       cleanup();
       toolCleanup();
+      elemTrunk = savedElemTrunk;
       continue;
     }
+
+    assertNoDynamicIndices(extractedTarget, lineNum, "wire targets");
 
     const firstSourceNode = sub(wireNode, "firstSource");
     const firstParenNode = sub(wireNode, "firstParenExpr");
