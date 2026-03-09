@@ -8,11 +8,13 @@ import {
   parseBridgeChevrotain,
   parseBridgeDiagnostics,
   executeBridge,
+  executeBridgeStream,
   formatBridgeError,
   prettyPrintToSource,
   buildTraversalManifest,
   decodeExecutionTrace,
 } from "@stackables/bridge";
+import type { StreamIncrementalItem } from "@stackables/bridge";
 export { prettyPrintToSource };
 import type {
   BridgeDiagnostic,
@@ -28,6 +30,7 @@ import {
   std,
   getBridgeTraces,
   createHttpCall,
+  createHttpCallSSE,
 } from "@stackables/bridge";
 
 // ── Playground HTTP cache: module-level, clearable from the UI ────────────────
@@ -61,6 +64,8 @@ const playgroundHttpCall = createHttpCall(
   globalThis.fetch,
   playgroundHttpCache,
 );
+
+const playgroundHttpCallSSE = createHttpCallSSE(globalThis.fetch);
 
 /** Flush all cached HTTP responses in the playground. */
 export function clearHttpCache(): void {
@@ -188,7 +193,7 @@ export async function runBridge(
   try {
     transformedSchema = bridgeTransform(schema, instructions, {
       tools: {
-        std: { ...std, httpCall: playgroundHttpCall },
+        std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE },
       },
       trace: "full",
       logger: collectingLogger,
@@ -654,7 +659,7 @@ export async function runBridgeStandalone(
       document,
       operation,
       input,
-      tools: { std: { ...std, httpCall: playgroundHttpCall } },
+      tools: { std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE } },
       context,
       trace: "full",
       logger: collectingLogger,
@@ -666,6 +671,223 @@ export async function runBridgeStandalone(
       traces: result.traces.length > 0 ? result.traces : undefined,
       logs: logs.length > 0 ? logs : undefined,
       executionTraceId: result.executionTraceId,
+    };
+  } catch (err: unknown) {
+    const trace =
+      err && typeof err === "object" && "executionTraceId" in err
+        ? (err as { executionTraceId?: bigint }).executionTraceId
+        : undefined;
+    return {
+      errors: [
+        formatBridgeError(err, {
+          source: document.source,
+          filename: document.filename,
+        }),
+      ],
+      ...(trace != null ? { executionTraceId: trace } : {}),
+    };
+  } finally {
+    _onCacheHit = null;
+  }
+}
+
+// ── Streaming standalone execution ──────────────────────────────────────────
+
+/**
+ * Apply incremental stream patches to a mutable data tree.
+ *
+ * Each patch has `items` (values to append) and `path` (JSON pointer
+ * where the last segment is the array index).  We navigate to the
+ * parent array and push the items.
+ */
+function applyIncrementalPatches(
+  data: unknown,
+  patches: StreamIncrementalItem[],
+): void {
+  for (const patch of patches) {
+    // The path includes the index as the last segment.
+    // Navigate to the parent container (the array).
+    const parentPath = patch.path.slice(0, -1);
+    let target: any = data;
+    for (const seg of parentPath) {
+      if (target == null) break;
+      target = target[seg];
+    }
+    if (Array.isArray(target)) {
+      target.push(...patch.items);
+    }
+  }
+}
+
+/**
+ * Execute a bridge operation with incremental streaming.
+ *
+ * Uses `executeBridgeStream` under the hood.  Calls `onPartial` after
+ * each incremental payload so the UI can show progressive results.
+ * Falls back to `runBridgeStandalone` semantics when no stream tools
+ * are present (single payload).
+ */
+export async function runBridgeStreamStandalone(
+  bridgeText: string,
+  operation: string,
+  inputJson = "{}",
+  requestedFields = "",
+  contextJson = "{}",
+  onPartial?: (result: RunResult) => void,
+): Promise<RunResult> {
+  // 1. Parse Bridge DSL
+  let document;
+  try {
+    const result = parseBridgeDiagnostics(bridgeText, {
+      filename: "playground.bridge",
+    });
+    document = result.document;
+  } catch (err: unknown) {
+    return {
+      errors: [
+        `Bridge parse error: ${err instanceof Error ? err.message : String(err)}`,
+      ],
+    };
+  }
+
+  // 2. Parse input JSON
+  let input: Record<string, unknown>;
+  try {
+    input = inputJson.trim()
+      ? (JSON.parse(inputJson) as Record<string, unknown>)
+      : {};
+  } catch (err: unknown) {
+    return {
+      errors: [
+        `Input JSON error: ${err instanceof Error ? err.message : String(err)}`,
+      ],
+    };
+  }
+
+  // 3. Parse context JSON
+  let context: Record<string, unknown>;
+  try {
+    context = contextJson.trim()
+      ? (JSON.parse(contextJson) as Record<string, unknown>)
+      : {};
+  } catch (err: unknown) {
+    return {
+      errors: [
+        `Context JSON error: ${err instanceof Error ? err.message : String(err)}`,
+      ],
+    };
+  }
+
+  // 4. Parse requested fields
+  const fields = requestedFields
+    .split(",")
+    .map((f) => f.trim())
+    .filter(Boolean);
+
+  // 5. Build logger
+  const logs: LogEntry[] = [];
+
+  function formatLog(args: unknown[]): string {
+    if (args.length === 0) return "";
+    const fmt = String(args[0]);
+    let i = 1;
+    const msg = fmt.replace(/%[sdioOjf%]/g, (token) => {
+      if (token === "%%") return "%";
+      if (i >= args.length) return token;
+      const val = args[i++];
+      switch (token) {
+        case "%d":
+        case "%i":
+        case "%f":
+          return String(Number(val));
+        case "%o":
+        case "%O":
+        case "%j":
+          try {
+            return JSON.stringify(val);
+          } catch {
+            return String(val);
+          }
+        default:
+          return String(val);
+      }
+    });
+    const rest = args.slice(i).map(String);
+    return rest.length > 0 ? `${msg} ${rest.join(" ")}` : msg;
+  }
+
+  const collectingLogger: Logger = {
+    debug: (...args: unknown[]) =>
+      logs.push({ level: "debug", message: formatLog(args) }),
+    info: (...args: unknown[]) =>
+      logs.push({ level: "info", message: formatLog(args) }),
+    warn: (...args: unknown[]) =>
+      logs.push({ level: "warn", message: formatLog(args) }),
+    error: (...args: unknown[]) =>
+      logs.push({ level: "error", message: formatLog(args) }),
+  };
+
+  // 6. Stream execution
+  _onCacheHit = (key: string) => {
+    try {
+      const url = new URL(key);
+      logs.push({
+        level: "info",
+        message: `⚡ cache hit: ${url.pathname}${url.search}`,
+      });
+    } catch {
+      logs.push({ level: "info", message: `⚡ cache hit: ${key}` });
+    }
+  };
+  try {
+    const stream = executeBridgeStream({
+      document,
+      operation,
+      input,
+      tools: { std: { ...std, httpCall: playgroundHttpCall, httpCallSSE: playgroundHttpCallSSE } },
+      context,
+      trace: "full",
+      logger: collectingLogger,
+      ...(fields.length > 0 ? { requestedFields: fields } : {}),
+    });
+
+    let data: unknown;
+    let traces: ToolTrace[] | undefined;
+    let executionTraceId: bigint | undefined;
+
+    for await (const payload of stream) {
+      if ("data" in payload) {
+        // Initial payload
+        data = payload.data;
+        traces = payload.traces;
+        executionTraceId = payload.executionTraceId;
+      } else {
+        // Incremental payload — apply patches in-place
+        applyIncrementalPatches(data, payload.incremental);
+      }
+
+      const partial: RunResult = {
+        data,
+        traces: traces && traces.length > 0 ? traces : undefined,
+        logs: logs.length > 0 ? [...logs] : undefined,
+        executionTraceId,
+      };
+
+      if (payload.hasNext && onPartial) {
+        onPartial(partial);
+      }
+
+      if (!payload.hasNext) {
+        return partial;
+      }
+    }
+
+    // Should not reach here, but just in case
+    return {
+      data,
+      traces: traces && traces.length > 0 ? traces : undefined,
+      logs: logs.length > 0 ? logs : undefined,
+      executionTraceId,
     };
   } catch (err: unknown) {
     const trace =

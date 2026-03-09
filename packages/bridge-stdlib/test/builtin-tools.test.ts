@@ -219,12 +219,13 @@ describe("std bundle", () => {
   test("std namespace contains transform tools", () => {
     assert.ok(std.audit, "audit present");
     assert.ok(std.httpCall, "httpCall present");
+    assert.ok(std.httpCallSSE, "httpCallSSE present");
     assert.ok(std.str.toUpperCase, "upperCase present");
     assert.ok(std.str.toLowerCase, "lowerCase present");
     assert.ok(std.arr.find, "findObject present");
     assert.ok(std.arr.first, "pickFirst present");
     assert.ok(std.arr.toArray, "toArray present");
-    assert.equal(Object.keys(std).length, 4);
+    assert.equal(Object.keys(std).length, 5);
   });
 
   test("httpCall is callable with std. prefix", () => {

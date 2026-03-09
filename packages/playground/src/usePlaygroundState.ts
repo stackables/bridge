@@ -3,7 +3,7 @@ import { examples } from "./examples";
 import type { QueryTab } from "./Playground";
 import {
   runBridge,
-  runBridgeStandalone,
+  runBridgeStreamStandalone,
   getDiagnostics,
   extractBridgeOperations,
   extractOutputFields,
@@ -244,12 +244,13 @@ export function usePlaygroundState(
     try {
       let r: RunResult;
       if (mode === "standalone") {
-        r = await runBridgeStandalone(
+        r = await runBridgeStreamStandalone(
           bridge,
           activeQuery.operation ?? "",
           activeQuery.inputJson ?? "{}",
           activeQuery.outputFields ?? "",
           context,
+          (partial) => setResults((prev) => ({ ...prev, [qId]: partial })),
         );
       } else {
         r = await runBridge(schema, bridge, activeQuery.query, {}, context);

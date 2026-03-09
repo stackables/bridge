@@ -9,6 +9,7 @@
  */
 import { audit } from "./tools/audit.ts";
 import { createHttpCall } from "./tools/http-call.ts";
+import { createHttpCallSSE } from "./tools/http-call-sse.ts";
 import * as arrays from "./tools/arrays.ts";
 import * as strings from "./tools/strings.ts";
 
@@ -27,12 +28,14 @@ export const STD_VERSION = "1.5.0";
  * Referenced in `.bridge` files as `std.str.toUpperCase`, `std.arr.first`, etc.
  */
 const httpCallFn = createHttpCall();
+const httpCallSSEFn = createHttpCallSSE();
 
 export const std = {
   str: strings,
   arr: arrays,
   audit,
   httpCall: httpCallFn,
+  httpCallSSE: httpCallSSEFn,
 } as const;
 
 /**
@@ -45,3 +48,4 @@ export const builtinToolNames: readonly string[] = Object.keys(std).map(
 );
 
 export { createHttpCall } from "./tools/http-call.ts";
+export { createHttpCallSSE } from "./tools/http-call-sse.ts";

@@ -8,6 +8,8 @@
 
 import type {
   BridgeDocument,
+  Bridge,
+  ToolDef,
   ToolMap,
   Logger,
   ToolTrace,
@@ -226,6 +228,54 @@ function flattenTools(
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * Collect the tool function names (flat-key form, e.g. "std.httpCall") that
+ * a specific bridge operation actually references.  This walks the bridge's
+ * handle bindings → ToolDef → extends chain to resolve the `fn` field.
+ */
+function getUsedToolFnNames(
+  document: BridgeDocument,
+  operation: string,
+): string[] {
+  const [type, field] = operation.split(".");
+  const bridge = document.instructions.find(
+    (i): i is Bridge =>
+      i.kind === "bridge" && i.type === type && i.field === field,
+  );
+  if (!bridge) return [];
+
+  const toolDefs = document.instructions.filter(
+    (i): i is ToolDef => i.kind === "tool",
+  );
+
+  const fnNames: string[] = [];
+  for (const h of bridge.handles) {
+    if (h.kind !== "tool") continue;
+    const resolved = resolveToolFn(h.name, toolDefs);
+    fnNames.push(resolved ?? h.name);
+  }
+  return fnNames;
+}
+
+/** Walk the ToolDef extends chain to find the actual `fn` name. */
+function resolveToolFn(
+  name: string,
+  toolDefs: ToolDef[],
+  seen?: Set<string>,
+): string | undefined {
+  const def = toolDefs.find((t) => t.name === name);
+  if (!def) return undefined;
+  if (def.fn) return def.fn;
+  if (def.extends) {
+    // Guard against circular extends
+    const visited = seen ?? new Set<string>();
+    if (visited.has(name)) return undefined;
+    visited.add(name);
+    return resolveToolFn(def.extends, toolDefs, visited);
+  }
+  return undefined;
+}
+
+/**
  * Execute a bridge operation using AOT-compiled code.
  *
  * On first call for a given (document, operation) pair, compiles the bridge
@@ -292,7 +342,11 @@ export async function executeBridge<T = unknown>(
   // Stream tools (async generators with `.bridge.stream`) are unsupported by
   // the compiled code path.  Fall back to the core interpreter which wraps
   // them in StreamHandle / eagerly consumes them.
-  for (const val of Object.values(flatTools)) {
+  // Only check tools actually referenced by this bridge operation — not every
+  // tool in the namespace — so unrelated stream tools don't force a fallback.
+  const usedFnNames = getUsedToolFnNames(document, operation);
+  for (const fnName of usedFnNames) {
+    const val = flatTools[fnName];
     if (
       typeof val === "function" &&
       val.bridge &&

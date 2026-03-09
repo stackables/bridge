@@ -1602,4 +1602,92 @@ bridge Mutation.deepseekChat {
     ],
     context: `{ "DEEPSEEK_API_KEY": "" }`,
   },
+  {
+    id: "deepseek-stream",
+    name: "Deepseek Stream",
+    mode: "standalone",
+    description:
+      "Stream a Deepseek chat completion via SSE — tokens arrive incrementally using std.httpCallSSE",
+    schema: `scalar JSONObject
+
+type Query {
+  _: Boolean
+}
+
+type Mutation {
+  deepseekStream(messages: JSONObject): [StreamChunk]
+}
+
+type StreamChunk {
+  content: String
+  role: String
+}`,
+    bridge: `version 1.5
+
+# SSE stream tool — each Server-Sent Event becomes one yielded item
+tool deepseekApi from std.httpCallSSE {
+  .baseUrl = "https://api.deepseek.com"
+  .method = POST
+  .path = "/chat/completions"
+  .headers.Content-Type = "application/json"
+}
+
+bridge Mutation.deepseekStream {
+  with deepseekApi as api
+  with input as i
+  with context as ctx
+  with output as o
+
+  api.headers.Authorization <- "Bearer {ctx.DEEPSEEK_API_KEY}"
+
+  api.model = "deepseek-chat"
+  api.stream = true
+  api.messages <- i.messages
+
+  # Each SSE event yields a chunk with choices[].delta
+  o <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+}`,
+    queries: [
+      {
+        name: "Deepseek Stream",
+        query: `mutation {
+  deepseekStream(messages: [
+    {
+      role: "system",
+      content: "You are a helpful assistant."
+    },
+    {
+      role: "user",
+      content: "Tell me a joke"
+    }
+  ]) {
+    content
+    role
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Mutation.deepseekStream",
+        outputFields: "",
+        input: {
+          messages: [
+            {
+              role: "system",
+              content: "You are a helpful assistant.",
+            },
+            {
+              role: "user",
+              content: "Tell me a joke",
+            },
+          ],
+        },
+      },
+    ],
+    context: `{ "DEEPSEEK_API_KEY": "" }`,
+  },
 ];
