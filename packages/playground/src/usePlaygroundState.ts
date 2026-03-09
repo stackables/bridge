@@ -129,14 +129,14 @@ export function usePlaygroundState(
     ? runningIds.has(displayQueryId)
     : false;
 
-  const clearExecutionTrace = useCallback(() => {
+  const clearExecutionTraceId = useCallback(() => {
     if (!displayQueryId) return;
     setResults((prev) => {
       const cur = prev[displayQueryId];
       if (!cur) return prev;
       return {
         ...prev,
-        [displayQueryId]: { ...cur, executionTrace: undefined },
+        [displayQueryId]: { ...cur, executionTraceId: undefined },
       };
     });
   }, [displayQueryId]);
@@ -413,7 +413,7 @@ export function usePlaygroundState(
     hasErrors,
     isActiveRunning,
     onRun: handleRun,
-    onClearExecutionTrace: clearExecutionTrace,
+    onClearExecutionTraceId: clearExecutionTraceId,
     graphqlSchema,
     bridgeOperations,
     availableOutputFields,

@@ -220,13 +220,13 @@ function QueryTabBar({
 
 // ── bridge DSL header with optional trace badge ─────────────────────────────
 function BridgeDslHeader({
-  executionTrace,
-  onClearExecutionTrace,
+  executionTraceId,
+  onClearExecutionTraceId,
 }: {
-  executionTrace?: bigint;
-  onClearExecutionTrace?: () => void;
+  executionTraceId?: bigint;
+  onClearExecutionTraceId?: () => void;
 }) {
-  const hasTrace = executionTrace != null && executionTrace > 0n;
+  const hasTrace = executionTraceId != null && executionTraceId > 0n;
   return (
     <div className="content-center shrink-0 px-5 h-10 flex items-center gap-4">
       <span className="text-[11px] font-bold uppercase tracking-widest text-slate-200">
@@ -234,14 +234,14 @@ function BridgeDslHeader({
       </span>
       {hasTrace && (
         <span
-          title={`Execution trace: ${executionTrace} (decimal)`}
+          title={`Execution trace ID: ${executionTraceId} (decimal)`}
           className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
         >
-          trace-id 0x{executionTrace.toString(16)}
-          {onClearExecutionTrace && (
+          trace-id 0x{executionTraceId.toString(16)}
+          {onClearExecutionTraceId && (
             <button
-              onClick={onClearExecutionTrace}
-              title="Clear execution trace highlighting"
+              onClick={onClearExecutionTraceId}
+              title="Clear execution trace ID highlighting"
               className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
             >
               <svg
@@ -313,9 +313,9 @@ import { getTraversalManifest, decodeExecutionTrace } from "./engine";
 function getInactiveTraversalLocations(
   bridge: string,
   operation: string,
-  executionTrace?: bigint,
+  executionTraceId?: bigint,
 ): SourceLocation[] {
-  if (!operation || executionTrace == null || executionTrace === 0n) {
+  if (!operation || executionTraceId == null || executionTraceId === 0n) {
     return [];
   }
 
@@ -323,7 +323,7 @@ function getInactiveTraversalLocations(
   if (manifest.length === 0) return [];
 
   const activeIds = new Set(
-    decodeExecutionTrace(manifest, executionTrace).map((entry) => entry.id),
+    decodeExecutionTrace(manifest, executionTraceId).map((entry) => entry.id),
   );
 
   // Group entries by wire (wireIndex).
@@ -419,7 +419,7 @@ export type PlaygroundProps = {
   bridgeOperations: BridgeOperation[];
   availableOutputFields: OutputFieldNode[];
   hideGqlSwitch?: boolean;
-  onClearExecutionTrace?: () => void;
+  onClearExecutionTraceId?: () => void;
 };
 
 export function Playground({
@@ -449,7 +449,7 @@ export function Playground({
   bridgeOperations,
   availableOutputFields,
   hideGqlSwitch,
-  onClearExecutionTrace,
+  onClearExecutionTraceId,
 }: PlaygroundProps) {
   const hLayout = useDefaultLayout({ id: "bridge-playground-h" });
   const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
@@ -470,9 +470,9 @@ export function Playground({
       getInactiveTraversalLocations(
         bridge,
         manifestOperation,
-        displayResult?.executionTrace,
+        displayResult?.executionTraceId,
       ),
-    [bridge, manifestOperation, displayResult?.executionTrace],
+    [bridge, manifestOperation, displayResult?.executionTraceId],
   );
 
   return (
@@ -511,8 +511,8 @@ export function Playground({
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
           <BridgeDslHeader
-            executionTrace={displayResult?.executionTrace}
-            onClearExecutionTrace={onClearExecutionTrace}
+            executionTraceId={displayResult?.executionTraceId}
+            onClearExecutionTraceId={onClearExecutionTraceId}
           />
           <div className="px-3 pb-3">
             <Editor
@@ -639,8 +639,8 @@ export function Playground({
                 )}
                 <PanelBox>
                   <BridgeDslHeader
-                    executionTrace={displayResult?.executionTrace}
-                    onClearExecutionTrace={onClearExecutionTrace}
+                    executionTraceId={displayResult?.executionTraceId}
+                    onClearExecutionTraceId={onClearExecutionTraceId}
                   />
                   <div className="flex-1 min-h-0 px-3 pb-3">
                     <Editor
@@ -687,8 +687,8 @@ export function Playground({
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
                     <BridgeDslHeader
-                      executionTrace={displayResult?.executionTrace}
-                      onClearExecutionTrace={onClearExecutionTrace}
+                      executionTraceId={displayResult?.executionTraceId}
+                      onClearExecutionTraceId={onClearExecutionTraceId}
                     />
                     <div className="flex-1 min-h-0 px-3 pb-3">
                       <Editor

@@ -81,7 +81,7 @@ export type RunResult = {
   traces?: ToolTrace[];
   logs?: LogEntry[];
   /** Compact bitmask encoding which traversal paths were taken during execution. */
-  executionTrace?: bigint;
+  executionTraceId?: bigint;
 };
 
 export type DiagnosticResult = {
@@ -665,12 +665,12 @@ export async function runBridgeStandalone(
       data: result.data,
       traces: result.traces.length > 0 ? result.traces : undefined,
       logs: logs.length > 0 ? logs : undefined,
-      executionTrace: result.executionTrace,
+      executionTraceId: result.executionTraceId,
     };
   } catch (err: unknown) {
     const trace =
-      err && typeof err === "object" && "executionTrace" in err
-        ? (err as { executionTrace?: bigint }).executionTrace
+      err && typeof err === "object" && "executionTraceId" in err
+        ? (err as { executionTraceId?: bigint }).executionTraceId
         : undefined;
     return {
       errors: [
@@ -679,7 +679,7 @@ export async function runBridgeStandalone(
           filename: document.filename,
         }),
       ],
-      ...(trace != null ? { executionTrace: trace } : {}),
+      ...(trace != null ? { executionTraceId: trace } : {}),
     };
   } finally {
     _onCacheHit = null;

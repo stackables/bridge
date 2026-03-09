@@ -7,13 +7,15 @@ import {
   decodeExecutionTrace,
   executeBridge,
 } from "@stackables/bridge-core";
-import type { Bridge, TraversalEntry, BridgeDocument } from "@stackables/bridge-core";
+import type {
+  Bridge,
+  TraversalEntry,
+  BridgeDocument,
+} from "@stackables/bridge-core";
 
 function getBridge(source: string): Bridge {
   const doc = parseBridge(source);
-  const bridge = doc.instructions.find(
-    (i): i is Bridge => i.kind === "bridge",
-  );
+  const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge");
   assert.ok(bridge, "expected a bridge instruction");
   return bridge;
 }
@@ -71,8 +73,8 @@ bridge Query.demo {
   o.label <- a.label || b.label
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const labelEntries = entries.filter((e) =>
-      e.target.includes("label") && e.target.length === 1,
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
     );
     assert.equal(labelEntries.length, 2);
     assert.equal(labelEntries[0].kind, "primary");
@@ -91,8 +93,8 @@ bridge Query.demo {
   o.label <- api.label ?? "default"
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const labelEntries = entries.filter((e) =>
-      e.target.includes("label") && e.target.length === 1,
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
     );
     assert.equal(labelEntries.length, 2);
     assert.equal(labelEntries[0].kind, "primary");
@@ -112,8 +114,8 @@ bridge Query.demo {
   o.label <- a.label || b.label || "fallback"
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const labelEntries = entries.filter((e) =>
-      e.target.includes("label") && e.target.length === 1,
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
     );
     assert.equal(labelEntries.length, 3);
     assert.equal(labelEntries[0].kind, "primary");
@@ -135,8 +137,8 @@ bridge Query.demo {
   o.lat <- api.lat catch 0
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const latEntries = entries.filter((e) =>
-      e.target.includes("lat") && e.target.length === 1,
+    const latEntries = entries.filter(
+      (e) => e.target.includes("lat") && e.target.length === 1,
     );
     assert.equal(latEntries.length, 2);
     assert.equal(latEntries[0].kind, "primary");
@@ -157,8 +159,8 @@ bridge Query.demo {
   o.result <- a.value || b.value catch i.fallback
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const resultEntries = entries.filter((e) =>
-      e.target.includes("result") && e.target.length === 1,
+    const resultEntries = entries.filter(
+      (e) => e.target.includes("result") && e.target.length === 1,
     );
     assert.equal(resultEntries.length, 3);
     assert.equal(resultEntries[0].kind, "primary");
@@ -245,7 +247,11 @@ bridge Query.demo {
     const entries = enumerateTraversalIds(bridge);
     const allIds = ids(entries);
     const unique = new Set(allIds);
-    assert.equal(unique.size, allIds.length, `IDs must be unique: ${JSON.stringify(allIds)}`);
+    assert.equal(
+      unique.size,
+      allIds.length,
+      `IDs must be unique: ${JSON.stringify(allIds)}`,
+    );
   });
 
   // ── TraversalEntry shape ──────────────────────────────────────────────────
@@ -284,8 +290,8 @@ bridge Query.demo {
   o.label <- i.flag ? api.a : api.b
 }`);
     const entries = enumerateTraversalIds(bridge);
-    const labelEntries = entries.filter((e) =>
-      e.target.includes("label") && e.target.length === 1,
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
     );
     assert.ok(labelEntries.length >= 2, "at least then + else");
     const then = labelEntries.find((e) => e.kind === "then");
@@ -347,7 +353,11 @@ bridge Query.demo {
 }`);
     const manifest = buildTraversalManifest(bridge);
     for (let i = 0; i < manifest.length; i++) {
-      assert.equal(manifest[i].bitIndex, i, `entry ${i} should have bitIndex ${i}`);
+      assert.equal(
+        manifest[i].bitIndex,
+        i,
+        `entry ${i} should have bitIndex ${i}`,
+      );
     }
   });
 });
@@ -379,9 +389,14 @@ bridge Query.demo {
   o.result <- api.label || "fallback"
 }`);
     const manifest = buildTraversalManifest(bridge);
-    const primary = manifest.find((e) => e.kind === "primary" && e.target.includes("result"));
+    const primary = manifest.find(
+      (e) => e.kind === "primary" && e.target.includes("result"),
+    );
     assert.ok(primary);
-    const result = decodeExecutionTrace(manifest, 1n << BigInt(primary.bitIndex));
+    const result = decodeExecutionTrace(
+      manifest,
+      1n << BigInt(primary.bitIndex),
+    );
     assert.equal(result.length, 1);
     assert.equal(result[0].id, primary.id);
   });
@@ -428,7 +443,10 @@ bridge Query.demo {
     const manifest = buildTraversalManifest(bridge);
     const thenEntry = manifest.find((e) => e.kind === "then");
     assert.ok(thenEntry);
-    const decoded = decodeExecutionTrace(manifest, 1n << BigInt(thenEntry.bitIndex));
+    const decoded = decodeExecutionTrace(
+      manifest,
+      1n << BigInt(thenEntry.bitIndex),
+    );
     assert.equal(decoded.length, 1);
     assert.equal(decoded[0].kind, "then");
   });
@@ -441,7 +459,7 @@ function getDoc(source: string): BridgeDocument {
   return JSON.parse(JSON.stringify(raw)) as BridgeDocument;
 }
 
-describe("executionTrace: end-to-end", () => {
+describe("executionTraceId: end-to-end", () => {
   test("simple pull wire — primary bits are set", async () => {
     const doc = getDoc(`version 1.5
 bridge Query.demo {
@@ -451,21 +469,21 @@ bridge Query.demo {
   api.q <- i.q
   o.result <- api.label
 }`);
-    const { executionTrace } = await executeBridge({
+    const { executionTraceId } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "test" },
       tools: { api: async () => ({ label: "Hello" }) },
     });
 
-    assert.ok(executionTrace > 0n, "trace should have bits set");
+    assert.ok(executionTraceId > 0n, "trace should have bits set");
 
     // Decode and verify
     const bridge = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("primary"), "should include primary paths");
   });
@@ -479,7 +497,7 @@ bridge Query.demo {
   api.q <- i.q
   o.label <- api.label || "default"
 }`);
-    const { executionTrace, data } = await executeBridge({
+    const { executionTraceId, data } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "test" },
@@ -492,7 +510,7 @@ bridge Query.demo {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("fallback"), "should include fallback path");
   });
@@ -506,11 +524,15 @@ bridge Query.demo {
   api.q <- i.q
   o.lat <- api.lat catch 0
 }`);
-    const { executionTrace, data } = await executeBridge({
+    const { executionTraceId, data } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "test" },
-      tools: { api: async () => { throw new Error("boom"); } },
+      tools: {
+        api: async () => {
+          throw new Error("boom");
+        },
+      },
     });
 
     assert.equal((data as any).lat, 0);
@@ -519,7 +541,7 @@ bridge Query.demo {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("catch"), "should include catch path");
   });
@@ -533,7 +555,7 @@ bridge Query.demo {
   api.q <- i.q
   o.label <- i.flag ? api.a : api.b
 }`);
-    const { executionTrace } = await executeBridge({
+    const { executionTraceId } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "test", flag: true },
@@ -544,7 +566,7 @@ bridge Query.demo {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("then"), "should include then path");
     assert.ok(!kinds.includes("else"), "should NOT include else path");
@@ -559,7 +581,7 @@ bridge Query.demo {
   api.q <- i.q
   o.label <- i.flag ? api.a : api.b
 }`);
-    const { executionTrace } = await executeBridge({
+    const { executionTraceId } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "test", flag: false },
@@ -570,7 +592,7 @@ bridge Query.demo {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("else"), "should include else path");
     assert.ok(!kinds.includes("then"), "should NOT include then path");
@@ -584,7 +606,7 @@ bridge Query.demo {
   api.mode = "fast"
   o.result <- api.label
 }`);
-    const { executionTrace } = await executeBridge({
+    const { executionTraceId } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: {},
@@ -595,12 +617,12 @@ bridge Query.demo {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const manifest = buildTraversalManifest(bridge);
-    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("const"), "should include const path");
   });
 
-  test("executionTrace is a bigint suitable for hex encoding", async () => {
+  test("executionTraceId is a bigint suitable for hex encoding", async () => {
     const doc = getDoc(`version 1.5
 bridge Query.demo {
   with api
@@ -609,15 +631,15 @@ bridge Query.demo {
   api.q <- i.q
   o.result <- api.label
 }`);
-    const { executionTrace } = await executeBridge({
+    const { executionTraceId } = await executeBridge({
       document: doc,
       operation: "Query.demo",
       input: { q: "Berlin" },
       tools: { api: async () => ({ label: "Berlin" }) },
     });
 
-    assert.equal(typeof executionTrace, "bigint");
-    const hex = `0x${executionTrace.toString(16)}`;
+    assert.equal(typeof executionTraceId, "bigint");
+    const hex = `0x${executionTraceId.toString(16)}`;
     assert.ok(hex.startsWith("0x"), "should be hex-encodable");
   });
 });

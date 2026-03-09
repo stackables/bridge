@@ -10,7 +10,7 @@
  *      (empty-array, primary for .data, nullish fallback for .data)
  *
  * The traversal manifest is a static analysis result. At runtime, the
- * execution engine produces a compact numeric `executionTrace` (bitmask)
+ * execution engine produces a compact numeric `executionTraceId` (bitmask)
  * that records which traversal paths were actually taken. Use
  * {@link decodeExecutionTrace} to map the bitmask back to entries.
  */

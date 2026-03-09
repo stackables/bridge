@@ -45,18 +45,18 @@ The Trace ID is returned alongside your standard data payload from the `executeB
 ```typescript
 import { executeBridge } from "@stackables/bridge-core";
 
-const { data, traceId } = await executeBridge({
+const { data, executionTraceId } = await executeBridge({
   bridge: Query.pricing,
   input: { isPro: false }
 });
 
 // data: { tier: "basic", discount: 5, price: 9.99 }
-// traceId: 42 (or "0x2a")
+// executionTraceId: 42 (or "0x2a")
 
 // Safe to log without scrubbing PII
 logger.info("Bridge executed", { 
   operation: "Query.pricing",
-  trace: traceId 
+  trace: executionTraceId 
 });
 
 ```

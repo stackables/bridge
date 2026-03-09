@@ -79,7 +79,7 @@ export type ExecuteBridgeResult<T = unknown> = {
   data: T;
   traces: ToolTrace[];
   /** Compact bitmask encoding which traversal paths were taken during execution. */
-  executionTrace: bigint;
+  executionTraceId: bigint;
 };
 
 /**
@@ -170,7 +170,7 @@ export async function executeBridge<T = unknown>(
     data = await tree.run(input, options.requestedFields);
   } catch (err) {
     if (err && typeof err === "object") {
-      (err as { executionTrace?: bigint }).executionTrace =
+      (err as { executionTraceId?: bigint }).executionTraceId =
         tree.getExecutionTrace();
     }
     throw attachBridgeErrorDocumentContext(err, doc);
@@ -179,6 +179,6 @@ export async function executeBridge<T = unknown>(
   return {
     data: data as T,
     traces: tree.getTraces(),
-    executionTrace: tree.getExecutionTrace(),
+    executionTraceId: tree.getExecutionTrace(),
   };
 }
