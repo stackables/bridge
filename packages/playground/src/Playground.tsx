@@ -299,7 +299,7 @@ function SchemaHeader({
 import { getTraversalManifest, decodeExecutionTrace } from "./engine";
 import type { TraversalEntry } from "./engine";
 
-/** Group entries by target path (wireIndex) for visual grouping. */
+/** Group entries by wireIndex for visual grouping. */
 type ManifestGroup = {
   label: string;
   entries: TraversalEntry[];
@@ -307,22 +307,24 @@ type ManifestGroup = {
 };
 
 function buildGroups(manifest: TraversalEntry[]): ManifestGroup[] {
-  const byWire = new Map<number, TraversalEntry[]>();
+  // Group by wireIndex; each unique wireIndex forms one group.
+  // Negative wireIndex values (empty-array entries) are already unique per scope.
+  const byKey = new Map<number, TraversalEntry[]>();
   const order: number[] = [];
   for (const e of manifest) {
     const key = e.wireIndex;
-    let group = byWire.get(key);
+    let group = byKey.get(key);
     if (!group) {
       group = [];
-      byWire.set(key, group);
+      byKey.set(key, group);
       order.push(key);
     }
     group.push(e);
   }
   return order.map((key) => {
-    const entries = byWire.get(key)!;
+    const entries = byKey.get(key)!;
     const label =
-      entries[0].target.length > 0 ? entries[0].target.join(".") : "*";
+      entries[0].target.length > 0 ? entries[0].target.join(".") : "(root)";
     return {
       label,
       entries,
@@ -364,7 +366,6 @@ function ManifestView({
   }, [manifest, executionTrace]);
 
   const groups = useMemo(() => buildGroups(manifest), [manifest]);
-  const hasAnyAlternatives = groups.some((g) => g.hasAlternatives);
   const [showAllPaths, setShowAllPaths] = useState(true);
 
   if (!operation || manifest.length === 0) {
@@ -386,49 +387,55 @@ function ManifestView({
         autoHeight ? "max-h-[60vh]" : "h-full",
       )}
     >
-      {/* Filter toggle */}
-      {hasAnyAlternatives && (
-        <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-2 border-b border-slate-700/50">
-          <button
-            onClick={() => setShowAllPaths((v) => !v)}
-            className={cn(
-              "text-[10px] font-medium uppercase tracking-wide transition-colors",
-              showAllPaths
-                ? "text-slate-500 hover:text-slate-300"
-                : "text-indigo-400 hover:text-indigo-300",
-            )}
-          >
-            {showAllPaths ? "Show alternatives only" : "Show all paths"}
-          </button>
-          <span
-            className="text-[10px] text-slate-600"
-            aria-label={`Showing ${visibleGroups.length} of ${groups.length} wire groups`}
-          >
-            {visibleGroups.length}/{groups.length} groups
-          </span>
-        </div>
-      )}
+      {/* Filter toggle — always visible so users can switch freely */}
+      <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-2 border-b border-slate-700/50">
+        <button
+          onClick={() => setShowAllPaths((v) => !v)}
+          className={cn(
+            "text-[10px] font-medium uppercase tracking-wide transition-colors",
+            showAllPaths
+              ? "text-slate-500 hover:text-slate-300"
+              : "text-indigo-400 hover:text-indigo-300",
+          )}
+        >
+          {showAllPaths ? "Show alternatives only" : "Show all paths"}
+        </button>
+        <span
+          className="text-[10px] text-slate-600"
+          aria-label={`Showing ${visibleGroups.length} of ${groups.length} wire groups`}
+        >
+          {visibleGroups.length}/{groups.length} groups
+        </span>
+      </div>
 
       <div className="px-3 pb-3 pt-1 space-y-2">
+        {visibleGroups.length === 0 && (
+          <p className="py-2 text-[11px] text-slate-600 font-mono">
+            No entries match the current filter.
+          </p>
+        )}
         {visibleGroups.map((group) => (
           <div
             key={group.entries[0].id}
             className={cn(
-              "rounded-lg overflow-hidden",
+              "rounded-lg overflow-hidden border",
               group.hasAlternatives
-                ? "border border-slate-700/60 bg-slate-900/30"
-                : "",
+                ? "border-slate-700/60 bg-slate-900/30"
+                : "border-slate-800/40 bg-slate-900/20",
             )}
           >
-            {/* Group header — target path (only for groups with alternatives) */}
-            {group.hasAlternatives && (
-              <div className="px-2.5 py-1 text-[11px] font-mono font-medium text-slate-300 bg-slate-800/50 border-b border-slate-700/40">
-                {group.label}
-              </div>
-            )}
+            {/* Group header — always show target path */}
+            <div className={cn(
+              "px-2.5 py-1 text-[11px] font-mono font-medium border-b",
+              group.hasAlternatives
+                ? "text-slate-300 bg-slate-800/50 border-slate-700/40"
+                : "text-slate-500 bg-slate-800/30 border-slate-800/30",
+            )}>
+              {group.label}
+            </div>
 
             {/* Entries */}
-            <div className={group.hasAlternatives ? "p-1 space-y-0.5" : "space-y-0.5"}>
+            <div className="p-1 space-y-0.5">
               {group.entries.map((entry) => {
                 const isActive = activeIds.has(entry.id);
                 return (
@@ -438,9 +445,7 @@ function ManifestView({
                       "flex items-center gap-2 px-2.5 py-1 rounded-md text-[12px] font-mono transition-all",
                       isActive
                         ? "bg-slate-700/80 ring-1 ring-indigo-500/50"
-                        : group.hasAlternatives
-                          ? "bg-slate-900/40 opacity-60"
-                          : "bg-slate-900/20 opacity-50",
+                        : "bg-slate-900/40 opacity-60",
                     )}
                   >
                     <span
@@ -452,23 +457,16 @@ function ManifestView({
                     >
                       {entry.kind}
                     </span>
-                    {/* Show target label for entries without group header */}
-                    {!group.hasAlternatives && (
+                    {/* Source description */}
+                    {entry.description && (
                       <span
                         className={cn(
                           "truncate",
                           isActive ? "text-slate-200" : "text-slate-500",
                         )}
-                        title={entry.id}
+                        title={entry.description}
                       >
-                        {entry.target.length > 0
-                          ? entry.target.join(".")
-                          : "*"}
-                      </span>
-                    )}
-                    {entry.gateType && (
-                      <span className="text-[10px] text-slate-600 shrink-0">
-                        {entry.gateType === "falsy" ? "||" : "??"}
+                        {entry.description}
                       </span>
                     )}
                     {isActive && (
