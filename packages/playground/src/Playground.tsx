@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import {
   Panel,
   Group,
@@ -218,12 +218,33 @@ function QueryTabBar({
 }
 
 // ── bridge DSL panel header (label only) ─────────────────────────────────────
-function BridgeDslHeader() {
+function BridgeDslHeader({
+  dslTab,
+  onDslTabChange,
+}: {
+  dslTab: "dsl" | "manifest";
+  onDslTabChange: (t: "dsl" | "manifest") => void;
+}) {
   return (
-    <div className="content-center shrink-0 px-5 h-10 flex items-center">
-      <span className="text-[11px] font-bold text-slate-200 uppercase tracking-widest">
+    <div className="content-center shrink-0 px-5 h-10 flex items-center gap-4">
+      <button
+        onClick={() => onDslTabChange("dsl")}
+        className={cn(
+          "text-[11px] font-bold uppercase tracking-widest transition-colors",
+          dslTab === "dsl" ? "text-slate-200" : "text-slate-500 hover:text-slate-300",
+        )}
+      >
         Bridge DSL
-      </span>
+      </button>
+      <button
+        onClick={() => onDslTabChange("manifest")}
+        className={cn(
+          "text-[11px] font-bold uppercase tracking-widest transition-colors",
+          dslTab === "manifest" ? "text-slate-200" : "text-slate-500 hover:text-slate-300",
+        )}
+      >
+        Manifest
+      </button>
     </div>
   );
 }
@@ -269,6 +290,106 @@ function SchemaHeader({
           </span>
         </button>
       )}
+    </div>
+  );
+}
+
+// ── manifest view ─────────────────────────────────────────────────────────────
+
+import { getTraversalManifest, decodeExecutionTrace } from "./engine";
+
+function ManifestView({
+  bridge,
+  operation,
+  executionTrace,
+  autoHeight = false,
+}: {
+  bridge: string;
+  operation: string;
+  executionTrace?: number;
+  autoHeight?: boolean;
+}) {
+  const manifest = useMemo(
+    () => getTraversalManifest(bridge, operation),
+    [bridge, operation],
+  );
+  const activeIds = useMemo(() => {
+    if (executionTrace == null || executionTrace === 0 || manifest.length === 0)
+      return new Set<string>();
+    const decoded = decodeExecutionTrace(manifest, executionTrace);
+    return new Set(decoded.map((e) => e.id));
+  }, [manifest, executionTrace]);
+
+  if (!operation || manifest.length === 0) {
+    return (
+      <p className="py-4 px-3 font-mono text-[13px] text-slate-700">
+        No bridge operation selected.
+      </p>
+    );
+  }
+
+  const kindColors: Record<string, string> = {
+    primary: "bg-sky-900/50 text-sky-300 border-sky-700/50",
+    fallback: "bg-amber-900/50 text-amber-300 border-amber-700/50",
+    catch: "bg-red-900/50 text-red-300 border-red-700/50",
+    "empty-array": "bg-slate-700/50 text-slate-400 border-slate-600/50",
+    then: "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
+    else: "bg-orange-900/50 text-orange-300 border-orange-700/50",
+    const: "bg-violet-900/50 text-violet-300 border-violet-700/50",
+  };
+
+  return (
+    <div
+      className={cn(
+        "overflow-y-auto",
+        !autoHeight && "flex-1 min-h-0",
+      )}
+    >
+      <div className="px-3 pb-3 space-y-1">
+        {manifest.map((entry) => {
+          const isActive = activeIds.has(entry.id);
+          return (
+            <div
+              key={entry.id}
+              className={cn(
+                "flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] font-mono transition-all",
+                isActive
+                  ? "bg-slate-700/80 ring-1 ring-indigo-500/50"
+                  : "bg-slate-900/40 opacity-60",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide shrink-0",
+                  kindColors[entry.kind] ?? "bg-slate-700 text-slate-400 border-slate-600",
+                )}
+              >
+                {entry.kind}
+              </span>
+              <span
+                className={cn(
+                  "truncate",
+                  isActive ? "text-slate-200" : "text-slate-500",
+                )}
+                title={entry.id}
+              >
+                {entry.target.length > 0 ? entry.target.join(".") : "*"}
+              </span>
+              {entry.gateType && (
+                <span className="text-[10px] text-slate-600 shrink-0">
+                  {entry.gateType === "falsy" ? "||" : "??"}
+                </span>
+              )}
+              <span className="ml-auto text-[9px] text-slate-700 shrink-0 tabular-nums">
+                bit {entry.bitIndex}
+              </span>
+              {isActive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -359,6 +480,14 @@ export function Playground({
 
   const activeQuery = queries.find((q) => q.id === activeTabId);
   const isStandalone = mode === "standalone";
+  const [dslTab, setDslTab] = useState<"dsl" | "manifest">("dsl");
+
+  // Determine which operation to use for manifest
+  const manifestOperation = useMemo(() => {
+    if (isStandalone && activeQuery?.operation) return activeQuery.operation;
+    if (bridgeOperations.length > 0) return bridgeOperations[0].label;
+    return "";
+  }, [isStandalone, activeQuery?.operation, bridgeOperations]);
 
   return (
     <>
@@ -395,16 +524,25 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader />
+          <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
           <div className="px-3 pb-3">
-            <Editor
-              label=""
-              value={bridge}
-              onChange={onBridgeChange}
-              language="bridge"
-              autoHeight
-              onFormat={onFormatBridge}
-            />
+            {dslTab === "dsl" ? (
+              <Editor
+                label=""
+                value={bridge}
+                onChange={onBridgeChange}
+                language="bridge"
+                autoHeight
+                onFormat={onFormatBridge}
+              />
+            ) : (
+              <ManifestView
+                bridge={bridge}
+                operation={manifestOperation}
+                executionTrace={displayResult?.executionTrace}
+                autoHeight
+              />
+            )}
           </div>
         </div>
 
@@ -489,6 +627,7 @@ export function Playground({
               loading={displayRunning}
               traces={displayResult?.traces}
               logs={displayResult?.logs}
+              executionTrace={displayResult?.executionTrace}
               onClearCache={clearHttpCache}
               autoHeight
             />
@@ -519,15 +658,23 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader />
+                  <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor
-                      label=""
-                      value={bridge}
-                      onChange={onBridgeChange}
-                      language="bridge"
-                      onFormat={onFormatBridge}
-                    />
+                    {dslTab === "dsl" ? (
+                      <Editor
+                        label=""
+                        value={bridge}
+                        onChange={onBridgeChange}
+                        language="bridge"
+                        onFormat={onFormatBridge}
+                      />
+                    ) : (
+                      <ManifestView
+                        bridge={bridge}
+                        operation={manifestOperation}
+                        executionTrace={displayResult?.executionTrace}
+                      />
+                    )}
                   </div>
                 </PanelBox>
               </div>
@@ -563,15 +710,23 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader />
+                    <BridgeDslHeader dslTab={dslTab} onDslTabChange={setDslTab} />
                     <div className="flex-1 min-h-0 px-3 pb-3">
-                      <Editor
-                        label=""
-                        value={bridge}
-                        onChange={onBridgeChange}
-                        language="bridge"
-                        onFormat={onFormatBridge}
-                      />
+                      {dslTab === "dsl" ? (
+                        <Editor
+                          label=""
+                          value={bridge}
+                          onChange={onBridgeChange}
+                          language="bridge"
+                          onFormat={onFormatBridge}
+                        />
+                      ) : (
+                        <ManifestView
+                          bridge={bridge}
+                          operation={manifestOperation}
+                          executionTrace={displayResult?.executionTrace}
+                        />
+                      )}
                     </div>
                   </PanelBox>
                 </Panel>
@@ -665,6 +820,7 @@ export function Playground({
                       loading={displayRunning}
                       traces={displayResult?.traces}
                       logs={displayResult?.logs}
+                      executionTrace={displayResult?.executionTrace}
                       onClearCache={clearHttpCache}
                     />
                   </div>

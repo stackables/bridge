@@ -15,6 +15,7 @@ type Props = {
   loading: boolean;
   traces?: ToolTrace[];
   logs?: LogEntry[];
+  executionTrace?: number;
   onClearCache?: () => void;
   /** When true the result view sizes itself to its content instead of filling the parent. */
   autoHeight?: boolean;
@@ -26,6 +27,7 @@ export function ResultView({
   loading,
   traces,
   logs,
+  executionTrace,
   onClearCache,
   autoHeight = false,
 }: Props) {
@@ -37,6 +39,7 @@ export function ResultView({
 
   const hasTraces = traces && traces.length > 0;
   const hasLogs = logs && logs.length > 0;
+  const hasExecutionTrace = executionTrace != null && executionTrace > 0;
 
   function toggle(panel: "traces" | "logs") {
     setActivePanel((v) => (v === panel ? null : panel));
@@ -92,9 +95,17 @@ export function ResultView({
       </div>
 
       {/* Badges row + expanded panel pinned to bottom */}
-      {(hasTraces || hasLogs || onClearCache) && (
+      {(hasTraces || hasLogs || hasExecutionTrace || onClearCache) && (
         <div className="shrink-0 pt-2.5 space-y-2">
           <div className="flex items-center gap-2">
+            {hasExecutionTrace && (
+              <span
+                title={`Execution trace: ${executionTrace} (decimal)`}
+                className="inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
+              >
+                trace 0x{executionTrace.toString(16)}
+              </span>
+            )}
             {hasTraces && (
               <TracesToggle
                 traces={traces}
