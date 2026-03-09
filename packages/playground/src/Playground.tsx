@@ -237,9 +237,16 @@ function BridgeDslHeader({
           title={`Execution trace ID: ${executionTraceId} (decimal)`}
           className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
         >
-          trace-id 0x{executionTraceId.toString(16)}
+          <a
+            href="/advanced/trace-id/"
+            className="rounded-sm hover:text-indigo-100 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-300"
+            target="docs"
+          >
+            trace-id 0x{executionTraceId.toString(16)}
+          </a>
           {onClearExecutionTraceId && (
             <button
+              type="button"
               onClick={onClearExecutionTraceId}
               title="Clear execution trace ID highlighting"
               className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
