@@ -231,7 +231,9 @@ function BridgeDslHeader({
         onClick={() => onDslTabChange("dsl")}
         className={cn(
           "text-[11px] font-bold uppercase tracking-widest transition-colors",
-          dslTab === "dsl" ? "text-slate-200" : "text-slate-500 hover:text-slate-300",
+          dslTab === "dsl"
+            ? "text-slate-200"
+            : "text-slate-500 hover:text-slate-300",
         )}
       >
         Bridge DSL
@@ -240,10 +242,12 @@ function BridgeDslHeader({
         onClick={() => onDslTabChange("manifest")}
         className={cn(
           "text-[11px] font-bold uppercase tracking-widest transition-colors",
-          dslTab === "manifest" ? "text-slate-200" : "text-slate-500 hover:text-slate-300",
+          dslTab === "manifest"
+            ? "text-slate-200"
+            : "text-slate-500 hover:text-slate-300",
         )}
       >
-        Manifest
+        Trace Manifest
       </button>
     </div>
   );
@@ -328,7 +332,6 @@ function buildGroups(manifest: TraversalEntry[]): ManifestGroup[] {
     return {
       label,
       entries,
-      hasAlternatives: entries.length > 1,
     };
   });
 }
@@ -359,14 +362,17 @@ function ManifestView({
     [bridge, operation],
   );
   const activeIds = useMemo(() => {
-    if (executionTrace == null || executionTrace === 0n || manifest.length === 0)
+    if (
+      executionTrace == null ||
+      executionTrace === 0n ||
+      manifest.length === 0
+    )
       return new Set<string>();
     const decoded = decodeExecutionTrace(manifest, executionTrace);
     return new Set(decoded.map((e) => e.id));
   }, [manifest, executionTrace]);
 
   const groups = useMemo(() => buildGroups(manifest), [manifest]);
-  const [showAllPaths, setShowAllPaths] = useState(true);
 
   if (!operation || manifest.length === 0) {
     return (
@@ -376,66 +382,29 @@ function ManifestView({
     );
   }
 
-  const visibleGroups = showAllPaths
-    ? groups
-    : groups.filter((g) => g.hasAlternatives);
-
   return (
     <div
-      className={cn(
-        "overflow-y-auto",
-        autoHeight ? "max-h-[60vh]" : "h-full",
-      )}
+      className={cn("overflow-y-auto", autoHeight ? "max-h-[60vh]" : "h-full")}
     >
-      {/* Filter toggle — always visible so users can switch freely */}
-      <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-2 border-b border-slate-700/50">
-        <button
-          onClick={() => setShowAllPaths((v) => !v)}
-          className={cn(
-            "text-[10px] font-medium uppercase tracking-wide transition-colors",
-            showAllPaths
-              ? "text-slate-500 hover:text-slate-300"
-              : "text-indigo-400 hover:text-indigo-300",
-          )}
-        >
-          {showAllPaths ? "Show alternatives only" : "Show all paths"}
-        </button>
-        <span
-          className="text-[10px] text-slate-600"
-          aria-label={`Showing ${visibleGroups.length} of ${groups.length} wire groups`}
-        >
-          {visibleGroups.length}/{groups.length} groups
-        </span>
-      </div>
-
       <div className="px-3 pb-3 pt-1 space-y-2">
-        {visibleGroups.length === 0 && (
-          <p className="py-2 text-[11px] text-slate-600 font-mono">
-            No entries match the current filter.
-          </p>
-        )}
-        {visibleGroups.map((group) => (
+        {groups.map((group) => (
           <div
             key={group.entries[0].id}
             className={cn(
-              "rounded-lg overflow-hidden border",
-              group.hasAlternatives
-                ? "border-slate-700/60 bg-slate-900/30"
-                : "border-slate-800/40 bg-slate-900/20",
+              "rounded-lg overflow-hidden border border-slate-700/60 bg-slate-900/30",
             )}
           >
             {/* Group header — always show target path */}
-            <div className={cn(
-              "px-2.5 py-1 text-[11px] font-mono font-medium border-b",
-              group.hasAlternatives
-                ? "text-slate-300 bg-slate-800/50 border-slate-700/40"
-                : "text-slate-500 bg-slate-800/30 border-slate-800/30",
-            )}>
+            <div
+              className={cn(
+                "px-2.5 py-1 text-[11px] font-mono font-medium border-b text-slate-300 bg-slate-800/50 border-slate-700/40",
+              )}
+            >
               {group.label}
             </div>
 
             {/* Entries */}
-            <div className="p-1 space-y-0.5">
+            <div className="p-1 space-y-1">
               {group.entries.map((entry) => {
                 const isActive = activeIds.has(entry.id);
                 return (
@@ -444,7 +413,7 @@ function ManifestView({
                     className={cn(
                       "flex items-center gap-2 px-2.5 py-1 rounded-md text-[12px] font-mono transition-all",
                       isActive
-                        ? "bg-slate-700/80 ring-1 ring-indigo-500/50"
+                        ? "bg-slate-700/80"
                         : "bg-slate-900/40 opacity-60",
                     )}
                   >
@@ -470,7 +439,9 @@ function ManifestView({
                       </span>
                     )}
                     {isActive && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 ml-auto" />
+                      <span className="text-indigo-400 shrink-0 ml-auto">
+                        on
+                      </span>
                     )}
                   </div>
                 );
@@ -613,7 +584,10 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
+          <BridgeDslHeader
+            dslTab={activeDslTab}
+            onDslTabChange={setActiveDslTab}
+          />
           <div className="px-3 pb-3">
             {activeDslTab === "dsl" ? (
               <Editor
@@ -747,7 +721,10 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
+                  <BridgeDslHeader
+                    dslTab={activeDslTab}
+                    onDslTabChange={setActiveDslTab}
+                  />
                   <div className="flex-1 min-h-0 px-3 pb-3">
                     {activeDslTab === "dsl" ? (
                       <Editor
@@ -799,7 +776,10 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader dslTab={activeDslTab} onDslTabChange={setActiveDslTab} />
+                    <BridgeDslHeader
+                      dslTab={activeDslTab}
+                      onDslTabChange={setActiveDslTab}
+                    />
                     <div className="flex-1 min-h-0 px-3 pb-3">
                       {activeDslTab === "dsl" ? (
                         <Editor
