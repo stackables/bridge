@@ -416,7 +416,7 @@ export class ExecutionTree implements TreeContext {
             const durationMs = roundMs(performance.now() - wallStart);
             toolCallCounter.add(1, metricAttrs);
             toolDurationHistogram.record(durationMs, metricAttrs);
-            if (tracer && traceStart != null) {
+            if (tracer && traceStart != null && doTrace) {
               tracer.record(
                 tracer.entry({
                   tool: toolName,
@@ -435,7 +435,7 @@ export class ExecutionTree implements TreeContext {
             toolCallCounter.add(1, metricAttrs);
             toolDurationHistogram.record(durationMs, metricAttrs);
             toolErrorCounter.add(1, metricAttrs);
-            if (tracer && traceStart != null) {
+            if (tracer && traceStart != null && doTrace) {
               tracer.record(
                 tracer.entry({
                   tool: toolName,
@@ -480,7 +480,7 @@ export class ExecutionTree implements TreeContext {
           const durationMs = roundMs(performance.now() - wallStart);
           toolCallCounter.add(1, metricAttrs);
           toolDurationHistogram.record(durationMs, metricAttrs);
-          if (tracer && traceStart != null) {
+          if (tracer && traceStart != null && doTrace) {
             tracer.record(
               tracer.entry({
                 tool: toolName,
@@ -499,7 +499,7 @@ export class ExecutionTree implements TreeContext {
           toolCallCounter.add(1, metricAttrs);
           toolDurationHistogram.record(durationMs, metricAttrs);
           toolErrorCounter.add(1, metricAttrs);
-          if (tracer && traceStart != null) {
+          if (tracer && traceStart != null && doTrace) {
             tracer.record(
               tracer.entry({
                 tool: toolName,
@@ -630,7 +630,7 @@ export class ExecutionTree implements TreeContext {
                     const durationMs = roundMs(performance.now() - wallStart);
                     toolCallCounter.add(1, metricAttrs);
                     toolDurationHistogram.record(durationMs, metricAttrs);
-                    if (tracer && traceStart != null) {
+                    if (tracer && traceStart != null && doTrace) {
                       tracer.record(
                         tracer.entry({
                           tool: queue.toolName,
@@ -655,7 +655,7 @@ export class ExecutionTree implements TreeContext {
                     toolCallCounter.add(1, metricAttrs);
                     toolDurationHistogram.record(durationMs, metricAttrs);
                     toolErrorCounter.add(1, metricAttrs);
-                    if (tracer && traceStart != null) {
+                    if (tracer && traceStart != null && doTrace) {
                       tracer.record(
                         tracer.entry({
                           tool: queue.toolName,

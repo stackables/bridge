@@ -930,6 +930,40 @@ bridge Query.echo {
       assert.ok(traces.length > 0);
       assert.ok(traces.some((t) => t.tool === "myTool"));
     });
+
+    test("tools with trace:false are excluded from traces", async () => {
+      const noTraceTool = (p: any) => ({ y: p.x * 3 });
+      (noTraceTool as any).bridge = { sync: true, trace: false };
+
+      const bridgeWithNoTrace = `version 1.5
+bridge Query.combo {
+  with myTool as t
+  with hiddenTool as h
+  with input as i
+  with output as o
+
+  t.x <- i.x
+  h.x <- t.y
+  o.result <- h.y
+}`;
+      const { data, traces } = await ctx.executeFn({
+        document: parseBridge(bridgeWithNoTrace),
+        operation: "Query.combo",
+        input: { x: 5 },
+        tools: { myTool: tools.myTool, hiddenTool: noTraceTool },
+        trace: "full",
+      });
+      assert.deepEqual(data, { result: 30 });
+      assert.ok(traces.length > 0, "should have at least one trace");
+      assert.ok(
+        traces.some((t) => t.tool === "myTool"),
+        "myTool should appear in traces",
+      );
+      assert.ok(
+        !traces.some((t) => t.tool === "hiddenTool"),
+        "hiddenTool (trace:false) should NOT appear in traces",
+      );
+    });
   });
 
   // ── Error handling ──────────────────────────────────────────────────────────
