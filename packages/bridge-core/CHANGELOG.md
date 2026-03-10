@@ -1,5 +1,11 @@
 # @stackables/bridge-core
 
+## 1.6.1
+
+### Patch Changes
+
+- [#118](https://github.com/stackables/bridge/pull/118) [`d6907a2`](https://github.com/stackables/bridge/commit/d6907a2d263f9f23397e2073dc5f0a2bd7248062) Thanks [@aarne](https://github.com/aarne)! - Bridge Trace IDs - The engine now returns a compact Trace ID alongside your data (e.g., 0x2a). This ID can be decoded into an exact execution map showing precisely which wires, fallbacks, and conditions activated. Because every bridge has a finite number of execution paths, these IDs are perfect for zero-PII monitoring and bucketing telemetry data.
+
 ## 1.6.0
 
 ### Minor Changes
