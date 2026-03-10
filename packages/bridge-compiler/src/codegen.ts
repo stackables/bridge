@@ -709,6 +709,7 @@ class CodegenContext {
     );
     lines.push(`  const __batchQueues = new Map();`);
     lines.push(`  const __trace = __opts?.__trace;`);
+    lines.push(`  const __shouldTrace = (fn) => fn?.bridge?.trace !== false;`);
     lines.push(`  function __toolExecutionLogLevel(fn) {`);
     lines.push(`    const log = fn?.bridge?.log;`);
     lines.push(`    if (log === false || log == null) return false;`);
@@ -848,8 +849,9 @@ class CodegenContext {
     );
     lines.push(`      const chunk = pending.slice(start, start + chunkSize);`);
     lines.push(`      const inputs = chunk.map((item) => item.input);`);
+    lines.push(`      const __doTrace = __trace && __shouldTrace(fn);`);
     lines.push(
-      `      const startTime = (__trace || __ctx.logger) ? performance.now() : 0;`,
+      `      const startTime = (__doTrace || __ctx.logger) ? performance.now() : 0;`,
     );
     lines.push(`      try {`);
     lines.push(`        const batchPromise = fn(inputs, __ctx);`);
@@ -867,7 +869,7 @@ class CodegenContext {
     lines.push(`          result = await batchPromise;`);
     lines.push(`        }`);
     lines.push(
-      `        if (__trace) __trace(queue.toolName, startTime, performance.now(), inputs, result, null);`,
+      `        if (__doTrace) __trace(queue.toolName, startTime, performance.now(), inputs, result, null);`,
     );
     lines.push(`        const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -884,7 +886,7 @@ class CodegenContext {
     );
     lines.push(`      } catch (err) {`);
     lines.push(
-      `        if (__trace) __trace(queue.toolName, startTime, performance.now(), inputs, null, err);`,
+      `        if (__doTrace) __trace(queue.toolName, startTime, performance.now(), inputs, null, err);`,
     );
     lines.push(`        const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(
@@ -897,14 +899,17 @@ class CodegenContext {
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
-    lines.push(`    const start = __trace ? performance.now() : 0;`);
+    lines.push(`    const __doTrace = __trace && __shouldTrace(fn);`);
+    lines.push(
+      `    const start = (__doTrace || __ctx.logger) ? performance.now() : 0;`,
+    );
     lines.push(`    try {`);
     lines.push(`      const result = fn(input, __ctx);`);
     lines.push(
       `      if (result && typeof result.then === "function") throw new Error("Tool \\"" + toolName + "\\" declared {sync:true} but returned a Promise");`,
     );
     lines.push(
-      `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
+      `      if (__doTrace) __trace(toolName, start, performance.now(), input, result, null);`,
     );
     lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -913,7 +918,7 @@ class CodegenContext {
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
-      `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
+      `      if (__doTrace) __trace(toolName, start, performance.now(), input, null, err);`,
     );
     lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(
@@ -931,7 +936,10 @@ class CodegenContext {
     // Async tool caller — full promise handling with optional timeout.
     lines.push(`  async function __call(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
-    lines.push(`    const start = __trace ? performance.now() : 0;`);
+    lines.push(`    const __doTrace = __trace && __shouldTrace(fn);`);
+    lines.push(
+      `    const start = (__doTrace || __ctx.logger) ? performance.now() : 0;`,
+    );
     lines.push(`    try {`);
     lines.push(`      const p = fn(input, __ctx);`);
     lines.push(`      let result;`);
@@ -946,7 +954,7 @@ class CodegenContext {
     lines.push(`        result = await p;`);
     lines.push(`      }`);
     lines.push(
-      `      if (__trace) __trace(toolName, start, performance.now(), input, result, null);`,
+      `      if (__doTrace) __trace(toolName, start, performance.now(), input, result, null);`,
     );
     lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -955,7 +963,7 @@ class CodegenContext {
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
-      `      if (__trace) __trace(toolName, start, performance.now(), input, null, err);`,
+      `      if (__doTrace) __trace(toolName, start, performance.now(), input, null, err);`,
     );
     lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(

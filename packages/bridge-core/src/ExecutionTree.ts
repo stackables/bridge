@@ -343,7 +343,6 @@ export class ExecutionTree implements TreeContext {
     if (this.signal?.aborted) {
       throw new BridgeAbortError();
     }
-    const tracer = this.tracer;
     const logger = this.logger;
     const toolContext: ToolContext = {
       logger: logger ?? {},
@@ -358,6 +357,7 @@ export class ExecutionTree implements TreeContext {
       doTrace,
       log,
     } = resolveToolMeta(fnImpl);
+    const tracer = doTrace ? this.tracer : undefined;
 
     if (batch) {
       return this.callBatchedTool(
@@ -380,16 +380,122 @@ export class ExecutionTree implements TreeContext {
     // generator into an array for backward compatibility.
     if (isStreamTool) {
       const generator = fnImpl(input, toolContext);
+      const traceStart = tracer?.now();
+      const metricAttrs = {
+        "bridge.tool.name": toolName,
+        "bridge.tool.fn": fnName,
+      };
+
       if (this.streamMode) {
-        return new StreamHandle(generator, toolName);
+        const traceEntry =
+          tracer && traceStart != null
+            ? tracer.entry({
+                tool: toolName,
+                fn: fnName,
+                input,
+                durationMs: 0,
+                startedAt: traceStart,
+              })
+            : undefined;
+
+        if (traceEntry && tracer) {
+          tracer.record(traceEntry);
+        }
+
+        const signal = this.signal;
+        const instrumentedGenerator = (async function* () {
+          const wallStart = performance.now();
+          const items: unknown[] = [];
+          try {
+            for await (const item of generator) {
+              items.push(item);
+              yield item;
+            }
+            const durationMs = roundMs(performance.now() - wallStart);
+            toolCallCounter.add(1, metricAttrs);
+            toolDurationHistogram.record(durationMs, metricAttrs);
+            if (traceEntry && tracer && traceStart != null) {
+              traceEntry.durationMs = roundMs(tracer.now() - traceStart);
+              if (tracer.level === "full") {
+                traceEntry.output = items;
+              }
+            }
+            logToolSuccess(logger, log.execution, toolName, fnName, durationMs);
+          } catch (err) {
+            const durationMs = roundMs(performance.now() - wallStart);
+            toolCallCounter.add(1, metricAttrs);
+            toolDurationHistogram.record(durationMs, metricAttrs);
+            toolErrorCounter.add(1, metricAttrs);
+            if (traceEntry && tracer && traceStart != null) {
+              traceEntry.durationMs = roundMs(tracer.now() - traceStart);
+              traceEntry.error = (err as Error).message;
+            }
+            logToolError(logger, log.errors, toolName, fnName, err as Error);
+            if (
+              signal?.aborted &&
+              err instanceof DOMException &&
+              err.name === "AbortError"
+            ) {
+              throw new BridgeAbortError();
+            }
+            throw err;
+          }
+        })();
+
+        return new StreamHandle(instrumentedGenerator, toolName);
       }
       // Eager consumption: collect all yielded values into an array
       return (async () => {
-        const items: unknown[] = [];
-        for await (const item of generator) {
-          items.push(item);
+        const wallStart = performance.now();
+        try {
+          const items: unknown[] = [];
+          for await (const item of generator) {
+            items.push(item);
+          }
+          const durationMs = roundMs(performance.now() - wallStart);
+          toolCallCounter.add(1, metricAttrs);
+          toolDurationHistogram.record(durationMs, metricAttrs);
+          if (tracer && traceStart != null) {
+            tracer.record(
+              tracer.entry({
+                tool: toolName,
+                fn: fnName,
+                input,
+                output: items,
+                durationMs: roundMs(tracer.now() - traceStart),
+                startedAt: traceStart,
+              }),
+            );
+          }
+          logToolSuccess(logger, log.execution, toolName, fnName, durationMs);
+          return items;
+        } catch (err) {
+          const durationMs = roundMs(performance.now() - wallStart);
+          toolCallCounter.add(1, metricAttrs);
+          toolDurationHistogram.record(durationMs, metricAttrs);
+          toolErrorCounter.add(1, metricAttrs);
+          if (tracer && traceStart != null) {
+            tracer.record(
+              tracer.entry({
+                tool: toolName,
+                fn: fnName,
+                input,
+                error: (err as Error).message,
+                durationMs: roundMs(tracer.now() - traceStart),
+                startedAt: traceStart,
+              }),
+            );
+          }
+          logToolError(logger, log.errors, toolName, fnName, err as Error);
+          if (
+            this.signal?.aborted &&
+            err instanceof DOMException &&
+            err.name === "AbortError"
+          ) {
+            throw new BridgeAbortError();
+          }
+          throw err;
         }
-        return items;
       })();
     }
 
@@ -637,7 +743,7 @@ export class ExecutionTree implements TreeContext {
     for (let start = 0; start < pending.length; start += chunkSize) {
       const chunk = pending.slice(start, start + chunkSize);
       const batchInput = chunk.map((item) => item.input);
-      const tracer = this.tracer;
+      const tracer = doTrace ? this.tracer : undefined;
       const logger = this.logger;
       const metricAttrs = {
         "bridge.tool.name": queue.toolName,

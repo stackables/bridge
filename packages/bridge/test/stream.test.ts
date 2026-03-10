@@ -894,6 +894,38 @@ bridge Query.items {
     }
   });
 
+  test("stream tools add trace entries to the initial payload", async () => {
+    const streamTool = createStreamTool([{ val: 1 }, { val: 2 }]);
+
+    const doc = parse(`version 1.5
+
+bridge Query.items {
+  with api as a
+  with output as o
+
+  o.items <- a
+}`);
+
+    const payloads = await collectPayloads(
+      executeBridgeStream({
+        document: doc,
+        operation: "Query.items",
+        tools: { api: streamTool },
+        trace: "full",
+      }),
+    );
+
+    const initial = payloads[0] as StreamInitialPayload<{
+      items: Array<{ val: number }>;
+    }>;
+    assert.ok("data" in initial);
+    assert.equal(initial.hasNext, true);
+    assert.equal(initial.traces?.length, 1);
+    assert.equal(initial.traces?.[0]?.tool, "api");
+    assert.deepEqual(initial.traces?.[0]?.input, {});
+    assert.deepEqual(initial.traces?.[0]?.output, [{ val: 1 }, { val: 2 }]);
+  });
+
   test("mapping before accumulation with element wires", async () => {
     // Map SSE deltas through element wires before feeding into accumulator.
     const chunks = [

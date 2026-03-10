@@ -930,6 +930,59 @@ bridge Query.echo {
       assert.ok(traces.length > 0);
       assert.ok(traces.some((t) => t.tool === "myTool"));
     });
+
+    test("internal concat helper does not emit trace entries", async () => {
+      const { data, traces } = await ctx.executeFn({
+        document: parseBridge(`version 1.5
+bridge Query.echo {
+  with input as i
+  with output as o
+
+  o.result <- "Hello, {i.name}!"
+}`),
+        operation: "Query.echo",
+        input: { name: "World" },
+        trace: "full",
+      });
+
+      assert.deepEqual(data, { result: "Hello, World!" });
+      assert.deepEqual(traces, []);
+    });
+
+    test("stream tools emit trace entries when tracing is enabled", async () => {
+      async function* httpSSE(input: { q: string }) {
+        yield { chunk: `${input.q}-1` };
+        yield { chunk: `${input.q}-2` };
+      }
+      httpSSE.bridge = { stream: true } as const;
+
+      const { data, traces } = await ctx.executeFn({
+        document: parseBridge(`version 1.5
+bridge Query.echo {
+  with httpSSE as s
+  with input as i
+  with output as o
+
+  s.q <- i.q
+  o.items <- s
+}`),
+        operation: "Query.echo",
+        input: { q: "token" },
+        tools: { httpSSE },
+        trace: "full",
+      });
+
+      assert.deepEqual(data, {
+        items: [{ chunk: "token-1" }, { chunk: "token-2" }],
+      });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0]?.tool, "httpSSE");
+      assert.deepEqual(traces[0]?.input, { q: "token" });
+      assert.deepEqual(traces[0]?.output, [
+        { chunk: "token-1" },
+        { chunk: "token-2" },
+      ]);
+    });
   });
 
   // ── Error handling ──────────────────────────────────────────────────────────
