@@ -79,8 +79,6 @@ import type {
   NodeRef,
   SourceLocation,
   ToolDef,
-  ToolDep,
-  ToolWire,
   Wire,
   WireFallback,
 } from "@stackables/bridge-core";
@@ -161,50 +159,18 @@ class BridgeParser extends CstParser {
     this.SUBRULE2(this.dottedName, { LABEL: "toolSource" });
     this.OPTION(() => {
       this.CONSUME(LCurly);
-      this.MANY(() => this.SUBRULE(this.toolBodyLine));
+      this.MANY(() =>
+        this.OR([
+          { ALT: () => this.SUBRULE(this.toolOnError) },
+          {
+            ALT: () =>
+              this.SUBRULE(this.elementLine, { LABEL: "toolSelfWire" }),
+          },
+          { ALT: () => this.SUBRULE(this.bridgeBodyLine) },
+        ]),
+      );
       this.CONSUME(RCurly);
     });
-  });
-
-  /**
-   * A single line inside a tool block.
-   *
-   * Ambiguity fix: `.target = value` and `.target <- source` share the
-   * prefix `Dot dottedPath`, so we merge them into one alternative that
-   * parses the prefix then branches on `=` vs `<-`.
-   *
-   * `on error` and `with` have distinct first tokens so they stay separate.
-   */
-  public toolBodyLine = this.RULE("toolBodyLine", () => {
-    this.OR([
-      { ALT: () => this.SUBRULE(this.toolOnError) },
-      { ALT: () => this.SUBRULE(this.toolWithDecl) },
-      { ALT: () => this.SUBRULE(this.toolWire) }, // merged constant + pull
-    ]);
-  });
-
-  /**
-   * Tool wire (merged): .target = value | .target <- source
-   *
-   * Parses the common prefix `.dottedPath` then branches on operator.
-   */
-  public toolWire = this.RULE("toolWire", () => {
-    this.CONSUME(Dot);
-    this.SUBRULE(this.dottedPath, { LABEL: "target" });
-    this.OR([
-      {
-        ALT: () => {
-          this.CONSUME(Equals, { LABEL: "equalsOp" });
-          this.SUBRULE(this.bareValue, { LABEL: "value" });
-        },
-      },
-      {
-        ALT: () => {
-          this.CONSUME(Arrow, { LABEL: "arrowOp" });
-          this.SUBRULE(this.dottedName, { LABEL: "source" });
-        },
-      },
-    ]);
   });
 
   /** on error = <value> | on error <- <source> */
@@ -222,46 +188,6 @@ class BridgeParser extends CstParser {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "arrowOp" });
           this.SUBRULE(this.dottedName, { LABEL: "errorSource" });
-        },
-      },
-    ]);
-  });
-
-  /** with context [as alias] | with const [as alias] | with <tool> as <alias> */
-  public toolWithDecl = this.RULE("toolWithDecl", () => {
-    this.CONSUME(WithKw);
-    this.OR([
-      {
-        ALT: () => {
-          this.CONSUME(ContextKw, { LABEL: "contextKw" });
-          this.OPTION(() => {
-            this.CONSUME(AsKw);
-            this.SUBRULE(this.nameToken, { LABEL: "alias" });
-          });
-        },
-      },
-      {
-        ALT: () => {
-          this.CONSUME(ConstKw, { LABEL: "constKw" });
-          this.OPTION2(() => {
-            this.CONSUME2(AsKw);
-            this.SUBRULE2(this.nameToken, { LABEL: "constAlias" });
-          });
-        },
-      },
-      {
-        // General tool reference — GATE excludes keywords handled above
-        GATE: () => {
-          const la = this.LA(1);
-          return la.tokenType !== ContextKw && la.tokenType !== ConstKw;
-        },
-        ALT: () => {
-          this.SUBRULE(this.dottedName, { LABEL: "toolName" });
-          this.OPTION3(() => {
-            this.CONSUME(VersionTag, { LABEL: "toolVersion" });
-          });
-          this.CONSUME3(AsKw);
-          this.SUBRULE3(this.nameToken, { LABEL: "toolAlias" });
         },
       },
     ]);
@@ -3150,69 +3076,31 @@ function buildToolDef(
     (inst) => inst.kind === "tool" && inst.name === source,
   );
 
-  const deps: ToolDep[] = [];
-  const wires: ToolWire[] = [];
+  // Tool blocks reuse bridgeBodyLine for with-declarations and handle-targeted wires
+  const bodyLines = subs(node, "bridgeBodyLine");
+  const selfWireNodes = subs(node, "toolSelfWire");
+  const { handles, wires, pipeHandles } = buildBridgeBody(
+    bodyLines,
+    "Tools",
+    toolName,
+    previousInstructions,
+    lineNum,
+    {
+      forbiddenHandleKinds: new Set(["input", "output"]),
+      selfWireNodes,
+    },
+  );
 
-  for (const bodyLine of subs(node, "toolBodyLine")) {
-    const c = bodyLine.children;
-
-    // toolWithDecl
-    const withNode = (c.toolWithDecl as CstNode[] | undefined)?.[0];
-    if (withNode) {
-      const wc = withNode.children;
-      if (wc.contextKw) {
-        const alias = wc.alias
-          ? extractNameToken((wc.alias as CstNode[])[0])
-          : "context";
-        deps.push({ kind: "context", handle: alias });
-      } else if (wc.constKw) {
-        const alias = wc.constAlias
-          ? extractNameToken((wc.constAlias as CstNode[])[0])
-          : "const";
-        deps.push({ kind: "const", handle: alias });
-      } else if (wc.toolName) {
-        const tName = extractDottedName((wc.toolName as CstNode[])[0]);
-        const tAlias = extractNameToken((wc.toolAlias as CstNode[])[0]);
-        const tVersion = (
-          wc.toolVersion as IToken[] | undefined
-        )?.[0]?.image.slice(1);
-        deps.push({
-          kind: "tool",
-          handle: tAlias,
-          tool: tName,
-          ...(tVersion ? { version: tVersion } : {}),
-        });
-      }
-      continue;
-    }
-
-    // toolOnError
-    const onError = (c.toolOnError as CstNode[] | undefined)?.[0];
-    if (onError) {
-      const oc = onError.children;
-      if (oc.equalsOp) {
-        const value = extractJsonValue(sub(onError, "errorValue")!);
-        wires.push({ kind: "onError", value });
-      } else if (oc.arrowOp) {
-        const source = extractDottedName(sub(onError, "errorSource")!);
-        wires.push({ kind: "onError", source });
-      }
-      continue;
-    }
-
-    // toolWire (merged constant + pull)
-    const wireNode = (c.toolWire as CstNode[] | undefined)?.[0];
-    if (wireNode) {
-      const wc = wireNode.children;
-      const target = extractDottedPathStr(sub(wireNode, "target")!);
-      if (wc.equalsOp) {
-        const value = extractBareValue(sub(wireNode, "value")!);
-        wires.push({ target, kind: "constant", value });
-      } else if (wc.arrowOp) {
-        const source = extractDottedName(sub(wireNode, "source")!);
-        wires.push({ target, kind: "pull", source });
-      }
-      continue;
+  // Extract on error from toolOnError CST nodes
+  let onError: ToolDef["onError"];
+  for (const child of (node.children.toolOnError as CstNode[]) ?? []) {
+    const oc = child.children;
+    if (oc.equalsOp) {
+      const value = extractJsonValue(sub(child, "errorValue")!);
+      onError = { value };
+    } else if (oc.arrowOp) {
+      const errorSource = extractDottedName(sub(child, "errorSource")!);
+      onError = { source: errorSource };
     }
   }
 
@@ -3221,8 +3109,10 @@ function buildToolDef(
     name: toolName,
     fn: isKnownTool ? undefined : source,
     extends: isKnownTool ? source : undefined,
-    deps,
+    handles,
     wires,
+    ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
+    ...(onError ? { onError } : {}),
   };
 }
 
@@ -3368,12 +3258,19 @@ function buildBridgeBody(
   bridgeField: string,
   previousInstructions: Instruction[],
   _lineOffset: number,
+  options?: {
+    /** Handle kinds that are not allowed in this block (e.g. "input"/"output" in tool blocks). */
+    forbiddenHandleKinds?: Set<string>;
+    /** Self-wire element line CST nodes to process (tool blocks). */
+    selfWireNodes?: CstNode[];
+  },
 ): {
   handles: HandleBinding[];
   wires: Wire[];
   arrayIterators: Record<string, string>;
   pipeHandles: NonNullable<Bridge["pipeHandles"]>;
   forces: NonNullable<Bridge["forces"]>;
+  handleRes: Map<string, HandleResolution>;
 } {
   const handleRes = new Map<string, HandleResolution>();
   const handleBindings: HandleBinding[] = [];
@@ -3400,6 +3297,11 @@ function buildBridgeBody(
     };
 
     if (wc.inputKw) {
+      if (options?.forbiddenHandleKinds?.has("input")) {
+        throw new Error(
+          `Line ${lineNum}: 'with input' is not allowed in tool blocks`,
+        );
+      }
       if (wc.memoizeKw) {
         throw new Error(
           `Line ${lineNum}: memoize is only valid for tool references`,
@@ -3416,6 +3318,11 @@ function buildBridgeBody(
         field: bridgeField,
       });
     } else if (wc.outputKw) {
+      if (options?.forbiddenHandleKinds?.has("output")) {
+        throw new Error(
+          `Line ${lineNum}: 'with output' is not allowed in tool blocks`,
+        );
+      }
       if (wc.memoizeKw) {
         throw new Error(
           `Line ${lineNum}: memoize is only valid for tool references`,
@@ -6093,12 +6000,276 @@ function buildBridgeBody(
     });
   }
 
+  // ── Step 4: Process tool self-wires (elementLine CST nodes) ───────────
+
+  const selfWireNodes = options?.selfWireNodes;
+  if (selfWireNodes) {
+    for (const elemLine of selfWireNodes) {
+      const elemC = elemLine.children;
+      const elemLineNum = line(findFirstToken(elemLine));
+      const elemLineLoc = locFromNode(elemLine);
+      const elemTargetPathStr = extractDottedPathStr(
+        sub(elemLine, "elemTarget")!,
+      );
+      const elemToPath = parsePath(elemTargetPathStr);
+      const toRef: NodeRef = {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        path: elemToPath,
+      };
+
+      if (elemC.elemEquals) {
+        // Constant self-wire: .property = value
+        const value = extractBareValue(sub(elemLine, "elemValue")!);
+        wires.push(withLoc({ value, to: toRef }, elemLineLoc));
+        continue;
+      }
+
+      if (!elemC.elemArrow) continue;
+
+      // ── String source: .field <- "..." ──
+      const elemStrToken = (
+        elemC.elemStringSource as IToken[] | undefined
+      )?.[0];
+      if (elemStrToken) {
+        const raw = elemStrToken.image.slice(1, -1);
+        const segs = parseTemplateString(raw);
+        if (segs) {
+          // Check for circular self-references
+          for (const seg of segs) {
+            if (seg.kind === "ref" && seg.path.startsWith(".")) {
+              throw new Error(
+                `Line ${elemLineNum}: Self-reference "{${seg.path}}" in tool "${bridgeField}" creates a circular dependency. A tool's output cannot be used as its own input.`,
+              );
+            }
+          }
+          // Desugar template string into concat fork
+          const concatOutRef = desugarTemplateString(
+            segs,
+            elemLineNum,
+            undefined,
+            elemLineLoc,
+          );
+          wires.push(
+            withLoc({ from: concatOutRef, to: toRef, pipe: true }, elemLineLoc),
+          );
+        } else {
+          // Plain string without interpolation — emit constant wire
+          wires.push(withLoc({ value: raw, to: toRef }, elemLineLoc));
+        }
+        continue;
+      }
+
+      // ── Source expression or paren expression ──
+      const elemSourceNode = sub(elemLine, "elemSource");
+      const elemFirstParenNode = sub(elemLine, "elemFirstParenExpr");
+
+      let elemSafe = false;
+      if (elemSourceNode) {
+        const headNode = sub(elemSourceNode, "head")!;
+        const extracted = extractAddressPath(headNode);
+        elemSafe = !!extracted.rootSafe;
+      }
+
+      const elemExprOps = subs(elemLine, "elemExprOp");
+      const elemExprRights = subs(elemLine, "elemExprRight");
+      const elemCondLoc = locFromNodeRange(
+        elemFirstParenNode ?? elemSourceNode,
+        elemExprRights[elemExprRights.length - 1] ??
+          elemFirstParenNode ??
+          elemSourceNode,
+      );
+
+      // Compute condition ref (expression chain or plain source)
+      let condRef: NodeRef;
+      let condIsPipeFork: boolean;
+      if (elemFirstParenNode) {
+        const parenRef = resolveParenExpr(
+          elemFirstParenNode,
+          elemLineNum,
+          undefined,
+          elemSafe || undefined,
+          elemLineLoc,
+        );
+        if (elemExprOps.length > 0) {
+          condRef = desugarExprChain(
+            parenRef,
+            elemExprOps,
+            elemExprRights,
+            elemLineNum,
+            undefined,
+            elemSafe || undefined,
+            elemLineLoc,
+          );
+        } else {
+          condRef = parenRef;
+        }
+        condIsPipeFork = true;
+      } else if (elemExprOps.length > 0) {
+        const leftRef = buildSourceExpr(elemSourceNode!, elemLineNum);
+        condRef = desugarExprChain(
+          leftRef,
+          elemExprOps,
+          elemExprRights,
+          elemLineNum,
+          undefined,
+          elemSafe || undefined,
+          elemLineLoc,
+        );
+        condIsPipeFork = true;
+      } else {
+        condRef = buildSourceExpr(elemSourceNode!, elemLineNum);
+        condIsPipeFork = false;
+      }
+
+      // Apply `not` prefix
+      if ((elemC.elemNotPrefix as IToken[] | undefined)?.[0]) {
+        condRef = desugarNot(
+          condRef,
+          elemLineNum,
+          elemSafe || undefined,
+          elemLineLoc,
+        );
+        condIsPipeFork = true;
+      }
+
+      // ── Ternary ──
+      const elemTernaryOp = (elemC.elemTernaryOp as IToken[] | undefined)?.[0];
+      if (elemTernaryOp) {
+        const thenNode = sub(elemLine, "elemThenBranch")!;
+        const elseNode = sub(elemLine, "elemElseBranch")!;
+        const thenBranch = extractTernaryBranch(thenNode, elemLineNum);
+        const elseBranch = extractTernaryBranch(elseNode, elemLineNum);
+
+        // Coalesce
+        const ternFallbacks: WireFallback[] = [];
+        const ternFallbackWires: Wire[] = [];
+        for (const item of subs(elemLine, "elemCoalesceItem")) {
+          const type = tok(item, "falsyOp")
+            ? ("falsy" as const)
+            : ("nullish" as const);
+          const altNode = sub(item, "altValue")!;
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(altNode, elemLineNum);
+          ternFallbacks.push(buildWireFallback(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
+            ternFallbackWires.push(...wires.splice(preLen));
+          }
+        }
+
+        // Catch
+        let ternCatchFallback: string | undefined;
+        let ternCatchControl: ControlFlowInstruction | undefined;
+        let ternCatchFallbackRef: NodeRef | undefined;
+        let ternCatchLoc: SourceLocation | undefined;
+        let ternCatchWires: Wire[] = [];
+        const ternCatchAlt = sub(elemLine, "elemCatchAlt");
+        if (ternCatchAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(ternCatchAlt, elemLineNum);
+          const catchAttrs = buildCatchAttrs(ternCatchAlt, altResult);
+          ternCatchLoc = catchAttrs.catchLoc;
+          ternCatchFallback = catchAttrs.catchFallback;
+          ternCatchControl = catchAttrs.catchControl;
+          ternCatchFallbackRef = catchAttrs.catchFallbackRef;
+          if ("sourceRef" in altResult) {
+            ternCatchWires = wires.splice(preLen);
+          }
+        }
+
+        wires.push(
+          withLoc(
+            {
+              cond: condRef,
+              ...(elemCondLoc ? { condLoc: elemCondLoc } : {}),
+              thenLoc: thenBranch.loc,
+              ...(thenBranch.kind === "ref"
+                ? { thenRef: thenBranch.ref }
+                : { thenValue: thenBranch.value }),
+              elseLoc: elseBranch.loc,
+              ...(elseBranch.kind === "ref"
+                ? { elseRef: elseBranch.ref }
+                : { elseValue: elseBranch.value }),
+              ...(ternFallbacks.length > 0 ? { fallbacks: ternFallbacks } : {}),
+              ...(ternCatchLoc ? { catchLoc: ternCatchLoc } : {}),
+              ...(ternCatchFallback !== undefined
+                ? { catchFallback: ternCatchFallback }
+                : {}),
+              ...(ternCatchFallbackRef !== undefined
+                ? { catchFallbackRef: ternCatchFallbackRef }
+                : {}),
+              ...(ternCatchControl ? { catchControl: ternCatchControl } : {}),
+              to: toRef,
+            },
+            elemLineLoc,
+          ),
+        );
+        wires.push(...ternFallbackWires);
+        wires.push(...ternCatchWires);
+        continue;
+      }
+
+      // ── Coalesce chains ──
+      const fallbacks: WireFallback[] = [];
+      const fallbackInternalWires: Wire[] = [];
+      for (const item of subs(elemLine, "elemCoalesceItem")) {
+        const type = tok(item, "falsyOp")
+          ? ("falsy" as const)
+          : ("nullish" as const);
+        const altNode = sub(item, "altValue")!;
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(altNode, elemLineNum);
+        fallbacks.push(buildWireFallback(type, altNode, altResult));
+        if ("sourceRef" in altResult) {
+          fallbackInternalWires.push(...wires.splice(preLen));
+        }
+      }
+
+      // ── Catch fallback ──
+      let catchFallback: string | undefined;
+      let catchControl: ControlFlowInstruction | undefined;
+      let catchFallbackRef: NodeRef | undefined;
+      let catchLoc: SourceLocation | undefined;
+      let catchFallbackInternalWires: Wire[] = [];
+      const catchAlt = sub(elemLine, "elemCatchAlt");
+      if (catchAlt) {
+        const preLen = wires.length;
+        const altResult = extractCoalesceAlt(catchAlt, elemLineNum);
+        const catchAttrs = buildCatchAttrs(catchAlt, altResult);
+        catchLoc = catchAttrs.catchLoc;
+        catchFallback = catchAttrs.catchFallback;
+        catchControl = catchAttrs.catchControl;
+        catchFallbackRef = catchAttrs.catchFallbackRef;
+        if ("sourceRef" in altResult) {
+          catchFallbackInternalWires = wires.splice(preLen);
+        }
+      }
+
+      // Emit wire
+      const wireAttrs = {
+        ...(condIsPipeFork ? { pipe: true as const } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks } : {}),
+        ...(catchLoc ? { catchLoc } : {}),
+        ...(catchFallback !== undefined ? { catchFallback } : {}),
+        ...(catchFallbackRef !== undefined ? { catchFallbackRef } : {}),
+        ...(catchControl ? { catchControl } : {}),
+      };
+      wires.push(
+        withLoc({ from: condRef, to: toRef, ...wireAttrs }, elemLineLoc),
+      );
+      wires.push(...fallbackInternalWires);
+      wires.push(...catchFallbackInternalWires);
+    }
+  }
+
   return {
     handles: handleBindings,
     wires,
     arrayIterators,
     pipeHandles: pipeHandleEntries,
     forces,
+    handleRes,
   };
 }
 

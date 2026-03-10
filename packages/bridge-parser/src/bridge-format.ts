@@ -136,7 +136,8 @@ function formatBareValue(v: string): string {
 
 function serializeToolBlock(tool: ToolDef): string {
   const lines: string[] = [];
-  const hasBody = tool.deps.length > 0 || tool.wires.length > 0;
+  const hasBody =
+    tool.handles.length > 0 || tool.wires.length > 0 || !!tool.onError;
 
   // Declaration line — use `tool <name> from <source>` format
   const source = tool.extends ?? tool.fn;
@@ -146,49 +147,123 @@ function serializeToolBlock(tool: ToolDef): string {
       : `tool ${tool.name} from ${source}`,
   );
 
-  // Dependencies
-  for (const dep of tool.deps) {
-    if (dep.kind === "context") {
-      if (dep.handle === "context") {
+  // Handles (context, const, tool deps)
+  for (const h of tool.handles) {
+    if (h.kind === "context") {
+      if (h.handle === "context") {
         lines.push(`  with context`);
       } else {
-        lines.push(`  with context as ${dep.handle}`);
+        lines.push(`  with context as ${h.handle}`);
       }
-    } else if (dep.kind === "const") {
-      if (dep.handle === "const") {
+    } else if (h.kind === "const") {
+      if (h.handle === "const") {
         lines.push(`  with const`);
       } else {
-        lines.push(`  with const as ${dep.handle}`);
+        lines.push(`  with const as ${h.handle}`);
       }
-    } else {
-      const depVTag = dep.version ? `@${dep.version}` : "";
-      const memoize = "memoize" in dep && dep.memoize ? " memoize" : "";
-      lines.push(`  with ${dep.tool}${depVTag} as ${dep.handle}${memoize}`);
+    } else if (h.kind === "tool") {
+      const vTag = h.version ? `@${h.version}` : "";
+      const memoize = h.memoize ? " memoize" : "";
+      // Short form when handle == last segment of name
+      const lastDot = h.name.lastIndexOf(".");
+      const defaultHandle =
+        lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
+      if (h.handle === defaultHandle && !vTag) {
+        lines.push(`  with ${h.name}${memoize}`);
+      } else {
+        lines.push(`  with ${h.name}${vTag} as ${h.handle}${memoize}`);
+      }
     }
   }
 
-  // Wires
+  // Wires — self-wires (targeting the tool's own trunk) get `.` prefix;
+  // handle-targeted wires (targeting declared handles) use bare target names
   for (const wire of tool.wires) {
-    if (wire.kind === "onError") {
-      if ("value" in wire) {
-        lines.push(`  on error = ${wire.value}`);
-      } else {
-        lines.push(`  on error <- ${wire.source}`);
-      }
-    } else if (wire.kind === "constant") {
+    const isSelfWire =
+      wire.to.module === SELF_MODULE &&
+      wire.to.type === "Tools" &&
+      wire.to.field === tool.name;
+    const prefix = isSelfWire ? "." : "";
+    if ("value" in wire && !("cond" in wire)) {
+      // Constant wire
+      const target = wire.to.path.join(".");
       if (needsQuoting(wire.value)) {
-        lines.push(`  .${wire.target} = "${wire.value}"`);
+        lines.push(`  ${prefix}${target} = "${wire.value}"`);
       } else {
-        lines.push(`  .${wire.target} = ${wire.value}`);
+        lines.push(`  ${prefix}${target} = ${formatBareValue(wire.value)}`);
       }
+    } else if ("from" in wire) {
+      // Pull wire — reconstruct source from handle map
+      const sourceStr = serializeToolWireSource(wire.from, tool);
+      const target = wire.to.path.join(".");
+      lines.push(`  ${prefix}${target} <- ${sourceStr}`);
+    }
+  }
+
+  // onError
+  if (tool.onError) {
+    if ("value" in tool.onError) {
+      lines.push(`  on error = ${tool.onError.value}`);
     } else {
-      lines.push(`  .${wire.target} <- ${wire.source}`);
+      lines.push(`  on error <- ${tool.onError.source}`);
     }
   }
 
   if (hasBody) lines.push(`}`);
 
   return lines.join("\n");
+}
+
+/**
+ * Reconstruct a pull wire source into a readable string for tool block serialization.
+ * Maps NodeRef back to handle.path format.
+ */
+function serializeToolWireSource(ref: NodeRef, tool: ToolDef): string {
+  for (const h of tool.handles) {
+    if (h.kind === "context") {
+      if (
+        ref.module === SELF_MODULE &&
+        ref.type === "Context" &&
+        ref.field === "context"
+      ) {
+        return ref.path.length > 0
+          ? `${h.handle}.${ref.path.join(".")}`
+          : h.handle;
+      }
+    } else if (h.kind === "const") {
+      if (
+        ref.module === SELF_MODULE &&
+        ref.type === "Const" &&
+        ref.field === "const"
+      ) {
+        return ref.path.length > 0
+          ? `${h.handle}.${ref.path.join(".")}`
+          : h.handle;
+      }
+    } else if (h.kind === "tool") {
+      const lastDot = h.name.lastIndexOf(".");
+      if (lastDot !== -1) {
+        if (
+          ref.module === h.name.substring(0, lastDot) &&
+          ref.field === h.name.substring(lastDot + 1)
+        ) {
+          return ref.path.length > 0
+            ? `${h.handle}.${ref.path.join(".")}`
+            : h.handle;
+        }
+      } else if (
+        ref.module === SELF_MODULE &&
+        ref.type === "Tools" &&
+        ref.field === h.name
+      ) {
+        return ref.path.length > 0
+          ? `${h.handle}.${ref.path.join(".")}`
+          : h.handle;
+      }
+    }
+  }
+  // Fallback: use raw ref path
+  return ref.path.join(".");
 }
 
 /**

@@ -434,7 +434,7 @@ tool myApi httpCall {
     const hover = svc.getHover({ line: 2, character: 18 }); // "ctx"
     assert.ok(hover !== null, "should return hover for context dep");
     assert.ok(hover.content.includes("ctx"), hover.content);
-    assert.ok(hover.content.includes("Context dep"), hover.content);
+    assert.ok(hover.content.includes("Context handle"), hover.content);
   });
 
   test("hover on tool dep (tool kind) in tool block", () => {
@@ -449,7 +449,7 @@ tool childApi httpCall {
     const hover = svc.getHover({ line: 2, character: 20 }); // "dep"
     assert.ok(hover !== null, "should return hover for tool-kind dep");
     assert.ok(hover.content.includes("dep"), hover.content);
-    assert.ok(hover.content.includes("Tool dep"), hover.content);
+    assert.ok(hover.content.includes("Tool handle"), hover.content);
   });
 
   test("hover on const dep in tool block", () => {
@@ -465,7 +465,7 @@ tool myApi httpCall {
     const hover = svc.getHover({ line: 3, character: 16 }); // "cfg"
     assert.ok(hover !== null, "should return hover for const dep");
     assert.ok(hover.content.includes("cfg"), hover.content);
-    assert.ok(hover.content.includes("Const dep"), hover.content);
+    assert.ok(hover.content.includes("Const handle"), hover.content);
   });
 
   test("hover on const instruction name", () => {

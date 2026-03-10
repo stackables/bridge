@@ -1668,12 +1668,24 @@ describe("mergeBridgeDocuments", () => {
   test("throws on duplicate tool definition", () => {
     const a: BridgeDocument = {
       instructions: [
-        { kind: "tool", name: "myHttp", fn: "std.http", deps: [], wires: [] },
+        {
+          kind: "tool",
+          name: "myHttp",
+          fn: "std.http",
+          handles: [],
+          wires: [],
+        },
       ],
     };
     const b: BridgeDocument = {
       instructions: [
-        { kind: "tool", name: "myHttp", fn: "std.fetch", deps: [], wires: [] },
+        {
+          kind: "tool",
+          name: "myHttp",
+          fn: "std.fetch",
+          handles: [],
+          wires: [],
+        },
       ],
     };
     assert.throws(
@@ -1705,7 +1717,13 @@ describe("mergeBridgeDocuments", () => {
     };
     const b: BridgeDocument = {
       instructions: [
-        { kind: "tool", name: "myHttp", fn: "std.http", deps: [], wires: [] },
+        {
+          kind: "tool",
+          name: "myHttp",
+          fn: "std.http",
+          handles: [],
+          wires: [],
+        },
       ],
     };
     // const:myHttp vs tool:myHttp — different namespaces, no collision

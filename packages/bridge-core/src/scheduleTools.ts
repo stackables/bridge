@@ -386,16 +386,15 @@ export async function scheduleToolDef(
     );
   }
 
-  // on error: wrap the tool call with fallback from onError wire
-  const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+  // on error: wrap the tool call with fallback
   try {
     const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
       ? trunkKey(target)
       : undefined;
     return await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
   } catch (err) {
-    if (!onErrorWire) throw err;
-    if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-    return resolveToolSource(ctx, onErrorWire.source, toolDef);
+    if (!toolDef.onError) throw err;
+    if ("value" in toolDef.onError) return JSON.parse(toolDef.onError.value);
+    return resolveToolSource(ctx, toolDef.onError.source, toolDef);
   }
 }

@@ -6,7 +6,13 @@ import {
   parsePath,
   serializeBridge,
 } from "../src/index.ts";
-import type { Bridge, Instruction, ToolDef, Wire } from "../src/index.ts";
+import type {
+  Bridge,
+  HandleBinding,
+  Instruction,
+  ToolDef,
+  Wire,
+} from "../src/index.ts";
 import { SELF_MODULE } from "../src/index.ts";
 import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 
@@ -655,19 +661,27 @@ gc.q <- i.search
     const root = tools.find((t) => t.name === "hereapi")!;
     assert.equal(root.fn, "httpCall");
     assert.equal(root.extends, undefined);
-    assertDeepStrictEqualIgnoringLoc(root.deps, [
+    assertDeepStrictEqualIgnoringLoc(root.handles, [
       { kind: "context", handle: "context" },
     ]);
     assertDeepStrictEqualIgnoringLoc(root.wires, [
       {
-        target: "baseUrl",
-        kind: "constant",
         value: "https://geocode.search.hereapi.com/v1",
+        to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
       },
       {
-        target: "headers.apiKey",
-        kind: "pull",
-        source: "context.hereapi.apiKey",
+        from: {
+          module: "_",
+          type: "Context",
+          field: "context",
+          path: ["hereapi", "apiKey"],
+        },
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi",
+          path: ["headers", "apiKey"],
+        },
       },
     ]);
 
@@ -675,8 +689,24 @@ gc.q <- i.search
     assert.equal(child.fn, undefined);
     assert.equal(child.extends, "hereapi");
     assertDeepStrictEqualIgnoringLoc(child.wires, [
-      { target: "method", kind: "constant", value: "GET" },
-      { target: "path", kind: "constant", value: "/geocode" },
+      {
+        value: "GET",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi.geocode",
+          path: ["method"],
+        },
+      },
+      {
+        value: "/geocode",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi.geocode",
+          path: ["path"],
+        },
+      },
     ]);
   });
 
@@ -707,16 +737,37 @@ sg.content <- i.body
     )!;
     assertDeepStrictEqualIgnoringLoc(root.wires, [
       {
-        target: "baseUrl",
-        kind: "constant",
         value: "https://api.sendgrid.com/v3",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["baseUrl"],
+        },
       },
       {
-        target: "headers.Authorization",
-        kind: "pull",
-        source: "context.sendgrid.bearerToken",
+        from: {
+          module: "_",
+          type: "Context",
+          field: "context",
+          path: ["sendgrid", "bearerToken"],
+        },
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["headers", "Authorization"],
+        },
       },
-      { target: "headers.X-Custom", kind: "constant", value: "static-value" },
+      {
+        value: "static-value",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["headers", "X-Custom"],
+        },
+      },
     ]);
 
     const child = result.instructions.find(
@@ -724,8 +775,24 @@ sg.content <- i.body
     )!;
     assert.equal(child.extends, "sendgrid");
     assertDeepStrictEqualIgnoringLoc(child.wires, [
-      { target: "method", kind: "constant", value: "POST" },
-      { target: "path", kind: "constant", value: "/mail/send" },
+      {
+        value: "POST",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid.send",
+          path: ["method"],
+        },
+      },
+      {
+        value: "/mail/send",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid.send",
+          path: ["path"],
+        },
+      },
     ]);
   });
 
@@ -757,14 +824,24 @@ sb.q <- i.query
     const serviceB = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
     )!;
-    assertDeepStrictEqualIgnoringLoc(serviceB.deps, [
+    assertDeepStrictEqualIgnoringLoc(serviceB.handles, [
       { kind: "context", handle: "context" },
-      { kind: "tool", handle: "auth", tool: "authService" },
+      { kind: "tool", handle: "auth", name: "authService" },
     ]);
     assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
-      target: "headers.Authorization",
-      kind: "pull",
-      source: "auth.access_token",
+      from: {
+        module: "_",
+        type: "Tools",
+        field: "authService",
+        path: ["access_token"],
+        instance: 1,
+      },
+      to: {
+        module: "_",
+        type: "Tools",
+        field: "serviceB",
+        path: ["headers", "Authorization"],
+      },
     });
   });
 });
@@ -1043,9 +1120,13 @@ tool myApi from httpCall {
   .url = "https://example.com/things#anchor"
 }`).instructions.find((inst) => inst.kind === "tool") as ToolDef;
     const urlWire = tool.wires.find(
-      (w) => w.kind === "constant" && w.target === "url",
-    ) as { kind: "constant"; target: string; value: string };
-    assert.equal(urlWire.value, "https://example.com/things#anchor");
+      (w) => "value" in w && w.to.path.join(".") === "url",
+    );
+    assert.ok(urlWire);
+    assert.equal(
+      (urlWire as { value: string }).value,
+      "https://example.com/things#anchor",
+    );
   });
 });
 
@@ -1104,7 +1185,7 @@ tool myApi from httpCall {
     const tool = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool",
     )!;
-    const onError = tool.wires.find((w) => w.kind === "onError");
+    const onError = tool.onError;
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
       assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
@@ -1193,12 +1274,12 @@ tool myApi from std.httpCall {
     const toolDef = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool",
     )!;
-    const dep = toolDef.deps.find(
-      (d) => d.kind === "tool" && d.handle === "pay",
+    const dep = toolDef.handles.find(
+      (d: HandleBinding) => d.kind === "tool" && d.handle === "pay",
     );
     assert.ok(dep);
     if (dep?.kind === "tool") {
-      assert.equal(dep.tool, "stripe");
+      assert.equal(dep.name, "stripe");
       assert.equal(dep.version, "2.0");
     }
   });

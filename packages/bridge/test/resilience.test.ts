@@ -197,8 +197,8 @@ tool myApi from httpCall {
 
 }`);
     const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
-    const onError = tool.wires.find((w) => w.kind === "onError");
-    assert.ok(onError, "should have an onError wire");
+    const onError = tool.onError;
+    assert.ok(onError, "should have an onError");
     assert.ok("value" in onError!, "should have a value");
     if ("value" in onError!) {
       assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
@@ -217,8 +217,8 @@ tool myApi from httpCall {
 
 }`);
     const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
-    const onError = tool.wires.find((w) => w.kind === "onError");
-    assert.ok(onError, "should have an onError wire");
+    const onError = tool.onError;
+    assert.ok(onError, "should have an onError");
     assert.ok("source" in onError!, "should have a source");
     if ("source" in onError!) {
       assert.equal(onError.source, "context.fallbacks.geo");
@@ -236,7 +236,7 @@ tool myApi from httpCall {
 }
 `);
     const tool = doc.instructions.find((i): i is ToolDef => i.kind === "tool")!;
-    const onError = tool.wires.find((w) => w.kind === "onError");
+    const onError = tool.onError;
     assert.ok(onError && "value" in onError);
     if ("value" in onError!) {
       assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
@@ -258,11 +258,11 @@ tool base.child from base {
 
 }`);
     // The engine resolves extends chains at runtime, so we just verify
-    // the parent has the on error wire
+    // the parent has the on error
     const base = doc.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "base",
     )!;
-    assert.ok(base.wires.some((w) => w.kind === "onError"));
+    assert.ok(base.onError);
   });
 });
 

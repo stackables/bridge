@@ -136,9 +136,9 @@ export function collectVersionedHandles(
       }
     }
     if (inst.kind === "tool") {
-      for (const dep of (inst as ToolDef).deps) {
-        if (dep.kind === "tool" && dep.version) {
-          result.push({ name: dep.tool, version: dep.version });
+      for (const h of (inst as ToolDef).handles) {
+        if (h.kind === "tool" && h.version) {
+          result.push({ name: h.name, version: h.version });
         }
       }
     }

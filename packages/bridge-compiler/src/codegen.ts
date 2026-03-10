@@ -1307,7 +1307,6 @@ class CodegenContext {
 
     // ToolDef-backed tool call
     const fnName = toolDef.fn ?? tool.toolName;
-    const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
 
     // Build input: ToolDef wires first, then bridge wires override
     // Track entries by key for precise override matching
@@ -1317,25 +1316,139 @@ class CodegenContext {
     // These must be emitted before building the input so their vars are in scope.
     this.emitToolDeps(lines, toolDef);
 
-    // ToolDef constant wires
+    // ── ToolDef pipe forks (expressions, interpolation) ─────────────
+    // When a ToolDef has pipeHandles, some wires target internal fork tools
+    // (e.g., add:100000). Compute their results as inline expressions before
+    // processing the main tool's input wires.
+    const forkKeys = new Set<string>();
+    const forkExprs = new Map<string, string>();
+    if (toolDef.pipeHandles && toolDef.pipeHandles.length > 0) {
+      for (const ph of toolDef.pipeHandles) {
+        forkKeys.add(ph.key);
+      }
+      // Process forks in instance order (expressions may chain)
+      const sortedPH = [...toolDef.pipeHandles].sort((a, b) => {
+        const ai = a.baseTrunk.instance ?? 0;
+        const bi = b.baseTrunk.instance ?? 0;
+        return ai - bi;
+      });
+      for (const ph of sortedPH) {
+        const forkKey = ph.key;
+        const forkField = ph.baseTrunk.field;
+        // Collect fork input wires
+        const forkInputs = new Map<string, string>();
+        for (const tw of toolDef.wires) {
+          if (refTrunkKey(tw.to) !== forkKey) continue;
+          const path = tw.to.path.join(".");
+          if ("value" in tw && !("cond" in tw)) {
+            forkInputs.set(
+              path,
+              emitCoerced((tw as Wire & { value: string }).value),
+            );
+          } else if ("from" in tw) {
+            const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+            if (forkExprs.has(fromKey)) {
+              let expr = forkExprs.get(fromKey)!;
+              for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+                expr += `[${JSON.stringify(p)}]`;
+              }
+              forkInputs.set(path, expr);
+            } else {
+              forkInputs.set(
+                path,
+                this.resolveToolWireSource(
+                  tw as Wire & { from: NodeRef },
+                  toolDef,
+                ),
+              );
+            }
+          }
+        }
+        // Inline the internal tool operation
+        forkExprs.set(forkKey, this.inlineForkExpr(forkField, forkInputs));
+      }
+    }
+
+    // ToolDef constant wires (skip fork-targeted wires)
     for (const tw of toolDef.wires) {
-      if (tw.kind === "constant") {
+      if ("value" in tw && !("cond" in tw)) {
+        if (forkKeys.has(refTrunkKey(tw.to))) continue;
+        const target = tw.to.path.join(".");
         inputEntries.set(
-          tw.target,
-          `    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+          target,
+          `    ${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
         );
       }
     }
 
-    // ToolDef pull wires — resolved from tool dependencies
+    // ToolDef pull wires — resolved from tool handles (skip fork-targeted wires)
     for (const tw of toolDef.wires) {
-      if (tw.kind === "pull") {
-        const expr = this.resolveToolDepSource(tw.source, toolDef);
-        inputEntries.set(
-          tw.target,
-          `    ${JSON.stringify(tw.target)}: ${expr}`,
+      if (!("from" in tw)) continue;
+      if (forkKeys.has(refTrunkKey(tw.to))) continue;
+      // Skip wires with fallbacks — handled below
+      if ("fallbacks" in tw && (tw as any).fallbacks?.length > 0) continue;
+      const target = tw.to.path.join(".");
+      const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+      let expr: string;
+      if (forkExprs.has(fromKey)) {
+        // Source is a fork result
+        expr = forkExprs.get(fromKey)!;
+        for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+          expr = `(${expr})[${JSON.stringify(p)}]`;
+        }
+      } else {
+        expr = this.resolveToolWireSource(
+          tw as Wire & { from: NodeRef },
+          toolDef,
         );
       }
+      inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
+    }
+
+    // ToolDef ternary wires
+    for (const tw of toolDef.wires) {
+      if (!("cond" in tw)) continue;
+      if (forkKeys.has(refTrunkKey(tw.to))) continue;
+      const target = tw.to.path.join(".");
+      const condExpr = this.resolveToolDefRef(
+        (tw as any).cond,
+        toolDef,
+        forkExprs,
+      );
+      const thenExpr = (tw as any).thenRef
+        ? this.resolveToolDefRef((tw as any).thenRef, toolDef, forkExprs)
+        : (tw as any).thenValue !== undefined
+          ? emitCoerced((tw as any).thenValue)
+          : "undefined";
+      const elseExpr = (tw as any).elseRef
+        ? this.resolveToolDefRef((tw as any).elseRef, toolDef, forkExprs)
+        : (tw as any).elseValue !== undefined
+          ? emitCoerced((tw as any).elseValue)
+          : "undefined";
+      inputEntries.set(
+        target,
+        `    ${JSON.stringify(target)}: (${condExpr} ? ${thenExpr} : ${elseExpr})`,
+      );
+    }
+
+    // ToolDef fallback/coalesce wires (pull wires with fallbacks array)
+    for (const tw of toolDef.wires) {
+      if (!("from" in tw)) continue;
+      if (!("fallbacks" in tw) || !(tw as any).fallbacks?.length) continue;
+      if (forkKeys.has(refTrunkKey(tw.to))) continue;
+      const target = tw.to.path.join(".");
+      const pullWire = tw as Wire & { from: NodeRef; fallbacks: any[] };
+      let expr = this.resolveToolDefRef(pullWire.from, toolDef, forkExprs);
+      for (const fb of pullWire.fallbacks) {
+        const op = fb.type === "nullish" ? "??" : "||";
+        if (fb.value !== undefined) {
+          expr = `(${expr} ${op} ${emitCoerced(fb.value)})`;
+        } else if (fb.ref) {
+          const refExpr = this.resolveToolDefRef(fb.ref, toolDef, forkExprs);
+          expr = `(${expr} ${op} ${refExpr})`;
+        }
+      }
+      inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
     }
 
     // Bridge wires override ToolDef wires
@@ -1367,7 +1480,7 @@ class CodegenContext {
         inputParts.length > 0 ? `{\n${inputParts.join(",\n")},\n  }` : "{}";
     }
 
-    if (onErrorWire) {
+    if (toolDef.onError) {
       // Wrap in try/catch for onError
       lines.push(`  let ${tool.varName};`);
       lines.push(`  try {`);
@@ -1375,13 +1488,13 @@ class CodegenContext {
         `    ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
       );
       lines.push(`  } catch (_e) {`);
-      if ("value" in onErrorWire) {
+      if ("value" in toolDef.onError) {
         lines.push(
-          `    ${tool.varName} = JSON.parse(${JSON.stringify(onErrorWire.value)});`,
+          `    ${tool.varName} = JSON.parse(${JSON.stringify(toolDef.onError.value)});`,
         );
       } else {
         const fallbackExpr = this.resolveToolDepSource(
-          onErrorWire.source,
+          toolDef.onError.source,
           toolDef,
         );
         lines.push(`    ${tool.varName} = ${fallbackExpr};`);
@@ -1512,11 +1625,11 @@ class CodegenContext {
    * Results are cached in `toolDepVars` so each dep is called at most once.
    */
   private emitToolDeps(lines: string[], toolDef: ToolDef): void {
-    // Collect tool-kind deps that haven't been emitted yet
+    // Collect tool-kind handles that haven't been emitted yet
     const pendingDeps: { handle: string; toolName: string }[] = [];
-    for (const dep of toolDef.deps) {
-      if (dep.kind === "tool" && !this.toolDepVars.has(dep.tool)) {
-        pendingDeps.push({ handle: dep.handle, toolName: dep.tool });
+    for (const h of toolDef.handles) {
+      if (h.kind === "tool" && !this.toolDepVars.has(h.name)) {
+        pendingDeps.push({ handle: h.handle, toolName: h.name });
       }
     }
     if (pendingDeps.length === 0) return;
@@ -1550,18 +1663,23 @@ class CodegenContext {
 
       // Constant wires
       for (const tw of depToolDef.wires) {
-        if (tw.kind === "constant") {
+        if ("value" in tw && !("cond" in tw)) {
           inputParts.push(
-            `      ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
           );
         }
       }
 
-      // Pull wires — resolved from the dep's own deps
+      // Pull wires — resolved from the dep's own handles
       for (const tw of depToolDef.wires) {
-        if (tw.kind === "pull") {
-          const expr = this.resolveToolDepSource(tw.source, depToolDef);
-          inputParts.push(`      ${JSON.stringify(tw.target)}: ${expr}`);
+        if ("from" in tw) {
+          const source = this.resolveToolWireSource(
+            tw as Wire & { from: NodeRef },
+            depToolDef,
+          );
+          inputParts.push(
+            `      ${JSON.stringify(tw.to.path.join("."))}: ${source}`,
+          );
         }
       }
 
@@ -1592,6 +1710,126 @@ class CodegenContext {
   }
 
   /**
+   * Resolve a Wire's source NodeRef to a JS expression in the context of a ToolDef.
+   * Handles context, const, and tool handle types.
+   */
+  private resolveToolWireSource(
+    wire: Wire & { from: NodeRef },
+    toolDef: ToolDef,
+  ): string {
+    const ref = wire.from;
+    // Match the ref against tool handles
+    const h = toolDef.handles.find((handle) => {
+      if (handle.kind === "context") {
+        return (
+          ref.module === SELF_MODULE &&
+          ref.type === "Context" &&
+          ref.field === "context"
+        );
+      }
+      if (handle.kind === "const") {
+        return (
+          ref.module === SELF_MODULE &&
+          ref.type === "Const" &&
+          ref.field === "const"
+        );
+      }
+      if (handle.kind === "tool") {
+        return (
+          ref.module === SELF_MODULE &&
+          ref.type === "Tools" &&
+          ref.field === handle.name
+        );
+      }
+      return false;
+    });
+
+    if (!h) return "undefined";
+
+    // Reconstruct the string-based source for resolveToolDepSource
+    const pathParts = ref.path.length > 0 ? "." + ref.path.join(".") : "";
+    return this.resolveToolDepSource(h.handle + pathParts, toolDef);
+  }
+
+  /**
+   * Resolve a NodeRef within a ToolDef context to a JS expression.
+   * Like resolveToolWireSource but also checks fork expression results.
+   */
+  private resolveToolDefRef(
+    ref: NodeRef,
+    toolDef: ToolDef,
+    forkExprs: Map<string, string>,
+  ): string {
+    const key = refTrunkKey(ref);
+    if (forkExprs.has(key)) {
+      let expr = forkExprs.get(key)!;
+      for (const p of ref.path) {
+        expr = `(${expr})[${JSON.stringify(p)}]`;
+      }
+      return expr;
+    }
+    // Delegate to resolveToolWireSource via a synthetic wire
+    return this.resolveToolWireSource(
+      { from: ref, to: ref } as Wire & { from: NodeRef },
+      toolDef,
+    );
+  }
+
+  /**
+   * Inline an internal fork tool operation as a JS expression.
+   * Used for ToolDef pipe forks — mirrors emitInternalToolCall logic.
+   */
+  private inlineForkExpr(
+    forkField: string,
+    inputs: Map<string, string>,
+  ): string {
+    const a = inputs.get("a") ?? "undefined";
+    const b = inputs.get("b") ?? "undefined";
+    switch (forkField) {
+      case "add":
+        return `(Number(${a}) + Number(${b}))`;
+      case "subtract":
+        return `(Number(${a}) - Number(${b}))`;
+      case "multiply":
+        return `(Number(${a}) * Number(${b}))`;
+      case "divide":
+        return `(Number(${a}) / Number(${b}))`;
+      case "eq":
+        return `(${a} === ${b})`;
+      case "neq":
+        return `(${a} !== ${b})`;
+      case "gt":
+        return `(Number(${a}) > Number(${b}))`;
+      case "gte":
+        return `(Number(${a}) >= Number(${b}))`;
+      case "lt":
+        return `(Number(${a}) < Number(${b}))`;
+      case "lte":
+        return `(Number(${a}) <= Number(${b}))`;
+      case "not":
+        return `(!${a})`;
+      case "and":
+        return `(Boolean(${a}) && Boolean(${b}))`;
+      case "or":
+        return `(Boolean(${a}) || Boolean(${b}))`;
+      case "concat": {
+        const parts: string[] = [];
+        for (let i = 0; ; i++) {
+          const partExpr = inputs.get(`parts.${i}`);
+          if (partExpr === undefined) break;
+          parts.push(partExpr);
+        }
+        const concatParts = parts
+          .map((p) => `(${p} == null ? "" : String(${p}))`)
+          .join(" + ");
+        return `{ value: ${concatParts || '""'} }`;
+      }
+      default:
+        return "undefined";
+    }
+  }
+
+  /**
    * Resolve a ToolDef source reference (e.g. "ctx.apiKey") to a JS expression.
    * Handles context, const, and tool dependencies.
    */
@@ -1601,13 +1839,13 @@ class CodegenContext {
     const restPath =
       dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
 
-    const dep = toolDef.deps.find((d) => d.handle === handle);
-    if (!dep) return "undefined";
+    const h = toolDef.handles.find((d) => d.handle === handle);
+    if (!h) return "undefined";
 
     let baseExpr: string;
-    if (dep.kind === "context") {
+    if (h.kind === "context") {
       baseExpr = "context";
-    } else if (dep.kind === "const") {
+    } else if (h.kind === "const") {
       // Resolve from the const definitions — inline parsed value
       if (restPath.length > 0) {
         const constName = restPath[0]!;
@@ -1623,14 +1861,14 @@ class CodegenContext {
         }
       }
       return "undefined";
-    } else if (dep.kind === "tool") {
+    } else if (h.kind === "tool") {
       // Tool dependency — first check ToolDef-level dep vars (emitted by emitToolDeps),
       // then fall back to bridge-level tool handles
-      const depVar = this.toolDepVars.get(dep.tool);
+      const depVar = this.toolDepVars.get(h.name);
       if (depVar) {
         baseExpr = depVar;
       } else {
-        const depToolInfo = this.findToolByName(dep.tool);
+        const depToolInfo = this.findToolByName(h.name);
         if (depToolInfo) {
           baseExpr = depToolInfo.varName;
         } else {
@@ -1676,28 +1914,32 @@ class CodegenContext {
       kind: "tool",
       name,
       fn: chain[0]!.fn,
-      deps: [],
+      handles: [],
       wires: [],
     };
 
     for (const def of chain) {
-      for (const dep of def.deps) {
-        if (!merged.deps.some((d) => d.handle === dep.handle)) {
-          merged.deps.push(dep);
+      for (const h of def.handles) {
+        if (!merged.handles.some((mh) => mh.handle === h.handle)) {
+          merged.handles.push(h);
         }
       }
       for (const wire of def.wires) {
-        if (wire.kind === "onError") {
-          const idx = merged.wires.findIndex((w) => w.kind === "onError");
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
-        } else if ("target" in wire) {
-          const target = wire.target;
-          const idx = merged.wires.findIndex(
-            (w) => "target" in w && w.target === target,
-          );
-          if (idx >= 0) merged.wires[idx] = wire;
-          else merged.wires.push(wire);
+        const wireKey = wire.to.path.join(".");
+        const idx = merged.wires.findIndex(
+          (w) => w.to.path.join(".") === wireKey,
+        );
+        if (idx >= 0) merged.wires[idx] = wire;
+        else merged.wires.push(wire);
+      }
+      if (def.onError) merged.onError = def.onError;
+      // Merge pipeHandles — child overrides parent by key
+      if (def.pipeHandles) {
+        if (!merged.pipeHandles) merged.pipeHandles = [];
+        for (const ph of def.pipeHandles) {
+          if (!merged.pipeHandles.some((mph) => mph.key === ph.key)) {
+            merged.pipeHandles.push(ph);
+          }
         }
       }
     }
@@ -3534,20 +3776,22 @@ class CodegenContext {
         if (toolDef) {
           const inputEntries = new Map<string, string>();
           for (const tw of toolDef.wires) {
-            if (tw.kind === "constant") {
+            if ("value" in tw && !("cond" in tw)) {
+              const target = tw.to.path.join(".");
               inputEntries.set(
-                tw.target,
-                `${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+                target,
+                `${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
               );
             }
           }
           for (const tw of toolDef.wires) {
-            if (tw.kind === "pull") {
-              const expr = this.resolveToolDepSource(tw.source, toolDef);
-              inputEntries.set(
-                tw.target,
-                `${JSON.stringify(tw.target)}: ${expr}`,
+            if ("from" in tw) {
+              const target = tw.to.path.join(".");
+              const expr = this.resolveToolWireSource(
+                tw as Wire & { from: NodeRef },
+                toolDef,
               );
+              inputEntries.set(target, `${JSON.stringify(target)}: ${expr}`);
             }
           }
           for (const bw of toolWires) {
@@ -3877,7 +4121,7 @@ class CodegenContext {
       const tool = this.tools.get(toolTk);
       if (tool) {
         const toolDef = this.resolveToolDef(tool.toolName);
-        if (toolDef?.wires.some((w) => w.kind === "onError")) continue;
+        if (toolDef?.onError) continue;
       }
 
       // Check that all prior tool dependencies appear earlier in topological order
@@ -3977,9 +4221,9 @@ class CodegenContext {
     const tool = this.tools.get(tk);
     if (!tool) return false;
     const toolDef = this.resolveToolDef(tool.toolName);
-    if (toolDef?.wires.some((w) => w.kind === "onError")) return false;
+    if (toolDef?.onError) return false;
     // Tools with ToolDef-level tool deps need their deps emitted first
-    if (toolDef?.deps.some((d) => d.kind === "tool")) return false;
+    if (toolDef?.handles.some((h) => h.kind === "tool")) return false;
     return true;
   }
 
@@ -4003,20 +4247,22 @@ class CodegenContext {
     const fnName = toolDef.fn ?? tool.toolName;
     const inputEntries = new Map<string, string>();
     for (const tw of toolDef.wires) {
-      if (tw.kind === "constant") {
+      if ("value" in tw && !("cond" in tw)) {
+        const target = tw.to.path.join(".");
         inputEntries.set(
-          tw.target,
-          `    ${JSON.stringify(tw.target)}: ${emitCoerced(tw.value)}`,
+          target,
+          `    ${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
         );
       }
     }
     for (const tw of toolDef.wires) {
-      if (tw.kind === "pull") {
-        const expr = this.resolveToolDepSource(tw.source, toolDef);
-        inputEntries.set(
-          tw.target,
-          `    ${JSON.stringify(tw.target)}: ${expr}`,
+      if ("from" in tw) {
+        const target = tw.to.path.join(".");
+        const expr = this.resolveToolWireSource(
+          tw as Wire & { from: NodeRef },
+          toolDef,
         );
+        inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
       }
     }
     for (const bw of bridgeWires) {
