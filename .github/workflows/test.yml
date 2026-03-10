@@ -22,6 +22,8 @@ jobs:
         run: pnpm install
       - name: Test
         run: pnpm test
+      - name: Fuzz
+        run: pnpm fuzz
       - name: Build
         run: pnpm build
       - name: Lint with ESLint

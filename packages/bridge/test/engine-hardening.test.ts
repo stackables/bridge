@@ -4,6 +4,7 @@ import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { executeBridge } from "../src/index.ts";
 import {
   BridgeTimeoutError,
+  BridgeRuntimeError,
   BridgeAbortError,
   boundedClone,
   TraceCollector,
@@ -40,7 +41,7 @@ bridge Query.test {
     assert.deepStrictEqual(data, { result: "ok" });
   });
 
-  test("tool that hangs throws BridgeTimeoutError", async () => {
+  test("tool that hangs throws BridgeRuntimeError wrapping timeout", async () => {
     const tools = {
       slow: () =>
         new Promise(() => {
@@ -58,9 +59,11 @@ bridge Query.test {
           toolTimeoutMs: 50, // 50ms timeout
         }),
       (err: any) => {
-        assert.ok(err instanceof BridgeTimeoutError);
+        assert.ok(err instanceof BridgeRuntimeError);
         assert.ok(err.message.includes("slow"));
         assert.ok(err.message.includes("50ms"));
+        assert.ok(err.bridgeLoc, "timeout error should carry bridgeLoc");
+        assert.ok(err.cause instanceof BridgeTimeoutError);
         return true;
       },
     );

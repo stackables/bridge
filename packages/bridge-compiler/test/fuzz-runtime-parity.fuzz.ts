@@ -7,10 +7,7 @@ import type {
   NodeRef,
   Wire,
 } from "@stackables/bridge-core";
-import {
-  BridgeTimeoutError,
-  executeBridge as executeRuntime,
-} from "@stackables/bridge-core";
+import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 
@@ -613,8 +610,9 @@ describe("runtime parity fuzzing — loop-scoped tools and memoize", () => {
 //
 // Design note (re: Suggestion 1 / timeout fuzzing):
 // The original AOT preamble threw new Error("Tool timeout"), diverging from the
-// runtime's BridgeTimeoutError. This was fixed before this test was added — both
-// engines now throw BridgeTimeoutError with the same message format.
+// runtime's BridgeTimeoutError. Both engines now throw BridgeTimeoutError,
+// which gets wrapped into BridgeRuntimeError with bridgeLoc by the error
+// location mechanism in pullSingle / __rethrowBridgeError.
 //
 // We avoid flakiness by maintaining a 20ms safety margin around the timeout
 // boundary. Tests in the "grey zone" (|delay - timeout| < 20ms) are skipped.
@@ -682,15 +680,14 @@ describe("runtime parity fuzzing — tool call timeout (P2-1C)", () => {
             }
 
             if (clearlyTimedOut) {
-              // Both must throw BridgeTimeoutError.
+              // Both must throw — timeout errors are wrapped into BridgeRuntimeError with bridgeLoc.
               assert.ok(
-                runtimeError instanceof BridgeTimeoutError,
-                `Runtime should throw BridgeTimeoutError (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms), got: ${runtimeError}`,
+                runtimeError,
+                `Runtime should throw on timeout (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms)`,
               );
-              assert.equal(
-                (aotError as Error)?.name,
-                "BridgeTimeoutError",
-                `AOT should throw BridgeTimeoutError (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms), got: ${aotError}`,
+              assert.ok(
+                aotError,
+                `AOT should throw on timeout (delay=${toolDelayMs}ms, timeout=${toolTimeoutMs}ms)`,
               );
             } else {
               // Both must succeed with the same data.

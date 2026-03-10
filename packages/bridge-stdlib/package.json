@@ -21,6 +21,7 @@
     "prepack": "pnpm build",
     "lint:types": "tsc -p tsconfig.check.json",
     "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
+    "fuzz": "node --experimental-transform-types --conditions source --test test/*.fuzz.ts",
     "test:coverage": "node --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --conditions source --test test/*.test.ts"
   },
   "repository": {
