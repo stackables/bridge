@@ -32,6 +32,7 @@ import {
   attachBridgeErrorMetadata,
   BridgeAbortError,
   BridgePanicError,
+  isFatalError,
   wrapBridgeRuntimeError,
   CONTINUE_SYM,
   decrementLoopControl,
@@ -64,7 +65,10 @@ import {
 } from "./requested-fields.ts";
 import { raceTimeout } from "./utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
-import { buildTraceBitsMap, enumerateTraversalIds } from "./enumerate-traversals.ts";
+import {
+  buildTraceBitsMap,
+  enumerateTraversalIds,
+} from "./enumerate-traversals.ts";
 
 function stableMemoizeKey(value: unknown): string {
   if (value === undefined) {
@@ -964,7 +968,12 @@ export class ExecutionTree implements TreeContext {
         }
       }
 
-      this.state[key] = this.schedule(ref, nextChain);
+      try {
+        this.state[key] = this.schedule(ref, nextChain);
+      } catch (err) {
+        if (isFatalError(err)) throw err;
+        throw wrapBridgeRuntimeError(err, { bridgeLoc });
+      }
       value = this.state[key]; // sync value or Promise (see #12)
     }
 
@@ -974,8 +983,13 @@ export class ExecutionTree implements TreeContext {
     }
 
     // Async: chain path traversal onto the pending promise.
-    return (value as Promise<any>).then((resolved: any) =>
-      this.applyPath(resolved, ref, bridgeLoc),
+    // Attach bridgeLoc to tool execution errors so they carry source context.
+    return (value as Promise<any>).then(
+      (resolved: any) => this.applyPath(resolved, ref, bridgeLoc),
+      (err: unknown) => {
+        if (isFatalError(err)) throw err;
+        throw wrapBridgeRuntimeError(err, { bridgeLoc });
+      },
     );
   }
 

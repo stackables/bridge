@@ -1298,8 +1298,14 @@ class CodegenContext {
           `  try { ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
         );
       } else {
+        const callExpr = this.syncAwareCall(
+          tool.toolName,
+          inputObj,
+          tool.trunkKey,
+        );
+        const pullingLoc = this.findPullingWireLoc(tool.trunkKey);
         lines.push(
-          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
+          `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
         );
       }
       return;
@@ -1512,8 +1518,10 @@ class CodegenContext {
         `  try { ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; ${tool.varName}_err = _e; }`,
       );
     } else {
+      const callExpr = this.syncAwareCall(fnName, inputObj, tool.trunkKey);
+      const pullingLoc = this.findPullingWireLoc(tool.trunkKey);
       lines.push(
-        `  const ${tool.varName} = ${this.syncAwareCall(fnName, inputObj, tool.trunkKey)};`,
+        `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
       );
     }
   }
@@ -2947,6 +2955,27 @@ class CodegenContext {
       return `await __wrapBridgeErrorAsync(async () => (${expr}), ${loc})`;
     }
     return `__wrapBridgeError(() => (${expr}), ${loc})`;
+  }
+
+  /**
+   * Find the source location of the closest wire that pulls FROM a tool.
+   * Used to attach `bridgeLoc` to tool execution errors.
+   */
+  private findPullingWireLoc(trunkKey: string): SourceLocation | undefined {
+    for (const w of this.bridge.wires) {
+      if ("from" in w) {
+        const srcKey = refTrunkKey(w.from);
+        if (srcKey === trunkKey) return w.fromLoc ?? w.loc;
+      }
+      if ("cond" in w) {
+        if (refTrunkKey(w.cond) === trunkKey) return w.condLoc ?? w.loc;
+        if (w.thenRef && refTrunkKey(w.thenRef) === trunkKey)
+          return w.thenLoc ?? w.loc;
+        if (w.elseRef && refTrunkKey(w.elseRef) === trunkKey)
+          return w.elseLoc ?? w.loc;
+      }
+    }
+    return undefined;
   }
 
   private serializeLoc(loc?: SourceLocation): string {
