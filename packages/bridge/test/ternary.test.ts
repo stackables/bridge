@@ -5,8 +5,8 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import { BridgePanicError } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 // ── Parser / desugaring tests ─────────────────────────────────────────────
 

@@ -3,7 +3,6 @@ import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
   parseBridgeDiagnostics,
-  parsePath,
   serializeBridge,
 } from "../src/index.ts";
 import type {
@@ -12,9 +11,9 @@ import type {
   Instruction,
   ToolDef,
   Wire,
-} from "../src/index.ts";
-import { SELF_MODULE } from "../src/index.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
+} from "@stackables/bridge-core";
+import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 /** Pull wire — the Wire variant that has a `from` field */
 type PullWire = Extract<Wire, { from: unknown }>;

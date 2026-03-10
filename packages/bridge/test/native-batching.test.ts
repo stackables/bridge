@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import type { BatchToolFn, ToolMetadata } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 forEachEngine("native batched tools", (run, ctx) => {
   test("tool metadata batches loop-scoped calls without userland loaders", async () => {

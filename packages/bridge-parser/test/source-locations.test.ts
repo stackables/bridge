@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  parseBridgeChevrotain as parseBridge,
-  type Bridge,
-  type Wire,
-} from "../src/index.ts";
+import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
+import type { Bridge, Wire } from "@stackables/bridge-core";
 
 function getBridge(text: string): Bridge {
   const document = parseBridge(text);

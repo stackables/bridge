@@ -6,8 +6,8 @@ import {
 } from "../src/index.ts";
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Parser: control flow keywords

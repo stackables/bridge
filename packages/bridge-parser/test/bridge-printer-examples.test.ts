@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { formatSnippet } from "./formatter-test-utils.ts";
+import { formatSnippet } from "./utils/formatter-test-utils.ts";
 
 /**
  * ============================================================================

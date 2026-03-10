@@ -1,26 +1,18 @@
-import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
-} from "../src/index.ts";
-import { createGateway } from "./_gateway.ts";
+} from "@stackables/bridge-parser";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── Missing tool error ──────────────────────────────────────────────────────
 
-describe("missing tool", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      hello(name: String!): Greeting
-    }
-    type Greeting {
-      message: String
-    }
-  `;
-
-  const bridgeText = `version 1.5
+forEachEngine("missing tool", (run) => {
+  test("throws when tool is not registered", async () => {
+    await assert.rejects(() =>
+      run(
+        `version 1.5
 bridge Query.hello {
   with unknown.api as u
   with input as i
@@ -29,38 +21,18 @@ bridge Query.hello {
 u.name <- i.name
 o.message <- u.greeting
 
-}`;
-
-  test("throws when tool is not registered", async () => {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, { tools: {} });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ hello(name: "world") { message } }`),
-    });
-
-    assert.ok(result.errors, "expected errors");
-    assert.ok(result.errors.length > 0, "expected at least one error");
+}`,
+        "Query.hello",
+        { name: "world" },
+        {},
+      ),
+    );
   });
 });
 
 // ── Extends chain (end-to-end) ──────────────────────────────────────────────
 
-describe("extends chain", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      weather(city: String!): Weather
-    }
-    type Weather {
-      temp: Float
-      city: String
-    }
-  `;
-
-  // Parent tool sets baseUrl + auth header.
-  // Child inherits those and adds method + path.
-  // Bridge wires city from input.
+forEachEngine("extends chain", (run, { engine }) => {
   const bridgeText = `version 1.5
 tool weatherApi from httpCall {
   with context
@@ -85,41 +57,36 @@ o.city <- w.location.name
 
 }`;
 
-  test("child inherits parent wires and calls httpCall", async () => {
-    let capturedInput: Record<string, any> = {};
+  test(
+    "child inherits parent wires and calls httpCall",
+    { skip: engine === "compiled" },
+    async () => {
+      let capturedInput: Record<string, any> = {};
+      const httpCall = async (input: Record<string, any>) => {
+        capturedInput = input;
+        return { temperature: 22.5, location: { name: "Berlin" } };
+      };
 
-    // Custom httpCall that captures the fully-built input
-    const httpCall = async (input: Record<string, any>) => {
-      capturedInput = input;
-      return { temperature: 22.5, location: { name: "Berlin" } };
-    };
+      const { data } = await run(
+        bridgeText,
+        "Query.weather",
+        { city: "Berlin" },
+        { httpCall },
+        { context: { weather: { apiKey: "test-key-123" } } },
+      );
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      context: { weather: { apiKey: "test-key-123" } },
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ weather(city: "Berlin") { temp city } }`),
-    });
-
-    // Verify the output
-    assert.equal(result.data.weather.temp, 22.5);
-    assert.equal(result.data.weather.city, "Berlin");
-
-    // Verify the merged input sent to httpCall
-    assert.equal(capturedInput.baseUrl, "https://api.weather.test/v2");
-    assert.equal(capturedInput.method, "GET");
-    assert.equal(capturedInput.path, "/current");
-    assert.equal(capturedInput.headers?.apiKey, "test-key-123");
-    assert.equal(capturedInput.city, "Berlin");
-  });
+      assert.equal(data.temp, 22.5);
+      assert.equal(data.city, "Berlin");
+      assert.equal(capturedInput.baseUrl, "https://api.weather.test/v2");
+      assert.equal(capturedInput.method, "GET");
+      assert.equal(capturedInput.path, "/current");
+      assert.equal(capturedInput.headers?.apiKey, "test-key-123");
+      assert.equal(capturedInput.city, "Berlin");
+    },
+  );
 
   test("child can override parent wire", async () => {
     let capturedInput: Record<string, any> = {};
-
     const bridgeWithOverride = `version 1.5
 tool base from httpCall {
   .method = GET
@@ -148,37 +115,35 @@ o.city <- b.location.name
       return { temperature: 15, location: { name: "Oslo" } };
     };
 
-    const instructions = parseBridge(bridgeWithOverride);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const { data } = await run(
+      bridgeWithOverride,
+      "Query.weather",
+      { city: "Oslo" },
+      { httpCall },
+    );
 
-    const result: any = await executor({
-      document: parse(`{ weather(city: "Oslo") { temp } }`),
-    });
-
-    assert.equal(result.data.weather.temp, 15);
-    // Child's baseUrl overrides parent's
+    assert.equal(data.temp, 15);
     assert.equal(capturedInput.baseUrl, "https://override.test");
-    assert.equal(capturedInput.method, "GET"); // inherited
+    assert.equal(capturedInput.method, "GET");
     assert.equal(capturedInput.path, "/data");
   });
 });
 
 // ── Context pull (end-to-end) ───────────────────────────────────────────────
 
-describe("context pull", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      lookup(q: String!): LookupResult
-    }
-    type LookupResult {
-      answer: String
-    }
-  `;
+forEachEngine("context pull", (run, { engine }) => {
+  test(
+    "context values are pulled into tool headers",
+    { skip: engine === "compiled" },
+    async () => {
+      let capturedInput: Record<string, any> = {};
+      const httpCall = async (input: Record<string, any>) => {
+        capturedInput = input;
+        return { result: "42" };
+      };
 
-  const bridgeText = `version 1.5
+      const { data } = await run(
+        `version 1.5
 tool myapi from httpCall {
   with context
   .baseUrl = "https://api.test"
@@ -200,48 +165,40 @@ bridge Query.lookup {
 m.q <- i.q
 o.answer <- m.result
 
-}`;
+}`,
+        "Query.lookup",
+        { q: "meaning of life" },
+        { httpCall },
+        { context: { myapi: { token: "Bearer secret", orgId: "org-99" } } },
+      );
 
-  test("context values are pulled into tool headers", async () => {
-    let capturedInput: Record<string, any> = {};
-
-    const httpCall = async (input: Record<string, any>) => {
-      capturedInput = input;
-      return { result: "42" };
-    };
-
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      context: { myapi: { token: "Bearer secret", orgId: "org-99" } },
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ lookup(q: "meaning of life") { answer } }`),
-    });
-
-    assert.equal(result.data.lookup.answer, "42");
-    assert.equal(capturedInput.headers?.Authorization, "Bearer secret");
-    assert.equal(capturedInput.headers?.["X-Org"], "org-99");
-    assert.equal(capturedInput.q, "meaning of life");
-  });
+      assert.equal(data.answer, "42");
+      assert.equal(capturedInput.headers?.Authorization, "Bearer secret");
+      assert.equal(capturedInput.headers?.["X-Org"], "org-99");
+      assert.equal(capturedInput.q, "meaning of life");
+    },
+  );
 });
 
 // ── Tool-to-tool dependency (end-to-end) ────────────────────────────────────
 
-describe("tool-to-tool dependency", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      data(id: String!): SecureData
-    }
-    type SecureData {
-      value: String
-    }
-  `;
+forEachEngine("tool-to-tool dependency", (run, { engine }) => {
+  test(
+    "auth tool is called before main API, token injected",
+    { skip: engine === "compiled" },
+    async () => {
+      const calls: { name: string; input: Record<string, any> }[] = [];
+      const httpCall = async (input: Record<string, any>) => {
+        if (input.path === "/token") {
+          calls.push({ name: "auth", input });
+          return { access_token: "tok_abc" };
+        }
+        calls.push({ name: "main", input });
+        return { payload: "secret-data" };
+      };
 
-  // authService is called first, its output is used in mainApi's headers
-  const bridgeText = `version 1.5
+      const { data } = await run(
+        `version 1.5
 tool authService from httpCall {
   with context
   .baseUrl = "https://auth.test"
@@ -272,62 +229,50 @@ bridge Query.data {
 m.id <- i.id
 o.value <- m.payload
 
-}`;
+}`,
+        "Query.data",
+        { id: "x" },
+        { httpCall },
+        { context: { auth: { clientId: "client-1", secret: "s3cret" } } },
+      );
 
-  test("auth tool is called before main API, token injected", async () => {
-    const calls: { name: string; input: Record<string, any> }[] = [];
+      assert.equal(data.value, "secret-data");
 
-    // httpCall sees both the auth call and the main API call
-    const httpCall = async (input: Record<string, any>) => {
-      if (input.path === "/token") {
-        calls.push({ name: "auth", input });
-        return { access_token: "tok_abc" };
-      }
-      calls.push({ name: "main", input });
-      return { payload: "secret-data" };
-    };
+      const authCall = calls.find((c) => c.name === "auth");
+      assert.ok(authCall, "auth tool should be called");
+      assert.equal(authCall.input.baseUrl, "https://auth.test");
+      assert.equal(authCall.input.body?.clientId, "client-1");
+      assert.equal(authCall.input.body?.secret, "s3cret");
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      context: { auth: { clientId: "client-1", secret: "s3cret" } },
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ data(id: "x") { value } }`),
-    });
-
-    assert.equal(result.data.data.value, "secret-data");
-
-    // Auth was called
-    const authCall = calls.find((c) => c.name === "auth");
-    assert.ok(authCall, "auth tool should be called");
-    assert.equal(authCall.input.baseUrl, "https://auth.test");
-    assert.equal(authCall.input.body?.clientId, "client-1");
-    assert.equal(authCall.input.body?.secret, "s3cret");
-
-    // Main API got the token from auth
-    const mainCall = calls.find((c) => c.name === "main");
-    assert.ok(mainCall, "main API tool should be called");
-    assert.equal(mainCall.input.headers?.Authorization, "tok_abc");
-    assert.equal(mainCall.input.id, "x");
-  });
+      const mainCall = calls.find((c) => c.name === "main");
+      assert.ok(mainCall, "main API tool should be called");
+      assert.equal(mainCall.input.headers?.Authorization, "tok_abc");
+      assert.equal(mainCall.input.id, "x");
+    },
+  );
 });
 
 // ── Tool-to-tool dependency: on error fallback ───────────────────────────────
 
-describe("tool-to-tool dependency: on error fallback", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      fetch: FetchResult
-    }
-    type FetchResult {
-      status: String
-    }
-  `;
+forEachEngine(
+  "tool-to-tool dependency: on error fallback",
+  (run, { engine }) => {
+    test(
+      "on error JSON value used when dep tool throws",
+      { skip: engine === "compiled" },
+      async () => {
+        const calls: string[] = [];
+        const mockFn = async (input: Record<string, any>) => {
+          if (!input.authToken) {
+            calls.push("flakyAuth-throw");
+            throw new Error("Auth service unreachable");
+          }
+          calls.push(`mainApi:${input.authToken}`);
+          return { result: `token=${input.authToken}` };
+        };
 
-  const bridgeText = `version 1.5
+        const { data } = await run(
+          `version 1.5
 tool flakyAuth from mockFn {
   on error = {"token": "fallback-token"}
 }
@@ -342,59 +287,29 @@ bridge Query.fetch {
 
 o.status <- m.result
 
-}`;
+}`,
+          "Query.fetch",
+          {},
+          { mockFn },
+        );
 
-  test("on error JSON value used when dep tool throws", async () => {
-    const calls: string[] = [];
-    const mockFn = async (input: Record<string, any>) => {
-      if (!input.authToken) {
-        calls.push("flakyAuth-throw");
-        throw new Error("Auth service unreachable");
-      }
-      calls.push(`mainApi:${input.authToken}`);
-      return { result: `token=${input.authToken}` };
-    };
-
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { mockFn },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ fetch { status } }`),
-    });
-
-    assert.ok(
-      calls.includes("flakyAuth-throw"),
-      "flakyAuth should have thrown",
+        assert.ok(
+          calls.includes("flakyAuth-throw"),
+          "flakyAuth should have thrown",
+        );
+        assert.ok(
+          calls.some((c) => c.startsWith("mainApi:")),
+          "mainApi should have been called",
+        );
+        assert.equal(data.status, "token=fallback-token");
+      },
     );
-    assert.ok(
-      calls.some((c) => c.startsWith("mainApi:")),
-      "mainApi should have been called",
-    );
-    assert.equal(result.data.fetch.status, "token=fallback-token");
-  });
-});
+  },
+);
 
 // ── Pipe operator (end-to-end) ───────────────────────────────────────────────
-//
-// `result <- toolName:source` is shorthand for:
-//   (implicit) with toolName as $handle
-//   $handle.in  <- source
-//   result      <- $handle.out
 
-describe("pipe operator", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      shout(text: String!): ShoutResult
-    }
-    type ShoutResult {
-      loud: String
-    }
-  `;
-
-  // The pipe tool receives { in: value } and returns { out: transformed }
+forEachEngine("pipe operator", (run) => {
   const bridgeText = `version 1.5
 bridge Query.shout {
   with input as i
@@ -407,37 +322,32 @@ o.loud <- tu:i.text
 
   test("pipes source through tool and maps result to output", async () => {
     let capturedInput: Record<string, any> = {};
-
     const toUpper = (input: Record<string, any>) => {
       capturedInput = input;
       return String(input.in).toUpperCase();
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { toUpper },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ shout(text: "hello world") { loud } }`),
-    });
-
-    assert.equal(result.data.shout.loud, "HELLO WORLD");
+    const { data } = await run(
+      bridgeText,
+      "Query.shout",
+      { text: "hello world" },
+      { toUpper },
+    );
+    assert.equal(data.loud, "HELLO WORLD");
     assert.equal(capturedInput.in, "hello world");
   });
 
   test("pipe fails when handle is not declared", () => {
-    const badBridge = `version 1.5
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
 bridge Query.shout {
   with input as i
   with output as o
 
 o.loud <- undeclared:i.text
 
-}`;
-    assert.throws(
-      () => parseBridge(badBridge),
+}`),
       /Undeclared handle in pipe: "undeclared"/,
     );
   });
@@ -445,61 +355,23 @@ o.loud <- undeclared:i.text
   test("serializer round-trips pipe syntax", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    // The declared handle must still appear in the with block
-    assert.ok(
-      serialized.includes("with toUpper as tu"),
-      "handle declaration must appear in header",
-    );
-    // The body should use the pipe operator (not two explicit wires)
-    assert.ok(
-      serialized.includes("tu:"),
-      "serialized output should use pipe operator",
-    );
-    assert.ok(
-      !serialized.includes("tu.in"),
-      "expanded in-wire should not appear",
-    );
-    assert.ok(
-      !serialized.includes("tu.out"),
-      "expanded out-wire should not appear",
-    );
-    // Parse → serialize → parse should be idempotent
+    assert.ok(serialized.includes("with toUpper as tu"), "handle declaration");
+    assert.ok(serialized.includes("tu:"), "pipe operator");
+    assert.ok(!serialized.includes("tu.in"), "no expanded in-wire");
+    assert.ok(!serialized.includes("tu.out"), "no expanded out-wire");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(
-      reserialized,
-      serialized,
-      "parseBridge(serializeBridge(x)) should be idempotent",
-    );
+    assert.equal(reserialized, serialized, "idempotent");
   });
 });
 
 // ── Pipe with extra tool params (end-to-end) ─────────────────────────────────
-//
-// Demonstrates a pipe-stage tool that has additional input fields beyond `in`.
-// Those fields can be:
-//   a) set as constants in the tool definition          → default values
-//   b) wired from bridge input in the bridge body       → per-call override
-//
-// Tool shape:  { in: number, currency: string }  →  { out: number }
 
-describe("pipe with extra tool params", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      priceEur(amount: Float!): Float
-      priceAny(amount: Float!, currency: String!): Float
-    }
-  `;
-
-  // Fictional exchange: divide by 100 for EUR, divide by 90 for GBP
+forEachEngine("pipe with extra tool params", (run, { engine }) => {
   const rates: Record<string, number> = { EUR: 100, GBP: 90 };
-
   const currencyConverter = (input: Record<string, any>) =>
     input.in / (rates[input.currency] ?? 100);
 
-  // ── Tool block ──────────────────────────────────────────────────────────
-  // `currency = EUR` bakes a default.  The `with convertToEur` shorthand
-  // (no `as`) uses the tool name itself as the handle.
   const bridgeText = `version 1.5
 tool convertToEur from currencyConverter {
   .currency = EUR
@@ -525,64 +397,43 @@ o.priceAny <- convertToEur:i.amount
 
 }`;
 
-  function makeExecutor() {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { currencyConverter },
-    });
-    return buildHTTPExecutor({ fetch: gateway.fetch as any });
-  }
-
   test("default currency from tool definition is used when not overridden", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{ priceEur(amount: 500) }`),
-    });
-    assert.equal(result.data.priceEur, 5); // 500 / 100
+    const { data } = await run(
+      bridgeText,
+      "Query.priceEur",
+      { amount: 500 },
+      { currencyConverter },
+    );
+    assert.equal(data.priceEur, 5);
   });
 
-  test("currency override from input takes precedence over tool default", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{ priceAny(amount: 450, currency: "GBP") }`),
-    });
-    assert.equal(result.data.priceAny, 5); // 450 / 90
-  });
+  test(
+    "currency override from input takes precedence over tool default",
+    { skip: engine === "compiled" },
+    async () => {
+      const { data } = await run(
+        bridgeText,
+        "Query.priceAny",
+        { amount: 450, currency: "GBP" },
+        { currencyConverter },
+      );
+      assert.equal(data.priceAny, 5);
+    },
+  );
 
   test("with <name> shorthand round-trips through serializer", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    // Short form must survive the round-trip
-    assert.ok(
-      serialized.includes("  with convertToEur\n"),
-      "short with form should be preserved",
-    );
+    assert.ok(serialized.includes("  with convertToEur\n"), "short with form");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(reserialized, serialized, "should be idempotent");
+    assert.equal(reserialized, serialized, "idempotent");
   });
 });
 
 // ── Pipe forking ──────────────────────────────────────────────────────────────
-//
-// Each use of `<- handle:source` in a bridge is an INDEPENDENT tool call:
-//   a <- c:i.a
-//   b <- c:i.b
-// is equivalent to two separate instances of tool `c`, each receiving its own
-// input and producing its own output independently.
 
-describe("pipe forking", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      doubled(a: Float!, b: Float!): Doubled
-    }
-    type Doubled {
-      a: Float
-      b: Float
-    }
-  `;
-
-  // Simple doubler tool  {in: number} → number
+forEachEngine("pipe forking", (run) => {
   const doubler = (input: Record<string, any>) => input.in * 2;
 
   const bridgeText = `version 1.5
@@ -599,48 +450,31 @@ o.b <- d:i.b
 
 }`;
 
-  function makeExecutor() {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { doubler },
-    });
-    return buildHTTPExecutor({ fetch: gateway.fetch as any });
-  }
-
   test("each pipe use is an independent call — both outputs are doubled", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{ doubled(a: 3, b: 7) { a b } }`),
-    });
-    assert.equal(result.data.doubled.a, 6); // 3 * 2
-    assert.equal(result.data.doubled.b, 14); // 7 * 2
+    const { data } = await run(
+      bridgeText,
+      "Query.doubled",
+      { a: 3, b: 7 },
+      { doubler },
+    );
+    assert.equal(data.a, 6);
+    assert.equal(data.b, 14);
   });
 
   test("pipe forking serializes and round-trips correctly", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    assert.ok(serialized.includes("o.a <- d:i.a"), "first fork serialized");
-    assert.ok(serialized.includes("o.b <- d:i.b"), "second fork serialized");
+    assert.ok(serialized.includes("o.a <- d:i.a"), "first fork");
+    assert.ok(serialized.includes("o.b <- d:i.b"), "second fork");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(reserialized, serialized, "should be idempotent");
+    assert.equal(reserialized, serialized, "idempotent");
   });
 });
 
 // ── Named pipe input field ────────────────────────────────────────────────────
-//
-// Syntax: `target <- handle.field:source`
-// The field name after the dot sets the input field on the pipe stage (default
-// is `in`).  This lets you route a value to a specific parameter of the tool.
 
-describe("pipe named input field", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      converted(amount: Float!, rate: Float!): Float
-    }
-  `;
-
-  // Divider tool: { dividend: number, divisor: number } → number
+forEachEngine("pipe named input field", (run, { engine }) => {
   const divider = (input: Record<string, any>) =>
     input.dividend / input.divisor;
 
@@ -658,47 +492,36 @@ dv.divisor <- i.rate
 
 }`;
 
-  function makeExecutor() {
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { divider },
-    });
-    return buildHTTPExecutor({ fetch: gateway.fetch as any });
-  }
-
-  test("named input field routes value to correct parameter", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{ converted(amount: 450, rate: 90) }`),
-    });
-    assert.equal(result.data.converted, 5); // 450 / 90
-  });
+  test(
+    "named input field routes value to correct parameter",
+    { skip: engine === "compiled" },
+    async () => {
+      const { data } = await run(
+        bridgeText,
+        "Query.converted",
+        { amount: 450, rate: 90 },
+        { divider },
+      );
+      assert.equal(data.converted, 5);
+    },
+  );
 
   test("named input field round-trips through serializer", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(
       serialized.includes("converted <- dv.dividend:i.amount"),
-      "named-field pipe token serialized correctly",
+      "named-field pipe token",
     );
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(reserialized, serialized, "should be idempotent");
+    assert.equal(reserialized, serialized, "idempotent");
   });
 });
 
 // ── httpCall cache (end-to-end) ─────────────────────────────────────────────
 
-describe("httpCall cache", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      lookup(q: String!): Result
-    }
-    type Result {
-      answer: String
-    }
-  `;
-
+forEachEngine("httpCall cache", (_run, { executeFn }) => {
   const bridgeText = `version 1.5
 tool api from httpCall {
   .cache = 60
@@ -724,22 +547,34 @@ o.answer <- a.value
       return { json: async () => ({ value: "hit-" + fetchCount }) } as Response;
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: {
-        httpCall: (await import("../src/index.ts")).createHttpCall(
-          mockFetch as any,
-        ),
-      },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-    const doc = parse(`{ lookup(q: "hello") { answer } }`);
+    const { createHttpCall } = await import("@stackables/bridge-stdlib");
+    const httpCallTool = createHttpCall(mockFetch as any);
 
-    const r1: any = await executor({ document: doc });
-    assert.equal(r1.data.lookup.answer, "hit-1");
+    const { parseBridgeFormat: parse } = await import(
+      "@stackables/bridge-parser"
+    );
+    const document = parse(bridgeText);
+    const doc = JSON.parse(JSON.stringify(document));
 
-    const r2: any = await executor({ document: doc });
-    assert.equal(r2.data.lookup.answer, "hit-1", "should return cached value");
+    const r1 = await executeFn({
+      document: doc,
+      operation: "Query.lookup",
+      input: { q: "hello" },
+      tools: { httpCall: httpCallTool },
+    } as any);
+    assert.equal((r1 as any).data.answer, "hit-1");
+
+    const r2 = await executeFn({
+      document: doc,
+      operation: "Query.lookup",
+      input: { q: "hello" },
+      tools: { httpCall: httpCallTool },
+    } as any);
+    assert.equal(
+      (r2 as any).data.answer,
+      "hit-1",
+      "should return cached value",
+    );
     assert.equal(fetchCount, 1, "fetch should only be called once");
   });
 
@@ -751,37 +586,39 @@ o.answer <- a.value
       return { json: async () => ({ value: q }) } as Response;
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: {
-        httpCall: (await import("../src/index.ts")).createHttpCall(
-          mockFetch as any,
-        ),
-      },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
+    const { createHttpCall } = await import("@stackables/bridge-stdlib");
+    const httpCallTool = createHttpCall(mockFetch as any);
 
-    const r1: any = await executor({
-      document: parse(`{ lookup(q: "A") { answer } }`),
-    });
-    const r2: any = await executor({
-      document: parse(`{ lookup(q: "B") { answer } }`),
-    });
+    const { parseBridgeFormat: parse } = await import(
+      "@stackables/bridge-parser"
+    );
+    const document = parse(bridgeText);
+    const doc = JSON.parse(JSON.stringify(document));
 
-    assert.equal(r1.data.lookup.answer, "A");
-    assert.equal(r2.data.lookup.answer, "B");
+    const r1 = await executeFn({
+      document: doc,
+      operation: "Query.lookup",
+      input: { q: "A" },
+      tools: { httpCall: httpCallTool },
+    } as any);
+    const r2 = await executeFn({
+      document: doc,
+      operation: "Query.lookup",
+      input: { q: "B" },
+      tools: { httpCall: httpCallTool },
+    } as any);
+
+    assert.equal((r1 as any).data.answer, "A");
+    assert.equal((r2 as any).data.answer, "B");
     assert.equal(fetchCount, 2, "different params should each call fetch");
   });
 
   test("cache param round-trips through serializer", () => {
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
-    assert.ok(
-      serialized.includes("cache = 60"),
-      "cache param should be in serialized output",
-    );
+    assert.ok(serialized.includes("cache = 60"), "cache param");
     const reparsed = parseBridge(serialized);
     const reserialized = serializeBridge(reparsed);
-    assert.equal(reserialized, serialized, "should be idempotent");
+    assert.equal(reserialized, serialized, "idempotent");
   });
 });

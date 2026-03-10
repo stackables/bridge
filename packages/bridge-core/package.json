@@ -35,7 +35,10 @@
     "@stackables/bridge-types": "workspace:*"
   },
   "devDependencies": {
+    "@stackables/bridge-graphql": "workspace:*",
+    "@stackables/bridge-parser": "workspace:*",
     "@types/node": "^25.3.3",
+    "graphql": "^16.13.1",
     "typescript": "^5.9.3"
   },
   "publishConfig": {

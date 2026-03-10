@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import type { ToolDef } from "../src/index.ts";
-import { SELF_MODULE } from "../src/index.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
+import type { ToolDef } from "@stackables/bridge-core";
+import { SELF_MODULE } from "@stackables/bridge-core";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 /** Shorthand to make a NodeRef for Tools */
 function toolRef(

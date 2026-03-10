@@ -7,7 +7,7 @@
  *
  * Usage:
  * ```ts
- * import { forEachEngine } from "./_dual-run.ts";
+ * import { forEachEngine } from "./utils/dual-run.ts";
  *
  * forEachEngine("my feature", (run, { engine, executeFn }) => {
  *   test("basic case", async () => {
@@ -24,7 +24,7 @@
  */
 
 import { describe } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "../../src/index.ts";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
 
@@ -41,6 +41,11 @@ export type RunFn = (
     context?: Record<string, unknown>;
     signal?: AbortSignal;
     toolTimeoutMs?: number;
+    requestedFields?: string[];
+    logger?: {
+      info?: (...args: any[]) => void;
+      warn?: (...args: any[]) => void;
+    };
   },
 ) => Promise<{ data: any; traces: any[] }>;
 
@@ -86,6 +91,8 @@ export function forEachEngine(
           context: extra?.context,
           signal: extra?.signal,
           toolTimeoutMs: extra?.toolTimeoutMs,
+          requestedFields: extra?.requestedFields,
+          logger: extra?.logger,
         } as any);
       };
 

@@ -4,7 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── String interpolation execution tests ────────────────────────────────────
 

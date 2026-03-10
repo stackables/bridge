@@ -7,7 +7,7 @@ import {
   serializeBridge,
   prettyPrintToSource,
 } from "../src/index.ts";
-import type { BridgeDocument } from "../src/index.ts";
+import type { BridgeDocument } from "@stackables/bridge-core";
 
 // ── Token-soup arbitrary ────────────────────────────────────────────────────
 // Generates strings composed of a weighted mix of Bridge-like tokens and noise.

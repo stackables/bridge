@@ -13,7 +13,7 @@ import {
 } from "../src/index.ts";
 import type { BridgeDocument } from "../src/index.ts";
 import { BridgeLanguageService } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

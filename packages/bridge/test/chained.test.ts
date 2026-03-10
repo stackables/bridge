@@ -1,18 +1,6 @@
-import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import { createGateway } from "./_gateway.ts";
-
-const typeDefs = /* GraphQL */ `
-  type Query {
-    livingStandard(location: String!): LivingStandard
-  }
-  type LivingStandard {
-    lifeExpectancy: Int
-  }
-`;
+import { test } from "node:test";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 const bridgeText = `version 1.5
 bridge Query.livingStandard {
@@ -45,23 +33,15 @@ const chainedTools: Record<string, any> = {
   }),
 };
 
-function makeExecutor() {
-  const instructions = parseBridge(bridgeText);
-  const gateway = createGateway(typeDefs, instructions, {
-    tools: chainedTools,
-  });
-  return buildHTTPExecutor({ fetch: gateway.fetch as any });
-}
-
-describe("chained providers", () => {
+forEachEngine("chained providers", (run) => {
   test("input -> geocode -> livingStandard -> tool -> output", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(
-        `{ livingStandard(location: "Berlin") { lifeExpectancy } }`,
-      ),
-    });
-    assert.equal(result.data.livingStandard.lifeExpectancy, 82);
+    const { data } = await run(
+      bridgeText,
+      "Query.livingStandard",
+      { location: "Berlin" },
+      chainedTools,
+    );
+    assert.equal(data.lifeExpectancy, 82);
   });
 
   test("geocode receives input params", async () => {
@@ -71,17 +51,15 @@ describe("chained providers", () => {
       return chainedTools["hereapi.geocode"](params);
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { ...chainedTools, "hereapi.geocode": spy },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    await executor({
-      document: parse(
-        `{ livingStandard(location: "Berlin") { lifeExpectancy } }`,
-      ),
-    });
+    await run(
+      bridgeText,
+      "Query.livingStandard",
+      { location: "Berlin" },
+      {
+        ...chainedTools,
+        "hereapi.geocode": spy,
+      },
+    );
 
     assert.equal(geoParams.q, "Berlin");
   });
@@ -93,17 +71,15 @@ describe("chained providers", () => {
       return chainedTools["companyX.getLivingStandard"](params);
     };
 
-    const instructions = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, instructions, {
-      tools: { ...chainedTools, "companyX.getLivingStandard": spy },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    await executor({
-      document: parse(
-        `{ livingStandard(location: "Berlin") { lifeExpectancy } }`,
-      ),
-    });
+    await run(
+      bridgeText,
+      "Query.livingStandard",
+      { location: "Berlin" },
+      {
+        ...chainedTools,
+        "companyX.getLivingStandard": spy,
+      },
+    );
 
     assert.equal(cxParams.x, 52.53);
     assert.equal(cxParams.y, 13.38);

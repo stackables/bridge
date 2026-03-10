@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { ToolTrace } from "@stackables/bridge-core";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
-import { createGateway } from "./_gateway.ts";
+import { createGateway } from "./utils/gateway.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tracing / Observability

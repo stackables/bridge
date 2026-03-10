@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { executeBridge } from "../src/index.ts";
 import {
   BridgeTimeoutError,
@@ -9,7 +9,7 @@ import {
   boundedClone,
   TraceCollector,
 } from "../src/index.ts";
-import { coerceConstant, setNested } from "../../bridge-core/src/tree-utils.ts";
+import { coerceConstant, setNested } from "../src/tree-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Step 1: Tool timeout

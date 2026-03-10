@@ -118,9 +118,6 @@ importers:
         specifier: workspace:*
         version: link:../bridge-stdlib
     devDependencies:
-      '@graphql-tools/executor-http':
-        specifier: ^3.1.0
-        version: 3.1.0(@types/node@25.3.3)(graphql@16.13.1)
       '@stackables/bridge-compiler':
         specifier: workspace:*
         version: link:../bridge-compiler
@@ -130,12 +127,6 @@ importers:
       fast-check:
         specifier: ^4.5.3
         version: 4.5.3
-      graphql:
-        specifier: 16.13.1
-        version: 16.13.1
-      graphql-yoga:
-        specifier: ^5.18.0
-        version: 5.18.0(graphql@16.13.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -174,9 +165,18 @@ importers:
         specifier: workspace:*
         version: link:../bridge-types
     devDependencies:
+      '@stackables/bridge-graphql':
+        specifier: workspace:*
+        version: link:../bridge-graphql
+      '@stackables/bridge-parser':
+        specifier: workspace:*
+        version: link:../bridge-parser
       '@types/node':
         specifier: ^25.3.3
         version: 25.3.3
+      graphql:
+        specifier: 16.13.1
+        version: 16.13.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -227,6 +227,9 @@ importers:
       '@types/node':
         specifier: ^25.3.3
         version: 25.3.3
+      fast-check:
+        specifier: ^4.5.3
+        version: 4.5.3
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

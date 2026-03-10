@@ -5,8 +5,8 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import type { Bridge, Wire } from "../src/index.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
 

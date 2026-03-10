@@ -3,9 +3,9 @@
  *
  * Every test case is a pure data record: bridge source, tools, input, and
  * expected output.  The suite runs each case against **both** the runtime
- * interpreter (`executeBridge`) and the AOT compiler (`executeAot`), then
- * asserts identical results.  This guarantees behavioral parity between the
- * two execution paths and gives us a single place to document "what the
+ * interpreter and the AOT compiler via `forEachEngine`, then asserts
+ * identical results.  This guarantees behavioral parity between the two
+ * execution paths and gives us a single place to document "what the
  * language does."
  *
  * Cases that exercise language features the AOT compiler does not yet support
@@ -13,10 +13,8 @@
  * the AOT leg is skipped (with a TODO in the test output).
  */
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridgeFormat } from "@stackables/bridge-parser";
-import { executeBridge } from "@stackables/bridge-core";
-import { executeBridge as executeAot } from "@stackables/bridge-compiler";
+import { test } from "node:test";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── Test-case type ──────────────────────────────────────────────────────────
 
@@ -43,79 +41,43 @@ interface SharedTestCase {
   requestedFields?: string[];
 }
 
-// ── Runners ─────────────────────────────────────────────────────────────────
-
-async function runRuntime(c: SharedTestCase): Promise<unknown> {
-  const document = parseBridgeFormat(c.bridgeText);
-  // Simulate serialisation round-trip, same as existing tests
-  const doc = JSON.parse(JSON.stringify(document));
-  const { data } = await executeBridge({
-    document: doc,
-    operation: c.operation,
-    input: c.input ?? {},
-    tools: c.tools ?? {},
-    context: c.context,
-    requestedFields: c.requestedFields,
-  });
-  return data;
-}
-
-async function runAot(c: SharedTestCase): Promise<unknown> {
-  const document = parseBridgeFormat(c.bridgeText);
-  const { data } = await executeAot({
-    document,
-    operation: c.operation,
-    input: c.input ?? {},
-    tools: c.tools ?? {},
-    context: c.context,
-    requestedFields: c.requestedFields,
-  });
-  return data;
-}
-
 // ── Shared test runner ──────────────────────────────────────────────────────
 
 function runSharedSuite(suiteName: string, cases: SharedTestCase[]) {
-  describe(suiteName, () => {
+  forEachEngine(suiteName, (run, { engine }) => {
     for (const c of cases) {
-      describe(c.name, () => {
-        if (c.expectedError) {
-          const expectedError = c.expectedError;
-          test("runtime: throws expected error", async () => {
-            await assert.rejects(() => runRuntime(c), expectedError);
-          });
-          if (c.aotSupported !== false) {
-            test("aot: throws expected error", async () => {
-              await assert.rejects(() => runAot(c), expectedError);
-            });
-          }
-          return;
-        }
+      if (c.aotSupported === false && engine === "compiled") {
+        test(`${c.name} (skipped: not yet supported)`, () => {});
+        continue;
+      }
 
-        test("runtime", async () => {
-          const data = await runRuntime(c);
+      if (c.expectedError) {
+        test(c.name, async () => {
+          const pattern = c.expectedError!;
+          await assert.rejects(
+            () =>
+              run(c.bridgeText, c.operation, c.input ?? {}, c.tools ?? {}, {
+                context: c.context,
+                requestedFields: c.requestedFields,
+              }),
+            pattern,
+          );
+        });
+      } else {
+        test(c.name, async () => {
+          const { data } = await run(
+            c.bridgeText,
+            c.operation,
+            c.input ?? {},
+            c.tools ?? {},
+            {
+              context: c.context,
+              requestedFields: c.requestedFields,
+            },
+          );
           assert.deepEqual(data, c.expected);
         });
-
-        if (c.aotSupported !== false) {
-          test("aot", async () => {
-            const data = await runAot(c);
-            assert.deepEqual(data, c.expected);
-          });
-
-          test("parity: runtime === aot", async () => {
-            const [rtData, aotData] = await Promise.all([
-              runRuntime(c),
-              runAot(c),
-            ]);
-            assert.deepEqual(rtData, aotData);
-          });
-        } else {
-          test("aot: skipped (not yet supported)", () => {
-            // Placeholder so the count shows what's pending
-          });
-        }
-      });
+      }
     }
   });
 }

@@ -19,6 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint:types": "tsc -p tsconfig.check.json",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
+    "fuzz": "node --experimental-transform-types --conditions source --test test/*.fuzz.ts",
     "prepack": "pnpm build"
   },
   "repository": {
@@ -33,6 +35,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
+    "fast-check": "^4.5.3",
     "typescript": "^5.9.3"
   },
   "publishConfig": {

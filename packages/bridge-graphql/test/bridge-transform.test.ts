@@ -1,5 +1,5 @@
 import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
+import { buildSchema, execute, parse } from "graphql";
 import { createSchema, createYoga } from "graphql-yoga";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -76,14 +76,18 @@ bridge Query.slow {
     const schema = bridgeTransform(rawSchema, instructions, {
       tools: {
         waitTool: async () =>
-          new Promise((resolve) => setTimeout(() => resolve({ value: "ok" }), 30)),
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ value: "ok" }), 30),
+          ),
       },
       toolTimeoutMs: 1,
       maxDepth: 3,
     });
     const yoga = createYoga({ schema, graphqlEndpoint: "*" });
     const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
-    const result: any = await executor({ document: parse(`{ slow { value } }`) });
+    const result: any = await executor({
+      document: parse(`{ slow { value } }`),
+    });
     assert.ok(result.errors?.length > 0, JSON.stringify(result));
   });
 });
@@ -110,5 +114,56 @@ describe("bridge tracing helpers", () => {
     });
 
     assert.deepEqual(updated.extensions.traces, traces);
+  });
+});
+
+describe("bridgeTransform: error surfacing", () => {
+  test("surfaces formatted runtime errors through GraphQL", async () => {
+    const bridgeText = `version 1.5
+
+bridge Query.greet {
+  with std.str.toUpperCase as uc memoize
+  with std.str.toLowerCase as lc
+  with input as i
+  with output as o
+
+  o.message <- i.empty.array.error
+  o.upper <- uc:i.name
+  o.lower <- lc:i.name
+}`;
+
+    const schema = buildSchema(/* GraphQL */ `
+      type Query {
+        greet(name: String!): Greeting
+      }
+
+      type Greeting {
+        message: String
+        upper: String
+        lower: String
+      }
+    `);
+
+    const transformed = bridgeTransform(
+      schema,
+      parseBridge(bridgeText, {
+        filename: "playground.bridge",
+      }),
+    );
+
+    const result = await execute({
+      schema: transformed,
+      document: parse(`{ greet(name: "Ada") { message upper lower } }`),
+      contextValue: {},
+    });
+
+    assert.ok(result.errors?.length, "expected GraphQL errors");
+    const message = result.errors?.[0]?.message ?? "";
+    assert.match(
+      message,
+      /Bridge Execution Error: Cannot read properties of undefined \(reading '(array|error)'\)/,
+    );
+    assert.match(message, /playground\.bridge:9:16/);
+    assert.match(message, /o\.message <- i\.empty\.array\.error/);
   });
 });

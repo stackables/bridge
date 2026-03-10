@@ -5,7 +5,7 @@ import {
   executeBridge as executeCompiled,
 } from "@stackables/bridge-compiler";
 import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 describe("memoized loop-scoped tools - invalid cases", () => {
   test("memoize is only valid for tool references", () => {

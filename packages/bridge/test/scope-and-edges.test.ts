@@ -1,47 +1,17 @@
-import { buildHTTPExecutor } from "@graphql-tools/executor-http";
-import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
-  parsePath,
   serializeBridge,
-} from "../src/index.ts";
-import { createGateway } from "./_gateway.ts";
+} from "@stackables/bridge-parser";
+import { parsePath } from "@stackables/bridge-core";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. Nested shadow tree — scope chain leak
-//
-//    When a tool returns nested arrays (journeys containing stops), the
-//    bridge creates shadow ExecutionTrees. If the outer array is mapped
-//    with [] as {} and the inner array is passed through, GraphQL creates
-//    shadow trees at BOTH levels. A grandchild shadow tree only checks
-//    one parent level for state/context — failing to reach the root.
-//
-//    Concrete scenario: outer array is mapped, inner array is passed
-//    through. The inner array's scalar fields should resolve from the
-//    element data stored in the shadow tree.
+// 1. Nested shadow tree — scope chain
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("nested shadow scope chain", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      plan(origin: String!): Plan
-    }
-    type Plan {
-      journeys: [Journey!]!
-    }
-    type Journey {
-      label: String
-      stops: [Stop!]!
-    }
-    type Stop {
-      name: String
-      eta: String
-    }
-  `;
-
-  // Map the outer array with [] as {}, pass inner array through
+forEachEngine("nested shadow scope chain", (run, { engine }) => {
   const bridgeText = `version 1.5
 bridge Query.plan {
   with router as r
@@ -78,87 +48,58 @@ o.journeys <- r.journeys[] as j {
     }),
   };
 
-  function makeExecutor() {
-    const doc = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, doc, { tools });
-    return buildHTTPExecutor({ fetch: gateway.fetch as any });
-  }
-
   test("outer array fields resolve correctly", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{
-        plan(origin: "Berlin") {
-          journeys { label }
-        }
-      }`),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
+    const { data } = await run(
+      bridgeText,
+      "Query.plan",
+      { origin: "Berlin" },
+      tools,
     );
-    assert.equal(result.data.plan.journeys.length, 2);
-    assert.equal(result.data.plan.journeys[0].label, "Express");
-    assert.equal(result.data.plan.journeys[1].label, "Local");
+    assert.equal(data.journeys.length, 2);
+    assert.equal(data.journeys[0].label, "Express");
+    assert.equal(data.journeys[1].label, "Local");
   });
 
   test("inner array passed through: scalar fields resolve from element data", async () => {
-    // This is the key test for the scope chain bug.
-    // The inner [Stop] array creates grandchild shadow trees.
-    // Their scalar fields (name, eta) must resolve from the stored element data.
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{
-        plan(origin: "Berlin") {
-          journeys { label stops { name eta } }
-        }
-      }`),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
+    const { data } = await run(
+      bridgeText,
+      "Query.plan",
+      { origin: "Berlin" },
+      tools,
     );
-    const journeys = result.data.plan.journeys;
+    const journeys = data.journeys;
     assert.equal(journeys.length, 2);
-
-    // First journey's stops
     assert.equal(journeys[0].stops.length, 2);
     assert.equal(journeys[0].stops[0].name, "A");
     assert.equal(journeys[0].stops[0].eta, "09:00");
     assert.equal(journeys[0].stops[1].name, "B");
     assert.equal(journeys[0].stops[1].eta, "09:30");
-
-    // Second journey's stops
     assert.equal(journeys[1].stops.length, 3);
     assert.equal(journeys[1].stops[2].name, "Z");
     assert.equal(journeys[1].stops[2].eta, "11:30");
   });
 
-  test("context accessible from tool triggered by nested array data", async () => {
-    // Tool definition uses `with context` to pull an API key.
-    // The result contains nested arrays. The context lookup in
-    // resolveToolSource checks only this.context ?? this.parent?.context.
-    // If the tree is 2+ levels deep, context is lost.
-    const contextTypeDefs = /* GraphQL */ `
-      type Query {
-        trips(origin: String!): TripPlan
-      }
-      type TripPlan {
-        routes: [Route!]!
-      }
-      type Route {
-        carrier: String
-        legs: [Leg!]!
-      }
-      type Leg {
-        from: String
-        to: String
-      }
-    `;
+  test(
+    "context accessible from tool triggered by nested array data",
+    { skip: engine === "compiled" },
+    async () => {
+      let capturedInput: Record<string, any> = {};
+      const httpCall = async (input: Record<string, any>) => {
+        capturedInput = input;
+        return {
+          routes: [
+            {
+              carrier: "TrainCo",
+              legs: [
+                { from: "Berlin", to: "Hamburg" },
+                { from: "Hamburg", to: "Copenhagen" },
+              ],
+            },
+          ],
+        };
+      };
 
-    const contextBridgeText = `version 1.5
+      const contextBridgeText = `version 1.5
 tool routeApi from httpCall {
   with context
   .baseUrl = "http://mock"
@@ -181,78 +122,43 @@ o.routes <- r.routes[] as route {
 
 }`;
 
-    let capturedInput: Record<string, any> = {};
-    const httpCall = async (input: Record<string, any>) => {
-      capturedInput = input;
-      return {
-        routes: [
-          {
-            carrier: "TrainCo",
-            legs: [
-              { from: "Berlin", to: "Hamburg" },
-              { from: "Hamburg", to: "Copenhagen" },
-            ],
-          },
-        ],
-      };
-    };
+      const { data } = await run(
+        contextBridgeText,
+        "Query.trips",
+        { origin: "Berlin" },
+        { httpCall },
+        { context: { apiKey: "secret-123" } },
+      );
 
-    const doc = parseBridge(contextBridgeText);
-    const gateway = createGateway(contextTypeDefs, doc, {
-      context: { apiKey: "secret-123" },
-      tools: { httpCall },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(
-        `{ trips(origin: "Berlin") { routes { carrier legs { from to } } } }`,
-      ),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
-    );
-    // Context should flow through to the tool
-    assert.equal(capturedInput.headers?.apiKey, "secret-123");
-
-    // Nested array data resolved correctly
-    assert.equal(result.data.trips.routes[0].carrier, "TrainCo");
-    assert.equal(result.data.trips.routes[0].legs[0].from, "Berlin");
-    assert.equal(result.data.trips.routes[0].legs[0].to, "Hamburg");
-    assert.equal(result.data.trips.routes[0].legs[1].from, "Hamburg");
-    assert.equal(result.data.trips.routes[0].legs[1].to, "Copenhagen");
-  });
+      assert.equal(capturedInput.headers?.apiKey, "secret-123");
+      assert.equal(data.routes[0].carrier, "TrainCo");
+      assert.equal(data.routes[0].legs[0].from, "Berlin");
+      assert.equal(data.routes[0].legs[0].to, "Hamburg");
+      assert.equal(data.routes[0].legs[1].from, "Hamburg");
+      assert.equal(data.routes[0].legs[1].to, "Copenhagen");
+    },
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. Tool extends: child overriding a parent with duplicate target wires
-//
-//    resolveToolDefByName merges wires by finding the first match on
-//    `target` and replacing it. If the parent has two wires with the same
-//    target (e.g., a constant + pull, or from future || support), only
-//    the first is replaced — the second leaks through.
+// 2. Tool extends: duplicate target override
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("tool extends with duplicate target override", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      locate(q: String!): Location
-    }
-    type Location {
-      lat: Float
-      name: String
-    }
-  `;
+forEachEngine(
+  "tool extends with duplicate target override",
+  (run, { engine }) => {
+    test(
+      "child constant replaces parent constant + pull for same target",
+      { skip: engine === "compiled" },
+      async () => {
+        let capturedInput: Record<string, any> = {};
+        const myTool = async (input: Record<string, any>) => {
+          capturedInput = input;
+          return { lat: 52.5, name: "Berlin" };
+        };
 
-  test("child constant replaces parent constant + pull for same target", async () => {
-    // Parent has TWO wires for "headers.Authorization":
-    //   1. .headers.Authorization <- context.token (pull)
-    //   2. .headers.Authorization = "fallback"     (constant, e.g. default)
-    // Child overrides with a single constant.
-    // Bug: findIndex replaces #1, but #2 leaks through.
-    const bridgeText = `version 1.5
+        await run(
+          `version 1.5
 tool base from myTool {
   with context
   .headers.Authorization <- context.token
@@ -273,45 +179,30 @@ b.q <- i.q
 o.lat <- b.lat
 o.name <- b.name
 
-}`;
+}`,
+          "Query.locate",
+          { q: "test" },
+          { myTool },
+          { context: { token: "parent-token" } },
+        );
 
-    let capturedInput: Record<string, any> = {};
-    const myTool = async (input: Record<string, any>) => {
-      capturedInput = input;
-      return { lat: 52.5, name: "Berlin" };
-    };
-
-    const doc = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, doc, {
-      context: { token: "parent-token" },
-      tools: { myTool },
-    });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    const result: any = await executor({
-      document: parse(`{ locate(q: "test") { lat name } }`),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
+        assert.equal(
+          capturedInput.headers?.Authorization,
+          "child-value",
+          "child should fully replace all parent wires",
+        );
+      },
     );
-    // The child's constant "child-value" should be the ONLY value.
-    // Neither the parent's pull ("parent-token") nor constant ("fallback")
-    // should leak through.
-    assert.equal(
-      capturedInput.headers?.Authorization,
-      "child-value",
-      "child should fully replace all parent wires for headers.Authorization",
-    );
-  });
 
-  test("child pull replaces parent constant for same target", async () => {
-    // Parent: .method = GET (constant)
-    // Parent: .method = POST (another constant — contrived but valid parse)
-    // Child: .method <- context.httpMethod (pull)
-    // Bug: First parent wire replaced, second leaks
-    const bridgeText = `version 1.5
+    test("child pull replaces parent constant for same target", async () => {
+      let capturedInput: Record<string, any> = {};
+      const myTool = async (input: Record<string, any>) => {
+        capturedInput = input;
+        return { lat: 0, name: "Test" };
+      };
+
+      await run(
+        `version 1.5
 tool base from myTool {
   .baseUrl = "http://test"
   .method = GET
@@ -333,38 +224,24 @@ b.q <- i.q
 o.lat <- b.lat
 o.name <- b.name
 
-}`;
+}`,
+        "Query.locate",
+        { q: "x" },
+        { myTool },
+        { context: { httpMethod: "PATCH" } },
+      );
 
-    let capturedInput: Record<string, any> = {};
-    const myTool = async (input: Record<string, any>) => {
-      capturedInput = input;
-      return { lat: 0, name: "Test" };
-    };
-
-    const doc = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, doc, {
-      context: { httpMethod: "PATCH" },
-      tools: { myTool },
+      assert.equal(
+        capturedInput.method,
+        "PATCH",
+        "child pull should replace ALL parent wires for 'method'",
+      );
     });
-    const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
-
-    await executor({
-      document: parse(`{ locate(q: "x") { lat } }`),
-    });
-
-    // Child's pull should be the only wire for "method"
-    assert.equal(
-      capturedInput.method,
-      "PATCH",
-      "child pull should replace ALL parent wires for 'method' (both GET and POST constants)",
-    );
-  });
-});
+  },
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 3. Array indices in paths — parser allows `o.items[0].lat` which
-//    creates path ["items","0","lat"], but response() strips numeric
-//    indices from the GraphQL path, so the wire never matches.
+// 3. Array indices in paths
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("array index in output path", () => {
@@ -385,12 +262,6 @@ o.items[0].name <- a.firstName
 
 }`;
 
-    // Currently: parses fine but wire path ["items","0","name"] never matches
-    // at runtime because response() strips indices from the GraphQL path.
-    // This is the silent-failure scenario — the worst option.
-    //
-    // Expected: either throw at parse time (Option A — preferred)
-    // or make it work at runtime (Option B).
     let parsed = false;
     let parseError: Error | undefined;
     try {
@@ -406,23 +277,17 @@ o.items[0].name <- a.firstName
           "Parser should reject `o.items[0].name` — use array mapping blocks instead.",
       );
     } else {
-      // Fixed: parser rejects explicit indices on the target side
       assert.ok(parseError!.message.length > 0, "should give a useful error");
     }
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. setNested sparse array creation
-//    setNested creates [] when the next path key is numeric, but this
-//    produces sparse arrays. Not a bug per se — documents the concern.
+// 4. setNested sparse array concern
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("setNested sparse arrays", () => {
   test("documented concern: sparse arrays are created when explicit indices are allowed", () => {
-    // The real protection is issue #3: forbid explicit indices on output LHS.
-    // If that's enforced, sparse arrays from bridge wiring can't happen.
-    // This test is a placeholder acknowledging the concern.
     assert.ok(
       true,
       "Sparse arrays are a concern if explicit indices are allowed in output paths",
@@ -431,34 +296,10 @@ describe("setNested sparse arrays", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. Nested array-in-array mapping (explicit field wiring)
-//
-//    When a bridge maps an outer array AND explicitly maps fields of a
-//    nested inner array using `[] as iter { ... }` syntax inside an
-//    element block, the parser, serializer, and runtime must all handle
-//    the recursion correctly.
-//
-//    This is the pattern used by the travel-api example where journeys[]
-//    contain legs[], and each leg's fields are explicitly remapped.
+// 5. Nested array-in-array mapping
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("nested array-in-array mapping", () => {
-  const typeDefs = /* GraphQL */ `
-    type Query {
-      searchTrains(from: String!, to: String!): [Journey!]!
-    }
-    type Journey {
-      id: ID!
-      provider: String!
-      legs: [Leg!]!
-    }
-    type Leg {
-      trainName: String
-      originStation: String
-      destStation: String
-    }
-  `;
-
+forEachEngine("nested array-in-array mapping", (run) => {
   const bridgeText = `version 1.5
 
 tool trainApi from httpCall {
@@ -517,21 +358,11 @@ bridge Query.searchTrains {
     ],
   });
 
-  function makeExecutor() {
-    const doc = parseBridge(bridgeText);
-    const gateway = createGateway(typeDefs, doc, {
-      tools: { httpCall: mockHttpCall },
-    });
-    return buildHTTPExecutor({ fetch: gateway.fetch as any });
-  }
-
   test("parse produces correct arrayIterators for nested arrays", () => {
     const doc = parseBridge(bridgeText);
     const bridge = doc.instructions.find((i): i is any => i.kind === "bridge");
     assert.ok(bridge, "bridge instruction must exist");
-    // Root array iterator
     assert.equal(bridge.arrayIterators[""], "j");
-    // Nested array iterator
     assert.equal(bridge.arrayIterators["legs"], "l");
   });
 
@@ -547,66 +378,47 @@ bridge Query.searchTrains {
       (i): i is any => i.kind === "bridge",
     );
 
-    // Same number of wires
     assert.equal(
       reparsedBridge.wires.length,
       origBridge.wires.length,
-      `wire count: expected ${origBridge.wires.length}, got ${reparsedBridge.wires.length}`,
+      "wire count matches",
     );
-
-    // Same arrayIterators
     assert.deepEqual(reparsedBridge.arrayIterators, origBridge.arrayIterators);
   });
 
   test("runtime: outer array fields resolve correctly", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{
-        searchTrains(from: "Berlin", to: "Hamburg") { id provider }
-      }`),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
+    const { data } = await run(
+      bridgeText,
+      "Query.searchTrains",
+      { from: "Berlin", to: "Hamburg" },
+      { httpCall: mockHttpCall },
     );
-    assert.equal(result.data.searchTrains.length, 2);
-    assert.equal(result.data.searchTrains[0].id, "ABC");
-    assert.equal(result.data.searchTrains[0].provider, "TRAIN");
-    assert.equal(result.data.searchTrains[1].id, "unknown"); // null-fallback
-    assert.equal(result.data.searchTrains[1].provider, "TRAIN");
+    assert.equal(data.length, 2);
+    assert.equal(data[0].id, "ABC");
+    assert.equal(data[0].provider, "TRAIN");
+    assert.equal(data[1].id, "unknown");
+    assert.equal(data[1].provider, "TRAIN");
   });
 
   test("runtime: nested inner array fields resolve with explicit mapping", async () => {
-    const executor = makeExecutor();
-    const result: any = await executor({
-      document: parse(`{
-        searchTrains(from: "Berlin", to: "Hamburg") {
-          id
-          legs { trainName originStation destStation }
-        }
-      }`),
-    });
-
-    assert.ok(
-      !result.errors,
-      `should not error: ${JSON.stringify(result.errors)}`,
+    const { data } = await run(
+      bridgeText,
+      "Query.searchTrains",
+      { from: "Berlin", to: "Hamburg" },
+      { httpCall: mockHttpCall },
     );
-    const trains = result.data.searchTrains;
 
-    // First journey: 2 legs
-    assert.equal(trains[0].legs.length, 2);
-    assert.equal(trains[0].legs[0].trainName, "ICE 100");
-    assert.equal(trains[0].legs[0].originStation, "Berlin");
-    assert.equal(trains[0].legs[0].destStation, "Hamburg");
-    assert.equal(trains[0].legs[1].trainName, "Walk"); // null-fallback
-    assert.equal(trains[0].legs[1].originStation, "Hamburg");
-    assert.equal(trains[0].legs[1].destStation, "Copenhagen");
+    assert.equal(data[0].legs.length, 2);
+    assert.equal(data[0].legs[0].trainName, "ICE 100");
+    assert.equal(data[0].legs[0].originStation, "Berlin");
+    assert.equal(data[0].legs[0].destStation, "Hamburg");
+    assert.equal(data[0].legs[1].trainName, "Walk");
+    assert.equal(data[0].legs[1].originStation, "Hamburg");
+    assert.equal(data[0].legs[1].destStation, "Copenhagen");
 
-    // Second journey: 1 leg
-    assert.equal(trains[1].legs.length, 1);
-    assert.equal(trains[1].legs[0].trainName, "IC 200");
-    assert.equal(trains[1].legs[0].originStation, "Munich");
-    assert.equal(trains[1].legs[0].destStation, "Vienna");
+    assert.equal(data[1].legs.length, 1);
+    assert.equal(data[1].legs[0].trainName, "IC 200");
+    assert.equal(data[1].legs[0].originStation, "Munich");
+    assert.equal(data[1].legs[0].destStation, "Vienna");
   });
 });

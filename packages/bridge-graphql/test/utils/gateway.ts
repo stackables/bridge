@@ -1,6 +1,6 @@
 import { createSchema, createYoga } from "graphql-yoga";
-import type { DocumentSource } from "../src/index.ts";
-import { bridgeTransform, useBridgeTracing } from "../src/index.ts";
+import type { DocumentSource } from "../../src/index.ts";
+import { bridgeTransform, useBridgeTracing } from "../../src/index.ts";
 import type { ToolMap, Logger, TraceLevel } from "@stackables/bridge-core";
 
 type GatewayOptions = {

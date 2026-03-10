@@ -1,24 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { executeBridge, parseBridge } from "../src/index.ts";
-
-function run(
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown>,
-  tools: Record<string, any> = {},
-): Promise<{ data: any; traces: any[] }> {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw)) as ReturnType<
-    typeof parseBridge
-  >;
-  return executeBridge({
-    document,
-    operation,
-    input,
-    tools,
-  });
-}
+import { parseBridge } from "../src/index.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 describe("strict scope rules - invalid cases", () => {
   test("tool inputs can be wired only in the scope that imports the tool", () => {
@@ -57,8 +40,10 @@ bridge Query.test {
   });
 });
 
-describe("strict scope rules - valid behavior", () => {
-  test("nested scopes can pull data from visible parent scopes", async () => {
+forEachEngine("strict scope rules - valid behavior", (run, ctx) => {
+  test("nested scopes can pull data from visible parent scopes", async (t) => {
+    if (ctx.engine === "compiled")
+      return t.skip("compiler: nested loop scope pull NYI");
     const bridge = `version 1.5
 
 bridge Query.test {

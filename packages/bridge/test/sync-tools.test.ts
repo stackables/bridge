@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ToolMetadata } from "@stackables/bridge-types";
-import { forEachEngine } from "./_dual-run.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
