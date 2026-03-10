@@ -391,6 +391,68 @@ bridge Query.items {
           assert.match(formatted, /o\.items <- a/);
           assert.match(formatted, /\^+/);
         });
+
+        test("tool-consumed streams keep the consuming tool wire location", async () => {
+          async function* failingStream() {
+            yield {
+              choices: [{ delta: { role: "assistant", content: "hi" } }],
+            };
+            throw new Error("httpCallSSE: HTTP 401");
+          }
+          failingStream.bridge = { stream: true } as const;
+
+          async function* passthroughBuffer(input: {
+            _source: AsyncGenerator<unknown, void, undefined>;
+          }) {
+            for await (const item of input._source) {
+              yield item;
+            }
+          }
+          passthroughBuffer.bridge = { stream: true } as const;
+
+          const bridgeText = `version 1.5
+bridge Mutation.deepseekStream {
+  with api
+  with buf
+  with output as o
+
+  buf <- api[] as chunk {
+    .role <- chunk.choices[0].delta.role
+    .content <- chunk.choices[0].delta.content
+  }
+
+  o[0] <- buf
+}`;
+          const document = parse(bridgeText);
+
+          const stream = executeBridgeStream({
+            document,
+            operation: "Mutation.deepseekStream",
+            tools: {
+              api: failingStream,
+              buf: passthroughBuffer,
+            },
+          });
+
+          await stream.next();
+          await stream.next();
+
+          let thrown: unknown;
+          try {
+            await stream.next();
+          } catch (err) {
+            thrown = err;
+          }
+
+          assert.ok(thrown instanceof Error);
+          const formatted = formatBridgeError(thrown);
+          assert.match(
+            formatted,
+            /Bridge Execution Error: httpCallSSE: HTTP 401/,
+          );
+          assert.match(formatted, /buf <- api\[\] as chunk \{/);
+          assert.doesNotMatch(formatted, /o\[0\] <- buf/);
+        });
       });
 
       const bridgeText = `version 1.5

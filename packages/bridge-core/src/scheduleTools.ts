@@ -68,6 +68,14 @@ function getBridgeLocFromGroups(groupEntries: [string, Wire[]][]): Wire["loc"] {
   return undefined;
 }
 
+function attachToolConsumerBridgeLoc<T>(value: T, bridgeLoc: Wire["loc"]): T {
+  if (!bridgeLoc || !isStreamHandle(value) || value.bridgeLoc !== undefined) {
+    return value;
+  }
+  value.bridgeLoc = bridgeLoc;
+  return value;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Derive tool name from a trunk. */
@@ -328,7 +336,19 @@ export function scheduleFinish(
     const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
       ? trunkKey(target)
       : undefined;
-    return ctx.callTool(toolName, toolName, directFn, input, memoizeKey);
+    const result = ctx.callTool(
+      toolName,
+      toolName,
+      directFn,
+      input,
+      memoizeKey,
+    );
+    if (isPromise(result)) {
+      return result.then((resolved) =>
+        attachToolConsumerBridgeLoc(resolved, bridgeLoc),
+      );
+    }
+    return attachToolConsumerBridgeLoc(result, bridgeLoc);
   }
 
   // Define pass-through: synthetic trunks created by define inlining
@@ -422,7 +442,14 @@ export async function scheduleToolDef(
     const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
       ? trunkKey(target)
       : undefined;
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
+    const result = await ctx.callTool(
+      toolName,
+      toolDef.fn!,
+      fn,
+      input,
+      memoizeKey,
+    );
+    return attachToolConsumerBridgeLoc(result, bridgeLoc);
   } catch (err) {
     if (!onErrorWire) throw err;
     if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
