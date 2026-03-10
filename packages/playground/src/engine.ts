@@ -264,6 +264,10 @@ export async function runBridge(
       logs: logs.length > 0 ? logs : undefined,
     };
   } catch (err: unknown) {
+    const traces =
+      err && typeof err === "object" && "traces" in err
+        ? (err as { traces?: ToolTrace[] }).traces
+        : undefined;
     return {
       errors: [
         formatBridgeError(err, {
@@ -271,6 +275,7 @@ export async function runBridge(
           filename: document.filename,
         }),
       ],
+      ...(traces && traces.length > 0 ? { traces } : {}),
     };
   } finally {
     _onCacheHit = null;
@@ -672,6 +677,10 @@ export async function runBridgeStandalone(
       err && typeof err === "object" && "executionTraceId" in err
         ? (err as { executionTraceId?: bigint }).executionTraceId
         : undefined;
+    const traces =
+      err && typeof err === "object" && "traces" in err
+        ? (err as { traces?: ToolTrace[] }).traces
+        : undefined;
     return {
       errors: [
         formatBridgeError(err, {
@@ -680,6 +689,7 @@ export async function runBridgeStandalone(
         }),
       ],
       ...(trace != null ? { executionTraceId: trace } : {}),
+      ...(traces && traces.length > 0 ? { traces } : {}),
     };
   } finally {
     _onCacheHit = null;

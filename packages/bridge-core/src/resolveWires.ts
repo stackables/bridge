@@ -10,7 +10,11 @@
  */
 
 import type { ControlFlowInstruction, NodeRef, Wire } from "./types.ts";
-import type { MaybePromise, TreeContext } from "./tree-types.ts";
+import type {
+  LoopControlSignal,
+  MaybePromise,
+  TreeContext,
+} from "./tree-types.ts";
 import {
   attachBridgeErrorMetadata,
   isFatalError,
@@ -176,7 +180,11 @@ export async function applyFallbackGates(
 ): Promise<unknown> {
   if (!w.fallbacks?.length) return value;
 
-  for (let fallbackIndex = 0; fallbackIndex < w.fallbacks.length; fallbackIndex++) {
+  for (
+    let fallbackIndex = 0;
+    fallbackIndex < w.fallbacks.length;
+    fallbackIndex++
+  ) {
     const fallback = w.fallbacks[fallbackIndex];
     const isFalsyGateOpen = fallback.type === "falsy" && !value;
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
@@ -234,7 +242,7 @@ export async function applyCatchGate(
 function applyControlFlowWithLoc(
   control: ControlFlowInstruction,
   bridgeLoc: Wire["loc"],
-): symbol | import("./tree-types.ts").LoopControlSignal {
+): symbol | LoopControlSignal {
   try {
     return applyControlFlow(control);
   } catch (err) {

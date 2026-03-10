@@ -10,6 +10,7 @@
 
 import type {
   Instruction,
+  NodeRef,
   ToolCallFn,
   ToolDef,
   ToolMap,
@@ -427,7 +428,7 @@ export async function resolveToolWires(
  */
 export async function resolveToolNodeRef(
   ctx: ToolLookupContext,
-  ref: import("./types.ts").NodeRef,
+  ref: NodeRef,
   toolDef: ToolDef,
 ): Promise<any> {
   // Find the matching handle by looking at how the ref was built

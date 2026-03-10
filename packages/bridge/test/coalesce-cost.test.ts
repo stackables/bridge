@@ -3,6 +3,7 @@ import { parse } from "graphql";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import type { Wire } from "../src/index.ts";
 import { assertDeepStrictEqualIgnoringLoc } from "./parse-test-utils.ts";
 import { createGateway } from "./_gateway.ts";
 
@@ -899,7 +900,7 @@ bridge Query.lookup {
     const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
     const wire = bridge.wires.find(
       (w) => "from" in w && (w as any).to.path[0] === "label" && !("pipe" in w),
-    ) as Extract<import("../src/index.ts").Wire, { from: any }>;
+    ) as Extract<Wire, { from: any }>;
     assert.ok(wire.fallbacks, "wire should have fallbacks");
     assert.equal(wire.fallbacks!.length, 2);
     assert.equal(wire.fallbacks![0].type, "nullish");

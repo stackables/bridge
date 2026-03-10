@@ -338,6 +338,10 @@ export async function executeBridge<T = unknown>(
   try {
     data = await fn(input, flatTools, context, opts);
   } catch (err) {
+    if (err && typeof err === "object") {
+      (err as { executionTraceId?: bigint }).executionTraceId = 0n;
+      (err as { traces?: ToolTrace[] }).traces = tracer?.traces ?? [];
+    }
     throw attachBridgeErrorDocumentContext(err, document);
   }
   return {

@@ -1,4 +1,4 @@
-type SourceLocation = import("@stackables/bridge-types").SourceLocation;
+import type { SourceLocation } from "@stackables/bridge-types";
 
 /**
  * Structured node reference — identifies a specific data point in the execution graph.

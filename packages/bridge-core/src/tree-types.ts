@@ -12,6 +12,8 @@ import type {
   SourceLocation,
   Wire,
 } from "./types.ts";
+import type { ToolTrace } from "./tracing.ts";
+import type { TraceWireBits } from "./enumerate-traversals.ts";
 
 // ── Error classes ───────────────────────────────────────────────────────────
 
@@ -42,6 +44,8 @@ export class BridgeTimeoutError extends Error {
 /** Runtime error enriched with the originating Bridge wire location. */
 export class BridgeRuntimeError extends Error {
   bridgeLoc?: SourceLocation;
+  traces?: ToolTrace[];
+  executionTraceId?: bigint;
 
   constructor(
     message: string,
@@ -141,7 +145,7 @@ export interface TreeContext {
    * Present only when execution tracing is enabled.  Looked up by
    * `resolveWires` to flip bits in `traceMask`.
    */
-  traceBits?: Map<Wire, import("./enumerate-traversals.ts").TraceWireBits>;
+  traceBits?: Map<Wire, TraceWireBits>;
   /**
    * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
    * array so shadow trees can share the same mutable reference without
