@@ -125,6 +125,34 @@ bridge Query.location {
   o.lon <- geo[0].lon
 }`;
 
+const bridgeAliasHttpErrorText = `version 1.5
+
+tool deepseekApi from std.httpCall {
+  .baseUrl = "https://api.deepseek.com"
+  .method = POST
+  .path = "/chat/completions"
+  .headers.Content-Type = "application/json"
+}
+
+bridge Mutation.deepseekChat {
+  with deepseekApi as api
+  with input as i
+  with context as ctx
+  with output as o
+
+  api.headers.Authorization <- "Bearer {ctx.DEEPSEEK_API_KEY}"
+  api.model = "deepseek-chat"
+  api.stream = false
+  api.messages <- i.messages
+
+  alias api.choices as choices
+
+  o <- choices[] as c {
+    .role <- c.message.role
+    .content <- c.message.content
+  }
+}`;
+
 function maxCaretCount(formatted: string): number {
   return Math.max(
     0,
@@ -427,6 +455,45 @@ describe("runtime error formatting", () => {
         assert.match(formatted, /playground\.bridge:15:12/);
         assert.match(formatted, /geo\.q <- geo\[0\]\.city/);
         assert.equal(maxCaretCount(formatted), "geo[0].city".length);
+        return true;
+      },
+    );
+  });
+
+  test("simple alias pulls wrap async tool failures with the alias location", async () => {
+    const document = parseBridge(bridgeAliasHttpErrorText, {
+      filename: "playground.bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        executeBridge({
+          document,
+          operation: "Mutation.deepseekChat",
+          input: { messages: [] },
+          context: { DEEPSEEK_API_KEY: "secret" },
+          tools: {
+            std: {
+              httpCall: async () => {
+                throw new SyntaxError(
+                  `Unexpected token 'A', "Authentica"... is not valid JSON`,
+                );
+              },
+            },
+          },
+        }),
+      (err: unknown) => {
+        const formatted = formatBridgeError(err);
+        assert.match(
+          formatted,
+          /Bridge Execution Error: Unexpected token 'A', "Authentica"\.\.\. is not valid JSON/,
+        );
+        assert.match(formatted, /playground\.bridge:21:/);
+        assert.match(formatted, /alias api\.choices as choices/);
+        assert.doesNotMatch(
+          formatted,
+          /Bridge Execution Error: Unexpected token 'A'.*\n$/s,
+        );
         return true;
       },
     );

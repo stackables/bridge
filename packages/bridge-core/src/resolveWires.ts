@@ -33,6 +33,16 @@ import type { TraceWireBits } from "./enumerate-traversals.ts";
  */
 type WireWithGates = Exclude<Wire, { value: string }>;
 
+function throwPrimaryWireError(err: unknown, wire: Wire): never {
+  if (isFatalError(err)) {
+    throw err;
+  }
+
+  throw wrapBridgeRuntimeError(err, {
+    bridgeLoc: wire.loc,
+  });
+}
+
 function attachStreamBridgeLoc(
   value: unknown,
   bridgeLoc: Wire["loc"],
@@ -103,17 +113,22 @@ export function resolveWires(
     const ref = getSimplePullRef(w);
     if (ref) {
       recordPrimary(ctx, w);
-      const result = ctx.pullSingle(
-        ref,
-        pullChain,
-        "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
-      );
-      if (isPromise(result)) {
-        return result.then((resolved) =>
-          attachStreamBridgeLoc(resolved, w.loc),
+      try {
+        const result = ctx.pullSingle(
+          ref,
+          pullChain,
+          "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
         );
+        if (isPromise(result)) {
+          return result.then(
+            (resolved) => attachStreamBridgeLoc(resolved, w.loc),
+            (err) => throwPrimaryWireError(err, w),
+          );
+        }
+        return attachStreamBridgeLoc(result, w.loc);
+      } catch (err) {
+        throwPrimaryWireError(err, w);
       }
-      return attachStreamBridgeLoc(result, w.loc);
     }
   }
   const orderedWires = orderOverdefinedWires(ctx, wires);
