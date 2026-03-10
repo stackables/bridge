@@ -181,6 +181,8 @@ function serializeToolBlock(tool: ToolDef): string {
       } else {
         lines.push(`  .${wire.target} = ${wire.value}`);
       }
+    } else if (wire.kind === "template") {
+      lines.push(`  .${wire.target} <- ${JSON.stringify(wire.value)}`);
     } else {
       lines.push(`  .${wire.target} <- ${wire.source}`);
     }

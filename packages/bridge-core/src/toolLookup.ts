@@ -202,11 +202,23 @@ export async function resolveToolWires(
 
   // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
   const pullWires = toolDef.wires.filter((w) => w.kind === "pull");
+  const templateWires = toolDef.wires.filter((w) => w.kind === "template");
   if (pullWires.length > 0) {
     const resolved = await Promise.all(
       pullWires.map(async (wire) => ({
         target: wire.target,
         value: await resolveToolSource(ctx, wire.source, toolDef),
+      })),
+    );
+    for (const { target, value } of resolved) {
+      setNested(input, parsePath(target), value);
+    }
+  }
+  if (templateWires.length > 0) {
+    const resolved = await Promise.all(
+      templateWires.map(async (wire) => ({
+        target: wire.target,
+        value: await resolveToolTemplate(ctx, wire.value, toolDef),
       })),
     );
     for (const { target, value } of resolved) {
@@ -261,6 +273,33 @@ export async function resolveToolSource(
     value = value[segment];
   }
   return value;
+}
+
+const TOOL_TEMPLATE_REF_RE = /\{([^{}]+)\}/g;
+
+export async function resolveToolTemplate(
+  ctx: ToolLookupContext,
+  template: string,
+  toolDef: ToolDef,
+): Promise<string> {
+  const matches = [...template.matchAll(TOOL_TEMPLATE_REF_RE)];
+  if (matches.length === 0) return template;
+
+  const values = await Promise.all(
+    matches.map((match) => resolveToolSource(ctx, match[1]!.trim(), toolDef)),
+  );
+
+  let result = "";
+  let cursor = 0;
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i]!;
+    result += template.slice(cursor, match.index);
+    const value = values[i];
+    result += value == null ? "" : String(value);
+    cursor = match.index + match[0].length;
+  }
+  result += template.slice(cursor);
+  return result;
 }
 
 // ── Tool dependency execution ───────────────────────────────────────────────

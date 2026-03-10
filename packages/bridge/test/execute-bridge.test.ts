@@ -150,6 +150,43 @@ bridge Query.getUser {
     });
   });
 
+  describe("tool wire expressions", () => {
+    const bridgeText = `version 1.5
+tool deepseekApi from httpCall {
+  with context as ctx
+  .headers.Authorization <- ctx.token ? "Bearer {ctx.token}" : ""
+  .timeoutMs <- ctx.baseTimeout + 250
+}
+bridge Query.demo {
+  with deepseekApi as api
+  with output as o
+
+  o.auth <- api.headers.Authorization
+  o.timeoutMs <- api.timeoutMs
+}`;
+
+    test("tool defs evaluate ternary and arithmetic inputs", async () => {
+      let captured: any;
+      const tools = {
+        httpCall: async (input: any) => {
+          captured = input;
+          return input;
+        },
+      };
+
+      const { data } = await run(bridgeText, "Query.demo", {}, tools, {
+        context: { token: "secret", baseTimeout: 750 },
+      });
+
+      assert.equal(captured.headers.Authorization, "Bearer secret");
+      assert.equal(captured.timeoutMs, 1000);
+      assert.deepEqual(data, {
+        auth: "Bearer secret",
+        timeoutMs: 1000,
+      });
+    });
+  });
+
   // ── Array output (o <- items[] as x { ... }) ────────────────────────────────
 
   describe("array output", () => {

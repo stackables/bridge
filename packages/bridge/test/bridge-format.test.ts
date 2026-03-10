@@ -767,6 +767,23 @@ sb.q <- i.query
       source: "auth.access_token",
     });
   });
+
+  test("parses tool wire expressions", () => {
+    const result = parseBridge(`version 1.5
+
+tool deepseekApi from httpCall {
+  with context as ctx
+  .headers.Authorization <- ctx.token ? "Bearer {ctx.token}" : ""
+  .timeoutMs <- ctx.baseTimeout + 250
+}`);
+    const tool = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool" && i.name === "deepseekApi",
+    )!;
+    assert.deepEqual(
+      tool.wires.map((wire) => wire.kind),
+      ["expr", "expr"],
+    );
+  });
 });
 
 // ── Tool roundtrip ──────────────────────────────────────────────────────────
@@ -824,6 +841,20 @@ sg.to <- i.to
 sg.content <- i.body
 o.messageId <- sg.id
 
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("tool wire expressions roundtrip", () => {
+    const input = `version 1.5
+tool deepseekApi from httpCall {
+  with context as ctx
+  .headers.Authorization <- ctx.token ? "Bearer {ctx.token}" : ""
+  .timeoutMs <- ctx.baseTimeout + 250
 }`;
     const instructions = parseBridge(input);
     assertDeepStrictEqualIgnoringLoc(

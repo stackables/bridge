@@ -201,7 +201,18 @@ class BridgeParser extends CstParser {
       {
         ALT: () => {
           this.CONSUME(Arrow, { LABEL: "arrowOp" });
-          this.SUBRULE(this.dottedName, { LABEL: "source" });
+          this.OR2([
+            {
+              ALT: () => {
+                this.CONSUME(StringLiteral, { LABEL: "stringSource" });
+              },
+            },
+            {
+              ALT: () => {
+                this.SUBRULE(this.dottedName, { LABEL: "source" });
+              },
+            },
+          ]);
         },
       },
     ]);
@@ -3275,8 +3286,19 @@ function buildToolDef(
         const value = extractBareValue(sub(wireNode, "value")!);
         wires.push({ target, kind: "constant", value });
       } else if (wc.arrowOp) {
-        const source = extractDottedName(sub(wireNode, "source")!);
-        wires.push({ target, kind: "pull", source });
+        const stringSourceToken = (
+          wc.stringSource as IToken[] | undefined
+        )?.[0];
+        if (stringSourceToken) {
+          wires.push({
+            target,
+            kind: "template",
+            value: stringSourceToken.image.slice(1, -1),
+          });
+        } else {
+          const source = extractDottedName(sub(wireNode, "source")!);
+          wires.push({ target, kind: "pull", source });
+        }
       }
       continue;
     }

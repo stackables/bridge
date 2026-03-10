@@ -177,6 +177,16 @@ tool myTool from std.httpCall {
   );
 
   compat(
+    "tool wire expression with ternary and arithmetic",
+    `version 1.5
+tool myTool from std.httpCall {
+  with context as ctx
+  .headers.Authorization <- ctx.token ? "Bearer {ctx.token}" : ""
+  .timeoutMs <- ctx.baseTimeout + 250
+}`,
+  );
+
+  compat(
     "null + error coalesce combined",
     `version 1.5
 bridge Query.test {

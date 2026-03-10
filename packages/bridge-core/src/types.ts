@@ -253,6 +253,7 @@ export type ToolDep =
 export type ToolWire =
   | { target: string; kind: "constant"; value: string }
   | { target: string; kind: "pull"; source: string }
+  | { target: string; kind: "template"; value: string }
   | { kind: "onError"; value: string }
   | { kind: "onError"; source: string };
 

@@ -242,6 +242,31 @@ function emitParsedConst(raw: string): string {
   }
 }
 
+function parseToolTemplate(
+  raw: string,
+): Array<{ kind: "text"; value: string } | { kind: "ref"; value: string }> {
+  const parts: Array<
+    { kind: "text"; value: string } | { kind: "ref"; value: string }
+  > = [];
+  const regex = /\{([^{}]+)\}/g;
+  let cursor = 0;
+
+  for (const match of raw.matchAll(regex)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push({ kind: "text", value: raw.slice(cursor, index) });
+    }
+    parts.push({ kind: "ref", value: match[1]!.trim() });
+    cursor = index + match[0].length;
+  }
+
+  if (cursor < raw.length) {
+    parts.push({ kind: "text", value: raw.slice(cursor) });
+  }
+
+  return parts;
+}
+
 // ── Code-generation context ─────────────────────────────────────────────────
 
 interface ToolInfo {
@@ -710,6 +735,9 @@ class CodegenContext {
     lines.push(`  const __batchQueues = new Map();`);
     lines.push(`  const __trace = __opts?.__trace;`);
     lines.push(`  const __shouldTrace = (fn) => fn?.bridge?.trace !== false;`);
+    lines.push(
+      `  const __toolTemplatePart = (value) => value == null ? "" : String(value);`,
+    );
     lines.push(`  function __toolExecutionLogLevel(fn) {`);
     lines.push(`    const log = fn?.bridge?.log;`);
     lines.push(`    if (log === false || log == null) return false;`);
@@ -1343,6 +1371,11 @@ class CodegenContext {
           tw.target,
           `    ${JSON.stringify(tw.target)}: ${expr}`,
         );
+      } else if (tw.kind === "template") {
+        inputEntries.set(
+          tw.target,
+          `    ${JSON.stringify(tw.target)}: ${this.renderToolTemplateExpr(tw.value, toolDef)}`,
+        );
       }
     }
 
@@ -1570,6 +1603,10 @@ class CodegenContext {
         if (tw.kind === "pull") {
           const expr = this.resolveToolDepSource(tw.source, depToolDef);
           inputParts.push(`      ${JSON.stringify(tw.target)}: ${expr}`);
+        } else if (tw.kind === "template") {
+          inputParts.push(
+            `      ${JSON.stringify(tw.target)}: ${this.renderToolTemplateExpr(tw.value, depToolDef)}`,
+          );
         }
       }
 
@@ -1651,6 +1688,20 @@ class CodegenContext {
 
     if (restPath.length === 0) return baseExpr;
     return baseExpr + restPath.map((p) => `[${JSON.stringify(p)}]`).join("");
+  }
+
+  private renderToolTemplateExpr(template: string, toolDef: ToolDef): string {
+    const parts = parseToolTemplate(template);
+    if (parts.length === 0) {
+      return JSON.stringify(template);
+    }
+    return parts
+      .map((part) =>
+        part.kind === "text"
+          ? JSON.stringify(part.value)
+          : `__toolTemplatePart(${this.resolveToolDepSource(part.value, toolDef)})`,
+      )
+      .join(" + ");
   }
 
   /** Find a tool info by tool name. */
