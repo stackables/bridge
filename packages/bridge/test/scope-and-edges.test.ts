@@ -435,6 +435,39 @@ bridge Query.thing {
     const serialized = serializeBridge(doc);
     assert.match(serialized, /o\[c\.index\] <- a\.items\[\] as c \{/);
   });
+
+  test("computed index on nested output array mapping is preserved", () => {
+    const bridgeText = `version 1.5
+bridge Query.thing {
+  with api as a
+  with output as o
+
+  o.messages[c.index] <- a.items[] as c {
+    .name <- c.name
+  }
+
+}`;
+
+    const doc = parseBridge(bridgeText);
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const wire = bridge.wires.find(
+      (w) =>
+        "from" in w && w.to.path.length === 1 && w.to.path[0] === "messages",
+    );
+    assert.ok(wire, "nested array mapping wire should exist");
+    assert.deepEqual(wire.dispatchIndexRef, {
+      module: "_",
+      type: "Query",
+      field: "thing",
+      element: true,
+      path: ["index"],
+    });
+
+    const serialized = serializeBridge(doc);
+    assert.match(serialized, /o\.messages\[c\.index\] <- a\.items\[\] as c \{/);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

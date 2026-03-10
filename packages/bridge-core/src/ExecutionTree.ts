@@ -941,7 +941,7 @@ export class ExecutionTree implements TreeContext {
     return index;
   }
 
-  private getRootDispatchIndexRef(): NodeRef | undefined {
+  private getDispatchIndexRef(pathPrefix: string[]): NodeRef | undefined {
     const bridge = this.bridge;
     if (!bridge) return undefined;
     const { type, field } = this.trunk;
@@ -950,7 +950,7 @@ export class ExecutionTree implements TreeContext {
         wire.to.module === SELF_MODULE &&
         wire.to.type === type &&
         wire.to.field === field &&
-        wire.to.path.length === 0 &&
+        pathEquals(wire.to.path, pathPrefix) &&
         wire.dispatchIndexRef !== undefined,
     )?.dispatchIndexRef;
   }
@@ -1571,8 +1571,7 @@ export class ExecutionTree implements TreeContext {
     if (!array) return result;
     const resolved = await result;
     if (isStreamHandle(resolved)) {
-      const dispatchIndexRef =
-        path.length === 0 ? this.getRootDispatchIndexRef() : undefined;
+      const dispatchIndexRef = this.getDispatchIndexRef(path);
       return this.wrapStreamWithMapping(resolved, path, dispatchIndexRef);
     }
     if (isLoopControlSignal(resolved)) return [];
@@ -1646,11 +1645,19 @@ export class ExecutionTree implements TreeContext {
         // Array mapping on a sub-field: resolve the array source,
         // create shadow trees, and materialise with field mappings.
         const resolved = await this.resolveWires(regularWires);
+        const dispatchIndexRef = this.getDispatchIndexRef(prefix);
         if (isStreamHandle(resolved)) {
-          return this.wrapStreamWithMapping(resolved, prefix);
+          return this.wrapStreamWithMapping(resolved, prefix, dispatchIndexRef);
         }
         if (!Array.isArray(resolved)) return null;
         const shadows = this.createShadowArray(resolved);
+        if (dispatchIndexRef) {
+          return this.materializeDispatchedShadows(
+            shadows,
+            prefix,
+            dispatchIndexRef,
+          );
+        }
         return this.materializeShadows(shadows, prefix);
       }
 
@@ -1799,7 +1806,7 @@ export class ExecutionTree implements TreeContext {
           w.to.field === field,
       );
       if (hasElementWires) {
-        const dispatchIndexRef = this.getRootDispatchIndexRef();
+        const dispatchIndexRef = this.getDispatchIndexRef([]);
         const shadowsOrStream = await this.pullOutputField([], true);
         if (isStreamHandle(shadowsOrStream)) {
           return shadowsOrStream;
@@ -1912,7 +1919,7 @@ export class ExecutionTree implements TreeContext {
     );
 
     if (hasRootWire && hasElementWires) {
-      const dispatchIndexRef = this.getRootDispatchIndexRef();
+      const dispatchIndexRef = this.getDispatchIndexRef([]);
       const [shadowsOrStream] = await Promise.all([
         this.pullOutputField([], true),
         ...forcePromises,

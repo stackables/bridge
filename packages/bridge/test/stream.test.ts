@@ -795,6 +795,53 @@ bridge Query.chat {
         ],
       );
     });
+
+    test("nested computed dispatch index emits patches at item-provided positions", async () => {
+      const bridgeText = `version 1.5
+bridge Query.chat {
+  with chunkStream as s
+  with output as o
+
+  o.messages[c.index] <- s[] as c {
+    .role <- c.role
+    .content <- c.content
+  }
+}`;
+      const chunkStream = createStreamTool([
+        { index: 1, role: "assistant", content: "second" },
+        { index: 0, role: "assistant", content: "first" },
+      ]);
+
+      const document = parse(bridgeText);
+      const payloads = await collectPayloads(
+        executeBridgeStream({
+          document,
+          operation: "Query.chat",
+          input: {},
+          tools: { chunkStream },
+        }),
+      );
+
+      const initial = payloads[0]! as StreamInitialPayload;
+      assert.deepEqual(initial.data, { messages: [] });
+
+      const incrementals = payloads
+        .slice(1)
+        .filter((p): p is StreamIncrementalPayload => "incremental" in p);
+      assert.deepEqual(
+        incrementals.flatMap((p) => p.incremental),
+        [
+          {
+            items: [{ role: "assistant", content: "second" }],
+            path: ["messages", 1],
+          },
+          {
+            items: [{ role: "assistant", content: "first" }],
+            path: ["messages", 0],
+          },
+        ],
+      );
+    });
   });
 });
 
@@ -887,6 +934,34 @@ bridge Query.chat {
       { role: "assistant", content: "first" },
       { role: "assistant", content: "second" },
     ]);
+  });
+
+  test("nested computed dispatch index materializes stream output by explicit slot", async () => {
+    const chunkStream = createStreamTool([
+      { index: 1, role: "assistant", content: "second" },
+      { index: 0, role: "assistant", content: "first" },
+    ]);
+    const { data } = await run(
+      `version 1.5
+bridge Query.chat {
+  with chunkStream as s
+  with output as o
+
+  o.messages[c.index] <- s[] as c {
+    .role <- c.role
+    .content <- c.content
+  }
+}`,
+      "Query.chat",
+      {},
+      { chunkStream },
+    );
+    assert.deepEqual(data, {
+      messages: [
+        { role: "assistant", content: "first" },
+        { role: "assistant", content: "second" },
+      ],
+    });
   });
 
   test("subtool inside array mapping on stream", async () => {

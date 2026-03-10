@@ -5865,12 +5865,11 @@ function buildBridgeBody(
           toRef.module !== SELF_MODULE ||
           toRef.type !== bridgeType ||
           toRef.field !== bridgeField ||
-          targetSegs.length !== 0 ||
           extractedTarget.dynamicIndices.length !== 1 ||
-          extractedTarget.dynamicIndices[0]!.position !== 0
+          extractedTarget.dynamicIndices[0]!.position !== targetSegs.length
         ) {
           throw new Error(
-            `Line ${lineNum}: Computed indices are only supported on root output array mappings like o[item.index] <- src[] as item { ... }`,
+            `Line ${lineNum}: Computed output indices are only supported on array-mapping targets like o[item.index] <- src[] as item { ... } or o.messages[item.index] <- src[] as item { ... }`,
           );
         }
 
