@@ -4,6 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   executeBridgeStream,
   isStreamHandle,
+  formatBridgeError,
 } from "../src/index.ts";
 import type {
   StreamPayload,
@@ -311,6 +312,86 @@ bridge Query.aiResponse {
         yield { id: 3 };
       }
       slowStream.bridge = { stream: true } as const;
+
+      describe("stream errors", () => {
+        test("stream tool errors propagate after the initial payload", async () => {
+          async function* failingStream() {
+            yield { chunk: "partial" };
+            throw new Error("HTTP 401");
+          }
+          failingStream.bridge = { stream: true } as const;
+
+          const document = parse(`version 1.5
+  bridge Query.items {
+    with api as a
+    with output as o
+
+    o.items <- a
+  }`);
+
+          const stream = executeBridgeStream({
+            document,
+            operation: "Query.items",
+            tools: { api: failingStream },
+            trace: "full",
+          });
+
+          const first = (await stream.next()).value as StreamInitialPayload<{
+            items: Array<{ chunk: string }>;
+          }>;
+          assert.ok("data" in first);
+          assert.equal(first.hasNext, true);
+
+          const second = await stream.next();
+          assert.equal(second.done, false);
+          assert.ok("incremental" in second.value);
+          assert.deepStrictEqual(second.value.incremental, [
+            { items: [{ chunk: "partial" }], path: ["items", 0] },
+          ]);
+
+          await assert.rejects(() => stream.next(), /HTTP 401/);
+        });
+
+        test("stream tool errors keep bridge location for rich formatting", async () => {
+          async function* failingStream() {
+            yield { chunk: "partial" };
+            throw new Error("HTTP 401");
+          }
+          failingStream.bridge = { stream: true } as const;
+
+          const bridgeText = `version 1.5
+bridge Query.items {
+  with api as a
+  with output as o
+
+  o.items <- a
+}`;
+          const document = parse(bridgeText);
+
+          const stream = executeBridgeStream({
+            document,
+            operation: "Query.items",
+            tools: { api: failingStream },
+          });
+
+          await stream.next();
+          await stream.next();
+
+          let thrown: unknown;
+          try {
+            await stream.next();
+          } catch (err) {
+            thrown = err;
+          }
+
+          assert.ok(thrown instanceof Error);
+          const formatted = formatBridgeError(thrown);
+          assert.match(formatted, /Bridge Execution Error: HTTP 401/);
+          assert.match(formatted, /--> <bridge>:\d+:3/);
+          assert.match(formatted, /o\.items <- a/);
+          assert.match(formatted, /\^+/);
+        });
+      });
 
       const bridgeText = `version 1.5
 bridge Query.data {
@@ -1088,7 +1169,10 @@ bridge Query.chat {
 
     // Each incremental should have an auto-incrementing index
     const indices = incrementals.flatMap((inc) =>
-      inc.incremental.map((item) => item.path[item.path.length - 1]),
+      inc.incremental.map(
+        (item: StreamIncrementalPayload["incremental"][number]) =>
+          item.path[item.path.length - 1],
+      ),
     );
     // Auto-indexed: 0, 1, 2, ...
     for (let i = 0; i < indices.length; i++) {

@@ -924,7 +924,11 @@ export class ExecutionTree implements TreeContext {
         yield mapped ?? item;
       }
     }
-    return new StreamHandle(mappedGenerator(), handle.toolName);
+    return new StreamHandle(
+      mappedGenerator(),
+      handle.toolName,
+      handle.bridgeLoc,
+    );
   }
 
   private normalizeDispatchIndex(value: unknown): number {
@@ -1072,7 +1076,11 @@ export class ExecutionTree implements TreeContext {
         yield obj;
       }
     }
-    return new StreamHandle(mappedGenerator(), handle.toolName);
+    return new StreamHandle(
+      mappedGenerator(),
+      handle.toolName,
+      handle.bridgeLoc,
+    );
   }
 
   /**

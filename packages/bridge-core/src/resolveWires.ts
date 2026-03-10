@@ -33,6 +33,29 @@ import type { TraceWireBits } from "./enumerate-traversals.ts";
  */
 type WireWithGates = Exclude<Wire, { value: string }>;
 
+function attachStreamBridgeLoc(
+  value: unknown,
+  bridgeLoc: Wire["loc"],
+): unknown {
+  if (!bridgeLoc || !value || typeof value !== "object") {
+    return value;
+  }
+
+  const candidate = value as {
+    generator?: { next?: unknown };
+    toolName?: unknown;
+    bridgeLoc?: Wire["loc"];
+  };
+  if (
+    typeof candidate.toolName === "string" &&
+    typeof candidate.generator?.next === "function" &&
+    candidate.bridgeLoc === undefined
+  ) {
+    candidate.bridgeLoc = bridgeLoc;
+  }
+  return value;
+}
+
 // ── Public entry point ──────────────────────────────────────────────────────
 
 /**
@@ -80,11 +103,17 @@ export function resolveWires(
     const ref = getSimplePullRef(w);
     if (ref) {
       recordPrimary(ctx, w);
-      return ctx.pullSingle(
+      const result = ctx.pullSingle(
         ref,
         pullChain,
         "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
       );
+      if (isPromise(result)) {
+        return result.then((resolved) =>
+          attachStreamBridgeLoc(resolved, w.loc),
+        );
+      }
+      return attachStreamBridgeLoc(result, w.loc);
     }
   }
   const orderedWires = orderOverdefinedWires(ctx, wires);
@@ -139,7 +168,7 @@ async function resolveWiresAsync(
       value = await applyFallbackGates(ctx, w, value, pullChain);
 
       // Overdefinition Boundary
-      if (value != null) return value;
+      if (value != null) return attachStreamBridgeLoc(value, w.loc);
     } catch (err: unknown) {
       // Layer 3: Catch Gate
       if (isFatalError(err)) throw err;
@@ -176,7 +205,11 @@ export async function applyFallbackGates(
 ): Promise<unknown> {
   if (!w.fallbacks?.length) return value;
 
-  for (let fallbackIndex = 0; fallbackIndex < w.fallbacks.length; fallbackIndex++) {
+  for (
+    let fallbackIndex = 0;
+    fallbackIndex < w.fallbacks.length;
+    fallbackIndex++
+  ) {
     const fallback = w.fallbacks[fallbackIndex];
     const isFalsyGateOpen = fallback.type === "falsy" && !value;
     const isNullishGateOpen = fallback.type === "nullish" && value == null;

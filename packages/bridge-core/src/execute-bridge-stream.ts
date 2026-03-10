@@ -13,9 +13,10 @@
 
 import { ExecutionTree } from "./ExecutionTree.ts";
 import { attachBridgeErrorDocumentContext } from "./formatBridgeError.ts";
+import { attachBridgeErrorMetadata } from "./tree-types.ts";
 import { TraceCollector } from "./tracing.ts";
 import type { ToolTrace } from "./tracing.ts";
-import type { ToolMap } from "./types.ts";
+import type { SourceLocation, ToolMap } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import type { ExecuteBridgeOptions } from "./execute-bridge.ts";
 import {
@@ -39,6 +40,7 @@ export class StreamHandle {
   constructor(
     public readonly generator: AsyncGenerator<unknown, void, undefined>,
     public readonly toolName: string,
+    public bridgeLoc?: SourceLocation,
   ) {}
 }
 
@@ -306,6 +308,7 @@ export async function* executeBridgeStream<T = unknown>(
     path: (string | number)[];
     index: number;
     done: boolean;
+    bridgeLoc?: SourceLocation;
     /** When true, yields replace at a fixed index instead of appending. */
     dispatch: boolean;
   };
@@ -323,6 +326,7 @@ export async function* executeBridgeStream<T = unknown>(
       path: s.path,
       index: 0,
       done: false,
+      bridgeLoc: s.handle.bridgeLoc,
       dispatch,
     };
   });
@@ -335,20 +339,37 @@ export async function* executeBridgeStream<T = unknown>(
     const pending = active
       .filter((s) => !s.done)
       .map(async (stream) => {
-        const result = await stream.iterator.next();
-        return { stream, result };
+        try {
+          const result = await stream.iterator.next();
+          return { stream, result };
+        } catch (err) {
+          throw attachBridgeErrorMetadata(err, {
+            bridgeLoc: stream.bridgeLoc,
+          });
+        }
       });
 
-    // Wait for the first one to produce a value
-    // Use Promise.allSettled to handle errors gracefully
+    // Wait for all active generators. If any generator throws, propagate the
+    // error instead of silently truncating the stream.
     const results = await Promise.allSettled(pending);
+
+    const rejected = results.find(
+      (settled): settled is PromiseRejectedResult =>
+        settled.status === "rejected",
+    );
+    if (rejected) {
+      const err = rejected.reason;
+      if (err && typeof err === "object") {
+        (err as { executionTraceId?: bigint }).executionTraceId =
+          tree.getExecutionTrace();
+      }
+      throw attachBridgeErrorDocumentContext(err, doc);
+    }
 
     const incremental: StreamIncrementalItem[] = [];
 
     for (const settled of results) {
-      if (settled.status === "rejected") {
-        // Stream generator threw — mark as done, skip
-        // Error is swallowed; the initial payload already delivered partial data
+      if (settled.status !== "fulfilled") {
         continue;
       }
       const { stream, result } = settled.value;
