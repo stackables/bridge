@@ -176,14 +176,305 @@ function serializeToolBlock(tool: ToolDef): string {
     }
   }
 
+  // ── Build internal-fork registries for expressions and concat ──────
+  const TOOL_FN_TO_OP: Record<string, string> = {
+    multiply: "*",
+    divide: "/",
+    add: "+",
+    subtract: "-",
+    eq: "==",
+    neq: "!=",
+    gt: ">",
+    gte: ">=",
+    lt: "<",
+    lte: "<=",
+  };
+
+  const refTk = (ref: NodeRef): string =>
+    ref.instance != null
+      ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
+      : `${ref.module}:${ref.type}:${ref.field}`;
+
+  // Expression fork info
+  type ToolExprForkInfo = {
+    op: string;
+    aWire: Extract<Wire, { from: NodeRef }> | undefined;
+    bWire: Wire | undefined;
+  };
+  const exprForks = new Map<string, ToolExprForkInfo>();
+  const exprInternalWires = new Set<Wire>();
+
+  // Concat fork info
+  type ToolConcatForkInfo = {
+    parts: ({ kind: "text"; value: string } | { kind: "ref"; ref: NodeRef })[];
+  };
+  const concatForks = new Map<string, ToolConcatForkInfo>();
+  const concatInternalWires = new Set<Wire>();
+
+  // Pipe handle keys for detecting pipe wires
+  const pipeHandleTrunkKeys = new Set<string>();
+
+  for (const ph of tool.pipeHandles ?? []) {
+    pipeHandleTrunkKeys.add(ph.key);
+
+    // Expression forks: __expr_N with known operator base trunk
+    if (ph.handle.startsWith("__expr_")) {
+      const op = TOOL_FN_TO_OP[ph.baseTrunk.field];
+      if (!op) continue;
+      let aWire: Extract<Wire, { from: NodeRef }> | undefined;
+      let bWire: Wire | undefined;
+      for (const w of tool.wires) {
+        const wTo = w.to;
+        if (refTk(wTo) !== ph.key || wTo.path.length !== 1) continue;
+        if (wTo.path[0] === "a" && "from" in w)
+          aWire = w as Extract<Wire, { from: NodeRef }>;
+        else if (wTo.path[0] === "b") bWire = w;
+      }
+      exprForks.set(ph.key, { op, aWire, bWire });
+      if (aWire) exprInternalWires.add(aWire);
+      if (bWire) exprInternalWires.add(bWire);
+    }
+
+    // Concat forks: __concat_N with baseTrunk.field === "concat"
+    if (ph.handle.startsWith("__concat_") && ph.baseTrunk.field === "concat") {
+      const partsMap = new Map<
+        number,
+        { kind: "text"; value: string } | { kind: "ref"; ref: NodeRef }
+      >();
+      for (const w of tool.wires) {
+        const wTo = w.to;
+        if (refTk(wTo) !== ph.key) continue;
+        if (wTo.path.length !== 2 || wTo.path[0] !== "parts") continue;
+        const idx = parseInt(wTo.path[1], 10);
+        if (isNaN(idx)) continue;
+        if ("value" in w && !("from" in w)) {
+          partsMap.set(idx, { kind: "text", value: (w as any).value });
+        } else if ("from" in w) {
+          partsMap.set(idx, {
+            kind: "ref",
+            ref: (w as Extract<Wire, { from: NodeRef }>).from,
+          });
+        }
+        concatInternalWires.add(w);
+      }
+      const maxIdx = Math.max(...partsMap.keys(), -1);
+      const parts: ToolConcatForkInfo["parts"] = [];
+      for (let i = 0; i <= maxIdx; i++) {
+        const part = partsMap.get(i);
+        if (part) parts.push(part);
+      }
+      concatForks.set(ph.key, { parts });
+    }
+  }
+
+  // Mark output wires from expression/concat forks as internal
+  for (const w of tool.wires) {
+    if (!("from" in w)) continue;
+    const fromTk = refTk(w.from);
+    if (
+      w.from.path.length === 0 &&
+      (exprForks.has(fromTk) || concatForks.has(fromTk))
+    ) {
+      // This is the output wire from a fork to the tool's self-wire target.
+      // We'll emit this as the main wire with the reconstructed expression.
+      // Don't mark it as internal — we still process it, but with special logic.
+    }
+  }
+
+  /** Serialize a ref using the tool's handle map. */
+  function serToolRef(ref: NodeRef): string {
+    return serializeToolWireSource(ref, tool);
+  }
+
+  /**
+   * Recursively reconstruct an expression string from a fork chain.
+   * E.g. for `const.one + 1` returns "const.one + 1".
+   */
+  function reconstructExpr(forkTk: string, parentPrec?: number): string {
+    const info = exprForks.get(forkTk);
+    if (!info) return forkTk;
+
+    // Reconstruct left operand
+    let left: string;
+    if (info.aWire) {
+      const aFromTk = refTk(info.aWire.from);
+      if (exprForks.has(aFromTk)) {
+        left = reconstructExpr(
+          aFromTk,
+          TOOL_PREC[info.op as keyof typeof TOOL_PREC],
+        );
+      } else {
+        left = serToolRef(info.aWire.from);
+      }
+    } else {
+      left = "?";
+    }
+
+    // Reconstruct right operand
+    let right: string;
+    if (info.bWire) {
+      if ("from" in info.bWire) {
+        const bFromTk = refTk(
+          (info.bWire as Extract<Wire, { from: NodeRef }>).from,
+        );
+        if (exprForks.has(bFromTk)) {
+          right = reconstructExpr(
+            bFromTk,
+            TOOL_PREC[info.op as keyof typeof TOOL_PREC],
+          );
+        } else {
+          right = serToolRef(
+            (info.bWire as Extract<Wire, { from: NodeRef }>).from,
+          );
+        }
+      } else if ("value" in info.bWire) {
+        right = formatBareValue((info.bWire as any).value);
+      } else {
+        right = "?";
+      }
+    } else {
+      right = "?";
+    }
+
+    const expr = `${left} ${info.op} ${right}`;
+    const myPrec = TOOL_PREC[info.op as keyof typeof TOOL_PREC] ?? 0;
+    if (parentPrec != null && myPrec < parentPrec) return `(${expr})`;
+    return expr;
+  }
+  const TOOL_PREC: Record<string, number> = {
+    "*": 4,
+    "/": 4,
+    "+": 3,
+    "-": 3,
+    "==": 2,
+    "!=": 2,
+    ">": 2,
+    ">=": 2,
+    "<": 2,
+    "<=": 2,
+  };
+
+  /**
+   * Reconstruct a template string from a concat fork.
+   */
+  function reconstructTemplateStr(forkTk: string): string | null {
+    const info = concatForks.get(forkTk);
+    if (!info || info.parts.length === 0) return null;
+    let result = "";
+    for (const part of info.parts) {
+      if (part.kind === "text") {
+        result += part.value.replace(/\\/g, "\\\\").replace(/\{/g, "\\{");
+      } else {
+        result += `{${serToolRef(part.ref)}}`;
+      }
+    }
+    return `"${result}"`;
+  }
+
   // Wires — self-wires (targeting the tool's own trunk) get `.` prefix;
   // handle-targeted wires (targeting declared handles) use bare target names
   for (const wire of tool.wires) {
+    // Skip internal expression/concat wires
+    if (exprInternalWires.has(wire) || concatInternalWires.has(wire)) continue;
+
     const isSelfWire =
       wire.to.module === SELF_MODULE &&
       wire.to.type === "Tools" &&
       wire.to.field === tool.name;
     const prefix = isSelfWire ? "." : "";
+
+    // Check if this wire's source is an expression or concat fork
+    if ("from" in wire) {
+      const fromTk = refTk(wire.from);
+
+      // Expression fork output wire
+      if (wire.from.path.length === 0 && exprForks.has(fromTk)) {
+        const target = wire.to.path.join(".");
+        const exprStr = reconstructExpr(fromTk);
+        // Check for ternary, coalesce, fallbacks, catch on the wire
+        let suffix = "";
+        if ("cond" in wire) {
+          const condWire = wire as any;
+          const trueVal =
+            "trueValue" in condWire
+              ? formatBareValue(condWire.trueValue)
+              : serToolRef(condWire.trueRef);
+          const falseVal =
+            "falseValue" in condWire
+              ? formatBareValue(condWire.falseValue)
+              : serToolRef(condWire.falseRef);
+          lines.push(`  ${prefix}${target} <- ${exprStr} ? ${trueVal} : ${falseVal}`);
+          continue;
+        }
+        if ((wire as any).nullCoalesceRef) {
+          suffix = ` ?? ${serToolRef((wire as any).nullCoalesceRef)}`;
+        } else if ((wire as any).nullCoalesceValue != null) {
+          suffix = ` ?? ${formatBareValue((wire as any).nullCoalesceValue)}`;
+        }
+        if ((wire as any).catchFallbackRef) {
+          suffix += ` catch ${serToolRef((wire as any).catchFallbackRef)}`;
+        } else if ((wire as any).catchFallback != null) {
+          suffix += ` catch ${formatBareValue((wire as any).catchFallback)}`;
+        }
+        lines.push(`  ${prefix}${target} <- ${exprStr}${suffix}`);
+        continue;
+      }
+
+      // Concat fork output wire (template string)
+      if (
+        wire.from.path.length <= 1 &&
+        concatForks.has(
+          wire.from.path.length === 0
+            ? fromTk
+            : refTk({ ...wire.from, path: [] }),
+        )
+      ) {
+        const concatTk =
+          wire.from.path.length === 0
+            ? fromTk
+            : refTk({ ...wire.from, path: [] });
+        // Only handle .value path (standard concat output)
+        if (
+          wire.from.path.length === 0 ||
+          (wire.from.path.length === 1 && wire.from.path[0] === "value")
+        ) {
+          const target = wire.to.path.join(".");
+          const tmpl = reconstructTemplateStr(concatTk);
+          if (tmpl) {
+            lines.push(`  ${prefix}${target} <- ${tmpl}`);
+            continue;
+          }
+        }
+      }
+
+      // Skip internal pipe wires (targeting fork inputs)
+      if (
+        (wire as any).pipe &&
+        pipeHandleTrunkKeys.has(refTk(wire.to))
+      ) {
+        continue;
+      }
+    }
+
+    // Ternary wire: has `cond` (condition ref), `thenValue`/`thenRef`, `elseValue`/`elseRef`
+    if ("cond" in wire) {
+      const condWire = wire as any;
+      const target = wire.to.path.join(".");
+      const condStr = serToolRef(condWire.cond);
+      const thenVal =
+        "thenValue" in condWire
+          ? formatBareValue(condWire.thenValue)
+          : serToolRef(condWire.thenRef);
+      const elseVal =
+        "elseValue" in condWire
+          ? formatBareValue(condWire.elseValue)
+          : serToolRef(condWire.elseRef);
+      lines.push(
+        `  ${prefix}${target} <- ${condStr} ? ${thenVal} : ${elseVal}`,
+      );
+      continue;
+    }
+
     if ("value" in wire && !("cond" in wire)) {
       // Constant wire
       const target = wire.to.path.join(".");
@@ -196,7 +487,32 @@ function serializeToolBlock(tool: ToolDef): string {
       // Pull wire — reconstruct source from handle map
       const sourceStr = serializeToolWireSource(wire.from, tool);
       const target = wire.to.path.join(".");
-      lines.push(`  ${prefix}${target} <- ${sourceStr}`);
+      let suffix = "";
+      // Fallbacks: || (or) and ?? (nullish coalesce)
+      const fallbacks = (wire as any).fallbacks as
+        | Array<{
+            type: "or" | "nullish";
+            value?: string;
+            ref?: NodeRef;
+          }>
+        | undefined;
+      if (fallbacks) {
+        for (const fb of fallbacks) {
+          const op = fb.type === "nullish" ? "??" : "||";
+          if (fb.ref) {
+            suffix += ` ${op} ${serToolRef(fb.ref)}`;
+          } else if (fb.value != null) {
+            suffix += ` ${op} ${formatBareValue(fb.value)}`;
+          }
+        }
+      }
+      // Catch
+      if ((wire as any).catchFallbackRef) {
+        suffix += ` catch ${serToolRef((wire as any).catchFallbackRef)}`;
+      } else if ((wire as any).catchFallback != null) {
+        suffix += ` catch ${formatBareValue((wire as any).catchFallback)}`;
+      }
+      lines.push(`  ${prefix}${target} <- ${sourceStr}${suffix}`);
     }
   }
 
