@@ -5,7 +5,10 @@ import {
   serializeBridge,
 } from "../src/index.ts";
 import { BridgePanicError } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
+import { executeBridge as executeRuntime } from "@stackables/bridge-core";
+import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 // ── Parser / desugaring tests ─────────────────────────────────────────────
@@ -241,197 +244,220 @@ bridge Query.pricing {
 
 // ── Execution tests ───────────────────────────────────────────────────────
 
-// ── Execution tests ───────────────────────────────────────────────────────────
+// Direct execution helpers (for tests with serializer issues)
+const directEngines = [
+  { name: "runtime", execute: executeRuntime },
+  { name: "compiled", execute: executeCompiled },
+] as const;
 
-forEachEngine("ternary execution", (run, _ctx) => {
-  describe("truthy condition", () => {
-    test("selects then branch when condition is truthy", async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`,
-        "Query.pricing",
-        { isPro: true, proPrice: 99.99, basicPrice: 9.99 },
-      );
-      assert.equal((data as any).amount, 99.99);
-    });
+function directRun(
+  execute: typeof executeRuntime,
+  bridgeText: string,
+  operation: string,
+  input: Record<string, unknown>,
+  toolMap: Record<string, any> = {},
+) {
+  const raw = parseBridge(bridgeText);
+  const document = JSON.parse(JSON.stringify(raw));
+  return (execute as any)({ document, operation, input, tools: toolMap });
+}
 
-    test("selects else branch when condition is falsy", async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`,
-        "Query.pricing",
-        { isPro: false, proPrice: 99.99, basicPrice: 9.99 },
-      );
-      assert.equal((data as any).amount, 9.99);
-    });
-  });
+// ── Basic ternary: ref + literal branches ─────────────────────────────────
 
-  describe("literal branches", () => {
-    test("string literal then branch", async () => {
-      const bridge = `version 1.5
-bridge Query.label {
-  with input as i
-  with output as o
-  o.tier <- i.isPro ? "premium" : "basic"
-}`;
-      const pro = await run(bridge, "Query.label", { isPro: true });
-      assert.equal((pro.data as any).tier, "premium");
+regressionTest("ternary: basic + literal branches", {
+  bridge: `
+    version 1.5
 
-      const basic = await run(bridge, "Query.label", { isPro: false });
-      assert.equal((basic.data as any).tier, "basic");
-    });
+    bridge Ternary.basic {
+      with input as i
+      with output as o
 
-    test("numeric literal branches", async () => {
-      const bridge = `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-  o.discount <- i.isPro ? 20 : 0
-}`;
-      const pro = await run(bridge, "Query.pricing", { isPro: true });
-      assert.equal((pro.data as any).discount, 20);
+      o.amount <- i.isPro ? i.proPrice : i.basicPrice
+      o.tier <- i.isPro ? "premium" : "basic"
+      o.discount <- i.isPro ? 20 : 0
+    }
+  `,
+  scenarios: {
+    "Ternary.basic": {
+      "truthy condition selects then branches": {
+        input: { isPro: true, proPrice: 99.99, basicPrice: 9.99 },
+        assertData: { amount: 99.99, tier: "premium", discount: 20 },
+        assertTraces: 0,
+      },
+      "falsy condition selects else branches": {
+        input: { isPro: false, proPrice: 99.99, basicPrice: 9.99 },
+        assertData: { amount: 9.99, tier: "basic", discount: 0 },
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-      const basic = await run(bridge, "Query.pricing", { isPro: false });
-      assert.equal((basic.data as any).discount, 0);
-    });
-  });
+// ── Expression condition ──────────────────────────────────────────────────
 
-  describe("expression condition", () => {
-    test("i.age >= 18 selects then branch for adult", async () => {
-      const bridge = `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-  o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
-}`;
-      const adult = await run(bridge, "Query.check", {
-        age: 20,
-        proPrice: 99,
-        basicPrice: 9,
-      });
-      assert.equal((adult.data as any).result, 99);
+regressionTest("ternary: expression condition", {
+  bridge: `
+    version 1.5
 
-      const minor = await run(bridge, "Query.check", {
-        age: 15,
-        proPrice: 99,
-        basicPrice: 9,
-      });
-      assert.equal((minor.data as any).result, 9);
-    });
-  });
+    bridge Ternary.expression {
+      with input as i
+      with output as o
 
-  describe("fallbacks", () => {
-    test("|| literal fallback fires when chosen branch is null", async () => {
-      const bridge = `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
-}`;
-      // basicPrice is absent (null/undefined) → fallback 0
-      const { data } = await run(bridge, "Query.pricing", {
-        isPro: false,
-        proPrice: 99,
-      });
-      assert.equal((data as any).amount, 0);
-    });
+      o.result <- i.age >= 18 ? i.proPrice : i.basicPrice
+    }
+  `,
+  scenarios: {
+    "Ternary.expression": {
+      "adult (age >= 18) selects then branch": {
+        input: { age: 20, proPrice: 99, basicPrice: 9 },
+        assertData: { result: 99 },
+        assertTraces: 0,
+      },
+      "minor (age < 18) selects else branch": {
+        input: { age: 15, proPrice: 99, basicPrice: 9 },
+        assertData: { result: 9 },
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-    test("catch literal fallback fires when chosen branch throws", async () => {
-      const bridge = `version 1.5
-bridge Query.pricing {
-  with pro.getPrice as proTool
-  with input as i
-  with output as o
-  o.amount <- i.isPro ? proTool.price : i.basicPrice catch -1
-}`;
-      const tools = {
-        "pro.getPrice": async () => {
-          throw new Error("api down");
+// ── Fallbacks ─────────────────────────────────────────────────────────────
+
+regressionTest("ternary: fallbacks", {
+  bridge: `
+    version 1.5
+
+    bridge Ternary.literalFallback {
+      with input as i
+      with output as o
+
+      o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
+    }
+
+    bridge Ternary.catchFallback {
+      with test.multitool as proTool
+      with input as i
+      with output as o
+
+      proTool <- i.proTool
+
+      o.amount <- i.isPro ? proTool.price : i.basicPrice catch -1
+    }
+
+    bridge Ternary.refFallback {
+      with test.multitool as fb
+      with input as i
+      with output as o
+
+      fb <- i.fb
+
+      o.amount <- i.isPro ? i.proPrice : i.basicPrice || fb.defaultPrice
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Ternary.literalFallback": {
+      "falsy, basicPrice null → || 0 fires": {
+        input: { isPro: false, proPrice: 99 },
+        assertData: { amount: 0 },
+        assertTraces: 0,
+      },
+      "truthy, proPrice present → then branch": {
+        input: { isPro: true, proPrice: 99, basicPrice: 9 },
+        assertData: { amount: 99 },
+        assertTraces: 0,
+      },
+      "falsy, basicPrice present → else branch": {
+        input: { isPro: false, proPrice: 99, basicPrice: 9 },
+        assertData: { amount: 9 },
+        assertTraces: 0,
+      },
+    },
+    "Ternary.catchFallback": {
+      "truthy, proTool throws → catch fires": {
+        input: { isPro: true, basicPrice: 9, proTool: { _error: "api down" } },
+        assertData: { amount: -1 },
+        assertTraces: 1,
+      },
+      "truthy, proTool succeeds → then branch": {
+        input: { isPro: true, basicPrice: 9, proTool: { price: 99 } },
+        assertData: { amount: 99 },
+        assertTraces: 1,
+      },
+      "falsy → else branch": {
+        input: { isPro: false, basicPrice: 9 },
+        assertData: { amount: 9 },
+        assertTraces: 0,
+      },
+    },
+    "Ternary.refFallback": {
+      "falsy, basicPrice null → || fb.defaultPrice fires": {
+        input: { isPro: false, proPrice: 99, fb: { defaultPrice: 5 } },
+        assertData: { amount: 5 },
+        assertTraces: 1,
+      },
+      "truthy, proPrice present → then branch": {
+        input: { isPro: true, proPrice: 99, fb: { defaultPrice: 5 } },
+        assertData: { amount: 99 },
+        assertTraces: 1,
+      },
+      "falsy, basicPrice present → else branch": {
+        input: { isPro: false, basicPrice: 9, fb: { defaultPrice: 5 } },
+        assertData: { amount: 9 },
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── Tool branches (lazy evaluation) ───────────────────────────────────────
+
+regressionTest("ternary: tool branches (lazy evaluation)", {
+  bridge: `
+    version 1.5
+
+    bridge Ternary.toolBranches {
+      with test.multitool as proTool
+      with test.multitool as basicTool
+      with input as i
+      with output as o
+
+      proTool <- i.proTool
+      basicTool <- i.basicTool
+
+      o.price <- i.isPro ? proTool.price : basicTool.price
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Ternary.toolBranches": {
+      "truthy → only chosen branch tool fires": {
+        input: {
+          isPro: true,
+          proTool: { price: 99.99 },
+          basicTool: { price: 9.99 },
         },
-      };
-      const { data } = await run(
-        bridge,
-        "Query.pricing",
-        { isPro: true, basicPrice: 9 },
-        tools,
-      );
-      assert.equal((data as any).amount, -1);
-    });
-
-    test("|| sourceRef fallback fires when chosen branch is null", async () => {
-      const bridge = `version 1.5
-bridge Query.pricing {
-  with fallback.getPrice as fb
-  with input as i
-  with output as o
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice || fb.defaultPrice
-}`;
-      const tools = { "fallback.getPrice": async () => ({ defaultPrice: 5 }) };
-      // basicPrice absent → chosen branch null → fallback tool fires
-      const { data } = await run(
-        bridge,
-        "Query.pricing",
-        { isPro: false, proPrice: 99 },
-        tools,
-      );
-      assert.equal((data as any).amount, 5);
-    });
-  });
-
-  describe("tool branches (lazy evaluation)", () => {
-    test("only the chosen branch tool is called", async () => {
-      let proCalls = 0;
-      let basicCalls = 0;
-
-      const bridge = `version 1.5
-bridge Query.smartPrice {
-  with pro.getPrice as proTool
-  with basic.getPrice as basicTool
-  with input as i
-  with output as o
-  o.price <- i.isPro ? proTool.price : basicTool.price
-}`;
-      const tools = {
-        "pro.getPrice": async () => {
-          proCalls++;
-          return { price: 99.99 };
+        assertData: { price: 99.99 },
+        assertTraces: 1,
+      },
+      "falsy → only chosen branch tool fires": {
+        input: {
+          isPro: false,
+          proTool: { price: 99.99 },
+          basicTool: { price: 9.99 },
         },
-        "basic.getPrice": async () => {
-          basicCalls++;
-          return { price: 9.99 };
-        },
-      };
+        assertData: { price: 9.99 },
+        assertTraces: 1,
+      },
+    },
+  },
+});
 
-      // When isPro=true: only proTool should be called
-      const pro = await run(bridge, "Query.smartPrice", { isPro: true }, tools);
-      assert.equal((pro.data as any).price, 99.99);
-      assert.equal(proCalls, 1, "proTool called once");
-      assert.equal(basicCalls, 0, "basicTool not called");
+// ── Ternary in array mapping (serializer issues — direct execution) ──────
 
-      // When isPro=false: only basicTool should be called
-      const basic = await run(
-        bridge,
-        "Query.smartPrice",
-        { isPro: false },
-        tools,
-      );
-      assert.equal((basic.data as any).price, 9.99);
-      assert.equal(proCalls, 1, "proTool still called only once");
-      assert.equal(basicCalls, 1, "basicTool called once");
-    });
-  });
-
-  describe("in array mapping", () => {
-    test("ternary works inside array element mapping", async () => {
-      const bridge = `version 1.5
+describe("ternary in array mapping", () => {
+  const bridgeText = `version 1.5
 bridge Query.products {
   with catalog.list as api
   with output as o
@@ -440,26 +466,37 @@ bridge Query.products {
     .price <- item.isPro ? item.proPrice : item.basicPrice
   }
 }`;
-      const tools = {
-        "catalog.list": async () => ({
-          items: [
-            { name: "Widget", isPro: true, proPrice: 99, basicPrice: 9 },
-            { name: "Gadget", isPro: false, proPrice: 199, basicPrice: 19 },
-          ],
-        }),
-      };
-      const { data } = await run(bridge, "Query.products", {}, tools);
+  const catalogTools = {
+    "catalog.list": async () => ({
+      items: [
+        { name: "Widget", isPro: true, proPrice: 99, basicPrice: 9 },
+        { name: "Gadget", isPro: false, proPrice: 199, basicPrice: 19 },
+      ],
+    }),
+  };
+
+  for (const { name, execute } of directEngines) {
+    test(`[${name}] ternary works inside array element mapping`, async () => {
+      const { data } = await directRun(
+        execute,
+        bridgeText,
+        "Query.products",
+        {},
+        catalogTools,
+      );
       const products = data as any[];
       assert.equal(products[0].name, "Widget");
       assert.equal(products[0].price, 99, "isPro=true → proPrice");
       assert.equal(products[1].name, "Gadget");
       assert.equal(products[1].price, 19, "isPro=false → basicPrice");
     });
-  });
+  }
+});
 
-  describe("alias + fallback modifiers (Lazy Gate)", () => {
-    test("alias ternary + ?? panic fires on false branch → null", async () => {
-      const src = `version 1.5
+// ── Alias + ternary with panic/fallback (serializer issues — direct) ─────
+
+describe("alias + ternary with panic/fallback modifiers (Lazy Gate)", () => {
+  const geoSrc = `version 1.5
 bridge Query.location {
   with geoApi as geo
   with input as i
@@ -472,107 +509,114 @@ bridge Query.location {
   o.lat <- geo[0].lat
   o.lon <- geo[0].lon
 }`;
-      const tools = {
-        geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
-      };
-      await assert.rejects(
-        () => run(src, "Query.location", { age: 15, city: "Zurich" }, tools),
-        (err: Error) => {
-          assert.ok(err instanceof BridgePanicError);
-          assert.equal(err.message, "Must be 18 or older");
-          return true;
-        },
-      );
-    });
+  const geoTools = {
+    geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
+  };
 
-    test("alias ternary + ?? panic does NOT fire when condition is true", async () => {
-      const src = `version 1.5
-bridge Query.location {
-  with geoApi as geo
-  with input as i
-  with output as o
+  for (const { name, execute } of directEngines) {
+    describe(`[${name}]`, () => {
+      test("alias ternary + ?? panic fires on false branch → null", async () => {
+        await assert.rejects(
+          () =>
+            directRun(
+              execute,
+              geoSrc,
+              "Query.location",
+              { age: 15, city: "Zurich" },
+              geoTools,
+            ),
+          (err: Error) => {
+            assert.ok(err instanceof BridgePanicError);
+            assert.equal(err.message, "Must be 18 or older");
+            return true;
+          },
+        );
+      });
 
-  alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
+      test("alias ternary + ?? panic does NOT fire when condition is true", async () => {
+        const { data } = await directRun(
+          execute,
+          geoSrc,
+          "Query.location",
+          { age: 25, city: "Zurich" },
+          geoTools,
+        );
+        assert.equal((data as any).lat, 47.37);
+        assert.equal((data as any).lon, 8.54);
+      });
 
-  geo.q <- ageChecked?.city
-
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
-}`;
-      const tools = {
-        geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
-      };
-      const { data } = await run(
-        src,
-        "Query.location",
-        { age: 25, city: "Zurich" },
-        tools,
-      );
-      assert.equal((data as any).lat, 47.37);
-      assert.equal((data as any).lon, 8.54);
-    });
-
-    test("alias ternary + || literal fallback", async () => {
-      const src = `version 1.5
+      test("alias ternary + || literal fallback", async () => {
+        const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   alias i.score >= 50 ? i.grade : null || "F" as grade
   o.grade <- grade
 }`;
-      const { data } = await run(src, "Query.test", { score: 30 });
-      assert.equal((data as any).grade, "F");
-    });
+        const { data } = await directRun(execute, src, "Query.test", {
+          score: 30,
+        });
+        assert.equal((data as any).grade, "F");
+      });
 
-    test("alias ternary + || ref fallback", async () => {
-      const src = `version 1.5
+      test("alias ternary + || ref fallback", async () => {
+        const src = `version 1.5
 bridge Query.test {
-  with fallback.api as fb
+  with test.multitool as fb
   with input as i
   with output as o
+  fb <- i.fb
   alias i.score >= 50 ? i.grade : null || fb.grade as grade
   o.grade <- grade
 }`;
-      const tools = {
-        "fallback.api": async () => ({ grade: "F" }),
-      };
-      const { data } = await run(src, "Query.test", { score: 30 }, tools);
-      assert.equal((data as any).grade, "F");
-    });
+        const { data } = await directRun(
+          execute,
+          src,
+          "Query.test",
+          { score: 30, fb: { grade: "F" } },
+          tools as any,
+        );
+        assert.equal((data as any).grade, "F");
+      });
 
-    test("alias ternary + catch literal fallback", async () => {
-      const src = `version 1.5
+      test("alias ternary + catch literal fallback", async () => {
+        const src = `version 1.5
 bridge Query.test {
-  with api as a
+  with test.multitool as a
+  with input as i
   with output as o
+  a <- i.a
   alias a.ok ? a.value : a.alt catch "safe" as result
   o.val <- result
 }`;
-      const tools = {
-        api: async () => {
-          throw new Error("boom");
-        },
-      };
-      const { data } = await run(src, "Query.test", {}, tools);
-      assert.equal((data as any).val, "safe");
-    });
+        const { data } = await directRun(
+          execute,
+          src,
+          "Query.test",
+          { a: { _error: "boom" } },
+          tools as any,
+        );
+        assert.equal((data as any).val, "safe");
+      });
 
-    test("string alias ternary + ?? panic", async () => {
-      const src = `version 1.5
+      test("string alias ternary + ?? panic", async () => {
+        const src = `version 1.5
 bridge Query.test {
   with input as i
   with output as o
   alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
   o.msg <- result
 }`;
-      await assert.rejects(
-        () => run(src, "Query.test", { secret: "world" }),
-        (err: Error) => {
-          assert.ok(err instanceof BridgePanicError);
-          assert.equal(err.message, "wrong secret");
-          return true;
-        },
-      );
+        await assert.rejects(
+          () =>
+            directRun(execute, src, "Query.test", { secret: "world" }),
+          (err: Error) => {
+            assert.ok(err instanceof BridgePanicError);
+            assert.equal(err.message, "wrong secret");
+            return true;
+          },
+        );
+      });
     });
-  });
+  }
 });
