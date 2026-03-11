@@ -1418,10 +1418,11 @@ bridge Query.test {
     assert.deepStrictEqual(callLog, []);
   });
 
-  test("two tools — second skipped when first resolves non-null", async () => {
-    const callLog: string[] = [];
-    const result = await compileAndRun(
-      `version 1.5
+  test("two tools — compile rejects unsupported same-cost tool overdefinition", async () => {
+    await assert.rejects(
+      () =>
+        compileAndRun(
+          `version 1.5
 bridge Query.test {
   with svcA
   with svcB
@@ -1433,21 +1434,15 @@ bridge Query.test {
   o.label <- svcA.label
   o.label <- svcB.label
 }`,
-      "Query.test",
-      { q: "test" },
-      {
-        svcA: () => {
-          callLog.push("svcA");
-          return { label: "from-A" };
-        },
-        svcB: () => {
-          callLog.push("svcB");
-          return { label: "from-B" };
-        },
-      },
+          "Query.test",
+          { q: "test" },
+          {
+            svcA: () => ({ label: "from-A" }),
+            svcB: () => ({ label: "from-B" }),
+          },
+        ),
+      /BridgeCompilerIncompatibleError|Tool-only overdefinition/i,
     );
-    assert.equal(result.label, "from-A");
-    assert.deepStrictEqual(callLog, ["svcA"], "svcB should NOT be called");
   });
 
   test("tool with multiple fields — not skipped if one field is primary", async () => {

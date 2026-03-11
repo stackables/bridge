@@ -1067,7 +1067,12 @@ export class ExecutionTree implements TreeContext {
         Promise.resolve(this.state[key]).catch(() => {});
       } else {
         // Critical: caller must await and let failure propagate.
-        critical.push(Promise.resolve(this.state[key]));
+        critical.push(
+          Promise.resolve(this.state[key]).catch((err) => {
+            if (isFatalError(err)) throw err;
+            throw wrapBridgeRuntimeError(err, {});
+          }),
+        );
       }
     }
     return critical;

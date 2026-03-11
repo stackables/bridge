@@ -28,12 +28,13 @@ describe("builtin tools", () => {
       "Query.format": {
         "all string operations": {
           input: { text: "  Hello  " },
-          assertData: (data) => {
-            assert.equal(data.upper, "  HELLO  ");
-            assert.equal(data.lower, "  hello  ");
-            assert.equal(data.trimmed, "Hello");
-            assert.equal(data.len, 9);
+          assertData: {
+            upper: "  HELLO  ",
+            lower: "  hello  ",
+            trimmed: "Hello",
+            len: 9,
           },
+          assertTraces: 0,
         },
         "std override replaces tools": {
           input: { text: "Hello" },
@@ -48,16 +49,32 @@ describe("builtin tools", () => {
               },
             },
           },
-          assertData: (data) => {
-            assert.equal(data.upper, "olleH");
-          },
+          assertData: { upper: "olleH" },
+          assertTraces: 4,
         },
         "missing std tool when namespace overridden": {
           input: { text: "Hello" },
           tools: {
             std: { somethingElse: () => ({}) },
           },
-          assertError: () => {},
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 0,
+        },
+        "uppercase tool failure propagates": {
+          input: { text: "Hello" },
+          tools: {
+            std: {
+              ...std,
+              str: {
+                ...std.str,
+                toUpperCase: () => {
+                  throw new Error("up error");
+                },
+              },
+            },
+          },
+          assertError: /up error/i,
+          assertTraces: 1,
         },
       },
     },
@@ -85,10 +102,8 @@ describe("builtin tools", () => {
       "Query.process": {
         "custom tools merge alongside std": {
           input: { text: "Hello" },
-          assertData: (data) => {
-            assert.equal(data.upper, "HELLO");
-            assert.equal(data.custom, "olleH");
-          },
+          assertData: { upper: "HELLO", custom: "olleH" },
+          assertTraces: 1,
         },
       },
     },
@@ -126,12 +141,11 @@ describe("builtin tools", () => {
         "filters array by criteria": {
           input: {},
           allowDowngrade: true,
-          assertData: (data) => {
-            assert.deepEqual(data, [
-              { id: 1, name: "Alice" },
-              { id: 3, name: "Charlie" },
-            ]);
-          },
+          assertData: [
+            { id: 1, name: "Alice" },
+            { id: 3, name: "Charlie" },
+          ],
+          assertTraces: 1,
         },
         "empty when no matches": {
           input: {},
@@ -141,9 +155,19 @@ describe("builtin tools", () => {
               users: [{ id: 2, name: "Bob", role: "editor" }],
             }),
           },
-          assertData: (data) => {
-            assert.deepEqual(data, []);
+          assertData: [],
+          assertTraces: 1,
+        },
+        "users source error propagates": {
+          input: {},
+          allowDowngrade: true,
+          tools: {
+            getUsers: async () => {
+              throw new Error("db.users error");
+            },
           },
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 1,
         },
       },
     },
@@ -181,9 +205,36 @@ describe("builtin tools", () => {
         "finds object in array": {
           input: { role: "editor" },
           allowDowngrade: true,
-          assertData: (data) => {
-            assert.deepEqual(data, { id: 2, name: "Bob", role: "editor" });
+          assertData: { id: 2, name: "Bob", role: "editor" },
+          assertTraces: 1,
+        },
+        "users source error propagates": {
+          input: { role: "editor" },
+          allowDowngrade: true,
+          tools: {
+            getUsers: async () => {
+              throw new Error("db.users error");
+            },
           },
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 1,
+        },
+        "find tool failure propagates to projected fields": {
+          input: { role: "editor" },
+          allowDowngrade: true,
+          tools: {
+            std: {
+              ...std,
+              arr: {
+                ...std.arr,
+                find: () => {
+                  throw new Error("find.id error");
+                },
+              },
+            },
+          },
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 2,
         },
       },
     },
@@ -206,9 +257,24 @@ describe("builtin tools", () => {
       "Query.first": {
         "picks first element via pipe": {
           input: { items: ["a", "b", "c"] },
-          assertData: (data) => {
-            assert.equal(data.value, "a");
+          assertData: { value: "a" },
+          assertTraces: 0,
+        },
+        "first tool failure propagates": {
+          input: { items: ["a", "b"] },
+          tools: {
+            std: {
+              ...std,
+              arr: {
+                ...std.arr,
+                first: () => {
+                  throw new Error("pf error");
+                },
+              },
+            },
           },
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 1,
         },
       },
     },
@@ -235,13 +301,13 @@ describe("builtin tools", () => {
       "Query.onlyOne": {
         "strict passes with one element": {
           input: { items: ["only"] },
-          assertData: (data) => {
-            assert.equal(data.value, "only");
-          },
+          assertData: { value: "only" },
+          assertTraces: 0,
         },
         "strict errors with multiple elements": {
           input: { items: ["a", "b"] },
-          assertError: () => {},
+          assertError: /RuntimeError/,
+          assertTraces: 0,
         },
       },
     },
@@ -271,10 +337,34 @@ describe("builtin tools", () => {
       "Query.normalize": {
         "round-trip and normalization": {
           input: { value: "hello" },
-          assertData: (data) => {
-            assert.equal(data.roundTrip, "hello");
-            assert.equal(data.count, 1);
+          assertData: { roundTrip: "hello", count: 1 },
+          assertTraces: 1,
+        },
+        "toArray tool failure propagates": {
+          input: { value: "hello" },
+          tools: {
+            std: {
+              ...std,
+              arr: {
+                ...std.arr,
+                toArray: () => {
+                  throw new Error("ta error");
+                },
+              },
+            },
           },
+          assertError: /ta error/i,
+          assertTraces: 2,
+        },
+        "count tool failure propagates": {
+          input: { value: "hello" },
+          tools: {
+            countItems: () => {
+              throw new Error("cnt.count error");
+            },
+          },
+          assertError: /cnt\.count error/i,
+          assertTraces: 1,
         },
       },
     },
@@ -306,9 +396,8 @@ describe("builtin tools", () => {
       "Query.search": {
         "forced audit logs via engine logger": {
           input: { q: "bridge" },
-          assertData: (data) => {
-            assert.equal(data.title, "Result for bridge");
-          },
+          assertData: { title: "Result for bridge" },
+          assertTraces: 1,
           assertLogs: (logs) => {
             const auditEntry = logs.find(
               (l) => l.level === "info" && l.args[1] === "[bridge:audit]",
@@ -331,7 +420,8 @@ describe("builtin tools", () => {
               },
             },
           },
-          assertError: () => {},
+          assertError: /BridgeRuntimeError/,
+          assertTraces: 2,
         },
       },
     },
@@ -367,9 +457,8 @@ describe("builtin tools", () => {
       "Query.search": {
         "catch null swallows audit error": {
           input: { q: "test" },
-          assertData: (data) => {
-            assert.equal(data.title, "OK");
-          },
+          assertData: { title: "OK" },
+          assertTraces: 2,
         },
       },
     },

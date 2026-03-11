@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 

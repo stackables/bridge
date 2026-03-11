@@ -734,7 +734,7 @@ class CodegenContext {
     );
     lines.push(`    if (err?.name === "BridgeAbortError") throw err;`);
     lines.push(
-      `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc !== undefined) throw err;`,
+      `    if (err?.name === "BridgeRuntimeError" && err.bridgeLoc != null) throw err;`,
     );
     lines.push(
       `    throw new __BridgeRuntimeError(err instanceof Error ? err.message : String(err), { cause: err, bridgeLoc: loc });`,
@@ -816,10 +816,13 @@ class CodegenContext {
     lines.push(
       `    if (__signal?.aborted) return Promise.reject(new __BridgeAbortError());`,
     );
+    lines.push(
+      `    if (typeof fn !== "function") return Promise.reject(new __BridgeRuntimeError('No tool found for "' + toolName + '"'));`,
+    );
     lines.push(`    let queue = __batchQueues.get(fn);`);
     lines.push(`    if (!queue) {`);
     lines.push(
-      `      queue = { items: [], scheduled: false, toolName, maxBatchSize: typeof fn.bridge?.batch === "object" && fn.bridge?.batch?.maxBatchSize > 0 ? Math.floor(fn.bridge.batch.maxBatchSize) : undefined };`,
+      `      queue = { items: [], scheduled: false, toolName, maxBatchSize: typeof fn?.bridge?.batch === "object" && fn?.bridge?.batch?.maxBatchSize > 0 ? Math.floor(fn.bridge.batch.maxBatchSize) : undefined };`,
     );
     lines.push(`      __batchQueues.set(fn, queue);`);
     lines.push(`    }`);
@@ -870,7 +873,7 @@ class CodegenContext {
     lines.push(`          result = await batchPromise;`);
     lines.push(`        }`);
     lines.push(
-      `        if (__trace && fn.bridge?.trace !== false) __trace(queue.toolName, startTime, performance.now(), inputs, result, null);`,
+      `        if (__trace && fn?.bridge?.trace !== false) __trace(queue.toolName, startTime, performance.now(), inputs, result, null);`,
     );
     lines.push(`        const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -887,7 +890,10 @@ class CodegenContext {
     );
     lines.push(`      } catch (err) {`);
     lines.push(
-      `        if (__trace && fn.bridge?.trace !== false) __trace(queue.toolName, startTime, performance.now(), inputs, null, err);`,
+      `        try { __rethrowBridgeError(err, undefined); } catch (_wrapped) { err = _wrapped; }`,
+    );
+    lines.push(
+      `        if (__trace && fn?.bridge?.trace !== false) __trace(queue.toolName, startTime, performance.now(), inputs, null, err);`,
     );
     lines.push(`        const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(
@@ -900,6 +906,9 @@ class CodegenContext {
     // Sync tool caller — no await, no timeout, enforces no-promise return.
     lines.push(`  function __callSync(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
+    lines.push(
+      `    if (typeof fn !== "function") throw new __BridgeRuntimeError('No tool found for "' + toolName + '"');`,
+    );
     lines.push(`    const start = __trace ? performance.now() : 0;`);
     lines.push(`    try {`);
     lines.push(`      const result = fn(input, __ctx);`);
@@ -907,7 +916,7 @@ class CodegenContext {
       `      if (result && typeof result.then === "function") throw new Error("Tool \\"" + toolName + "\\" declared {sync:true} but returned a Promise");`,
     );
     lines.push(
-      `      if (__trace && fn.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, result, null);`,
+      `      if (__trace && fn?.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, result, null);`,
     );
     lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -916,13 +925,13 @@ class CodegenContext {
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
-      `      if (__trace && fn.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, null, err);`,
+      `      if (__trace && fn?.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, null, err);`,
     );
     lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(
       `      if (__errorLevel) __ctx.logger?.[__errorLevel]?.({ tool: toolName, fn: toolName, err: err instanceof Error ? err.message : String(err) }, "[bridge] tool failed");`,
     );
-    lines.push(`      throw err;`);
+    lines.push(`      __rethrowBridgeError(err, undefined);`);
     lines.push(`    }`);
     lines.push(`  }`);
     lines.push(
@@ -934,6 +943,9 @@ class CodegenContext {
     // Async tool caller — full promise handling with optional timeout.
     lines.push(`  async function __call(fn, input, toolName) {`);
     lines.push(`    if (__signal?.aborted) throw new __BridgeAbortError();`);
+    lines.push(
+      `    if (typeof fn !== "function") throw new __BridgeRuntimeError('No tool found for "' + toolName + '"');`,
+    );
     lines.push(`    const start = __trace ? performance.now() : 0;`);
     lines.push(`    try {`);
     lines.push(`      const p = fn(input, __ctx);`);
@@ -949,7 +961,7 @@ class CodegenContext {
     lines.push(`        result = await p;`);
     lines.push(`      }`);
     lines.push(
-      `      if (__trace && fn.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, result, null);`,
+      `      if (__trace && fn?.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, result, null);`,
     );
     lines.push(`      const __execLevel = __toolExecutionLogLevel(fn);`);
     lines.push(
@@ -958,13 +970,13 @@ class CodegenContext {
     lines.push(`      return result;`);
     lines.push(`    } catch (err) {`);
     lines.push(
-      `      if (__trace && fn.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, null, err);`,
+      `      if (__trace && fn?.bridge?.trace !== false) __trace(toolName, start, performance.now(), input, null, err);`,
     );
     lines.push(`      const __errorLevel = __toolErrorLogLevel(fn);`);
     lines.push(
       `      if (__errorLevel) __ctx.logger?.[__errorLevel]?.({ tool: toolName, fn: toolName, err: err instanceof Error ? err.message : String(err) }, "[bridge] tool failed");`,
     );
-    lines.push(`      throw err;`);
+    lines.push(`      __rethrowBridgeError(err, undefined);`);
     lines.push(`    }`);
     lines.push(`  }`);
     if (this.memoizedToolKeys.size > 0) {
@@ -1000,7 +1012,7 @@ class CodegenContext {
       lines.push(`    if (cached !== undefined) return cached;`);
       lines.push(`    try {`);
       lines.push(
-        `      const result = fn.bridge?.batch ? __callBatch(fn, input, toolName) : fn.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
+        `      const result = fn?.bridge?.batch ? __callBatch(fn, input, toolName) : fn?.bridge?.sync ? __callSync(fn, input, toolName) : __call(fn, input, toolName);`,
       );
       lines.push(`      if (result && typeof result.then === "function") {`);
       lines.push(
@@ -1239,7 +1251,7 @@ class CodegenContext {
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `await __callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
     }
-    return `(${fn}.bridge?.batch ? await __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
+    return `(${fn}?.bridge?.batch ? await __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}?.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : await __call(${fn}, ${inputObj}, ${name}))`;
   }
 
   /**
@@ -1256,7 +1268,7 @@ class CodegenContext {
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `__callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
     }
-    return `(${fn}.bridge?.batch ? __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
+    return `(${fn}?.bridge?.batch ? __callBatch(${fn}, ${inputObj}, ${name}) : ${fn}?.bridge?.sync ? __callSync(${fn}, ${inputObj}, ${name}) : __call(${fn}, ${inputObj}, ${name}))`;
   }
 
   /**
@@ -1307,9 +1319,15 @@ class CodegenContext {
           tool.trunkKey,
         );
         const pullingLoc = this.findPullingWireLoc(tool.trunkKey);
-        lines.push(
-          `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
-        );
+        if (pullingLoc) {
+          lines.push(
+            `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
+          );
+        } else {
+          lines.push(
+            `  const ${tool.varName} = await __wrapBridgeErrorAsync(async () => (${callExpr}), null);`,
+          );
+        }
       }
       return;
     }
@@ -1523,9 +1541,15 @@ class CodegenContext {
     } else {
       const callExpr = this.syncAwareCall(fnName, inputObj, tool.trunkKey);
       const pullingLoc = this.findPullingWireLoc(tool.trunkKey);
-      lines.push(
-        `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
-      );
+      if (pullingLoc) {
+        lines.push(
+          `  const ${tool.varName} = ${this.wrapExprWithLoc(callExpr, pullingLoc)};`,
+        );
+      } else {
+        lines.push(
+          `  const ${tool.varName} = await __wrapBridgeErrorAsync(async () => (${callExpr}), null);`,
+        );
+      }
     }
   }
 

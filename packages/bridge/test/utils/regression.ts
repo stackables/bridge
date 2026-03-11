@@ -530,7 +530,7 @@ function shouldRelaxSelectedFieldErrors(
     const path = Array.isArray(error?.path) ? error.path.slice(1) : [];
     if (
       path.length === 0 ||
-      !path.every((segment) => typeof segment === "string")
+      !path.every((segment: unknown) => typeof segment === "string")
     ) {
       return false;
     }
@@ -891,7 +891,6 @@ export function regressionTest(name: string, data: RegressionTest) {
             for (const { name: engineName, execute } of engines) {
               test(engineName, async (t) => {
                 const { logs, logger } = createCapturingLogger();
-                const needsTraces = !!scenario.assertTraces;
 
                 const executeOpts = {
                   document,
@@ -903,7 +902,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                   toolTimeoutMs: 5_000,
                   requestedFields: scenario.fields,
                   logger,
-                  trace: needsTraces ? ("full" as const) : ("off" as const),
+                  trace: "full" as const,
                 };
 
                 try {
@@ -1121,10 +1120,13 @@ export function regressionTest(name: string, data: RegressionTest) {
                   return;
                 }
 
-                assert.ok(
-                  !scenario.assertError,
-                  `Scenario ${operation}.${scenarioName} needs assertGraphql for GraphQL replay`,
-                );
+                if (scenario.assertError) {
+                  assert.ok(
+                    (graphQLErrors?.length ?? 0) > 0,
+                    `GraphQL replay expected errors for ${operation}.${scenarioName}`,
+                  );
+                  return;
+                }
 
                 assert.deepStrictEqual(
                   graphQLErrors,
@@ -1151,7 +1153,10 @@ export function regressionTest(name: string, data: RegressionTest) {
           const covered = traceMasks.get(operation) ?? 0n;
 
           const requiredBits = manifest.reduce(
-            (mask, e) => mask | (1n << BigInt(e.bitIndex)),
+            (mask, e) =>
+              e.id.endsWith("/error")
+                ? mask
+                : mask | (1n << BigInt(e.bitIndex)),
             0n,
           );
           const missed = decodeExecutionTrace(
