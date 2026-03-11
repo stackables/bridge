@@ -1,87 +1,52 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
 
-const bridgeText = `version 1.5
-bridge Query.livingStandard {
-  with hereapi.geocode as gc
-  with companyX.getLivingStandard as cx
-  with input as i
-  with toInt as ti
-  with output as out
+// ═══════════════════════════════════════════════════════════════════════════
+// Chained providers
+//
+// Tests that output from one tool flows correctly as input to the next.
+// Uses test.multitool (echo) to verify wire routing across a 3-tool chain:
+//   input → gc → cx → ti → output
+// ═══════════════════════════════════════════════════════════════════════════
 
-gc.q <- i.location
-cx.x <- gc.lat
-cx.y <- gc.lon
-ti.value <- cx.lifeExpectancy
-out.lifeExpectancy <- ti.result
+regressionTest("chained providers", {
+  bridge: `
+    version 1.5
 
-}`;
+    bridge Chained.livingStandard {
+      with test.multitool as gc
+      with test.multitool as cx
+      with test.multitool as ti
+      with input as i
+      with output as out
 
-const chainedTools: Record<string, any> = {
-  "hereapi.geocode": async (_params: any) => {
-    return { lat: 52.53, lon: 13.38 };
-  },
-  "companyX.getLivingStandard": async (params: any) => {
-    if (params.x === 52.53 && params.y === 13.38) {
-      return { lifeExpectancy: "81.5" };
+      gc <- i.gc
+      cx.x <- gc.lat
+      cx.y <- gc.lon
+      cx.lifeExpectancy <- gc.lifeExpectancy
+      ti.value <- cx.lifeExpectancy
+      out.lifeExpectancy <- ti.value
+      out.geoLat <- cx.x
+      out.geoLon <- cx.y
     }
-    throw new Error(`Unexpected params: ${JSON.stringify(params)}`);
+  `,
+  tools: tools,
+  scenarios: {
+    "Chained.livingStandard": {
+      "input → gc → cx → ti → output": {
+        input: { gc: { lat: 52.53, lon: 13.38, lifeExpectancy: "81.5" } },
+        assertData: {
+          lifeExpectancy: "81.5",
+          geoLat: 52.53,
+          geoLon: 13.38,
+        },
+        assertTraces: 3,
+      },
+      "gc error → chain fails": {
+        input: { gc: { _error: "geocode failed" } },
+        assertError: /geocode failed/,
+        assertTraces: 1,
+      },
+    },
   },
-  toInt: (params: { value: string }) => ({
-    result: Math.round(parseFloat(params.value)),
-  }),
-};
-
-forEachEngine("chained providers", (run) => {
-  test("input -> geocode -> livingStandard -> tool -> output", async () => {
-    const { data } = await run(
-      bridgeText,
-      "Query.livingStandard",
-      { location: "Berlin" },
-      chainedTools,
-    );
-    assert.equal(data.lifeExpectancy, 82);
-  });
-
-  test("geocode receives input params", async () => {
-    let geoParams: Record<string, any> = {};
-    const spy = async (params: any) => {
-      geoParams = params;
-      return chainedTools["hereapi.geocode"](params);
-    };
-
-    await run(
-      bridgeText,
-      "Query.livingStandard",
-      { location: "Berlin" },
-      {
-        ...chainedTools,
-        "hereapi.geocode": spy,
-      },
-    );
-
-    assert.equal(geoParams.q, "Berlin");
-  });
-
-  test("companyX receives chained geocode output", async () => {
-    let cxParams: Record<string, any> = {};
-    const spy = async (params: any) => {
-      cxParams = params;
-      return chainedTools["companyX.getLivingStandard"](params);
-    };
-
-    await run(
-      bridgeText,
-      "Query.livingStandard",
-      { location: "Berlin" },
-      {
-        ...chainedTools,
-        "companyX.getLivingStandard": spy,
-      },
-    );
-
-    assert.equal(cxParams.x, 52.53);
-    assert.equal(cxParams.y, 13.38);
-  });
 });
