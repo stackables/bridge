@@ -61,7 +61,7 @@ bridge Query.demo {
 
   // ── Fallback chains ───────────────────────────────────────────────────────
 
-  test("|| fallback — 2 traversals (primary + fallback)", () => {
+  test("|| fallback — 2 non-error traversals (primary + fallback)", () => {
     const bridge = getBridge(`version 1.5
 bridge Query.demo {
   with a
@@ -74,7 +74,7 @@ bridge Query.demo {
 }`);
     const entries = enumerateTraversalIds(bridge);
     const labelEntries = entries.filter(
-      (e) => e.target.includes("label") && e.target.length === 1,
+      (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
     assert.equal(labelEntries.length, 2);
     assert.equal(labelEntries[0].kind, "primary");
@@ -83,7 +83,7 @@ bridge Query.demo {
     assert.equal(labelEntries[1].fallbackIndex, 0);
   });
 
-  test("?? fallback — 2 traversals (primary + nullish fallback)", () => {
+  test("?? fallback — 2 non-error traversals (primary + nullish fallback)", () => {
     const bridge = getBridge(`version 1.5
 bridge Query.demo {
   with api
@@ -94,7 +94,7 @@ bridge Query.demo {
 }`);
     const entries = enumerateTraversalIds(bridge);
     const labelEntries = entries.filter(
-      (e) => e.target.includes("label") && e.target.length === 1,
+      (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
     assert.equal(labelEntries.length, 2);
     assert.equal(labelEntries[0].kind, "primary");
@@ -102,7 +102,7 @@ bridge Query.demo {
     assert.equal(labelEntries[1].gateType, "nullish");
   });
 
-  test("|| || — 3 traversals (primary + 2 fallbacks)", () => {
+  test("|| || — 3 non-error traversals (primary + 2 fallbacks)", () => {
     const bridge = getBridge(`version 1.5
 bridge Query.demo {
   with a
@@ -115,7 +115,7 @@ bridge Query.demo {
 }`);
     const entries = enumerateTraversalIds(bridge);
     const labelEntries = entries.filter(
-      (e) => e.target.includes("label") && e.target.length === 1,
+      (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
     assert.equal(labelEntries.length, 3);
     assert.equal(labelEntries[0].kind, "primary");
@@ -166,6 +166,191 @@ bridge Query.demo {
     assert.equal(resultEntries[0].kind, "primary");
     assert.equal(resultEntries[1].kind, "fallback");
     assert.equal(resultEntries[2].kind, "catch");
+  });
+
+  // ── Error traversal entries ───────────────────────────────────────────────
+
+  test("a.label || b.label — 4 traversals (primary, fallback, primary/error, fallback/error)", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with a
+  with b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label || b.label
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
+    );
+    assert.equal(labelEntries.length, 4);
+    // Non-error entries come first
+    assert.equal(labelEntries[0].kind, "primary");
+    assert.ok(!labelEntries[0].error);
+    assert.equal(labelEntries[1].kind, "fallback");
+    assert.ok(!labelEntries[1].error);
+    // Error entries come after
+    assert.equal(labelEntries[2].kind, "primary");
+    assert.ok(labelEntries[2].error);
+    assert.equal(labelEntries[3].kind, "fallback");
+    assert.ok(labelEntries[3].error);
+  });
+
+  test("a.label || b?.label — 3 traversals (primary, fallback, primary/error)", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with a
+  with b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label || b?.label
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
+    );
+    assert.equal(labelEntries.length, 3);
+    // Non-error entries come first
+    assert.equal(labelEntries[0].kind, "primary");
+    assert.ok(!labelEntries[0].error);
+    assert.equal(labelEntries[1].kind, "fallback");
+    assert.ok(!labelEntries[1].error);
+    // b?.label has rootSafe — no error entry for fallback
+    assert.equal(labelEntries[2].kind, "primary");
+    assert.ok(labelEntries[2].error);
+  });
+
+  test("a.label || b.label catch 'whatever' — 3 traversals (primary, fallback, catch)", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with a
+  with b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label || b.label catch "whatever"
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
+    );
+    // catch absorbs all errors — no error entries for primary or fallback
+    assert.equal(labelEntries.length, 3);
+    assert.equal(labelEntries[0].kind, "primary");
+    assert.ok(!labelEntries[0].error);
+    assert.equal(labelEntries[1].kind, "fallback");
+    assert.ok(!labelEntries[1].error);
+    assert.equal(labelEntries[2].kind, "catch");
+    assert.ok(!labelEntries[2].error);
+  });
+
+  test("catch with tool ref — catch/error entry added", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with a
+  with b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label catch b.fallback
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const labelEntries = entries.filter(
+      (e) => e.target.includes("label") && e.target.length === 1,
+    );
+    // primary + catch + catch/error
+    assert.equal(labelEntries.length, 3);
+    assert.equal(labelEntries[0].kind, "primary");
+    assert.ok(!labelEntries[0].error);
+    assert.equal(labelEntries[1].kind, "catch");
+    assert.ok(!labelEntries[1].error);
+    assert.equal(labelEntries[2].kind, "catch");
+    assert.ok(labelEntries[2].error);
+  });
+
+  test("simple pull wire — primary + primary/error", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.result <- api.value
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const resultEntries = entries.filter(
+      (e) => e.target.includes("result") && e.target.length === 1,
+    );
+    assert.equal(resultEntries.length, 2);
+    assert.equal(resultEntries[0].kind, "primary");
+    assert.ok(!resultEntries[0].error);
+    assert.equal(resultEntries[1].kind, "primary");
+    assert.ok(resultEntries[1].error);
+  });
+
+  test("input ref wire — no error entry (inputs cannot throw)", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.result <- api.value
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const qEntries = entries.filter(
+      (e) => e.target.includes("q") && e.target.length === 1,
+    );
+    // i.q is an input ref — no error entry
+    assert.equal(qEntries.length, 1);
+    assert.equal(qEntries[0].kind, "primary");
+    assert.ok(!qEntries[0].error);
+  });
+
+  test("safe (?.) wire — no primary/error entry", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.result <- api?.value
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const resultEntries = entries.filter(
+      (e) => e.target.includes("result") && e.target.length === 1,
+    );
+    // rootSafe ref — canRefError returns false, no error entry
+    assert.equal(resultEntries.length, 1);
+    assert.equal(resultEntries[0].kind, "primary");
+    assert.ok(!resultEntries[0].error);
+  });
+
+  test("error entries have unique IDs", () => {
+    const bridge = getBridge(`version 1.5
+bridge Query.demo {
+  with a
+  with b
+  with input as i
+  with output as o
+  a.q <- i.q
+  b.q <- i.q
+  o.label <- a.label || b.label
+}`);
+    const entries = enumerateTraversalIds(bridge);
+    const allIds = ids(entries);
+    const unique = new Set(allIds);
+    assert.equal(
+      unique.size,
+      allIds.length,
+      `IDs must be unique: ${JSON.stringify(allIds)}`,
+    );
   });
 
   // ── Array iterators ───────────────────────────────────────────────────────
@@ -641,5 +826,68 @@ bridge Query.demo {
     assert.equal(typeof executionTraceId, "bigint");
     const hex = `0x${executionTraceId.toString(16)}`;
     assert.ok(hex.startsWith("0x"), "should be hex-encodable");
+  });
+
+  test("primary error bit is set when tool throws", async () => {
+    const doc = getDoc(`version 1.5
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.lat <- api.lat
+}`);
+    try {
+      await executeBridge({
+        document: doc,
+        operation: "Query.demo",
+        input: { q: "test" },
+        tools: {
+          api: async () => {
+            throw new Error("boom");
+          },
+        },
+      });
+      assert.fail("should have thrown");
+    } catch (err: any) {
+      const executionTraceId: bigint = err.executionTraceId;
+      assert.ok(
+        typeof executionTraceId === "bigint",
+        "error should carry executionTraceId",
+      );
+
+      const bridge = doc.instructions.find(
+        (i): i is Bridge => i.kind === "bridge",
+      )!;
+      const manifest = buildTraversalManifest(bridge);
+      const decoded = decodeExecutionTrace(manifest, executionTraceId);
+      const primaryError = decoded.find((e) => e.kind === "primary" && e.error);
+      assert.ok(primaryError, "primary error bit should be set");
+    }
+  });
+
+  test("no error bit when tool succeeds", async () => {
+    const doc = getDoc(`version 1.5
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+  api.q <- i.q
+  o.result <- api.value
+}`);
+    const { executionTraceId } = await executeBridge({
+      document: doc,
+      operation: "Query.demo",
+      input: { q: "test" },
+      tools: { api: async () => ({ value: "ok" }) },
+    });
+
+    const bridge = doc.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const manifest = buildTraversalManifest(bridge);
+    const decoded = decodeExecutionTrace(manifest, executionTraceId);
+    const errorEntries = decoded.filter((e) => e.error);
+    assert.equal(errorEntries.length, 0, "no error bits when tool succeeds");
   });
 });

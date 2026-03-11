@@ -87,6 +87,7 @@ export {
   buildTraversalManifest,
   decodeExecutionTrace,
   buildTraceBitsMap,
+  buildEmptyArrayBitsMap,
 } from "./enumerate-traversals.ts";
 export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";
 

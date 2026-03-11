@@ -67,6 +67,7 @@ import { raceTimeout } from "./utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
 import {
   buildTraceBitsMap,
+  buildEmptyArrayBitsMap,
   enumerateTraversalIds,
 } from "./enumerate-traversals.ts";
 
@@ -156,6 +157,12 @@ export class ExecutionTree implements TreeContext {
    * Built once from the bridge manifest.  Shared across shadow trees.
    */
   traceBits?: Map<Wire, TraceWireBits>;
+  /**
+   * Per-array-iterator bit positions for "empty-array" trace recording.
+   * Keys are `arrayIterators` path keys (`""` for root, `"entries"` for nested).
+   * Shared across shadow trees.
+   */
+  emptyArrayBits?: Map<string, number>;
   /**
    * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
    * array so shadow trees can share the same mutable reference.
@@ -744,6 +751,7 @@ export class ExecutionTree implements TreeContext {
     child.elementTrunkKey = this.elementTrunkKey;
     child.tracer = this.tracer;
     child.traceBits = this.traceBits;
+    child.emptyArrayBits = this.emptyArrayBits;
     child.traceMask = this.traceMask;
     child.logger = this.logger;
     child.signal = this.signal;
@@ -755,8 +763,14 @@ export class ExecutionTree implements TreeContext {
   /**
    * Wrap raw array items into shadow trees, honouring `break` / `continue`
    * sentinels.  Shared by `pullOutputField`, `response`, and `run`.
+   *
+   * When `arrayPathKey` is provided and the resulting shadow array is empty,
+   * the corresponding "empty-array" traversal bit is recorded.
    */
-  private createShadowArray(items: any[]): ExecutionTree[] {
+  private createShadowArray(
+    items: any[],
+    arrayPathKey?: string,
+  ): ExecutionTree[] {
     const shadows: ExecutionTree[] = [];
     for (const item of items) {
       // Abort discipline — yield immediately if client disconnected
@@ -771,6 +785,9 @@ export class ExecutionTree implements TreeContext {
       const s = this.shadow();
       s.state[this.elementTrunkKey] = item;
       shadows.push(s);
+    }
+    if (shadows.length === 0 && arrayPathKey !== undefined) {
+      this.recordEmptyArray(arrayPathKey);
     }
     return shadows;
   }
@@ -794,7 +811,16 @@ export class ExecutionTree implements TreeContext {
     if (!this.bridge) return;
     const manifest = enumerateTraversalIds(this.bridge);
     this.traceBits = buildTraceBitsMap(this.bridge, manifest);
+    this.emptyArrayBits = buildEmptyArrayBitsMap(manifest);
     this.traceMask = [0n];
+  }
+
+  /** Record an empty-array traversal bit for the given array-iterator path key. */
+  private recordEmptyArray(pathKey: string): void {
+    const bit = this.emptyArrayBits?.get(pathKey);
+    if (bit !== undefined && this.traceMask) {
+      this.traceMask[0] |= 1n << BigInt(bit);
+    }
   }
 
   /**
@@ -1249,8 +1275,12 @@ export class ExecutionTree implements TreeContext {
     const result = this.resolveWires(matches);
     if (!array) return result;
     const resolved = await result;
-    if (isLoopControlSignal(resolved)) return [];
-    return this.createShadowArray(resolved as any[]);
+    const arrayPathKey = path.join(".");
+    if (isLoopControlSignal(resolved)) {
+      this.recordEmptyArray(arrayPathKey);
+      return [];
+    }
+    return this.createShadowArray(resolved as any[], arrayPathKey);
   }
 
   private isElementScopedTrunk(ref: NodeRef): boolean {
@@ -1321,7 +1351,7 @@ export class ExecutionTree implements TreeContext {
         // create shadow trees, and materialise with field mappings.
         const resolved = await this.resolveWires(regularWires);
         if (!Array.isArray(resolved)) return null;
-        const shadows = this.createShadowArray(resolved);
+        const shadows = this.createShadowArray(resolved, prefix.join("."));
         return this.materializeShadows(shadows, prefix);
       }
 
@@ -1682,8 +1712,12 @@ export class ExecutionTree implements TreeContext {
 
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
-      if (isLoopControlSignal(resolved)) return [];
-      return this.createShadowArray(resolved as any[]);
+      const arrayPathKey = cleanPath.join(".");
+      if (isLoopControlSignal(resolved)) {
+        this.recordEmptyArray(arrayPathKey);
+        return [];
+      }
+      return this.createShadowArray(resolved as any[], arrayPathKey);
     }
 
     // ── Resolve field from deferred define ────────────────────────────
@@ -1696,8 +1730,12 @@ export class ExecutionTree implements TreeContext {
         const response = this.resolveWires(defineFieldWires);
         if (!array) return response;
         const resolved = await response;
-        if (isLoopControlSignal(resolved)) return [];
-        return this.createShadowArray(resolved as any[]);
+        const definePathKey = cleanPath.join(".");
+        if (isLoopControlSignal(resolved)) {
+          this.recordEmptyArray(definePathKey);
+          return [];
+        }
+        return this.createShadowArray(resolved as any[], definePathKey);
       }
     }
 

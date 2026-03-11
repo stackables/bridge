@@ -282,7 +282,7 @@ bridge Query.fallback {
     assert.deepEqual(data, { label: "default" });
   });
 
-  test("|| falsy fallback with ref", async () => {
+  test("|| falsy fallback with ref throws incompatible when tool-backed", () => {
     const bridgeText = `version 1.5
 bridge Query.refFallback {
   with primary as p
@@ -292,18 +292,12 @@ bridge Query.refFallback {
   o.value <- p.val || b.val
 }`;
 
-    const tools = {
-      primary: () => ({ val: null }),
-      backup: () => ({ val: "from-backup" }),
-    };
-
-    const data = await compileAndRun(
-      bridgeText,
-      "Query.refFallback",
-      {},
-      tools,
+    assert.throws(
+      () => compileOnly(bridgeText, "Query.refFallback"),
+      (err: any) =>
+        err.name === "BridgeCompilerIncompatibleError" &&
+        /tool-backed/.test(err.message),
     );
-    assert.deepEqual(data, { value: "from-backup" });
   });
 
   test("nullish fallback to null matches runtime overdefinition semantics", async () => {

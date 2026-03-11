@@ -31,7 +31,10 @@ import type {
   ToolDef,
 } from "@stackables/bridge-core";
 import type { SourceLocation } from "@stackables/bridge-types";
-import { assertBridgeCompilerCompatible } from "./bridge-asserts.ts";
+import {
+  assertBridgeCompilerCompatible,
+  BridgeCompilerIncompatibleError,
+} from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
 
@@ -3723,11 +3726,14 @@ class CodegenContext {
       if (val != null) {
         const base = emitParsedConst(val);
         if (ref.path.length === 1) return base;
-        const tail = ref.path
-          .slice(1)
-          .map((p) => `[${JSON.stringify(p)}]`)
-          .join("");
-        return `(${base})${tail}`;
+        // Delegate sub-path to appendPathExpr so pathSafe flags are respected.
+        const subRef: NodeRef = {
+          ...ref,
+          path: ref.path.slice(1),
+          rootSafe: ref.pathSafe?.[1] ?? false,
+          pathSafe: ref.pathSafe?.slice(1),
+        };
+        return this.appendPathExpr(`(${base})`, subRef);
       }
     }
 
@@ -3761,7 +3767,10 @@ class CodegenContext {
 
     const varName = this.varMap.get(key);
     if (!varName)
-      throw new Error(`Unknown reference: ${key} (${JSON.stringify(ref)})`);
+      throw new BridgeCompilerIncompatibleError(
+        `${this.bridge.type}.${this.bridge.field}`,
+        `Unsupported reference: ${key}.`,
+      );
     if (ref.path.length === 0) return varName;
     return this.appendPathExpr(varName, ref);
   }

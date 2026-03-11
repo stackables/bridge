@@ -1104,26 +1104,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // Regular wire
     let fromStr = sRef(w.from, true);
-    // Per-segment safe navigation: insert ?. at correct positions
+    // Legacy safe flag without per-segment info: put ?. after root
     if (w.safe) {
       const ref = w.from;
-      if (ref.rootSafe || ref.pathSafe?.some((s) => s)) {
-        // Re-serialize the path with per-segment safety
-        const handle = fromStr.split(".")[0].split("[")[0];
-        const parts: string[] = [handle];
-        for (let i = 0; i < ref.path.length; i++) {
-          const seg = ref.path[i];
-          const isSafe = i === 0 ? !!ref.rootSafe : !!ref.pathSafe?.[i];
-          if (/^\d+$/.test(seg)) {
-            parts.push(`[${seg}]`);
-          } else {
-            parts.push(`${isSafe ? "?." : "."}${seg}`);
-          }
+      if (!ref.rootSafe && !ref.pathSafe?.some((s) => s)) {
+        if (fromStr.includes(".")) {
+          fromStr = fromStr.replace(".", "?.");
         }
-        fromStr = parts.join("");
-      } else if (fromStr.includes(".")) {
-        // Legacy behavior: safe flag without per-segment info, put ?. after root
-        fromStr = fromStr.replace(".", "?.");
       }
     }
     const toStr = sRef(w.to, false);
@@ -1506,6 +1493,9 @@ function serializeRef(
     return "item." + serPath(ref.path);
   }
 
+  const hasSafe = ref.rootSafe || ref.pathSafe?.some((s) => s);
+  const firstSep = hasSafe && ref.rootSafe ? "?." : ".";
+
   // Bridge's own trunk (no instance, no element)
   const isBridgeTrunk =
     ref.module === SELF_MODULE &&
@@ -1518,7 +1508,7 @@ function serializeRef(
     if (isFrom && inputHandle) {
       // From side: use input handle (data comes from args)
       return ref.path.length > 0
-        ? inputHandle + "." + serPath(ref.path)
+        ? inputHandle + firstSep + serPath(ref.path, ref.rootSafe, ref.pathSafe)
         : inputHandle;
     }
     if (!isFrom && outputHandle) {
@@ -1528,7 +1518,7 @@ function serializeRef(
         : outputHandle;
     }
     // Fallback (no handle declared — legacy/serializer-only path)
-    return serPath(ref.path);
+    return serPath(ref.path, ref.rootSafe, ref.pathSafe);
   }
 
   // Lookup by trunk key
@@ -1539,21 +1529,30 @@ function serializeRef(
   const handle = handleMap.get(trunkStr);
   if (handle) {
     if (ref.path.length === 0) return handle;
-    return handle + "." + serPath(ref.path);
+    return handle + firstSep + serPath(ref.path, ref.rootSafe, ref.pathSafe);
   }
 
   // Fallback: bare path
-  return serPath(ref.path);
+  return serPath(ref.path, ref.rootSafe, ref.pathSafe);
 }
 
-/** Serialize a path array to dot notation with [n] for numeric indices */
-function serPath(path: string[]): string {
+/**
+ * Serialize a path array to dot notation with [n] for numeric indices.
+ * When `rootSafe` or `pathSafe` are provided, emits `?.` for safe segments.
+ */
+function serPath(
+  path: string[],
+  rootSafe?: boolean,
+  pathSafe?: boolean[],
+): string {
   let result = "";
-  for (const segment of path) {
+  for (let i = 0; i < path.length; i++) {
+    const segment = path[i];
+    const isSafe = i === 0 ? !!rootSafe : !!pathSafe?.[i];
     if (/^\d+$/.test(segment)) {
       result += `[${segment}]`;
     } else {
-      if (result.length > 0) result += ".";
+      if (result.length > 0) result += isSafe ? "?." : ".";
       result += segment;
     }
   }
