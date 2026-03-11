@@ -8,6 +8,7 @@ import {
 } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { forEachEngine } from "./utils/dual-run.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Runtime-only: ExecutionTree depth ceiling
@@ -41,14 +42,41 @@ bridge Query.test {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Dual-engine tests via regressionTest
+// Circular dependency detection — cannot use regressionTest (error + no output)
 // ══════════════════════════════════════════════════════════════════════════════
 
-regressionTest("infinite loop protection", {
+forEachEngine("circular dependency detection", (run) => {
+  test("circular A→B→A dependency throws BridgePanicError", async () => {
+    const bridgeText = `version 1.5
+bridge Query.loop {
+  with test.multitool as a
+  with test.multitool as b
+  with output as o
+
+  a <- b
+  b <- a
+  o.val <- a.result
+}`;
+    await assert.rejects(
+      () => run(bridgeText, "Query.loop", {}, tools),
+      (err: any) => {
+        assert.equal(err.name, "BridgePanicError");
+        assert.match(err.message, /Circular dependency detected/);
+        return true;
+      },
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Regression tests (data-driven)
+// ══════════════════════════════════════════════════════════════════════════════
+
+regressionTest("infinite loop protection: array mapping", {
   bridge: `
     version 1.5
 
-    bridge LoopProtect.items {
+    bridge ArrayMap.basic {
       with input as i
       with output as o
 
@@ -56,49 +84,44 @@ regressionTest("infinite loop protection", {
         .name <- item.name
       }
     }
-
-    bridge LoopProtect.loop {
-      with test.multitool as a
-      with test.multitool as b
-      with output as o
-
-      a <- b
-      b <- a
-      o.val <- a.result
-    }
-
-    bridge LoopProtect.chain {
-      with test.multitool as a
-      with test.multitool as b
-      with input as i
-      with output as o
-
-      a <- i.a
-      b <- a
-      o.val <- b.result
-    }
   `,
-  tools: tools,
   scenarios: {
-    "LoopProtect.items": {
+    "ArrayMap.basic": {
       "normal array mapping works within depth limit": {
         input: { list: [{ name: "a" }, { name: "b" }] },
         assertData: [{ name: "a" }, { name: "b" }],
         assertTraces: 0,
       },
-    },
-    "LoopProtect.loop": {
-      "circular A→B→A dependency throws BridgePanicError": {
-        input: {},
-        assertError: /Circular dependency detected/,
+      "empty array produces empty output": {
+        input: { list: [] },
+        assertData: [],
         assertTraces: 0,
       },
     },
-    "LoopProtect.chain": {
+  },
+});
+
+regressionTest("infinite loop protection: non-circular chain", {
+  bridge: `
+    version 1.5
+
+    bridge Chain.normal {
+      with test.multitool as a
+      with test.multitool as b
+      with input as i
+      with output as o
+
+      a.x <- i.value
+      b.x <- a.x
+      o.val <- b.x
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Chain.normal": {
       "non-circular dependencies work normally": {
-        input: { a: { result: "startA" } },
-        allowDowngrade: true,
-        assertData: { val: "startA" },
+        input: { value: "start" },
+        assertData: { val: "start" },
         assertTraces: 2,
       },
     },
