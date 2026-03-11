@@ -682,6 +682,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
   lines.push(`bridge ${bridge.type}.${bridge.field} {`);
 
   for (const h of bridge.handles) {
+    // Element-scoped tool handles are emitted inside their array block
+    if (h.kind === "tool" && h.element) continue;
     switch (h.kind) {
       case "tool": {
         // Short form `with <name>` when handle == last segment of name
@@ -734,6 +736,33 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
   // ── Build handle map for reverse resolution ─────────────────────────
   const { handleMap, inputHandle, outputHandle } = buildHandleMap(bridge);
+
+  // ── Element-scoped tool trunk keys ──────────────────────────────────
+  const elementToolTrunkKeys = new Set<string>();
+  {
+    const localCounters = new Map<string, number>();
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool") continue;
+      const lastDot = h.name.lastIndexOf(".");
+      if (lastDot !== -1) {
+        const mod = h.name.substring(0, lastDot);
+        const fld = h.name.substring(lastDot + 1);
+        const ik = `${mod}:${fld}`;
+        const inst = (localCounters.get(ik) ?? 0) + 1;
+        localCounters.set(ik, inst);
+        if (h.element) {
+          elementToolTrunkKeys.add(`${mod}:${bridge.type}:${fld}:${inst}`);
+        }
+      } else {
+        const ik = `Tools:${h.name}`;
+        const inst = (localCounters.get(ik) ?? 0) + 1;
+        localCounters.set(ik, inst);
+        if (h.element) {
+          elementToolTrunkKeys.add(`${SELF_MODULE}:Tools:${h.name}:${inst}`);
+        }
+      }
+    }
+  }
 
   // ── Pipe fork registry ──────────────────────────────────────────────
   const pipeHandleTrunkKeys = new Set<string>();
@@ -929,10 +958,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
   }
 
   // ── Group element wires by array-destination field ──────────────────
-  // Pull wires: from.element=true
+  // Pull wires: from.element=true OR involving element-scoped tools
+  const isElementToolWire = (w: Wire): boolean => {
+    if (!("from" in w)) return false;
+    if (elementToolTrunkKeys.has(refTrunkKey(w.from))) return true;
+    if (elementToolTrunkKeys.has(refTrunkKey(w.to))) return true;
+    return false;
+  };
   const elementPullWires = bridge.wires.filter(
     (w): w is Extract<Wire, { from: NodeRef }> =>
-      "from" in w && !!w.from.element,
+      "from" in w && (!!w.from.element || isElementToolWire(w)),
   );
   // Constant wires: "value" in w && to.element=true
   const elementConstWires = bridge.wires.filter(
@@ -972,6 +1007,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       !exprPipeWireSet.has(w) &&
       !concatPipeWireSet.has(w) &&
       (!("from" in w) || !w.from.element) &&
+      !isElementToolWire(w) &&
       (!("value" in w) || !w.to.element) &&
       w.to.module !== "__local" &&
       (!("from" in w) || (w.from as NodeRef).module !== "__local"),
@@ -1225,6 +1261,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
       lines.push(`${indent}alias ${sourcePart} as ${alias}`);
     }
 
+    // Emit element-scoped tool declarations: with <tool> as <handle>
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool" || !h.element) continue;
+      const vTag = h.version ? `@${h.version}` : "";
+      const memoize = h.memoize ? " memoize" : "";
+      const lastDot = h.name.lastIndexOf(".");
+      const defaultHandle =
+        lastDot !== -1 ? h.name.substring(lastDot + 1) : h.name;
+      if (h.handle === defaultHandle && !vTag) {
+        lines.push(`${indent}with ${h.name}${memoize}`);
+      } else {
+        lines.push(
+          `${indent}with ${h.name}${vTag} as ${h.handle}${memoize}`,
+        );
+      }
+    }
+
     // Emit constant element wires
     for (const ew of levelConsts) {
       const fieldPath = ew.to.path.slice(pathDepth);
@@ -1261,10 +1314,17 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
       // Regular element pull wire
       const fromPart = ew.from.element
-        ? parentIterName + "." + serPath(ew.from.path)
+        ? parentIterName +
+          (ew.from.path.length > 0 ? "." + serPath(ew.from.path) : "")
         : sRef(ew.from, true);
-      const fieldPath = ew.to.path.slice(pathDepth);
-      const elemTo = "." + serPath(fieldPath);
+      // Tool input wires target an element-scoped tool handle
+      const toTk = refTrunkKey(ew.to);
+      const toToolHandle = elementToolTrunkKeys.has(toTk)
+        ? handleMap.get(toTk)
+        : undefined;
+      const elemTo = toToolHandle
+        ? toToolHandle + (ew.to.path.length > 0 ? "." + serPath(ew.to.path) : "")
+        : "." + serPath(ew.to.path.slice(pathDepth));
 
       const fallbackStr = (ew.fallbacks ?? [])
         .map((f) => {

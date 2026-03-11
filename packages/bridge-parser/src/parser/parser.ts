@@ -3693,6 +3693,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          element: true as const,
           ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
@@ -3710,6 +3711,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          element: true as const,
           ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
