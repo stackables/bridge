@@ -114,7 +114,7 @@ export function compileBridge(
   if (!bridge)
     throw new Error(`No bridge definition found for operation: ${operation}`);
 
-  assertBridgeCompilerCompatible(bridge);
+  assertBridgeCompilerCompatible(bridge, options.requestedFields);
 
   // Collect const definitions from the document
   const constDefs = new Map<string, string>();

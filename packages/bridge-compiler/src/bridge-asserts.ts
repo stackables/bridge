@@ -14,6 +14,28 @@ export class BridgeCompilerIncompatibleError extends Error {
   }
 }
 
+function matchesRequestedField(
+  path: string,
+  requestedFields?: string[],
+): boolean {
+  if (!requestedFields || requestedFields.length === 0) {
+    return true;
+  }
+
+  return requestedFields.some((requested) => {
+    if (requested === path) {
+      return true;
+    }
+
+    if (requested.endsWith(".*")) {
+      const prefix = requested.slice(0, -2);
+      return path === prefix || path.startsWith(`${prefix}.`);
+    }
+
+    return false;
+  });
+}
+
 function isToolRef(ref: NodeRef, bridge: Bridge): boolean {
   if (
     ref.module === SELF_MODULE &&
@@ -28,7 +50,10 @@ function isToolRef(ref: NodeRef, bridge: Bridge): boolean {
   return true;
 }
 
-export function assertBridgeCompilerCompatible(bridge: Bridge): void {
+export function assertBridgeCompilerCompatible(
+  bridge: Bridge,
+  requestedFields?: string[],
+): void {
   const op = `${bridge.type}.${bridge.field}`;
 
   // Pipe-handle trunk keys — block-scoped aliases inside array maps
@@ -77,6 +102,41 @@ export function assertBridgeCompilerCompatible(bridge: Bridge): void {
           );
         }
       }
+    }
+  }
+
+  // Same-cost overdefinition sourced only from tools can diverge from runtime
+  // tracing/error behavior in current AOT codegen; compile must downgrade.
+  const toolOnlyOverdefs = new Map<string, number>();
+  for (const w of bridge.wires) {
+    if (
+      w.to.module !== SELF_MODULE ||
+      w.to.type !== bridge.type ||
+      w.to.field !== bridge.field
+    ) {
+      continue;
+    }
+    if (!("from" in w) || !isToolRef(w.from, bridge)) {
+      continue;
+    }
+
+    const outputPath = w.to.path.join(".");
+    if (!matchesRequestedField(outputPath, requestedFields)) {
+      continue;
+    }
+
+    toolOnlyOverdefs.set(
+      outputPath,
+      (toolOnlyOverdefs.get(outputPath) ?? 0) + 1,
+    );
+  }
+
+  for (const [outputPath, count] of toolOnlyOverdefs) {
+    if (count > 1) {
+      throw new BridgeCompilerIncompatibleError(
+        op,
+        `Tool-only overdefinition for output path "${outputPath}" is not yet supported by the compiler.`,
+      );
     }
   }
 }
