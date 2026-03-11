@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import { executeBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "../../src/index.ts";
+import { executeBridge } from "../../src/index.ts";
 import {
   checkStdVersion,
   checkHandleVersions,
@@ -10,10 +10,10 @@ import {
   hasVersionedToolFn,
   mergeBridgeDocuments,
   resolveStd,
-} from "../src/index.ts";
-import type { BridgeDocument } from "../src/index.ts";
-import { BridgeLanguageService } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+} from "../../src/index.ts";
+import type { BridgeDocument } from "../../src/index.ts";
+import { BridgeLanguageService } from "../../src/index.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

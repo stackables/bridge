@@ -20,9 +20,9 @@
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
     "lint:types": "tsc -p tsconfig.check.json",
-    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
+    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts test/legacy/*.test.ts",
     "fuzz": "node --experimental-transform-types --conditions source --test test/*.fuzz.ts",
-    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --conditions source --test test/*.test.ts",
+    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --conditions source --test test/*.test.ts test/legacy/*.test.ts",
     "bench": "node --experimental-transform-types --conditions source bench/engine.bench.ts",
     "bench:compiler": "node --experimental-transform-types --conditions source bench/compiler.bench.ts"
   },

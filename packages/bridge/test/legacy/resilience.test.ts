@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Const in bridge — with const as c, wiring c.value

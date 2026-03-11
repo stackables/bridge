@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 const bridgeFile = readFileSync(
-  new URL("./property-search.bridge", import.meta.url),
+  new URL("../property-search.bridge", import.meta.url),
   "utf-8",
 );
 

@@ -5,7 +5,7 @@ import {
   serializeBridge,
 } from "@stackables/bridge-parser";
 import { parsePath } from "@stackables/bridge-core";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Nested shadow tree — scope chain

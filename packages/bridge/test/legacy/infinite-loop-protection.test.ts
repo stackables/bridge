@@ -5,8 +5,8 @@ import {
   ExecutionTree,
   BridgePanicError,
   MAX_EXECUTION_DEPTH,
-} from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+} from "../../src/index.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Runtime-only: ExecutionTree depth ceiling

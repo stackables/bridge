@@ -4,8 +4,8 @@ import {
   compileBridge,
   executeBridge as executeCompiled,
 } from "@stackables/bridge-compiler";
-import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { parseBridge } from "../../src/index.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 describe("loop scoped tools - invalid cases", () => {
   test("outer bridge tools cannot be wired inside array loops without a local with", () => {

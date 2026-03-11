@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

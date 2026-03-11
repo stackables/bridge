@@ -7,8 +7,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { forEachEngine, type ExecuteFn } from "./utils/dual-run.ts";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { forEachEngine, type ExecuteFn } from "../utils/dual-run.ts";
+import { parseBridgeFormat as parseBridge } from "../../src/index.ts";
 import { BridgeRuntimeError } from "@stackables/bridge-core";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

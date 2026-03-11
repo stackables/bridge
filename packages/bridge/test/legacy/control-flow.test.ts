@@ -3,11 +3,11 @@ import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
-} from "../src/index.ts";
-import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
-import type { Bridge, Wire } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+} from "../../src/index.ts";
+import { BridgeAbortError, BridgePanicError } from "../../src/index.ts";
+import type { Bridge, Wire } from "../../src/index.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "../utils/parse-test-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. Parser: control flow keywords

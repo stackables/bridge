@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BridgeRuntimeError, formatBridgeError } from "@stackables/bridge-core";
 import { parseBridgeChevrotain as parseBridge } from "@stackables/bridge-parser";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 const bridgeText = `version 1.5
 

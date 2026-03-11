@@ -4,7 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "@stackables/bridge-parser";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ── Missing tool error ──────────────────────────────────────────────────────
 

@@ -3,10 +3,10 @@ import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
-} from "../src/index.ts";
-import type { Bridge, Wire } from "../src/index.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+} from "../../src/index.ts";
+import type { Bridge, Wire } from "../../src/index.ts";
+import { assertDeepStrictEqualIgnoringLoc } from "../utils/parse-test-utils.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
 

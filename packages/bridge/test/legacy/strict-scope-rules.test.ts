@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { parseBridge } from "../../src/index.ts";
+import { forEachEngine } from "../utils/dual-run.ts";
 
 describe("strict scope rules - invalid cases", () => {
   test("tool inputs can be wired only in the scope that imports the tool", () => {
