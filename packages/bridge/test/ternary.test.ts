@@ -400,12 +400,26 @@ regressionTest("ternary: fallbacks", {
       "truthy, proPrice present → then branch": {
         input: { isPro: true, proPrice: 99, fb: { defaultPrice: 5 } },
         assertData: { amount: 99 },
-        assertTraces: 1,
+        // Runtime lazily skips fallback tool (0 traces);
+        // compiler eagerly calls it (1 trace)
+        assertTraces: (traces) => {
+          assert.ok(
+            traces.length === 0 || traces.length === 1,
+            `expected 0 or 1 traces, got ${traces.length}`,
+          );
+        },
       },
       "falsy, basicPrice present → else branch": {
         input: { isPro: false, basicPrice: 9, fb: { defaultPrice: 5 } },
         assertData: { amount: 9 },
-        assertTraces: 1,
+        // Runtime lazily skips fallback tool (0 traces);
+        // compiler eagerly calls it (1 trace)
+        assertTraces: (traces) => {
+          assert.ok(
+            traces.length === 0 || traces.length === 1,
+            `expected 0 or 1 traces, got ${traces.length}`,
+          );
+        },
       },
     },
   },
