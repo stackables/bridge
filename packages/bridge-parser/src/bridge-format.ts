@@ -1024,6 +1024,75 @@ function serializeBridgeBlock(bridge: Bridge): string {
     return false;
   }
 
+  // ── Determine array scope for each element-scoped tool ──────────────
+  // Maps element tool trunk key → array iterator key (e.g. "g" or "g.b")
+  const elementToolScope = new Map<string, string>();
+  // Also maps handle index → array iterator key for the declaration loop
+  const elementHandleScope = new Map<number, string>();
+  {
+    // Build trunk key for each handle (mirrors elementToolTrunkKeys logic)
+    const localCounters = new Map<string, number>();
+    const handleTrunkKeys: (string | undefined)[] = [];
+    for (const h of bridge.handles) {
+      if (h.kind !== "tool") {
+        handleTrunkKeys.push(undefined);
+        continue;
+      }
+      const lastDot = h.name.lastIndexOf(".");
+      let tk: string;
+      if (lastDot !== -1) {
+        const mod = h.name.substring(0, lastDot);
+        const fld = h.name.substring(lastDot + 1);
+        const ik = `${mod}:${fld}`;
+        const inst = (localCounters.get(ik) ?? 0) + 1;
+        localCounters.set(ik, inst);
+        tk = `${mod}:${bridge.type}:${fld}:${inst}`;
+      } else {
+        const ik = `Tools:${h.name}`;
+        const inst = (localCounters.get(ik) ?? 0) + 1;
+        localCounters.set(ik, inst);
+        tk = `${SELF_MODULE}:Tools:${h.name}:${inst}`;
+      }
+      handleTrunkKeys.push(h.element ? tk : undefined);
+    }
+
+    // Sort iterator keys by path depth (deepest first) for matching
+    const iterKeys = Object.keys(arrayIterators).sort(
+      (a, b) => b.length - a.length,
+    );
+
+    // For each element tool, find its output wire to determine scope
+    for (const w of bridge.wires) {
+      if (!("from" in w)) continue;
+      const fromTk = refTrunkKey(w.from);
+      if (!elementToolTrunkKeys.has(fromTk)) continue;
+      if (elementToolScope.has(fromTk)) continue;
+      // Output wire: from=tool → to=bridge output
+      const toRef = w.to;
+      if (
+        toRef.module !== SELF_MODULE ||
+        toRef.type !== bridge.type ||
+        toRef.field !== bridge.field
+      )
+        continue;
+      const toPath = toRef.path.join(".");
+      for (const ik of iterKeys) {
+        if (ik === "" || toPath.startsWith(ik + ".") || toPath === ik) {
+          elementToolScope.set(fromTk, ik);
+          break;
+        }
+      }
+    }
+
+    // Map handle indices using the trunk keys
+    for (let i = 0; i < bridge.handles.length; i++) {
+      const tk = handleTrunkKeys[i];
+      if (tk && elementToolScope.has(tk)) {
+        elementHandleScope.set(i, elementToolScope.get(tk)!);
+      }
+    }
+  }
+
   // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, and __local wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
@@ -1195,6 +1264,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     arrayPath: string[],
     parentIterName: string,
     indent: string,
+    ancestorIterNames: string[] = [],
   ): void {
     const arrayPathStr = arrayPath.join(".");
     const pathDepth = arrayPath.length;
@@ -1210,6 +1280,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // Find element pull wires at this level (direct fields, not nested array children)
     const levelPulls = elementPullAll.filter((ew) => {
+      // Tool-targeting wires: include if the tool belongs to this scope
+      const ewToTk = refTrunkKey(ew.to);
+      if (elementToolTrunkKeys.has(ewToTk)) {
+        return elementToolScope.get(ewToTk) === arrayPathStr;
+      }
+      // Tool-output wires: include if the tool belongs to this scope
+      const ewFromTk = refTrunkKey(ew.from);
+      if (elementToolTrunkKeys.has(ewFromTk)) {
+        return elementToolScope.get(ewFromTk) === arrayPathStr;
+      }
       if (ew.to.path.length < pathDepth + 1) return false;
       for (let i = 0; i < pathDepth; i++) {
         if (ew.to.path[i] !== arrayPath[i]) return false;
@@ -1286,8 +1366,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // Emit element-scoped tool declarations: with <tool> as <handle>
-    for (const h of bridge.handles) {
+    for (let hi = 0; hi < bridge.handles.length; hi++) {
+      const h = bridge.handles[hi];
       if (h.kind !== "tool" || !h.element) continue;
+      // Only emit if this tool belongs to the current array scope
+      const scope = elementHandleScope.get(hi);
+      if (scope !== arrayPathStr) continue;
       const vTag = h.version ? `@${h.version}` : "";
       const memoize = h.memoize ? " memoize" : "";
       const lastDot = h.name.lastIndexOf(".");
@@ -1310,6 +1394,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     // Emit pull element wires (direct level only)
     for (const ew of levelPulls) {
       const toPathStr = ew.to.path.join(".");
+
       // Skip wires that belong to a nested array level
       if (ew.to.path.length > pathDepth + 1) {
         // Check if this wire's immediate child segment forms a nested array
@@ -1321,22 +1406,37 @@ function serializeBridgeBlock(bridge: Bridge): string {
       if (nestedArrayPaths.has(toPathStr) && !serializedArrays.has(toPathStr)) {
         serializedArrays.add(toPathStr);
         const nestedIterName = arrayIterators[toPathStr];
+        let nestedFromIter = parentIterName;
+        if (ew.from.element && ew.from.elementDepth) {
+          const stack = [...ancestorIterNames, parentIterName];
+          const idx = stack.length - 1 - ew.from.elementDepth;
+          if (idx >= 0) nestedFromIter = stack[idx];
+        }
         const fromPart = ew.from.element
-          ? parentIterName + "." + serPath(ew.from.path)
+          ? nestedFromIter + "." + serPath(ew.from.path)
           : sRef(ew.from, true);
         const fieldPath = ew.to.path.slice(pathDepth);
         const elemTo = "." + serPath(fieldPath);
         lines.push(
           `${indent}${elemTo} <- ${fromPart}[] as ${nestedIterName} {`,
         );
-        serializeArrayElements(ew.to.path, nestedIterName, indent + "  ");
+        serializeArrayElements(ew.to.path, nestedIterName, indent + "  ", [
+          ...ancestorIterNames,
+          parentIterName,
+        ]);
         lines.push(`${indent}}`);
         continue;
       }
 
       // Regular element pull wire
+      let resolvedIterName = parentIterName;
+      if (ew.from.element && ew.from.elementDepth) {
+        const stack = [...ancestorIterNames, parentIterName];
+        const idx = stack.length - 1 - ew.from.elementDepth;
+        if (idx >= 0) resolvedIterName = stack[idx];
+      }
       const fromPart = ew.from.element
-        ? parentIterName +
+        ? resolvedIterName +
           (ew.from.path.length > 0 ? "." + serPath(ew.from.path) : "")
         : sRef(ew.from, true);
       // Tool input wires target an element-scoped tool handle
