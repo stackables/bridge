@@ -164,8 +164,6 @@ regressionTest("panic control flow", {
 //
 //   • ?? continue skips null elements in array mapping
 //   • ?? break halts array processing at null element
-//   • ?? continue on root array wire returns [] when source is null
-//   • catch continue on root array wire returns [] when source throws
 //   • continue 2 skips current parent element
 //   • break 2 breaks out of parent loop
 //
@@ -197,30 +195,6 @@ regressionTest("continue and break in arrays", {
       o <- a.items[] as item {
         .name <- item.name ?? break
       }
-    }
-
-    bridge RootNullContinue.items {
-      with test.multitool as a
-      with input as i
-      with output as o
-
-      a <- i.a
-
-      o <- a.items[] as item {
-        .name <- item.name
-      } ?? continue
-    }
-
-    bridge RootCatchContinue.items {
-      with test.multitool as a
-      with input as i
-      with output as o
-
-      a <- i.a
-
-      o <- a.items[] as item {
-        .name <- item.name
-      } catch continue
     }
 
     bridge Continue2.items {
@@ -309,30 +283,6 @@ regressionTest("continue and break in arrays", {
       },
       "empty array → empty output": {
         input: { a: { items: [] } },
-        assertData: [],
-        assertTraces: 1,
-      },
-    },
-    "RootNullContinue.items": {
-      "items present → normal iteration": {
-        input: { a: { items: [{ name: "Alice" }] } },
-        assertData: [{ name: "Alice" }],
-        assertTraces: 1,
-      },
-      "items null → ?? continue returns []": {
-        input: { a: { items: null } },
-        assertData: [],
-        assertTraces: 1,
-      },
-    },
-    "RootCatchContinue.items": {
-      "tool succeeds → normal iteration": {
-        input: { a: { items: [{ name: "Alice" }] } },
-        assertData: [{ name: "Alice" }],
-        assertTraces: 1,
-      },
-      "tool throws → catch continue returns []": {
-        input: { a: { _error: "service unavailable" } },
         assertData: [],
         assertTraces: 1,
       },

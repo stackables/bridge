@@ -1005,6 +1005,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
   };
   const elementExprWires: ElementExprInfo[] = [];
 
+  // Collect element-targeting pipe chain wires
+  // These use ITER. as a placeholder for element refs, replaced in serializeArrayElements
+  type ElementPipeInfo = {
+    toPath: string[];
+    sourceStr: string; // "handle:ITER.field" or "h1:h2:ITER.field"
+    fallbackStr: string;
+    errStr: string;
+  };
+  const elementPipeWires: ElementPipeInfo[] = [];
+
   // Detect array source wires: a regular wire whose to.path (joined) matches
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
@@ -1270,6 +1280,65 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
+  // Pre-compute element-targeting normal pipe chain wires
+  for (const [tk, outWire] of fromOutMap.entries()) {
+    if (exprForks.has(tk) || concatForks.has(tk)) continue;
+    if (!isUnderArrayScope(outWire.to)) continue;
+
+    // Walk the pipe chain backward to reconstruct handle:source
+    const handleChain: string[] = [];
+    let currentTk = tk;
+    let sourceStr: string | null = null;
+    for (;;) {
+      const handleName = handleMap.get(currentTk);
+      if (!handleName) break;
+      const inWire = toInMap.get(currentTk);
+      const fieldName = inWire?.to.path[0] ?? "in";
+      const token =
+        fieldName === "in" ? handleName : `${handleName}.${fieldName}`;
+      handleChain.push(token);
+      if (!inWire) break;
+      if (inWire.from.element) {
+        sourceStr =
+          inWire.from.path.length > 0
+            ? "ITER." + serPath(inWire.from.path)
+            : "ITER";
+        break;
+      }
+      const fromTk = refTrunkKey(inWire.from);
+      if (inWire.from.path.length === 0 && pipeHandleTrunkKeys.has(fromTk)) {
+        currentTk = fromTk;
+      } else {
+        sourceStr = sRef(inWire.from, true);
+        break;
+      }
+    }
+    if (sourceStr && handleChain.length > 0) {
+      const fallbackStr = (outWire.fallbacks ?? [])
+        .map((f) => {
+          const op = f.type === "falsy" ? "||" : "??";
+          if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+          if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+          return ` ${op} ${f.value}`;
+        })
+        .join("");
+      const errf =
+        "catchControl" in outWire && outWire.catchControl
+          ? ` catch ${serializeControl(outWire.catchControl)}`
+          : outWire.catchFallbackRef
+            ? ` catch ${sPipeOrRef(outWire.catchFallbackRef)}`
+            : outWire.catchFallback
+              ? ` catch ${outWire.catchFallback}`
+              : "";
+      elementPipeWires.push({
+        toPath: outWire.to.path,
+        sourceStr: `${handleChain.join(":")}:${sourceStr}`,
+        fallbackStr,
+        errStr: errf,
+      });
+    }
+  }
+
   /** Serialize a ref in element context, resolving element refs to iterator name. */
   function serializeElemRef(
     ref: NodeRef,
@@ -1511,15 +1580,55 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const srcWire = info.sourceWire!;
       // Reconstruct the source expression
       const fromRef = srcWire.from;
+
+      // Determine if this alias is element-scoped (skip top-level aliases)
+      let isElementScoped = fromRef.element;
+      if (!isElementScoped) {
+        const srcTk = refTrunkKey(fromRef);
+        if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+          // Walk pipe chain — element-scoped if any input is element-scoped
+          let walkTk = srcTk;
+          while (true) {
+            const inWire = toInMap.get(walkTk);
+            if (!inWire) break;
+            if (inWire.from.element) {
+              isElementScoped = true;
+              break;
+            }
+            const innerTk = refTrunkKey(inWire.from);
+            if (
+              inWire.from.path.length === 0 &&
+              pipeHandleTrunkKeys.has(innerTk)
+            ) {
+              walkTk = innerTk;
+            } else {
+              break;
+            }
+          }
+        }
+      }
+      if (!isElementScoped) continue;
+
       let sourcePart: string;
       if (fromRef.element) {
         sourcePart =
           parentIterName +
           (fromRef.path.length > 0 ? "." + serPath(fromRef.path) : "");
       } else {
-        // Check if the source is a pipe fork — reconstruct pipe:source syntax
+        // Check if the source is an expression fork, concat fork, or pipe fork
         const srcTk = refTrunkKey(fromRef);
-        if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+        if (fromRef.path.length === 0 && exprForks.has(srcTk)) {
+          // Expression fork → reconstruct infix expression
+          const exprStr = serializeElemExprTreeFn(
+            srcTk,
+            parentIterName,
+            ancestorIterNames,
+          );
+          sourcePart = exprStr ?? sRef(fromRef, true);
+        } else if (
+          fromRef.path.length === 0 &&
+          pipeHandleTrunkKeys.has(srcTk)
+        ) {
           // Walk the pipe chain backward to reconstruct pipe:source
           const parts: string[] = [];
           let currentTk = srcTk;
@@ -1678,6 +1787,26 @@ function serializeBridgeBlock(bridge: Bridge): string {
       lines.push(`${indent}${elemTo} <- ${src}`);
     }
 
+    // Emit pipe chain element wires at this level
+    for (const epw of elementPipeWires) {
+      if (epw.toPath.length !== pathDepth + 1) continue;
+      let match = true;
+      for (let i = 0; i < pathDepth; i++) {
+        if (epw.toPath[i] !== arrayPath[i]) {
+          match = false;
+          break;
+        }
+      }
+      if (!match) continue;
+      const fieldPath = epw.toPath.slice(pathDepth);
+      const elemTo = "." + serPath(fieldPath);
+      // Replace ITER placeholder with actual iterator name
+      const src = epw.sourceStr
+        .replaceAll("ITER.", parentIterName + ".")
+        .replaceAll(/ITER(?!\.)/g, parentIterName);
+      lines.push(`${indent}${elemTo} <- ${src}${epw.fallbackStr}${epw.errStr}`);
+    }
+
     // Emit element-scoped ternary wires at this level
     for (const tw of elementTernaryWires) {
       if (tw.to.path.length !== pathDepth + 1) continue;
@@ -1768,9 +1897,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
     if (concatStr) return concatStr;
     if (ref.path.length === 0 && exprForks.has(tk)) {
       // Recursively serialize expression fork
-      function serFork(forkTk: string): string {
+      function serFork(forkTk: string, parentPrec?: number): string {
         const info = exprForks.get(forkTk);
         if (!info) return "?";
+        const myPrec = OP_PREC_SER[info.op] ?? 0;
         let leftStr: string | null = null;
         if (info.aWire) {
           const aTk = refTrunkKey(info.aWire.from);
@@ -1778,7 +1908,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           if (concatLeft) {
             leftStr = concatLeft;
           } else if (info.aWire.from.path.length === 0 && exprForks.has(aTk)) {
-            leftStr = serFork(aTk);
+            leftStr = serFork(aTk, myPrec);
           } else {
             leftStr = sRef(info.aWire.from, true);
           }
@@ -1795,7 +1925,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           } else {
             rightStr =
               bFrom.path.length === 0 && exprForks.has(bTk)
-                ? serFork(bTk)
+                ? serFork(bTk, myPrec)
                 : sRef(bFrom, true);
           }
         } else {
@@ -1803,7 +1933,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
         if (leftStr == null) return rightStr;
         if (info.op === "not") return `not ${leftStr}`;
-        return `${leftStr} ${info.op} ${rightStr}`;
+        let result = `${leftStr} ${info.op} ${rightStr}`;
+        if (parentPrec != null && myPrec < parentPrec) result = `(${result})`;
+        return result;
       }
       return serFork(tk) ?? sRef(ref, true);
     }
@@ -1855,7 +1987,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // Array mapping — emit brace-delimited element block
     const arrayKey = w.to.path.join(".");
-    if (arrayKey in arrayIterators && !serializedArrays.has(arrayKey)) {
+    if (
+      arrayKey in arrayIterators &&
+      !serializedArrays.has(arrayKey) &&
+      w.to.module === SELF_MODULE &&
+      w.to.type === bridge.type &&
+      w.to.field === bridge.field
+    ) {
       serializedArrays.add(arrayKey);
       const iterName = arrayIterators[arrayKey];
       const fromStr = sRef(w.from, true) + "[]";
@@ -1944,7 +2082,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
     // Reconstruct source expression
     let sourcePart: string;
-    if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
+    if (fromRef.path.length === 0 && exprForks.has(srcTk)) {
+      // Expression fork → reconstruct infix expression
+      sourcePart = serializeExprOrRef(fromRef);
+    } else if (tryResolveConcat(fromRef)) {
+      // Concat fork → reconstruct template string
+      sourcePart = tryResolveConcat(fromRef)!;
+    } else if (fromRef.path.length === 0 && pipeHandleTrunkKeys.has(srcTk)) {
       const parts: string[] = [];
       let currentTk = srcTk;
       while (true) {
@@ -1965,7 +2109,32 @@ function serializeBridgeBlock(bridge: Bridge): string {
     } else {
       sourcePart = sRef(fromRef, true);
     }
-    lines.push(`alias ${sourcePart} as ${alias}`);
+    // Serialize safe navigation on alias source
+    if (srcWire.safe) {
+      const ref = srcWire.from;
+      if (!ref.rootSafe && !ref.pathSafe?.some((s) => s)) {
+        if (sourcePart.includes(".")) {
+          sourcePart = sourcePart.replace(".", "?.");
+        }
+      }
+    }
+    const aliasFb = (srcWire.fallbacks ?? [])
+      .map((f) => {
+        const op = f.type === "falsy" ? "||" : "??";
+        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+        return ` ${op} ${f.value}`;
+      })
+      .join("");
+    const aliasErrf =
+      "catchControl" in srcWire && srcWire.catchControl
+        ? ` catch ${serializeControl(srcWire.catchControl)}`
+        : srcWire.catchFallbackRef
+          ? ` catch ${sPipeOrRef(srcWire.catchFallbackRef)}`
+          : srcWire.catchFallback
+            ? ` catch ${srcWire.catchFallback}`
+            : "";
+    lines.push(`alias ${sourcePart}${aliasFb}${aliasErrf} as ${alias}`);
   }
   // Also emit wires reading from top-level __local bindings
   for (const lw of localReadWires) {
@@ -1997,7 +2166,23 @@ function serializeBridgeBlock(bridge: Bridge): string {
           serPath(lw.from.path, lw.from.rootSafe, lw.from.pathSafe)
         : alias;
     const toStr = sRef(lw.to, false);
-    lines.push(`${toStr} <- ${fromPart}`);
+    const lwFb = (lw.fallbacks ?? [])
+      .map((f) => {
+        const op = f.type === "falsy" ? "||" : "??";
+        if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+        if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+        return ` ${op} ${f.value}`;
+      })
+      .join("");
+    const lwErrf =
+      "catchControl" in lw && lw.catchControl
+        ? ` catch ${serializeControl(lw.catchControl)}`
+        : lw.catchFallbackRef
+          ? ` catch ${sPipeOrRef(lw.catchFallbackRef)}`
+          : lw.catchFallback
+            ? ` catch ${lw.catchFallback}`
+            : "";
+    lines.push(`${toStr} <- ${fromPart}${lwFb}${lwErrf}`);
   }
 
   // ── Pipe wires ───────────────────────────────────────────────────────
@@ -2154,6 +2339,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
 
     // ── Normal pipe chain ─────────────────────────────────────────────
+    // Element-targeting pipe chains are handled in serializeArrayElements
+    if (isUnderArrayScope(outWire.to)) continue;
+
     const handleChain: string[] = [];
     let currentTk = tk;
     let actualSourceRef: NodeRef | null = null;
