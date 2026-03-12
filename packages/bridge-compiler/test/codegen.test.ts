@@ -25,7 +25,7 @@ function buildAotFn(code: string) {
     bodyMatch[1]!,
   ) as (
     input: Record<string, unknown>,
-    tools: Record<string, (...args: any[]) => any>,
+    tools: Record<string, unknown>,
     context: Record<string, unknown>,
     opts?: Record<string, unknown>,
   ) => Promise<any>;
@@ -39,7 +39,7 @@ async function compileAndRun(
   bridgeText: string,
   operation: string,
   input: Record<string, unknown>,
-  tools: Record<string, (...args: any[]) => any> = {},
+  tools: Record<string, unknown> = {},
   context: Record<string, unknown> = {},
 ): Promise<any> {
   const document = parseBridgeFormat(bridgeText);
