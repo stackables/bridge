@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GraphQLSchemaObserver } from "./utils/observed-schema/index.ts";
+import { GraphQLSchemaObserver } from "../utils/observed-schema/index.ts";
 
 test("observed data can be turned into GraphQL SDL", () => {
   const schema = new GraphQLSchemaObserver();

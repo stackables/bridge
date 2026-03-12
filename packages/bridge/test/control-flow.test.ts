@@ -115,13 +115,11 @@ regressionTest("panic control flow", {
     "Panic.test": {
       "all values present → no panic": {
         input: { name: "Alice", a: { name: "ok" } },
-        allowDowngrade: true,
         assertData: { basic: "Alice", catchBypass: "ok", safeBypass: "ok" },
         assertTraces: 1,
       },
       "null name → basic panics, tool fields succeed": {
         input: { a: { name: "ok" } },
-        allowDowngrade: true,
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
           assert.equal(err.message, "fatal error");
@@ -135,7 +133,6 @@ regressionTest("panic control flow", {
       },
       "null tool name → catch/safe panic, catch does not swallow": {
         input: { name: "present", a: { name: null } },
-        allowDowngrade: true,
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
         },
@@ -148,7 +145,6 @@ regressionTest("panic control flow", {
       },
       "tool error → catch fallback works, safe panics": {
         input: { name: "present", a: { _error: "HTTP 500" } },
-        allowDowngrade: true,
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
         },
@@ -467,7 +463,6 @@ regressionTest("AbortSignal control flow", {
       "pre-aborted signal prevents tool, bypasses catch and safe": {
         input: {},
         timeout: 0,
-        allowDowngrade: true,
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeAbortError);
         },
@@ -475,7 +470,6 @@ regressionTest("AbortSignal control flow", {
       },
       "tool error triggers catch fallback": {
         input: {},
-        allowDowngrade: true,
         tools: {
           api: async () => {
             throw new Error("service down");
@@ -491,7 +485,6 @@ regressionTest("AbortSignal control flow", {
       },
       "signal is passed to tool context": {
         input: {},
-        allowDowngrade: true,
         tools: {
           api: async (_input: any, ctx: any) => {
             assert.ok(ctx.signal instanceof AbortSignal);

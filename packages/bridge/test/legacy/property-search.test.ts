@@ -1,12 +1,74 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { forEachEngine } from "../utils/dual-run.ts";
 
-const bridgeFile = readFileSync(
-  new URL("../property-search.bridge", import.meta.url),
-  "utf-8",
-);
+const bridgeFile = `version 1.5
+
+# Property search — all patterns in one API
+#
+# Resolves backwards from demand:
+#   listings/topPick ← zillow ← hereapi ← user input
+bridge Query.propertySearch {
+  with hereapi.geocode as gc
+  with zillow.search as z
+  with input as i
+  with centsToUsd as usd
+  with output as o
+
+  # passthrough: explicit input → output
+  o.location <- i.location
+
+  # user input → hereapi (rename: location → q)
+  gc.q <- i.location
+
+  # chained: hereapi output → zillow input
+  z.latitude <- gc.items[0].position.lat
+  z.longitude <- gc.items[0].position.lng
+
+  # user input → zillow (rename: budget → maxPrice)
+  z.maxPrice <- i.budget
+
+  # topPick: first result, nested drill + rename + tool
+  o.topPick.address <- z.properties[0].streetAddress
+  o.topPick.bedrooms <- z.properties[0].beds
+  o.topPick.city <- z.properties[0].location.city
+
+  usd.cents <- z.properties[0].priceInCents
+  o.topPick.price <- usd.dollars
+
+  # listings: array mapping with per-element rename + nested drill
+  o.listings <- z.properties[] as prop {
+    .address <- prop.streetAddress
+    .price <- prop.priceInCents
+    .bedrooms <- prop.beds
+    .city <- prop.location.city
+  }
+
+}
+
+# Property comments — chained providers + scalar array via tool
+#
+# Resolves: comments ← pluckText ← reviews ← hereapi ← user input
+bridge Query.propertyComments {
+  with hereapi.geocode as gc
+  with reviews.getByLocation as rv
+  with input as i
+  with pluckText as pt
+  with output as o
+
+  # user input → hereapi
+  gc.q <- i.location
+
+  # chained: hereapi → reviews
+  rv.lat <- gc.items[0].position.lat
+  rv.lng <- gc.items[0].position.lng
+
+  # reviews.comments piped through pluckText → flat string array
+  # pipe shorthand: wires rv.comments → pt.in, pt.out → propertyComments
+  o.propertyComments <- pt:rv.comments
+
+}
+`;
 
 const propertyTools: Record<string, any> = {
   "hereapi.geocode": async (_params: any) => ({

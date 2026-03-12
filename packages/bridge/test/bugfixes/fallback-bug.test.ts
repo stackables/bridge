@@ -1,5 +1,5 @@
-import { regressionTest } from "./utils/regression.ts";
-import { tools } from "./utils/bridge-tools.ts";
+import { regressionTest } from "../utils/regression.ts";
+import { tools } from "../utils/bridge-tools.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // String interpolation || fallback priority
