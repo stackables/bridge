@@ -64,7 +64,13 @@ export function lookupToolFn(
 ): ToolCallFn | ((...args: any[]) => any) | undefined {
   const toolFns = ctx.toolFns;
   if (name.includes(".")) {
-    // Try namespace traversal first
+    // Check flat key first — explicit overrides (e.g. "std.httpCall" as a
+    // literal property) take precedence over namespace traversal so that
+    // users can override built-in tools without replacing the whole namespace.
+    const flat = (toolFns as any)?.[name];
+    if (typeof flat === "function") return flat;
+
+    // Namespace traversal (e.g. toolFns.std.httpCall)
     const parts = name.split(".");
     let current: any = toolFns;
     for (const part of parts) {
@@ -76,9 +82,6 @@ export function lookupToolFn(
       current = current[part];
     }
     if (typeof current === "function") return current;
-    // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
-    const flat = (toolFns as any)?.[name];
-    if (typeof flat === "function") return flat;
 
     // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
     // For "std.str.toLowerCase@999.1", check:

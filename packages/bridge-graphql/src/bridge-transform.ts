@@ -430,7 +430,7 @@ export function bridgeTransform(
           if (source instanceof ExecutionTree) {
             let result;
             try {
-              result = await source.response(info.path, array);
+              result = await source.response(info.path, array, scalar);
             } catch (err) {
               throw new Error(
                 formatBridgeError(err, {

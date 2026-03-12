@@ -224,7 +224,7 @@ regressionTest("sync array map", {
           { label: "WIDGET", qty: 3 },
           { label: "GADGET", qty: 7 },
         ],
-        assertTraces: 2,
+        assertTraces: 3,
       },
       "empty array source": {
         input: {},
@@ -249,20 +249,41 @@ regressionTest("sync array map", {
             { id: "x2", doubled: 30 },
           ],
         },
-        assertTraces: 2,
+        assertTraces: 3,
+      },
+      "empty entries": {
+        input: {},
+        tools: {
+          api: Object.assign(() => ({ name: "Empty", items: [] }), {
+            bridge: { sync: true },
+          }),
+          doubler: syncDoub,
+        },
+        assertData: { title: "Empty", entries: [] },
+        assertTraces: 1,
       },
     },
     "Query.enriched": {
       "array map with alias and sync per-element tool": {
         input: {},
         tools: { api: syncEnrichSource, enrich: syncEnrich },
-        allowDowngrade: true,
         assertData: [
           { id: 1, label: "enriched-1" },
           { id: 2, label: "enriched-2" },
           { id: 3, label: "enriched-3" },
         ],
         assertTraces: 4,
+      },
+      "empty items": {
+        input: {},
+        tools: {
+          api: Object.assign(() => ({ items: [] }), {
+            bridge: { sync: true },
+          }),
+          enrich: syncEnrich,
+        },
+        assertData: [],
+        assertTraces: 1,
       },
     },
   },

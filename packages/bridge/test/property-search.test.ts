@@ -122,12 +122,13 @@ regressionTest("property search (.bridge file)", {
       },
       "empty listings: array source returns empty": {
         input: { location: "Berlin" },
+        fields: ["listings"],
         tools: {
           ...propertyTools,
           "zillow.search": async () => ({ properties: [] }),
         },
         assertData: { listings: [] },
-        assertTraces: 3,
+        assertTraces: 2,
       },
     },
     "Query.propertyComments": {

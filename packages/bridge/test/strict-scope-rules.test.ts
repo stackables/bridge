@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -33,6 +34,7 @@ regressionTest("strict scope rules - valid behavior", {
       with output as o
 
       whatever.id <- i.requestId
+      o.toolResult <- whatever.data
       o.items <- i.list[] as whatever {
         .id <- whatever.id
         .data <- whatever.data
@@ -49,6 +51,7 @@ regressionTest("strict scope rules - valid behavior", {
       with output as o
 
       whatever.id <- i.requestId
+      o.toolResult <- whatever.data
       o.items <- i.list[] as whatever {
         .value <- whatever.id
         .sub <- whatever.list[] as whatever {
@@ -79,7 +82,6 @@ regressionTest("strict scope rules - valid behavior", {
             },
           ],
         },
-        allowDowngrade: true,
         assertData: {
           items: [
             {
@@ -99,6 +101,22 @@ regressionTest("strict scope rules - valid behavior", {
         },
         assertTraces: 1,
       },
+      "empty outer list": {
+        input: { requestId: "req-1", list: [] },
+        assertData: { items: [] },
+        // runtime: 0 (pull-based, tool output never consumed); compiled: 1 (eagerly calls bridge-level tools)
+        assertTraces: (traces) => assert.ok(traces.length <= 1),
+      },
+      "empty inner list": {
+        input: {
+          requestId: "req-1",
+          list: [{ id: "a", list: [] }],
+        },
+        assertData: {
+          items: [{ id: "a", result: "fetch:req-1", sub: [] }],
+        },
+        assertTraces: 1,
+      },
     },
     "Query.shadow": {
       "inner scopes shadow outer tool names during execution": {
@@ -113,6 +131,7 @@ regressionTest("strict scope rules - valid behavior", {
           ],
         },
         assertData: {
+          toolResult: "fetch:tool-value",
           items: [
             {
               id: "item-a",
@@ -120,6 +139,22 @@ regressionTest("strict scope rules - valid behavior", {
               sub: [{ id: "sub-a1", data: "sub-a1-data" }],
             },
           ],
+        },
+        assertTraces: 1,
+      },
+      "empty outer list": {
+        input: { requestId: "x", list: [] },
+        assertData: { toolResult: "fetch:x", items: [] },
+        assertTraces: 1,
+      },
+      "empty inner list": {
+        input: {
+          requestId: "x",
+          list: [{ id: "a", data: "a-data", list: [] }],
+        },
+        assertData: {
+          toolResult: "fetch:x",
+          items: [{ id: "a", data: "a-data", sub: [] }],
         },
         assertTraces: 1,
       },
@@ -139,6 +174,7 @@ regressionTest("strict scope rules - valid behavior", {
           ],
         },
         assertData: {
+          toolResult: "fetch:tool-value",
           items: [
             {
               value: "outer-a",
@@ -148,6 +184,22 @@ regressionTest("strict scope rules - valid behavior", {
               ],
             },
           ],
+        },
+        assertTraces: 1,
+      },
+      "empty outer list": {
+        input: { requestId: "x", list: [] },
+        assertData: { toolResult: "fetch:x", items: [] },
+        assertTraces: 1,
+      },
+      "empty inner list": {
+        input: {
+          requestId: "x",
+          list: [{ id: "a", list: [] }],
+        },
+        assertData: {
+          toolResult: "fetch:x",
+          items: [{ value: "a", sub: [] }],
         },
         assertTraces: 1,
       },

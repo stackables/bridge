@@ -54,7 +54,8 @@ regressionTest("loop scoped tools - valid behavior", {
       with std.httpCall as http
 
       http.value <- ctx.prefix
-      o <- ctx.catalog[] as cat {
+      o.bridgeHttp <- http.data
+      o.items <- ctx.catalog[] as cat {
         with std.httpCall as http
 
         http.value <- cat.val
@@ -103,6 +104,20 @@ regressionTest("loop scoped tools - valid behavior", {
         ],
         assertTraces: 3,
       },
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty children": {
+        input: {},
+        context: {
+          catalog: [{ val: "outer-a", children: [] }],
+        },
+        assertData: [{ outer: "tool:outer-a", children: [] }],
+        assertTraces: 1,
+      },
     },
     "Query.shadow": {
       "inner loop-scoped tools shadow outer and bridge level handles": {
@@ -116,13 +131,34 @@ regressionTest("loop scoped tools - valid behavior", {
             },
           ],
         },
-        assertData: [
-          {
-            outer: "tool:outer-a",
-            children: [{ inner: "tool:inner-a1" }],
-          },
-        ],
+        assertData: {
+          bridgeHttp: "tool:bridge-level",
+          items: [
+            {
+              outer: "tool:outer-a",
+              children: [{ inner: "tool:inner-a1" }],
+            },
+          ],
+        },
         assertTraces: 3,
+      },
+      "empty catalog": {
+        input: {},
+        context: { prefix: "bridge-level", catalog: [] },
+        assertData: { bridgeHttp: "tool:bridge-level", items: [] },
+        assertTraces: 1,
+      },
+      "empty children": {
+        input: {},
+        context: {
+          prefix: "bridge-level",
+          catalog: [{ val: "outer-a", children: [] }],
+        },
+        assertData: {
+          bridgeHttp: "tool:bridge-level",
+          items: [{ outer: "tool:outer-a", children: [] }],
+        },
+        assertTraces: 2,
       },
     },
   },

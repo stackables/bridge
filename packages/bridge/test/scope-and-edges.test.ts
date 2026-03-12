@@ -127,6 +127,12 @@ regressionTest("nested shadow scope chain", {
         },
         assertTraces: 1,
       },
+      "empty routes": {
+        input: { origin: "x" },
+        tools: { routeApi: async () => ({ routes: [] }) },
+        assertData: { routes: [] },
+        assertTraces: 1,
+      },
     },
   },
 });
@@ -166,7 +172,6 @@ regressionTest("tool extends with duplicate target override", {
       "child pull replaces parent constant for same target": {
         input: { q: "x" },
         context: { httpMethod: "PATCH" },
-        allowDowngrade: true,
         assertData: { lat: 0, name: "Test" },
         assertTraces: 1,
       },
@@ -280,6 +285,16 @@ regressionTest("nested array-in-array mapping", {
           },
         },
         assertData: [],
+        assertTraces: 1,
+      },
+      "empty legs": {
+        input: { from: "Berlin", to: "Hamburg" },
+        tools: {
+          httpCall: async () => ({
+            journeys: [{ token: "X", legs: [] }],
+          }),
+        },
+        assertData: [{ id: "X", provider: "TRAIN", legs: [] }],
         assertTraces: 1,
       },
     },

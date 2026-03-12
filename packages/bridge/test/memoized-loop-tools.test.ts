@@ -106,6 +106,18 @@ regressionTest("memoized loop-scoped tools - data correctness", {
         ],
         assertTraces: 2,
       },
+      "empty outer catalog": {
+        input: {},
+        context: { catalog1: [], catalog2: [{ id: "x" }] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty inner catalog": {
+        input: {},
+        context: { catalog1: [{ id: "x" }], catalog2: [] },
+        assertData: [{ outer: "item:x", inner: [] }],
+        assertTraces: 1,
+      },
     },
     "Query.shadowMemoize": {
       "shadowed memoize aliases maintain isolated caches": {
@@ -121,6 +133,18 @@ regressionTest("memoized loop-scoped tools - data correctness", {
           },
         ],
         assertTraces: 2,
+      },
+      "empty outer catalog": {
+        input: {},
+        context: { catalog1: [], catalog2: [{ id: "x" }] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty inner catalog": {
+        input: {},
+        context: { catalog1: [{ id: "x" }], catalog2: [] },
+        assertData: [{ outer: "item:x", inner: [] }],
+        assertTraces: 1,
       },
     },
   },

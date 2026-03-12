@@ -637,7 +637,7 @@ regressionTest("and/or short-circuit data correctness", {
   bridge: `
     version 1.5
 
-    bridge Query.andFalse {
+    bridge Query.andBehavior {
       with input as i
       with checker as c
       with output as o
@@ -646,25 +646,7 @@ regressionTest("and/or short-circuit data correctness", {
       o.result <- i.flag and c.ok
     }
 
-    bridge Query.andTrue {
-      with input as i
-      with checker as c
-      with output as o
-
-      c.in <- i.value
-      o.result <- i.flag and c.ok
-    }
-
-    bridge Query.orTrue {
-      with input as i
-      with checker as c
-      with output as o
-
-      c.in <- i.value
-      o.result <- i.flag or c.ok
-    }
-
-    bridge Query.orFalse {
+    bridge Query.orBehavior {
       with input as i
       with checker as c
       with output as o
@@ -677,37 +659,29 @@ regressionTest("and/or short-circuit data correctness", {
     checker: async () => ({ ok: true }),
   },
   scenarios: {
-    "Query.andFalse": {
+    "Query.andBehavior": {
       "and short-circuits: false and _ => false": {
         input: { flag: false, value: "test" },
-        allowDowngrade: true,
         assertData: { result: false },
-        assertTraces: (_traces) => {},
+        assertTraces: 0,
       },
-    },
-    "Query.andTrue": {
       "and evaluates right: true and true => true": {
         input: { flag: true, value: "test" },
-        allowDowngrade: true,
         assertData: { result: true },
-        assertTraces: (_traces) => {},
+        assertTraces: 1,
       },
     },
-    "Query.orTrue": {
+    "Query.orBehavior": {
       "or short-circuits: true or _ => true": {
         input: { flag: true, value: "test" },
-        allowDowngrade: true,
         assertData: { result: true },
-        assertTraces: (_traces) => {},
+        assertTraces: 0,
       },
-    },
-    "Query.orFalse": {
       "or evaluates right: false or false => false": {
         input: { flag: false, value: "test" },
         tools: { checker: async () => ({ ok: false }) },
-        allowDowngrade: true,
         assertData: { result: false },
-        assertTraces: (_traces) => {},
+        assertTraces: 1,
       },
     },
   },

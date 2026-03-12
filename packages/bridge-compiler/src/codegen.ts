@@ -2311,7 +2311,9 @@ class CodegenContext {
         ("from" in w &&
           (w.from.element ||
             w.to.element ||
-            this.elementScopedTools.has(refTrunkKey(w.from)))) ||
+            this.elementScopedTools.has(refTrunkKey(w.from)) ||
+            // Wires from bridge-level refs targeting inside an array mapping
+            (arrayFields.has(topField) && w.to.path.length > 1))) ||
         (w.to.element && ("value" in w || "cond" in w)) ||
         // Cond wires targeting a field inside an array mapping are element wires
         ("cond" in w && arrayFields.has(topField) && w.to.path.length > 1) ||
@@ -3035,12 +3037,16 @@ class CodegenContext {
 
     // Logical AND
     if ("condAnd" in w) {
-      const { leftRef, rightRef, rightValue } = w.condAnd;
+      const { leftRef, rightRef, rightValue, rightSafe } = w.condAnd;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef)
-        expr = `(Boolean(${left}) && Boolean(${this.refToExpr(rightRef)}))`;
-      else if (rightValue !== undefined)
+      if (rightRef) {
+        let rightExpr = this.lazyRefToExpr(rightRef);
+        if (rightSafe && this.ternaryOnlyTools.has(refTrunkKey(rightRef))) {
+          rightExpr = `await (async () => { try { return ${rightExpr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return undefined; } })()`;
+        }
+        expr = `(Boolean(${left}) && Boolean(${rightExpr}))`;
+      } else if (rightValue !== undefined)
         expr = `(Boolean(${left}) && Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
@@ -3049,12 +3055,16 @@ class CodegenContext {
 
     // Logical OR
     if ("condOr" in w) {
-      const { leftRef, rightRef, rightValue } = w.condOr;
+      const { leftRef, rightRef, rightValue, rightSafe } = w.condOr;
       const left = this.refToExpr(leftRef);
       let expr: string;
-      if (rightRef)
-        expr = `(Boolean(${left}) || Boolean(${this.refToExpr(rightRef)}))`;
-      else if (rightValue !== undefined)
+      if (rightRef) {
+        let rightExpr = this.lazyRefToExpr(rightRef);
+        if (rightSafe && this.ternaryOnlyTools.has(refTrunkKey(rightRef))) {
+          rightExpr = `await (async () => { try { return ${rightExpr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return undefined; } })()`;
+        }
+        expr = `(Boolean(${left}) || Boolean(${rightExpr}))`;
+      } else if (rightValue !== undefined)
         expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
       else expr = `Boolean(${left})`;
       expr = this.applyFallbacks(w, expr);
@@ -3197,7 +3207,14 @@ class CodegenContext {
         return expr;
       }
       // Element refs: from.element === true, path = ["srcField"]
-      let expr = this.appendPathExpr(elVar, w.from, true);
+      // Resolve elementDepth to find the correct enclosing element variable
+      const elemDepth = w.from.elementDepth ?? 0;
+      let targetVar = elVar;
+      if (elemDepth > 0) {
+        const currentDepth = parseInt(elVar.slice(3), 10);
+        targetVar = `_el${currentDepth - elemDepth}`;
+      }
+      let expr = this.appendPathExpr(targetVar, w.from, true);
       expr = this.wrapExprWithLoc(expr, w.fromLoc);
       expr = this.applyFallbacks(w, expr);
       return expr;
@@ -4072,11 +4089,13 @@ class CodegenContext {
       }
       if ("condAnd" in w) {
         allRefs.add(refTrunkKey(w.condAnd.leftRef));
-        if (w.condAnd.rightRef) allRefs.add(refTrunkKey(w.condAnd.rightRef));
+        if (w.condAnd.rightRef)
+          ternaryBranchRefs.add(refTrunkKey(w.condAnd.rightRef));
       }
       if ("condOr" in w) {
         allRefs.add(refTrunkKey(w.condOr.leftRef));
-        if (w.condOr.rightRef) allRefs.add(refTrunkKey(w.condOr.rightRef));
+        if (w.condOr.rightRef)
+          ternaryBranchRefs.add(refTrunkKey(w.condOr.rightRef));
       }
       // Fallback refs — on ternary wires, treat as lazy (ternary-branch-like)
       if ("fallbacks" in w && w.fallbacks) {

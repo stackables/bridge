@@ -1447,6 +1447,16 @@ export class ExecutionTree implements TreeContext {
     // For scalar arrays ([JSON!]) GraphQL won't call sub-field resolvers,
     // so we eagerly materialise each element here.
     if (this.parent) {
+      const elementData = this.state[this.elementTrunkKey];
+
+      // Scalar element (string, number, boolean, null): return directly.
+      // Shadow trees wrapping non-object values have no sub-fields to
+      // resolve — re-entering wire resolution would incorrectly re-trigger
+      // the array-level wire that produced this element.
+      if (typeof elementData !== "object" || elementData === null) {
+        return elementData;
+      }
+
       const outputFields = new Set<string>();
       for (const wire of bridge.wires) {
         if (
@@ -1653,7 +1663,7 @@ export class ExecutionTree implements TreeContext {
     return _materializeShadows(this, items, pathPrefix);
   }
 
-  async response(ipath: Path, array: boolean): Promise<any> {
+  async response(ipath: Path, array: boolean, scalar = false): Promise<any> {
     // Build path segments from GraphQL resolver info
     const pathSegments: string[] = [];
     let index = ipath;
@@ -1662,7 +1672,7 @@ export class ExecutionTree implements TreeContext {
       index = index.prev;
     }
 
-    if (pathSegments.length === 0) {
+    if (pathSegments.length === 0 && (array || scalar)) {
       // Direct output for scalar/list return types (e.g. [String!])
       const directOutput =
         this.bridge?.wires.filter(
