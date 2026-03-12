@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",
-    "@stackables/bridge-stdlib": "workspace:*"
+    "@stackables/bridge-stdlib": "workspace:*",
+    "@stackables/bridge-types": "workspace:*"
   },
   "devDependencies": {
     "@stackables/bridge-parser": "workspace:*",
