@@ -281,6 +281,10 @@ export async function executeBridge<T = unknown>(
         ...(maxDepth !== undefined ? { maxDepth } : {}),
       });
     }
+    // Attach bridge source so formatBridgeError can render snippets
+    if (err != null && typeof err === "object" && document.source) {
+      (err as any).bridgeSource ??= document.source;
+    }
     throw err;
   }
 

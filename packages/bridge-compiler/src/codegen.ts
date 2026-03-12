@@ -30,6 +30,7 @@ import type {
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
+import { BridgePanicError } from "@stackables/bridge-core";
 import type { SourceLocation } from "@stackables/bridge-types";
 import {
   assertBridgeCompilerCompatible,
@@ -3549,7 +3550,14 @@ class CodegenContext {
       const wires = this.bridge.wires.filter((w) => refTrunkKey(w.to) === key);
       for (const w of wires) {
         for (const src of this.getSourceTrunks(w)) {
-          if (!needed.has(src) || src === key) continue;
+          if (src === key) {
+            const err = new BridgePanicError(
+              `Circular dependency detected: "${key}" depends on itself`,
+            );
+            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            throw err;
+          }
+          if (!needed.has(src)) continue;
           const neighbors = adj.get(src);
           if (!neighbors || neighbors.has(key)) continue;
           neighbors.add(key);
@@ -3767,10 +3775,11 @@ class CodegenContext {
             expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
           } else if (fb.control) {
             const ctrl = fb.control;
+            const fbLoc = this.serializeLoc(fb.loc);
             if (ctrl.kind === "throw") {
-              expr = `(${expr} || (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+              expr = `(${expr} || (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${fbLoc} }); })())`; // lgtm [js/code-injection]
             } else if (ctrl.kind === "panic") {
-              expr = `(${expr} || (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+              expr = `(${expr} || (() => { const _e = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _e.bridgeLoc = ${fbLoc}; throw _e; })())`; // lgtm [js/code-injection]
             }
           }
         } else {
@@ -3781,10 +3790,11 @@ class CodegenContext {
             expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
           } else if (fb.control) {
             const ctrl = fb.control;
+            const fbLoc = this.serializeLoc(fb.loc);
             if (ctrl.kind === "throw") {
-              expr = `(${expr} ?? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+              expr = `(${expr} ?? (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${fbLoc} }); })())`; // lgtm [js/code-injection]
             } else if (ctrl.kind === "panic") {
-              expr = `(${expr} ?? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })())`; // lgtm [js/code-injection]
+              expr = `(${expr} ?? (() => { const _e = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _e.bridgeLoc = ${fbLoc}; throw _e; })())`; // lgtm [js/code-injection]
             }
           }
         }
@@ -3841,18 +3851,21 @@ class CodegenContext {
     // Catch control flow (throw/panic on catch gate)
     if ("catchControl" in w && w.catchControl) {
       const ctrl = w.catchControl;
+      const catchLoc = this.serializeLoc(
+        "catchLoc" in w ? w.catchLoc : undefined,
+      );
       if (ctrl.kind === "throw") {
         // Wrap in catch IIFE — on error, throw the custom message
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { throw new Error(${JSON.stringify(ctrl.message)}); })() : ${expr})`; // lgtm [js/code-injection]
+          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${catchLoc} }); })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new Error(${JSON.stringify(ctrl.message)}); } })()`; // lgtm [js/code-injection]
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${catchLoc} }); } })()`; // lgtm [js/code-injection]
         }
       } else if (ctrl.kind === "panic") {
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); })() : ${expr})`; // lgtm [js/code-injection]
+          expr = `(${errFlag} !== undefined ? (() => { const _e = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _e.bridgeLoc = ${catchLoc}; throw _e; })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgePanicError(${JSON.stringify(ctrl.message)}); } })()`; // lgtm [js/code-injection]
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; const _pe = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _pe.bridgeLoc = ${catchLoc}; throw _pe; } })()`; // lgtm [js/code-injection]
         }
       }
     }
@@ -4539,7 +4552,14 @@ class CodegenContext {
       const wires = toolWires.get(key) ?? [];
       for (const w of wires) {
         for (const src of this.getSourceTrunks(w)) {
-          if (adj.has(src) && src !== key) {
+          if (src === key) {
+            const err = new BridgePanicError(
+              `Circular dependency detected: "${key}" depends on itself`,
+            );
+            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            throw err;
+          }
+          if (adj.has(src)) {
             adj.get(src)!.add(key);
           }
         }
@@ -4588,7 +4608,14 @@ class CodegenContext {
       const wires = toolWires.get(key) ?? [];
       for (const w of wires) {
         for (const src of this.getSourceTrunks(w)) {
-          if (adj.has(src) && src !== key) {
+          if (src === key) {
+            const err = new BridgePanicError(
+              `Circular dependency detected: "${key}" depends on itself`,
+            );
+            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            throw err;
+          }
+          if (adj.has(src)) {
             adj.get(src)!.add(key);
           }
         }

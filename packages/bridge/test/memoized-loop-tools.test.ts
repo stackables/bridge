@@ -3,7 +3,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 // Memoized loop-scoped tools — caching, isolation, dedup
 //
-// Migrated from legacy/memoized-loop-tools.test.ts
+// Migrated from legacy/memoized-loop-tools.test.ts, legacy/define-loop-tools.test.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("memoized loop-scoped tools - data correctness", {
@@ -145,6 +145,69 @@ regressionTest("memoized loop-scoped tools - data correctness", {
         context: { catalog1: [{ id: "x" }], catalog2: [] },
         assertData: [{ outer: "item:x", inner: [] }],
         assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Define blocks with memoized tools inside loops
+//
+// Migrated from legacy/define-loop-tools.test.ts
+// (parser error test moved to bridge-parser/test/bridge-format.test.ts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+regressionTest("define blocks with memoized tools in loops", {
+  bridge: `
+    version 1.5
+
+    define formatProfile {
+      with input as i
+      with output as o
+      with std.httpCall as fetch memoize
+
+      fetch.value <- i.userId
+      o.data <- fetch.data
+    }
+
+    bridge Query.processCatalog {
+      with context as ctx
+      with output as o
+
+      o <- ctx.catalog[] as cat {
+        with formatProfile as profile
+
+        profile.userId <- cat.id
+        .item <- profile.data
+      }
+    }
+  `,
+  tools: {
+    std: {
+      httpCall: async (params: { value: string }) => ({
+        data: `profile:${params.value}`,
+      }),
+    },
+  },
+  scenarios: {
+    "Query.processCatalog": {
+      "memoized tool inside define block deduplicates across loop elements": {
+        input: {},
+        context: {
+          catalog: [{ id: "user-1" }, { id: "user-2" }, { id: "user-1" }],
+        },
+        assertData: [
+          { item: "profile:user-1" },
+          { item: "profile:user-2" },
+          { item: "profile:user-1" },
+        ],
+        assertTraces: 2,
+      },
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
       },
     },
   },

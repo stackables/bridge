@@ -620,6 +620,8 @@ export type RegressionTest = {
   bridge: string;
   tools?: Record<string, any>;
   context?: Record<string, any>;
+  /** Tool-level timeout in ms (default: 5 000). */
+  toolTimeoutMs?: number;
   scenarios: Record<string, Record<string, Scenario>>;
 };
 
@@ -916,7 +918,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                   tools,
                   context,
                   signal: timeout.signal,
-                  toolTimeoutMs: 5_000,
+                  toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                   requestedFields: scenario.fields,
                   logger,
                   trace: "full" as const,
@@ -1123,6 +1125,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                 const transformedSchema = bridgeTransform(rawSchema, document, {
                   tools,
                   signalMapper: (ctx) => ctx.__bridgeSignal,
+                  toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                 });
                 const source = buildGraphQLOperationSource(
                   rawSchema,
