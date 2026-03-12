@@ -75,34 +75,32 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
 export function serializeBridge(doc: BridgeDocument): string {
   const version = doc.version ?? BRIDGE_VERSION;
   const { instructions } = doc;
-  const bridges = instructions.filter((i): i is Bridge => i.kind === "bridge");
-  const tools = instructions.filter((i): i is ToolDef => i.kind === "tool");
-  const consts = instructions.filter((i): i is ConstDef => i.kind === "const");
-  const defines = instructions.filter(
-    (i): i is DefineDef => i.kind === "define",
-  );
-  if (
-    bridges.length === 0 &&
-    tools.length === 0 &&
-    consts.length === 0 &&
-    defines.length === 0
-  )
-    return "";
+  if (instructions.length === 0) return "";
 
   const blocks: string[] = [];
 
-  // Group const declarations into a single block
-  if (consts.length > 0) {
-    blocks.push(consts.map((c) => `const ${c.name} = ${c.value}`).join("\n"));
-  }
-  for (const tool of tools) {
-    blocks.push(serializeToolBlock(tool));
-  }
-  for (const def of defines) {
-    blocks.push(serializeDefineBlock(def));
-  }
-  for (const bridge of bridges) {
-    blocks.push(serializeBridgeBlock(bridge));
+  // Group consecutive const declarations into a single block
+  let i = 0;
+  while (i < instructions.length) {
+    const instr = instructions[i]!;
+    if (instr.kind === "const") {
+      const constLines: string[] = [];
+      while (i < instructions.length && instructions[i]!.kind === "const") {
+        const c = instructions[i] as ConstDef;
+        constLines.push(`const ${c.name} = ${c.value}`);
+        i++;
+      }
+      blocks.push(constLines.join("\n"));
+    } else if (instr.kind === "tool") {
+      blocks.push(serializeToolBlock(instr as ToolDef));
+      i++;
+    } else if (instr.kind === "define") {
+      blocks.push(serializeDefineBlock(instr as DefineDef));
+      i++;
+    } else {
+      blocks.push(serializeBridgeBlock(instr as Bridge));
+      i++;
+    }
   }
 
   return `version ${version}\n\n` + blocks.join("\n\n") + "\n";
@@ -690,9 +688,51 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Header ──────────────────────────────────────────────────────────
   lines.push(`bridge ${bridge.type}.${bridge.field} {`);
 
+  // Collect trunk keys of define-inlined tools (handle contains $)
+  const defineInlinedTrunkKeys = new Set<string>();
+  for (const h of bridge.handles) {
+    if (h.kind === "tool" && h.handle.includes("$")) {
+      const lastDot = h.name.lastIndexOf(".");
+      if (lastDot !== -1) {
+        const mod = h.name.substring(0, lastDot);
+        const fld = h.name.substring(lastDot + 1);
+        // Count instances to match trunk key
+        let inst = 0;
+        for (const h2 of bridge.handles) {
+          if (h2.kind !== "tool") continue;
+          const ld2 = h2.name.lastIndexOf(".");
+          if (
+            ld2 !== -1 &&
+            h2.name.substring(0, ld2) === mod &&
+            h2.name.substring(ld2 + 1) === fld
+          )
+            inst++;
+          if (h2 === h) break;
+        }
+        defineInlinedTrunkKeys.add(`${mod}:${bridge.type}:${fld}:${inst}`);
+      }
+    }
+  }
+
+  // Detect element-scoped define handles: defines whose __define_in_ wires
+  // originate from element scope (i.e., the define is used inside an array block)
+  const elementScopedDefines = new Set<string>();
+  for (const w of bridge.wires) {
+    if (
+      "from" in w &&
+      w.from.element &&
+      w.to.module.startsWith("__define_in_")
+    ) {
+      const defineHandle = w.to.module.substring("__define_in_".length);
+      elementScopedDefines.add(defineHandle);
+    }
+  }
+
   for (const h of bridge.handles) {
     // Element-scoped tool handles are emitted inside their array block
     if (h.kind === "tool" && h.element) continue;
+    // Define-inlined tool handles are part of the define block, not the bridge
+    if (h.kind === "tool" && h.handle.includes("$")) continue;
     switch (h.kind) {
       case "tool": {
         // Short form `with <name>` when handle == last segment of name
@@ -733,7 +773,9 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
         break;
       case "define":
-        lines.push(`  with ${h.name} as ${h.handle}`);
+        if (!elementScopedDefines.has(h.handle)) {
+          lines.push(`  with ${h.name} as ${h.handle}`);
+        }
         break;
     }
   }
@@ -968,15 +1010,35 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
   // ── Group element wires by array-destination field ──────────────────
   // Pull wires: from.element=true OR involving element-scoped tools
+  // OR define-output wires targeting an array-scoped bridge path
   const isElementToolWire = (w: Wire): boolean => {
     if (!("from" in w)) return false;
     if (elementToolTrunkKeys.has(refTrunkKey(w.from))) return true;
     if (elementToolTrunkKeys.has(refTrunkKey(w.to))) return true;
     return false;
   };
+  const isDefineOutElementWire = (w: Wire): boolean => {
+    if (!("from" in w)) return false;
+    if (!w.from.module.startsWith("__define_out_")) return false;
+    // Check if target is a bridge trunk path under any array iterator
+    const to = w.to;
+    if (
+      to.module !== SELF_MODULE ||
+      to.type !== bridge.type ||
+      to.field !== bridge.field
+    )
+      return false;
+    const ai = bridge.arrayIterators ?? {};
+    const p = to.path.join(".");
+    for (const iterPath of Object.keys(ai)) {
+      if (iterPath === "" || p.startsWith(iterPath + ".")) return true;
+    }
+    return false;
+  };
   const elementPullWires = bridge.wires.filter(
     (w): w is Extract<Wire, { from: NodeRef }> =>
-      "from" in w && (!!w.from.element || isElementToolWire(w)),
+      "from" in w &&
+      (!!w.from.element || isElementToolWire(w) || isDefineOutElementWire(w)),
   );
   // Constant wires: "value" in w && to.element=true
   const elementConstWires = bridge.wires.filter(
@@ -1103,7 +1165,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
-  // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, __local, and element-scoped ternary wires from main loop
+  // ── Helper: is a wire endpoint a define-inlined tool? ─────────────
+  const isDefineInlinedRef = (ref: NodeRef): boolean => {
+    const tk =
+      ref.instance != null
+        ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
+        : `${ref.module}:${ref.type}:${ref.field}`;
+    return defineInlinedTrunkKeys.has(tk);
+  };
+
+  // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, __local, define-internal, and element-scoped ternary wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
@@ -1114,7 +1185,10 @@ function serializeBridgeBlock(bridge: Bridge): string {
       (!("value" in w) || !w.to.element) &&
       w.to.module !== "__local" &&
       (!("from" in w) || (w.from as NodeRef).module !== "__local") &&
-      (!("cond" in w) || !isUnderArrayScope(w.to)),
+      (!("cond" in w) || !isUnderArrayScope(w.to)) &&
+      (!("from" in w) || !isDefineInlinedRef((w as any).from)) &&
+      !isDefineInlinedRef(w.to) &&
+      !isDefineOutElementWire(w),
   );
 
   // ── Collect __local binding wires for array-scoped `with` declarations ──
@@ -1685,6 +1759,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
 
+    // Emit element-scoped define declarations: with <defineName> as <handle>
+    // Only emit at root array level (pathDepth === 0) for now
+    if (pathDepth === 0) {
+      for (const h of bridge.handles) {
+        if (h.kind !== "define") continue;
+        if (!elementScopedDefines.has(h.handle)) continue;
+        lines.push(`${indent}with ${h.name} as ${h.handle}`);
+      }
+    }
+
     // Emit constant element wires
     for (const ew of levelConsts) {
       const fieldPath = ew.to.path.slice(pathDepth);
@@ -1740,11 +1824,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
         ? resolvedIterName +
           (ew.from.path.length > 0 ? "." + serPath(ew.from.path) : "")
         : sRef(ew.from, true);
-      // Tool input wires target an element-scoped tool handle
+      // Tool input or define-in wires target a scoped handle
       const toTk = refTrunkKey(ew.to);
-      const toToolHandle = elementToolTrunkKeys.has(toTk)
-        ? handleMap.get(toTk)
-        : undefined;
+      const toToolHandle =
+        elementToolTrunkKeys.has(toTk) ||
+        ew.to.module.startsWith("__define_in_")
+          ? handleMap.get(toTk)
+          : undefined;
       const elemTo = toToolHandle
         ? toToolHandle +
           (ew.to.path.length > 0 ? "." + serPath(ew.to.path) : "")
@@ -2458,6 +2544,14 @@ function buildHandleMap(bridge: Bridge): {
       case "define":
         handleMap.set(
           `__define_${h.handle}:${bridge.type}:${bridge.field}`,
+          h.handle,
+        );
+        handleMap.set(
+          `__define_in_${h.handle}:${bridge.type}:${bridge.field}`,
+          h.handle,
+        );
+        handleMap.set(
+          `__define_out_${h.handle}:${bridge.type}:${bridge.field}`,
           h.handle,
         );
         break;
