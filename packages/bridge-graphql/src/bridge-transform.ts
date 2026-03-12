@@ -119,6 +119,18 @@ export type BridgeOptions = {
    */
   maxDepth?: number;
   /**
+   * Extract a per-request `AbortSignal` from the GraphQL context.
+   * When the signal is aborted, in-flight tool calls throw `BridgeAbortError`.
+   *
+   * Typical usage with GraphQL Yoga:
+   * ```ts
+   * bridgeTransform(schema, doc, {
+   *   signalMapper: (context) => context.request?.signal,
+   * })
+   * ```
+   */
+  signalMapper?: (context: any) => AbortSignal | undefined;
+  /**
    * Override the standalone execution function.
    *
    * When provided, **all** bridge operations are executed through this function
@@ -252,6 +264,7 @@ export function bridgeTransform(
         info: GraphQLResolveInfo,
       ): Promise<unknown> {
         const requestedFields = collectRequestedFields(info);
+        const signal = options?.signalMapper?.(context);
         try {
           const { data, traces } = await executeBridgeFn({
             document: activeDoc,
@@ -261,6 +274,7 @@ export function bridgeTransform(
             tools: userTools,
             ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
             logger,
+            ...(signal ? { signal } : {}),
             ...(options?.toolTimeoutMs !== undefined
               ? { toolTimeoutMs: options.toolTimeoutMs }
               : {}),
@@ -376,6 +390,11 @@ export function bridgeTransform(
               options.maxDepth >= 0
             ) {
               source.maxDepth = Math.floor(options.maxDepth);
+            }
+
+            const signal = options?.signalMapper?.(context);
+            if (signal) {
+              source.signal = signal;
             }
 
             if (traceLevel !== "off") {

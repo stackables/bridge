@@ -1071,7 +1071,7 @@ export function regressionTest(name: string, data: RegressionTest) {
             });
 
             for (const scenarioName of scenarioNames) {
-              test(scenarioName, async () => {
+              test(scenarioName, async (t) => {
                 const observedRuntimeData = observedRuntimeSamples.find(
                   (sample) => sample.scenarioName === scenarioName,
                 )?.output;
@@ -1079,9 +1079,28 @@ export function regressionTest(name: string, data: RegressionTest) {
                   observedRuntimeData ?? replayExemplar;
                 const scenario = scenarios[scenarioName]!;
                 const tools = { ...data.tools, ...scenario.tools };
-                const context = { ...data.context, ...scenario.context };
+                const context: Record<string, unknown> = {
+                  ...data.context,
+                  ...scenario.context,
+                };
+
+                // Mirror the engine's AbortController setup so GraphQL replay
+                // exercises the same abort path a real server would.
+                // A real server always has a request signal; we replicate that here.
+                const ac = new AbortController();
+                t.signal.onabort = () => ac.abort();
+                if (scenario.timeout !== undefined) {
+                  if (scenario.timeout <= 0) {
+                    ac.abort();
+                  } else {
+                    setTimeout(() => ac.abort(), scenario.timeout);
+                  }
+                }
+                context.__bridgeSignal = ac.signal;
+
                 const transformedSchema = bridgeTransform(rawSchema, document, {
                   tools,
+                  signalMapper: (ctx) => ctx.__bridgeSignal,
                 });
                 const source = buildGraphQLOperationSource(
                   rawSchema,

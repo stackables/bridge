@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // throw control flow
@@ -440,111 +438,73 @@ regressionTest("continue and break in arrays", {
 // ═══════════════════════════════════════════════════════════════════════════
 // AbortSignal control flow
 //
-// These tests require per-scenario AbortSignal configuration which the
-// regressionTest framework does not currently support. They use
-// forEachEngine to test against both runtime and compiled engines.
-//
 //   • Aborted signal prevents tool execution (BridgeAbortError)
 //   • Abort error bypasses catch gate
 //   • Abort error bypasses safe navigation (?.)
 //   • Signal is passed to tool context
 //
+// Uses timeout: 0 to pre-abort the harness signal before execution begins.
 // ═══════════════════════════════════════════════════════════════════════════
 
-forEachEngine("AbortSignal control flow", (run) => {
-  test("aborted signal prevents tool execution", async () => {
-    const src = `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o.name <- a.name
-}`;
-    const controller = new AbortController();
-    controller.abort();
-    const abortTools = {
-      api: async () => {
-        throw new Error("should not be called");
-      },
-    };
-    await assert.rejects(
-      () =>
-        run(src, "Query.test", {}, abortTools, {
-          signal: controller.signal,
-        }),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
-      },
-    );
-  });
+regressionTest("AbortSignal control flow", {
+  bridge: `
+    version 1.5
 
-  test("abort error bypasses catch gate", async () => {
-    const src = `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o.name <- a.name catch "fallback"
-}`;
-    const controller = new AbortController();
-    controller.abort();
-    const abortTools = {
-      api: async () => ({ name: "test" }),
-    };
-    await assert.rejects(
-      () =>
-        run(src, "Query.test", {}, abortTools, {
-          signal: controller.signal,
-        }),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
-      },
-    );
-  });
+    bridge Abort.test {
+      with api as a
+      with output as o
 
-  test("abort error bypasses safe navigation (?.)", async () => {
-    const src = `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o.name <- a?.name
-}`;
-    const controller = new AbortController();
-    controller.abort();
-    const abortTools = {
-      api: async () => ({ name: "test" }),
-    };
-    await assert.rejects(
-      () =>
-        run(src, "Query.test", {}, abortTools, {
-          signal: controller.signal,
-        }),
-      (err: Error) => {
-        assert.ok(err instanceof BridgeAbortError);
-        return true;
+      o.direct <- a.name
+      o.caught <- a.name catch "fallback"
+      o.safe <- a?.name
+    }
+  `,
+  tools: {
+    api: async () => ({ name: "hello" }),
+  },
+  scenarios: {
+    "Abort.test": {
+      "pre-aborted signal prevents tool, bypasses catch and safe": {
+        input: {},
+        timeout: 0,
+        allowDowngrade: true,
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeAbortError);
+        },
+        assertTraces: 0,
       },
-    );
-  });
-
-  test("signal is passed to tool context", async () => {
-    const src = `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o.name <- a.name
-}`;
-    const controller = new AbortController();
-    let receivedSignal: AbortSignal | undefined;
-    const signalTools = {
-      api: async (_input: any, ctx: any) => {
-        receivedSignal = ctx.signal;
-        return { name: "test" };
+      "tool error triggers catch fallback": {
+        input: {},
+        allowDowngrade: true,
+        tools: {
+          api: async () => {
+            throw new Error("service down");
+          },
+        },
+        assertError: /service down/,
+        assertTraces: 1,
+        assertGraphql: {
+          direct: /service down/i,
+          caught: "fallback",
+          safe: null,
+        },
       },
-    };
-    await run(src, "Query.test", {}, signalTools, {
-      signal: controller.signal,
-    });
-    assert.ok(receivedSignal);
-    assert.equal(receivedSignal, controller.signal);
-  });
+      "signal is passed to tool context": {
+        input: {},
+        allowDowngrade: true,
+        tools: {
+          api: async (_input: any, ctx: any) => {
+            assert.ok(ctx.signal instanceof AbortSignal);
+            return { name: "received" };
+          },
+        },
+        assertData: {
+          direct: "received",
+          caught: "received",
+          safe: "received",
+        },
+        assertTraces: 1,
+      },
+    },
+  },
 });
