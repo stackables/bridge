@@ -13,7 +13,7 @@ import { describe, test } from "node:test";
 // so these tests cannot be expressed as regressionTests.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
+import { parseBridgeFormat as parseBridge } from "../../src/index.ts";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
 
