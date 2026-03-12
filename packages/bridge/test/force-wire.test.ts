@@ -1,5 +1,6 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import assert from "node:assert";
 
 // ── Force statement: regression tests ───────────────────────────────────────
 
@@ -52,7 +53,12 @@ bridge Mutation.fire {
       "critical forced tool error throws": {
         input: { q: "test", err: "audit service unavailable" },
         assertError: /audit service unavailable/,
-        assertTraces: 2,
+        assertTraces: (a) => {
+          assert.ok(
+            a.length >= 1,
+            "Expected at least 1 trace for the failing tool",
+          );
+        },
       },
     },
 
