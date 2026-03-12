@@ -2,29 +2,25 @@
   "name": "@stackables/bridge",
   "version": "2.3.1",
   "description": "Declarative dataflow for GraphQL",
-  "main": "./build/index.js",
+  "main": "./src/index.ts",
   "type": "module",
-  "types": "./build/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "source": "./src/index.ts",
-      "import": "./build/index.js",
-      "types": "./build/index.d.ts"
-    }
+    ".": "./src/index.ts"
   },
   "files": [
     "build",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm build",
-    "lint:types": "tsc -p tsconfig.check.json",
-    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts test/legacy/*.test.ts",
-    "fuzz": "node --experimental-transform-types --conditions source --test test/*.fuzz.ts",
-    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --conditions source --test test/*.test.ts test/legacy/*.test.ts",
-    "bench": "node --experimental-transform-types --conditions source bench/engine.bench.ts",
-    "bench:compiler": "node --experimental-transform-types --conditions source bench/compiler.bench.ts"
+    "lint:types": "tsc -p tsconfig.json",
+    "test": "node --experimental-transform-types --test test/*.test.ts test/legacy/*.test.ts",
+    "fuzz": "node --experimental-transform-types --test test/*.fuzz.ts",
+    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --test test/*.test.ts test/legacy/*.test.ts",
+    "bench": "node --experimental-transform-types bench/engine.bench.ts",
+    "bench:compiler": "node --experimental-transform-types bench/compiler.bench.ts"
   },
   "repository": {
     "type": "git",
@@ -50,7 +46,15 @@
     "@stackables/bridge-stdlib": "workspace:*"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "main": "./build/index.js",
+    "types": "./build/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./build/index.d.ts",
+        "default": "./build/index.js"
+      }
+    }
   },
   "packageManager": "pnpm@10.15.0+sha512.486ebc259d3e999a4e8691ce03b5cac4a71cbeca39372a9b762cb500cfdf0873e2cb16abe3d951b1ee2cf012503f027b98b6584e4df22524e0c7450d9ec7aa7b"
 }

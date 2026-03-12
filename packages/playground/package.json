@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "test": "node --experimental-transform-types --conditions source --test test/*.test.ts",
+    "test": "node --experimental-transform-types --test test/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
