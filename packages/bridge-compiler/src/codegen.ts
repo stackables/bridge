@@ -402,15 +402,17 @@ class CodegenContext {
           const vn = `_t${++this.toolCounter}`;
           this.varMap.set(tk, vn);
           const field = ph.baseTrunk.field;
+          // Normalise __and/__or → and/or so they match INTERNAL_TOOLS
+          const normField = field.startsWith("__") ? field.slice(2) : field;
           // Use the full tool name from the handle binding (e.g. "std.str.toUpperCase")
           // falling back to just the field name for internal/synthetic handles
-          const fullToolName = handleToolNames.get(ph.handle) ?? field;
+          const fullToolName = handleToolNames.get(ph.handle) ?? normField;
           this.tools.set(tk, {
             trunkKey: tk,
             toolName: fullToolName,
             varName: vn,
           });
-          if (INTERNAL_TOOLS.has(field)) {
+          if (INTERNAL_TOOLS.has(normField)) {
             this.internalToolKeys.add(tk);
           }
         }
@@ -599,7 +601,12 @@ class CodegenContext {
     // Detect tools whose output is only referenced by catch-guarded wires.
     // These tools need try/catch wrapping to prevent unhandled rejections.
     for (const w of outputWires) {
-      if ((hasCatchFallback(w) || hasCatchControl(w)) && "from" in w) {
+      if (
+        (hasCatchFallback(w) ||
+          hasCatchControl(w) ||
+          ("safe" in w && w.safe)) &&
+        "from" in w
+      ) {
         const srcKey = refTrunkKey(w.from);
         this.catchGuardedTools.add(srcKey);
       }
@@ -618,6 +625,30 @@ class CodegenContext {
           this.catchGuardedTools.add(refTrunkKey(w.cond));
           if (w.thenRef) this.catchGuardedTools.add(refTrunkKey(w.thenRef));
           if (w.elseRef) this.catchGuardedTools.add(refTrunkKey(w.elseRef));
+        }
+      }
+    }
+    // Mark tools catch-guarded when pipe wires carry safe/catch modifiers
+    // (e.g. `api?.score > 5` — the pipe from api to the `>` operator has safe)
+    for (const [, twires] of toolWires) {
+      for (const w of twires) {
+        const isSafe =
+          ("safe" in w && w.safe) ||
+          ("condAnd" in w && w.condAnd.safe) ||
+          ("condOr" in w && w.condOr.safe);
+        if (!isSafe) continue;
+        if ("from" in w) {
+          this.catchGuardedTools.add(refTrunkKey(w.from));
+        }
+        if ("condAnd" in w) {
+          this.catchGuardedTools.add(refTrunkKey(w.condAnd.leftRef));
+          if (w.condAnd.rightRef)
+            this.catchGuardedTools.add(refTrunkKey(w.condAnd.rightRef));
+        }
+        if ("condOr" in w) {
+          this.catchGuardedTools.add(refTrunkKey(w.condOr.leftRef));
+          if (w.condOr.rightRef)
+            this.catchGuardedTools.add(refTrunkKey(w.condOr.rightRef));
         }
       }
     }
@@ -1575,74 +1606,82 @@ class CodegenContext {
     }
 
     let expr: string;
-    const a = inputs.get("a") ?? "undefined";
-    const b = inputs.get("b") ?? "undefined";
 
-    switch (fieldName) {
-      case "add":
-        expr = `(Number(${a}) + Number(${b}))`;
-        break;
-      case "subtract":
-        expr = `(Number(${a}) - Number(${b}))`;
-        break;
-      case "multiply":
-        expr = `(Number(${a}) * Number(${b}))`;
-        break;
-      case "divide":
-        expr = `(Number(${a}) / Number(${b}))`;
-        break;
-      case "eq":
-        expr = `(${a} === ${b})`;
-        break;
-      case "neq":
-        expr = `(${a} !== ${b})`;
-        break;
-      case "gt":
-        expr = `(Number(${a}) > Number(${b}))`;
-        break;
-      case "gte":
-        expr = `(Number(${a}) >= Number(${b}))`;
-        break;
-      case "lt":
-        expr = `(Number(${a}) < Number(${b}))`;
-        break;
-      case "lte":
-        expr = `(Number(${a}) <= Number(${b}))`;
-        break;
-      case "not":
-        expr = `(!${a})`;
-        break;
-      case "and":
-        expr = `(Boolean(${a}) && Boolean(${b}))`;
-        break;
-      case "or":
-        expr = `(Boolean(${a}) || Boolean(${b}))`;
-        break;
-      case "concat": {
-        const parts: string[] = [];
-        for (let i = 0; ; i++) {
-          const partExpr = inputs.get(`parts.${i}`);
-          if (partExpr === undefined) break;
-          parts.push(partExpr);
+    // condAnd/condOr wires target the root path and already contain the full
+    // inlined expression (e.g. `(Boolean(left) && Boolean(right))`).
+    const rootExpr = inputs.get("");
+    if (rootExpr !== undefined && (fieldName === "and" || fieldName === "or")) {
+      expr = rootExpr;
+    } else {
+      const a = inputs.get("a") ?? "undefined";
+      const b = inputs.get("b") ?? "undefined";
+
+      switch (fieldName) {
+        case "add":
+          expr = `(Number(${a}) + Number(${b}))`;
+          break;
+        case "subtract":
+          expr = `(Number(${a}) - Number(${b}))`;
+          break;
+        case "multiply":
+          expr = `(Number(${a}) * Number(${b}))`;
+          break;
+        case "divide":
+          expr = `(Number(${a}) / Number(${b}))`;
+          break;
+        case "eq":
+          expr = `(${a} === ${b})`;
+          break;
+        case "neq":
+          expr = `(${a} !== ${b})`;
+          break;
+        case "gt":
+          expr = `(Number(${a}) > Number(${b}))`;
+          break;
+        case "gte":
+          expr = `(Number(${a}) >= Number(${b}))`;
+          break;
+        case "lt":
+          expr = `(Number(${a}) < Number(${b}))`;
+          break;
+        case "lte":
+          expr = `(Number(${a}) <= Number(${b}))`;
+          break;
+        case "not":
+          expr = `(!${a})`;
+          break;
+        case "and":
+          expr = `(Boolean(${a}) && Boolean(${b}))`;
+          break;
+        case "or":
+          expr = `(Boolean(${a}) || Boolean(${b}))`;
+          break;
+        case "concat": {
+          const parts: string[] = [];
+          for (let i = 0; ; i++) {
+            const partExpr = inputs.get(`parts.${i}`);
+            if (partExpr === undefined) break;
+            parts.push(partExpr);
+          }
+          // concat returns { value: string } — same as the runtime internal tool
+          const concatParts = parts
+            .map((p) => `(${p} == null ? "" : String(${p}))`)
+            .join(" + ");
+          expr = `{ value: ${concatParts || '""'} }`;
+          break;
         }
-        // concat returns { value: string } — same as the runtime internal tool
-        const concatParts = parts
-          .map((p) => `(${p} == null ? "" : String(${p}))`)
-          .join(" + ");
-        expr = `{ value: ${concatParts || '""'} }`;
-        break;
-      }
-      default: {
-        // Unknown internal tool — fall back to tools map call
-        const inputObj = this.buildObjectLiteral(
-          bridgeWires,
-          (w) => w.to.path,
-          4,
-        );
-        lines.push(
-          `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
-        );
-        return;
+        default: {
+          // Unknown internal tool — fall back to tools map call
+          const inputObj = this.buildObjectLiteral(
+            bridgeWires,
+            (w) => w.to.path,
+            4,
+          );
+          lines.push(
+            `  const ${tool.varName} = ${this.syncAwareCall(tool.toolName, inputObj, tool.trunkKey)};`,
+          );
+          return;
+        }
       }
     }
 
@@ -3618,6 +3657,27 @@ class CodegenContext {
 
   /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */
   private applyFallbacks(w: Wire, expr: string): string {
+    // Top-level safe flag indicates the wire wants error → undefined conversion.
+    // condAnd/condOr wires carry safe INSIDE (condAnd.safe) — those refs already
+    // have rootSafe/pathSafe so __get handles null bases; no extra wrapping needed.
+    const wireSafe = "safe" in w && w.safe;
+    // When safe (?.) has fallbacks (?? / ||), convert tool error → undefined
+    // BEFORE the fallback chain so that `a?.name ?? panic "msg"` triggers
+    // the panic when the tool errors (safe makes it undefined, then ?? fires).
+    const hasFallbacks =
+      "fallbacks" in w && w.fallbacks && w.fallbacks.length > 0;
+    if (
+      hasFallbacks &&
+      wireSafe &&
+      !hasCatchFallback(w) &&
+      !hasCatchControl(w)
+    ) {
+      const earlyErrFlag = this.getSourceErrorFlag(w);
+      if (earlyErrFlag) {
+        expr = `(${earlyErrFlag} !== undefined ? undefined : ${expr})`; // lgtm [js/code-injection]
+      }
+    }
+
     if ("fallbacks" in w && w.fallbacks) {
       for (const fb of w.fallbacks) {
         if (fb.type === "falsy") {
@@ -3673,11 +3733,28 @@ class CodegenContext {
         // Fallback: wrap in IIFE with try/catch (re-throw fatal errors)
         expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return ${catchExpr}; } })()`; // lgtm [js/code-injection]
       }
+    } else if (wireSafe && !hasCatchControl(w)) {
+      // Safe navigation (?.) without catch — return undefined on error.
+      // When fallbacks are present, the early conversion already happened above.
+      if (!hasFallbacks) {
+        if (errFlag) {
+          expr = `(${errFlag} !== undefined ? undefined : ${expr})`; // lgtm [js/code-injection]
+        } else {
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return undefined; } })()`; // lgtm [js/code-injection]
+        }
+      }
     } else if (errFlag) {
-      // This wire has NO catch fallback but its source tool is catch-guarded by another
-      // wire. If the tool failed, re-throw the stored error rather than silently
-      // returning undefined — swallowing the error here would be a silent data bug.
-      expr = `(${errFlag} !== undefined ? (() => { throw ${errFlag}; })() : ${expr})`; // lgtm [js/code-injection]
+      // condAnd/condOr with nested safe flag — the inner refs have rootSafe/pathSafe
+      // so __get handles null bases gracefully. Don't re-throw; the natural Boolean()
+      // evaluation produces the correct result (e.g. Boolean(undefined) → false).
+      const isCondSafe =
+        ("condAnd" in w && w.condAnd.safe) || ("condOr" in w && w.condOr.safe);
+      if (!isCondSafe) {
+        // This wire has NO catch fallback but its source tool is catch-guarded by another
+        // wire. If the tool failed, re-throw the stored error rather than silently
+        // returning undefined — swallowing the error here would be a silent data bug.
+        expr = `(${errFlag} !== undefined ? (() => { throw ${errFlag}; })() : ${expr})`; // lgtm [js/code-injection]
+      }
     }
 
     // Catch control flow (throw/panic on catch gate)
@@ -3722,6 +3799,27 @@ class CodegenContext {
         if (f && !flags.includes(f)) flags.push(f);
       }
       if (flags.length > 0) return flags.join(" ?? "); // Combine error flags
+    }
+    // For condAnd/condOr wires, check leftRef and rightRef
+    if ("condAnd" in w) {
+      const flags: string[] = [];
+      const lf = this.getErrorFlagForRef(w.condAnd.leftRef);
+      if (lf) flags.push(lf);
+      if (w.condAnd.rightRef) {
+        const rf = this.getErrorFlagForRef(w.condAnd.rightRef);
+        if (rf && !flags.includes(rf)) flags.push(rf);
+      }
+      if (flags.length > 0) return flags.join(" ?? ");
+    }
+    if ("condOr" in w) {
+      const flags: string[] = [];
+      const lf = this.getErrorFlagForRef(w.condOr.leftRef);
+      if (lf) flags.push(lf);
+      if (w.condOr.rightRef) {
+        const rf = this.getErrorFlagForRef(w.condOr.rightRef);
+        if (rf && !flags.includes(rf)) flags.push(rf);
+      }
+      if (flags.length > 0) return flags.join(" ?? ");
     }
     return undefined;
   }

@@ -81,15 +81,6 @@ export function assertBridgeCompilerCompatible(
 
     if (!("from" in w)) continue;
 
-    // safe: true wires WITHOUT catch — compiler doesn't correctly catch
-    // tool errors via bare ?. (it works when combined with catch).
-    if (w.safe && !w.catchFallback && !w.catchFallbackRef && !w.catchControl) {
-      throw new BridgeCompilerIncompatibleError(
-        op,
-        "Safe execution modifier (?.) without catch is not yet supported by the compiler.",
-      );
-    }
-
     // Fallback chains (|| / ??) with tool-backed refs — compiler eagerly
     // calls all tools via Promise.all, so short-circuit semantics are lost
     // and tool side effects fire unconditionally.
