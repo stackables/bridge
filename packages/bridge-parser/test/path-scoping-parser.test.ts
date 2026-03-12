@@ -3,10 +3,9 @@ import { describe, test } from "node:test";
 import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
-} from "../../src/index.ts";
-import type { Bridge, Wire } from "../../src/index.ts";
-import { assertDeepStrictEqualIgnoringLoc } from "../utils/parse-test-utils.ts";
-import { forEachEngine } from "../utils/dual-run.ts";
+} from "../src/index.ts";
+import type { Bridge, Wire } from "@stackables/bridge-core";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
 
@@ -327,6 +326,78 @@ bridge Query.test {
 
     assertDeepStrictEqualIgnoringLoc(scopedBridge.wires, flatBridge.wires);
   });
+
+  test("scope block on tool input wires to tool correctly", () => {
+    const bridge = `version 1.5
+
+tool api from std.httpCall {
+  .baseUrl = "https://nominatim.openstreetmap.org"
+  .method = GET
+  .path = "/search"
+}
+
+bridge Query.test {
+  with api
+  with input as i
+  with output as o
+
+  api {
+    .q <- i.city
+  }
+  o.success = true
+}`;
+    const parsed = parseBridge(bridge);
+    const br = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = br.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
+    assert.ok(qWire, "wire to api.q should exist");
+  });
+
+  test("alias inside nested scope blocks parses correctly", () => {
+    const bridge = `version 1.5
+
+bridge Query.user {
+  with std.str.toUpperCase as uc
+  with input as i
+  with output as o
+
+  o {
+    .info {
+      alias uc:i.name as upper
+      .displayName <- upper
+      .email <- i.email
+    }
+  }
+}`;
+    const parsed = parseBridge(bridge);
+    const br = parsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const pullWires = br.wires.filter(
+      (w): w is Extract<Wire, { from: any }> => "from" in w,
+    );
+    // Alias creates a __local wire
+    const localWire = pullWires.find(
+      (w) => w.to.module === "__local" && w.to.field === "upper",
+    );
+    assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
+    // displayName wire reads from alias
+    const displayWire = pullWires.find(
+      (w) => w.to.path.join(".") === "info.displayName",
+    );
+    assert.ok(displayWire, "wire to o.info.displayName should exist");
+    assert.equal(displayWire!.from.module, "__local");
+    assert.equal(displayWire!.from.field, "upper");
+    // email wire reads from input
+    const emailWire = pullWires.find(
+      (w) => w.to.path.join(".") === "info.email",
+    );
+    assert.ok(emailWire, "wire to o.info.email should exist");
+  });
 });
 
 // ── Serializer round-trip tests ─────────────────────────────────────────────
@@ -385,170 +456,6 @@ bridge Query.test {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assertDeepStrictEqualIgnoringLoc(bridge1.wires, bridge2.wires);
-  });
-});
-
-// ── Execution tests ─────────────────────────────────────────────────────────
-
-forEachEngine("path scoping execution", (run, _ctx) => {
-  describe("basic", () => {
-    test("scope block constants resolve at runtime", async () => {
-      const bridge = `version 1.5
-
-bridge Query.config {
-  with output as o
-
-  o {
-    .theme = "dark"
-    .lang = "en"
-  }
-}`;
-      const result = await run(bridge, "Query.config", {});
-      assertDeepStrictEqualIgnoringLoc(result.data, {
-        theme: "dark",
-        lang: "en",
-      });
-    });
-
-    test("scope block pull wires resolve at runtime", async () => {
-      const bridge = `version 1.5
-
-bridge Query.user {
-  with input as i
-  with output as o
-
-  o {
-    .name <- i.name
-    .email <- i.email
-  }
-}`;
-      const result = await run(bridge, "Query.user", {
-        name: "Alice",
-        email: "alice@test.com",
-      });
-      assertDeepStrictEqualIgnoringLoc(result.data, {
-        name: "Alice",
-        email: "alice@test.com",
-      });
-    });
-
-    test("nested scope blocks resolve deeply nested objects", async () => {
-      const bridge = `version 1.5
-
-bridge Query.profile {
-  with input as i
-  with output as o
-
-  o.identity.id <- i.id
-  o.identity.name <- i.name
-  o.settings.theme <- i.theme || "light"
-  o.settings.notifications = true
-}`;
-      // First verify this works with flat syntax
-      const flatResult = await run(bridge, "Query.profile", {
-        id: "42",
-        name: "Bob",
-        theme: "dark",
-      });
-
-      // Then verify scope block syntax produces identical result
-      const scopedBridge = `version 1.5
-
-bridge Query.profile {
-  with input as i
-  with output as o
-
-  o {
-    .identity {
-      .id <- i.id
-      .name <- i.name
-    }
-    .settings {
-      .theme <- i.theme || "light"
-      .notifications = true
-    }
-  }
-}`;
-      const scopedResult = await run(scopedBridge, "Query.profile", {
-        id: "42",
-        name: "Bob",
-        theme: "dark",
-      });
-
-      assertDeepStrictEqualIgnoringLoc(scopedResult.data, flatResult.data);
-    });
-
-    test("scope block on tool input wires to tool correctly", () => {
-      const bridge = `version 1.5
-
-tool api from std.httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .method = GET
-  .path = "/search"
-}
-
-bridge Query.test {
-  with api
-  with input as i
-  with output as o
-
-  api {
-    .q <- i.city
-  }
-  o.success = true
-}`;
-      const parsed = parseBridge(bridge);
-      const br = parsed.instructions.find(
-        (i): i is Bridge => i.kind === "bridge",
-      )!;
-      const pullWires = br.wires.filter(
-        (w): w is Extract<Wire, { from: any }> => "from" in w,
-      );
-      const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
-      assert.ok(qWire, "wire to api.q should exist");
-    });
-
-    test("alias inside nested scope blocks parses correctly", () => {
-      const bridge = `version 1.5
-
-bridge Query.user {
-  with std.str.toUpperCase as uc
-  with input as i
-  with output as o
-
-  o {
-    .info {
-      alias uc:i.name as upper
-      .displayName <- upper
-      .email <- i.email
-    }
-  }
-}`;
-      const parsed = parseBridge(bridge);
-      const br = parsed.instructions.find(
-        (i): i is Bridge => i.kind === "bridge",
-      )!;
-      const pullWires = br.wires.filter(
-        (w): w is Extract<Wire, { from: any }> => "from" in w,
-      );
-      // Alias creates a __local wire
-      const localWire = pullWires.find(
-        (w) => w.to.module === "__local" && w.to.field === "upper",
-      );
-      assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
-      // displayName wire reads from alias
-      const displayWire = pullWires.find(
-        (w) => w.to.path.join(".") === "info.displayName",
-      );
-      assert.ok(displayWire, "wire to o.info.displayName should exist");
-      assert.equal(displayWire!.from.module, "__local");
-      assert.equal(displayWire!.from.field, "upper");
-      // email wire reads from input
-      const emailWire = pullWires.find(
-        (w) => w.to.path.join(".") === "info.email",
-      );
-      assert.ok(emailWire, "wire to o.info.email should exist");
-    });
   });
 });
 
@@ -668,56 +575,6 @@ bridge Query.test {
       pullWires.find((w) => w.to.path.join(".") === "nested.y"),
       "nested.y pull wire should exist",
     );
-  });
-});
-
-forEachEngine("path scoping – array mapper execution", (run, _ctx) => {
-  test("array mapper scope block executes correctly", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o <- i.items[] as item {
-    .obj {
-      .name <- item.title
-      .code = 42
-    }
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      items: [{ title: "Hello" }, { title: "World" }],
-    });
-    assertDeepStrictEqualIgnoringLoc(result.data, [
-      { obj: { name: "Hello", code: 42 } },
-      { obj: { name: "World", code: 42 } },
-    ]);
-  });
-
-  test("nested scope blocks inside array mapper execute correctly", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o <- i.items[] as item {
-    .level1 {
-      .level2 {
-        .name <- item.title
-        .fixed = "ok"
-      }
-    }
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      items: [{ title: "Alice" }, { title: "Bob" }],
-    });
-    assertDeepStrictEqualIgnoringLoc(result.data, [
-      { level1: { level2: { name: "Alice", fixed: "ok" } } },
-      { level1: { level2: { name: "Bob", fixed: "ok" } } },
-    ]);
   });
 });
 
@@ -855,275 +712,5 @@ bridge Query.test {
     const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");
     assert.ok(spreadWire, "spread wire to tool.nested should exist");
     assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, []);
-  });
-});
-
-forEachEngine("path scoping – spread execution", (run, _ctx) => {
-  test("spread in scope block passes all input fields to tool", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
-
-  t {
-    ...i
-  }
-
-  o.result <- t
-}`;
-    const result = await run(
-      bridge,
-      "Query.test",
-      { name: "Alice", age: 30 },
-      {
-        myTool: async (input: any) => ({ received: input }),
-      },
-    );
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      result: { received: { name: "Alice", age: 30 } },
-    });
-  });
-
-  test("spread combined with constant field override", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
-
-  t {
-    ...i
-    .extra = "added"
-  }
-
-  o.result <- t
-}`;
-    const result = await run(
-      bridge,
-      "Query.test",
-      { name: "Alice", age: 30 },
-      {
-        myTool: async (input: any) => ({ received: input }),
-      },
-    );
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      result: { received: { name: "Alice", age: 30, extra: "added" } },
-    });
-  });
-
-  test("spread with sub-path source", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
-
-  t {
-    ...i.profile
-  }
-
-  o.result <- t
-}`;
-    const result = await run(
-      bridge,
-      "Query.test",
-      { profile: { name: "Bob", email: "bob@test.com" } },
-      {
-        myTool: async (input: any) => ({ received: input }),
-      },
-    );
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      result: { received: { name: "Bob", email: "bob@test.com" } },
-    });
-  });
-});
-
-// ── Spread into output ────────────────────────────────────────────────────────
-
-forEachEngine("path scoping – spread into output", (run, _ctx) => {
-  test("basic spread of input into output", async () => {
-    const bridge = `version 1.5
-
-bridge Query.greet {
-  with input as i
-  with output as o
-
-  o {
-    ...i
-  }
-}`;
-    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assertDeepStrictEqualIgnoringLoc(result.data, { name: "Hello Bridge" });
-  });
-
-  test("spread with explicit field overrides", async () => {
-    const bridge = `version 1.5
-
-bridge Query.greet {
-  with input as i
-  with output as o
-
-  o {
-    ...i
-    .message <- i.name
-  }
-}`;
-    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      name: "Hello Bridge",
-      message: "Hello Bridge",
-    });
-  });
-
-  test("spread with multiple sources in order", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o {
-    ...i.first
-    ...i.second
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      first: { a: 1, b: 2 },
-      second: { b: 3, c: 4 },
-    });
-    // second should override b from first
-    assertDeepStrictEqualIgnoringLoc(result.data, { a: 1, b: 3, c: 4 });
-  });
-
-  test("spread with explicit override taking precedence", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o {
-    ...i
-    .name = "overridden"
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      name: "original",
-      age: 30,
-    });
-    // explicit .name should override spread
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      name: "overridden",
-      age: 30,
-    });
-  });
-
-  test("spread with deep path source", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o {
-    ...i.user.profile
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      user: { profile: { email: "test@test.com", verified: true } },
-    });
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      email: "test@test.com",
-      verified: true,
-    });
-  });
-
-  test("spread combined with pipe operators", async () => {
-    const bridge = `version 1.5
-
-bridge Query.greet {
-  with std.str.toUpperCase as uc
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
-
-  o {
-    ...i
-    .upper <- uc:i.name
-    .lower <- lc:i.name
-  }
-}`;
-    const result = await run(bridge, "Query.greet", { name: "Hello Bridge" });
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      name: "Hello Bridge",
-      upper: "HELLO BRIDGE",
-      lower: "hello bridge",
-    });
-  });
-
-  test("spread into nested output scope", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o.result {
-    ...i.data
-    .extra = "added"
-  }
-}`;
-    const result = await run(bridge, "Query.test", {
-      data: { x: 1, y: 2 },
-    });
-    assertDeepStrictEqualIgnoringLoc(result.data, {
-      result: { x: 1, y: 2, extra: "added" },
-    });
-  });
-});
-
-// ── Null intermediate path access ────────────────────────────────────────────
-
-forEachEngine("path traversal: null intermediate segment", (run, _ctx) => {
-  test("throws TypeError when intermediate path segment is null", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with myTool as t
-  with output as o
-
-o.result <- t.user.profile.name
-
-}`;
-    await assert.rejects(
-      () =>
-        run(
-          bridgeText,
-          "Query.test",
-          {},
-          {
-            myTool: async () => ({ user: { profile: null } }),
-          },
-        ),
-      /Cannot read properties of null \(reading 'name'\)/,
-    );
-  });
-
-  test("?. only guards the segment it prefixes", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-
-  o.result <- i.does?.not.crash.hard ?? throw "Errore"
-}`;
-
-    await assert.rejects(
-      () => run(bridgeText, "Query.test", { does: null }),
-      /Cannot read properties of undefined \(reading 'crash'\)/,
-    );
   });
 });
