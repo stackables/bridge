@@ -192,7 +192,7 @@ function hasCatchControl(w: Wire): boolean {
 }
 
 function splitToolName(name: string): { module: string; fieldName: string } {
-  const dotIdx = name.indexOf(".");
+  const dotIdx = name.lastIndexOf(".");
   if (dotIdx === -1) return { module: SELF_MODULE, fieldName: name };
   return {
     module: name.substring(0, dotIdx),
@@ -305,6 +305,9 @@ class CodegenContext {
   private toolInstanceCursors = new Map<string, number>();
   /** Tool trunk keys declared with `memoize`. */
   private memoizedToolKeys = new Set<string>();
+  /** Map from tool function name to its upfront-resolved variable name. */
+  private toolFnVars = new Map<string, string>();
+  private toolFnVarCounter = 0;
 
   constructor(
     bridge: Bridge,
@@ -482,6 +485,35 @@ class CodegenContext {
     // need a distinct synthetic instance number so later bindings don't collide
     // with earlier tool registrations.
     return lastInstance + (nextIndex - uniqueInstances.length) + 1;
+  }
+
+  /**
+   * Get the variable name for an upfront-resolved tool function.
+   * Registers the tool if not yet seen.
+   */
+  private toolFnVar(fnName: string): string {
+    let varName = this.toolFnVars.get(fnName);
+    if (!varName) {
+      varName = `__fn${++this.toolFnVarCounter}`;
+      this.toolFnVars.set(fnName, varName);
+    }
+    return varName;
+  }
+
+  /**
+   * Generate a static lookup expression for a dotted tool name.
+   * For "vendor.sub.api" → `tools?.vendor?.sub?.api ?? tools?.["vendor.sub.api"]`
+   * For "myTool" → `tools?.["myTool"]`
+   */
+  private toolLookupExpr(fnName: string): string {
+    if (!fnName.includes(".")) {
+      return `tools?.[${JSON.stringify(fnName)}]`;
+    }
+    const parts = fnName.split(".");
+    const nested =
+      "tools" + parts.map((p) => `?.[${JSON.stringify(p)}]`).join("");
+    const flat = `tools?.[${JSON.stringify(fnName)}]`;
+    return `${nested} ?? ${flat}`;
   }
 
   // ── Main compilation entry point ──────────────────────────────────────────
@@ -1076,6 +1108,9 @@ class CodegenContext {
       lines.push(`  }`);
     }
 
+    // Placeholder for upfront tool lookups — replaced after code emission
+    lines.push("  // __TOOL_LOOKUPS__");
+
     // ── Dead tool detection ────────────────────────────────────────────
     // Detect which tools are reachable from the (possibly filtered) output
     // wires.  Uses a backward reachability analysis: start from tools
@@ -1267,6 +1302,21 @@ class CodegenContext {
     lines.push("}");
     lines.push("");
 
+    // Insert upfront tool function lookups right after the preamble.
+    // The toolFnVars map is fully populated at this point from tool emission.
+    if (this.toolFnVars.size > 0) {
+      const placeholderIdx = lines.indexOf("  // __TOOL_LOOKUPS__");
+      if (placeholderIdx !== -1) {
+        const lookupLines: string[] = [];
+        for (const [fnName, varName] of this.toolFnVars) {
+          lookupLines.push(
+            `  const ${varName} = ${this.toolLookupExpr(fnName)};`,
+          );
+        }
+        lines.splice(placeholderIdx, 1, ...lookupLines);
+      }
+    }
+
     // Extract function body (lines after the signature, before the closing brace)
     const signatureIdx = lines.findIndex((l) =>
       l.startsWith("export default async function"),
@@ -1289,7 +1339,7 @@ class CodegenContext {
     inputObj: string,
     memoizeTrunkKey?: string,
   ): string {
-    const fn = `tools[${JSON.stringify(fnName)}]`;
+    const fn = this.toolFnVar(fnName);
     const name = JSON.stringify(fnName);
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `await __callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
@@ -1306,7 +1356,7 @@ class CodegenContext {
     inputObj: string,
     memoizeTrunkKey?: string,
   ): string {
-    const fn = `tools[${JSON.stringify(fnName)}]`;
+    const fn = this.toolFnVar(fnName);
     const name = JSON.stringify(fnName);
     if (memoizeTrunkKey && this.memoizedToolKeys.has(memoizeTrunkKey)) {
       return `__callMemoized(${fn}, ${inputObj}, ${name}, ${JSON.stringify(memoizeTrunkKey)})`;
@@ -3261,9 +3311,10 @@ class CodegenContext {
     // Non-internal tool in element scope — inline as an await __call
     const inputObj = this.buildElementToolInput(toolWires, elVar);
     const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
+    const fn = this.toolFnVar(fnName);
     return this.memoizedToolKeys.has(trunkKey)
-      ? `await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(trunkKey)})`
-      : `await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)})`;
+      ? `await __callMemoized(${fn}, ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(trunkKey)})`
+      : `await __call(${fn}, ${inputObj}, ${JSON.stringify(fnName)})`;
   }
 
   /**
@@ -3436,7 +3487,7 @@ class CodegenContext {
         const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
         const isCatchGuarded = this.catchGuardedTools.has(tk);
         if (syncOnly) {
-          const fn = `tools[${JSON.stringify(fnName)}]`;
+          const fn = this.toolFnVar(fnName);
           const syncExpr = this.memoizedToolKeys.has(tk)
             ? `__callMemoized(${fn}, ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(tk)})`
             : `__callSync(${fn}, ${inputObj}, ${JSON.stringify(fnName)})`;
@@ -3601,7 +3652,7 @@ class CodegenContext {
       const tool = this.tools.get(tk);
       if (!tool) continue;
       const fnName = this.resolveToolDef(tool.toolName)?.fn ?? tool.toolName;
-      refs.push(`tools[${JSON.stringify(fnName)}]`);
+      refs.push(this.toolFnVar(fnName));
     }
     return refs;
   }
@@ -3983,9 +4034,10 @@ class CodegenContext {
           inputObj = this.buildObjectLiteral(toolWires, (w) => w.to.path, 4);
         }
 
+        const fn = this.toolFnVar(fnName);
         let expr = this.memoizedToolKeys.has(key)
-          ? `(await __callMemoized(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(key)}))`
-          : `(await __call(tools[${JSON.stringify(fnName)}], ${inputObj}, ${JSON.stringify(fnName)}))`;
+          ? `(await __callMemoized(${fn}, ${inputObj}, ${JSON.stringify(fnName)}, ${JSON.stringify(key)}))`
+          : `(await __call(${fn}, ${inputObj}, ${JSON.stringify(fnName)}))`;
         if (ref.path.length > 0) {
           expr = this.appendPathExpr(expr, ref);
         }
@@ -4402,7 +4454,7 @@ class CodegenContext {
   }
 
   /**
-   * Build a raw `__call(tools[...], {...}, ...)` expression suitable for use
+   * Build a raw `__call(__fnX, {...}, ...)` expression suitable for use
    * inside `Promise.all([...])` — no `await`, no `const` declaration.
    * Only call this for tools where `isParallelizableTool` returns true.
    */

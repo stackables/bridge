@@ -1015,6 +1015,10 @@ export function regressionTest(name: string, data: RegressionTest) {
           });
         }
 
+        const hasSuccessScenario = scenarioNames.some(
+          (name) => !scenarios[name]!.assertError,
+        );
+
         if (scenarioNames.length > 0) {
           describe("graphql replay", () => {
             let rawSchema!: GraphQLSchema;
@@ -1022,6 +1026,24 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             before(async () => {
               await runtimeCollectionDone;
+
+              if (!hasSuccessScenario) {
+                // Error-only operations have no output to infer a schema from.
+                // Use a minimal JSONObject fallback so GraphQL replay still
+                // exercises the error path through the full GraphQL stack.
+                const [rootType, fieldName] = operation.split(".");
+                const inputArgs = Object.keys(
+                  scenarios[scenarioNames[0]!]!.input,
+                );
+                const argsDef = inputArgs.length
+                  ? `(${inputArgs.map((a) => `${a}: JSONObject`).join(", ")})`
+                  : "";
+                const fallbackSDL = `scalar JSONObject\ntype ${rootType} {\n  ${fieldName}${argsDef}: JSONObject\n}\n`;
+                rawSchema = buildGraphQLSchema(
+                  ensureExecutableSDLForOperation(fallbackSDL, operation),
+                );
+                return;
+              }
 
               const observer = new GraphQLSchemaObserver();
 
