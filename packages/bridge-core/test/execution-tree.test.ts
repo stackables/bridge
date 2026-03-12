@@ -5,6 +5,7 @@ import {
   BridgePanicError,
   BridgeRuntimeError,
   ExecutionTree,
+  MAX_EXECUTION_DEPTH,
   type BridgeDocument,
   type NodeRef,
 } from "../src/index.ts";
@@ -22,6 +23,21 @@ describe("ExecutionTree edge cases", () => {
     assert.throws(
       () => new ExecutionTree(TRUNK, DOC, {}, undefined, parent),
       BridgePanicError,
+    );
+  });
+
+  test("shadow() beyond MAX_EXECUTION_DEPTH throws BridgePanicError", () => {
+    let tree = new ExecutionTree(TRUNK, DOC);
+    for (let i = 0; i < MAX_EXECUTION_DEPTH; i++) {
+      tree = tree.shadow();
+    }
+    assert.throws(
+      () => tree.shadow(),
+      (err: any) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.match(err.message, /Maximum execution depth exceeded/);
+        return true;
+      },
     );
   });
 

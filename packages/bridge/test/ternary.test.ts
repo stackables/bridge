@@ -1,266 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import {
-  parseBridgeFormat as parseBridge,
-  serializeBridge,
-} from "../src/index.ts";
 import { BridgePanicError } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
-import { executeBridge as executeRuntime } from "@stackables/bridge-core";
-import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
-
-// ── Parser / desugaring tests ─────────────────────────────────────────────
-
-describe("ternary: parser", () => {
-  test("simple ref ? ref : ref produces a conditional wire", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire, "should have a conditional wire");
-    assert.ok("cond" in condWire);
-    assert.ok(condWire.thenRef, "thenRef should be a NodeRef");
-    assert.ok(condWire.elseRef, "elseRef should be a NodeRef");
-    assert.deepEqual(condWire.thenRef!.path, ["proPrice"]);
-    assert.deepEqual(condWire.elseRef!.path, ["basicPrice"]);
-  });
-
-  test("string literal branches produce thenValue / elseValue", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.label {
-  with input as i
-  with output as o
-
-  o.tier <- i.isPro ? "premium" : "basic"
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.thenValue, '"premium"');
-    assert.equal(condWire.elseValue, '"basic"');
-  });
-
-  test("numeric literal branches produce thenValue / elseValue", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.discount <- i.isPro ? 20 : 0
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.thenValue, "20");
-    assert.equal(condWire.elseValue, "0");
-  });
-
-  test("boolean literal branches", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.cond ? true : false
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.thenValue, "true");
-    assert.equal(condWire.elseValue, "false");
-  });
-
-  test("null literal branch", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.cond ? i.value : null
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.ok(condWire.thenRef, "thenRef should be NodeRef");
-    assert.equal(condWire.elseValue, "null");
-  });
-
-  test("condition with expression chain: i.age >= 18 ? a : b", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.age >= 18 ? i.proValue : i.basicValue
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.ok(
-      condWire.cond.instance != null && condWire.cond.instance >= 100000,
-      "cond should be an expression fork result",
-    );
-    const exprHandle = bridge.pipeHandles!.find((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandle, "should have expression fork");
-    assert.equal(exprHandle.baseTrunk.field, "gte");
-  });
-
-  test("|| literal fallback stored on conditional wire", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assertDeepStrictEqualIgnoringLoc(condWire.fallbacks, [
-      { type: "falsy", value: "0" },
-    ]);
-  });
-
-  test("catch literal fallback stored on conditional wire", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
-}`);
-    const bridge = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.catchFallback, "-1");
-  });
-});
-
-// ── Round-trip serialization tests ───────────────────────────────────────
-
-describe("ternary: round-trip serialization", () => {
-  test("simple ref ternary round-trips", () => {
-    const text = `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice
-}`;
-    const doc = parseBridge(text);
-    const serialized = serializeBridge(doc);
-    assert.ok(
-      serialized.includes("? i.proPrice : i.basicPrice"),
-      `got: ${serialized}`,
-    );
-    const reparsed = parseBridge(serialized);
-    const bridge = reparsed.instructions.find(
-      (inst) => inst.kind === "bridge",
-    )!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire, "re-parsed should have conditional wire");
-  });
-
-  test("string literal ternary round-trips", () => {
-    const text = `version 1.5
-bridge Query.label {
-  with input as i
-  with output as o
-
-  o.tier <- i.isPro ? "premium" : "basic"
-}`;
-    const doc = parseBridge(text);
-    const serialized = serializeBridge(doc);
-    assert.ok(
-      serialized.includes(`? "premium" : "basic"`),
-      `got: ${serialized}`,
-    );
-    const reparsed = parseBridge(serialized);
-    const bridge = reparsed.instructions.find(
-      (inst) => inst.kind === "bridge",
-    )!;
-    const condWire = bridge.wires.find((w) => "cond" in w);
-    assert.ok(condWire && "cond" in condWire);
-    assert.equal(condWire.thenValue, '"premium"');
-  });
-
-  test("expression condition ternary round-trips", () => {
-    const text = `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.age >= 18 ? i.proValue : i.basicValue
-}`;
-    const doc = parseBridge(text);
-    const serialized = serializeBridge(doc);
-    assert.ok(
-      serialized.includes("i.age >= 18 ? i.proValue : i.basicValue"),
-      `got: ${serialized}`,
-    );
-  });
-
-  test("|| literal fallback round-trips", () => {
-    const text = `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice || 0
-}`;
-    const doc = parseBridge(text);
-    const serialized = serializeBridge(doc);
-    assert.ok(
-      serialized.includes("? i.proPrice : i.basicPrice || 0"),
-      `got: ${serialized}`,
-    );
-  });
-
-  test("catch literal fallback round-trips", () => {
-    const text = `version 1.5
-bridge Query.pricing {
-  with input as i
-  with output as o
-
-  o.amount <- i.isPro ? i.proPrice : i.basicPrice catch -1
-}`;
-    const doc = parseBridge(text);
-    const serialized = serializeBridge(doc);
-    assert.ok(
-      serialized.includes("? i.proPrice : i.basicPrice catch -1"),
-      `got: ${serialized}`,
-    );
-  });
-});
-
-// ── Execution tests ───────────────────────────────────────────────────────
-
-// Direct execution helpers (for tests with serializer issues)
-const directEngines = [
-  { name: "runtime", execute: executeRuntime },
-  { name: "compiled", execute: executeCompiled },
-] as const;
-
-function directRun(
-  execute: typeof executeRuntime,
-  bridgeText: string,
-  operation: string,
-  input: Record<string, unknown>,
-  toolMap: Record<string, any> = {},
-) {
-  const raw = parseBridge(bridgeText);
-  const document = JSON.parse(JSON.stringify(raw));
-  return (execute as any)({ document, operation, input, tools: toolMap });
-}
 
 // ── Basic ternary: ref + literal branches ─────────────────────────────────
 
@@ -468,169 +209,212 @@ regressionTest("ternary: tool branches (lazy evaluation)", {
   },
 });
 
-// ── Ternary in array mapping (serializer issues — direct execution) ──────
+// ── Ternary in array mapping ──────────────────────────────────────────
 
-describe("ternary in array mapping", () => {
-  const bridgeText = `version 1.5
-bridge Query.products {
-  with catalog.list as api
-  with output as o
-  o <- api.items[] as item {
-    .name <- item.name
-    .price <- item.isPro ? item.proPrice : item.basicPrice
-  }
-}`;
-  const catalogTools = {
+regressionTest("ternary: array element mapping", {
+  bridge: `
+    version 1.5
+
+    bridge Query.products {
+      with catalog.list as api
+      with output as o
+
+      o <- api.items[] as item {
+        .name <- item.name
+        .price <- item.isPro ? item.proPrice : item.basicPrice
+      }
+    }
+  `,
+  tools: {
     "catalog.list": async () => ({
       items: [
         { name: "Widget", isPro: true, proPrice: 99, basicPrice: 9 },
         { name: "Gadget", isPro: false, proPrice: 199, basicPrice: 19 },
       ],
     }),
-  };
-
-  for (const { name, execute } of directEngines) {
-    test(`[${name}] ternary works inside array element mapping`, async () => {
-      const { data } = await directRun(
-        execute,
-        bridgeText,
-        "Query.products",
-        {},
-        catalogTools,
-      );
-      const products = data as any[];
-      assert.equal(products[0].name, "Widget");
-      assert.equal(products[0].price, 99, "isPro=true → proPrice");
-      assert.equal(products[1].name, "Gadget");
-      assert.equal(products[1].price, 19, "isPro=false → basicPrice");
-    });
-  }
+  },
+  scenarios: {
+    "Query.products": {
+      "ternary works inside array element mapping": {
+        input: {},
+        assertData: [
+          { name: "Widget", price: 99 },
+          { name: "Gadget", price: 19 },
+        ],
+        assertTraces: 1,
+      },
+      "all items truthy": {
+        input: {},
+        tools: {
+          "catalog.list": async () => ({
+            items: [{ name: "A", isPro: true, proPrice: 50, basicPrice: 5 }],
+          }),
+        },
+        assertData: [{ name: "A", price: 50 }],
+        assertTraces: 1,
+      },
+      "all items falsy": {
+        input: {},
+        tools: {
+          "catalog.list": async () => ({
+            items: [{ name: "B", isPro: false, proPrice: 50, basicPrice: 5 }],
+          }),
+        },
+        assertData: [{ name: "B", price: 5 }],
+        assertTraces: 1,
+      },
+      "empty items array": {
+        input: {},
+        tools: {
+          "catalog.list": async () => ({ items: [] }),
+        },
+        assertData: [],
+        assertTraces: 1,
+      },
+    },
+  },
 });
 
-// ── Alias + ternary with panic/fallback (serializer issues — direct) ─────
+// ── Alias ternary: geo + panic gate ───────────────────────────────────
 
-describe("alias + ternary with panic/fallback modifiers (Lazy Gate)", () => {
-  const geoSrc = `version 1.5
-bridge Query.location {
-  with geoApi as geo
-  with input as i
-  with output as o
+regressionTest("alias ternary: panic gate on age check", {
+  bridge: `
+    version 1.5
 
-  alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
+    bridge Query.location {
+      with geoApi as geo
+      with input as i
+      with output as o
 
-  geo.q <- ageChecked?.city
+      alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
 
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
-}`;
-  const geoTools = {
+      geo.q <- ageChecked?.city
+
+      o.lat <- geo[0].lat
+      o.lon <- geo[0].lon
+    }
+  `,
+  tools: {
     geoApi: async () => [{ lat: 47.37, lon: 8.54 }],
-  };
+  },
+  scenarios: {
+    "Query.location": {
+      "alias ternary + ?? panic fires on false branch → null": {
+        input: { age: 15, city: "Zurich" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgePanicError);
+          assert.equal(err.message, "Must be 18 or older");
+        },
+        assertTraces: 0,
+      },
+      "alias ternary + ?? panic does NOT fire when condition is true": {
+        input: { age: 25, city: "Zurich" },
+        assertData: { lat: 47.37, lon: 8.54 },
+        assertTraces: 1,
+      },
+    },
+  },
+});
 
-  for (const { name, execute } of directEngines) {
-    describe(`[${name}]`, () => {
-      test("alias ternary + ?? panic fires on false branch → null", async () => {
-        await assert.rejects(
-          () =>
-            directRun(
-              execute,
-              geoSrc,
-              "Query.location",
-              { age: 15, city: "Zurich" },
-              geoTools,
-            ),
-          (err: Error) => {
-            assert.ok(err instanceof BridgePanicError);
-            assert.equal(err.message, "Must be 18 or older");
-            return true;
-          },
-        );
-      });
+// ── Alias ternary: fallback variants ──────────────────────────────────
 
-      test("alias ternary + ?? panic does NOT fire when condition is true", async () => {
-        const { data } = await directRun(
-          execute,
-          geoSrc,
-          "Query.location",
-          { age: 25, city: "Zurich" },
-          geoTools,
-        );
-        assert.equal((data as any).lat, 47.37);
-        assert.equal((data as any).lon, 8.54);
-      });
+regressionTest("alias ternary: fallback variants", {
+  bridge: `
+    version 1.5
 
-      test("alias ternary + || literal fallback", async () => {
-        const src = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  alias i.score >= 50 ? i.grade : null || "F" as grade
-  o.grade <- grade
-}`;
-        const { data } = await directRun(execute, src, "Query.test", {
-          score: 30,
-        });
-        assert.equal((data as any).grade, "F");
-      });
+    bridge AliasTernary.literalFallback {
+      with input as i
+      with output as o
 
-      test("alias ternary + || ref fallback", async () => {
-        const src = `version 1.5
-bridge Query.test {
-  with test.multitool as fb
-  with input as i
-  with output as o
-  fb <- i.fb
-  alias i.score >= 50 ? i.grade : null || fb.grade as grade
-  o.grade <- grade
-}`;
-        const { data } = await directRun(
-          execute,
-          src,
-          "Query.test",
-          { score: 30, fb: { grade: "F" } },
-          tools as any,
-        );
-        assert.equal((data as any).grade, "F");
-      });
+      alias i.score >= 50 ? i.grade : null || "F" as grade
+      o.grade <- grade
+    }
 
-      test("alias ternary + catch literal fallback", async () => {
-        const src = `version 1.5
-bridge Query.test {
-  with test.multitool as a
-  with input as i
-  with output as o
-  a <- i.a
-  alias a.ok ? a.value : a.alt catch "safe" as result
-  o.val <- result
-}`;
-        const { data } = await directRun(
-          execute,
-          src,
-          "Query.test",
-          { a: { _error: "boom" } },
-          tools as any,
-        );
-        assert.equal((data as any).val, "safe");
-      });
+    bridge AliasTernary.refFallback {
+      with test.multitool as fb
+      with input as i
+      with output as o
 
-      test("string alias ternary + ?? panic", async () => {
-        const src = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
-  o.msg <- result
-}`;
-        await assert.rejects(
-          () =>
-            directRun(execute, src, "Query.test", { secret: "world" }),
-          (err: Error) => {
-            assert.ok(err instanceof BridgePanicError);
-            assert.equal(err.message, "wrong secret");
-            return true;
-          },
-        );
-      });
-    });
-  }
+      fb <- i.fb
+      alias i.score >= 50 ? i.grade : null || fb.grade as grade
+      o.grade <- grade
+    }
+
+    bridge AliasTernary.catchFallback {
+      with test.multitool as a
+      with input as i
+      with output as o
+
+      a <- i.a
+      alias a.ok ? a.value : a.alt catch "safe" as result
+      o.val <- result
+    }
+
+    bridge AliasTernary.stringPanic {
+      with input as i
+      with output as o
+
+      alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
+      o.msg <- result
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "AliasTernary.literalFallback": {
+      "score below threshold → fallback literal": {
+        input: { score: 30 },
+        assertData: { grade: "F" },
+        assertTraces: 0,
+      },
+      "score above threshold → then branch": {
+        input: { score: 80, grade: "A" },
+        assertData: { grade: "A" },
+        assertTraces: 0,
+      },
+    },
+    "AliasTernary.refFallback": {
+      "score below threshold → fallback ref": {
+        input: { score: 30, fb: { grade: "F" } },
+        assertData: { grade: "F" },
+        assertTraces: 1,
+      },
+      "score above threshold → then branch": {
+        input: { score: 80, grade: "A", fb: { grade: "F" } },
+        assertData: { grade: "A" },
+        assertTraces: 0,
+      },
+    },
+    "AliasTernary.catchFallback": {
+      "tool throws → catch fallback fires": {
+        input: { a: { _error: "boom" } },
+        assertData: { val: "safe" },
+        assertTraces: 1,
+      },
+      "tool succeeds with truthy condition → then branch": {
+        input: { a: { ok: true, value: "good" } },
+        assertData: { val: "good" },
+        assertTraces: 1,
+      },
+      "tool succeeds with falsy condition → else branch": {
+        input: { a: { ok: false, value: "good", alt: "other" } },
+        assertData: { val: "other" },
+        assertTraces: 1,
+      },
+    },
+    "AliasTernary.stringPanic": {
+      "wrong secret → panic fires": {
+        input: { secret: "world" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgePanicError);
+          assert.equal(err.message, "wrong secret");
+        },
+        assertTraces: 0,
+      },
+      "correct secret → access granted": {
+        input: { secret: "hello" },
+        assertData: { msg: "access granted" },
+        assertTraces: 0,
+      },
+    },
+  },
 });
