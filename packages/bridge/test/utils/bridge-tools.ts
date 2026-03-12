@@ -56,6 +56,7 @@ async function batchMultitool(
 }
 batchMultitool.bridge = {
   batch: true,
+  log: { execution: "info" },
 };
 
 export const tools = {

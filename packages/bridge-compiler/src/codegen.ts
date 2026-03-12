@@ -3694,7 +3694,7 @@ class CodegenContext {
       for (const fb of w.fallbacks) {
         if (fb.type === "falsy") {
           if (fb.ref) {
-            expr = `(${expr} || ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)})`; // lgtm [js/code-injection]
+            expr = `(${expr} || ${this.wrapExprWithLoc(this.lazyRefToExpr(fb.ref), fb.loc)})`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -3708,7 +3708,7 @@ class CodegenContext {
         } else {
           // nullish
           if (fb.ref) {
-            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.refToExpr(fb.ref), fb.loc)}))`; // lgtm [js/code-injection]
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.lazyRefToExpr(fb.ref), fb.loc)}))`; // lgtm [js/code-injection]
           } else if (fb.value != null) {
             expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
           } else if (fb.control) {
@@ -4026,10 +4026,11 @@ class CodegenContext {
         allRefs.add(refTrunkKey(w.condOr.leftRef));
         if (w.condOr.rightRef) allRefs.add(refTrunkKey(w.condOr.rightRef));
       }
-      // Fallback refs
+      // Fallback refs — on ternary wires, treat as lazy (ternary-branch-like)
       if ("fallbacks" in w && w.fallbacks) {
+        const refSet = "cond" in w ? ternaryBranchRefs : allRefs;
         for (const fb of w.fallbacks) {
-          if (fb.ref) allRefs.add(refTrunkKey(fb.ref));
+          if (fb.ref) refSet.add(refTrunkKey(fb.ref));
         }
       }
       if ("catchFallbackRef" in w && w.catchFallbackRef)
