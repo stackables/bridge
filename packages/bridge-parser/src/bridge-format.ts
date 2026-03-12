@@ -134,6 +134,16 @@ function formatBareValue(v: string): string {
   return needsQuoting(v) ? `"${v}"` : v;
 }
 
+/**
+ * Format a value that appears as an operand in an expression context.
+ * Identifier-like strings must be quoted because bare identifiers in
+ * expressions are parsed as source references, not string literals.
+ */
+function formatExprValue(v: string): string {
+  if (/^[a-zA-Z_][\w-]*$/.test(v)) return `"${v}"`;
+  return formatBareValue(v);
+}
+
 function serializeToolBlock(tool: ToolDef): string {
   const lines: string[] = [];
   const hasBody =
@@ -328,7 +338,7 @@ function serializeToolBlock(tool: ToolDef): string {
           );
         }
       } else if ("value" in info.bWire) {
-        right = formatBareValue((info.bWire as any).value);
+        right = formatExprValue((info.bWire as any).value);
       } else {
         right = "?";
       }
@@ -403,7 +413,9 @@ function serializeToolBlock(tool: ToolDef): string {
             "falseValue" in condWire
               ? formatBareValue(condWire.falseValue)
               : serToolRef(condWire.falseRef);
-          lines.push(`  ${prefix}${target} <- ${exprStr} ? ${trueVal} : ${falseVal}`);
+          lines.push(
+            `  ${prefix}${target} <- ${exprStr} ? ${trueVal} : ${falseVal}`,
+          );
           continue;
         }
         if ((wire as any).nullCoalesceRef) {
@@ -448,10 +460,7 @@ function serializeToolBlock(tool: ToolDef): string {
       }
 
       // Skip internal pipe wires (targeting fork inputs)
-      if (
-        (wire as any).pipe &&
-        pipeHandleTrunkKeys.has(refTk(wire.to))
-      ) {
+      if ((wire as any).pipe && pipeHandleTrunkKeys.has(refTk(wire.to))) {
         continue;
       }
     }
@@ -1000,6 +1009,21 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // a key in arrayIterators. This includes root-level arrays (path=[]).
   const arrayIterators = bridge.arrayIterators ?? {};
 
+  /** Check if a NodeRef targets a path under an array iterator scope. */
+  function isUnderArrayScope(ref: NodeRef): boolean {
+    if (
+      ref.module !== SELF_MODULE ||
+      ref.type !== bridge.type ||
+      ref.field !== bridge.field
+    )
+      return false;
+    const p = ref.path.join(".");
+    for (const iterPath of Object.keys(arrayIterators)) {
+      if (iterPath === "" || p.startsWith(iterPath + ".")) return true;
+    }
+    return false;
+  }
+
   // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, and __local wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
@@ -1051,7 +1075,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Pre-compute element expression wires ────────────────────────────
   // Walk expression trees from fromOutMap that target element refs
   for (const [tk, outWire] of fromOutMap.entries()) {
-    if (!exprForks.has(tk) || !outWire.to.element) continue;
+    if (!exprForks.has(tk) || !isUnderArrayScope(outWire.to)) continue;
 
     // Recursively serialize expression fork tree
     function serializeElemExprTree(
@@ -1092,7 +1116,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
               : sRef(logic.rightRef, true);
           }
         } else if (logic.rightValue != null) {
-          rightStr = logic.rightValue;
+          rightStr = formatExprValue(logic.rightValue);
         } else {
           rightStr = "0";
         }
@@ -1117,7 +1141,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
       let rightStr: string;
       if (info.bWire && "value" in info.bWire) {
-        rightStr = info.bWire.value;
+        rightStr = formatExprValue(info.bWire.value);
       } else if (info.bWire && "from" in info.bWire) {
         const bFrom = (info.bWire as FW).from;
         const bTk = refTrunkKey(bFrom);
@@ -1272,9 +1296,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       if (h.handle === defaultHandle && !vTag) {
         lines.push(`${indent}with ${h.name}${memoize}`);
       } else {
-        lines.push(
-          `${indent}with ${h.name}${vTag} as ${h.handle}${memoize}`,
-        );
+        lines.push(`${indent}with ${h.name}${vTag} as ${h.handle}${memoize}`);
       }
     }
 
@@ -1323,7 +1345,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
         ? handleMap.get(toTk)
         : undefined;
       const elemTo = toToolHandle
-        ? toToolHandle + (ew.to.path.length > 0 ? "." + serPath(ew.to.path) : "")
+        ? toToolHandle +
+          (ew.to.path.length > 0 ? "." + serPath(ew.to.path) : "")
         : "." + serPath(ew.to.path.slice(pathDepth));
 
       const fallbackStr = (ew.fallbacks ?? [])
@@ -1402,7 +1425,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         }
         let rightStr: string;
         if (info.bWire && "value" in info.bWire) {
-          rightStr = info.bWire.value;
+          rightStr = formatExprValue(info.bWire.value);
         } else if (info.bWire && "from" in info.bWire) {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
@@ -1585,7 +1608,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     // the infix expression tree, respecting precedence grouping.
     if (exprForks.has(tk)) {
       // Element-targeting expressions are handled in serializeArrayElements
-      if (outWire.to.element) continue;
+      if (isUnderArrayScope(outWire.to)) continue;
       // Recursively serialize an expression fork into infix notation.
       function serializeExprTree(
         forkTk: string,
@@ -1625,7 +1648,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
                 : sRef(logic.rightRef, true);
             }
           } else if (logic.rightValue != null) {
-            rightStr = logic.rightValue;
+            rightStr = formatExprValue(logic.rightValue);
           } else {
             rightStr = "0";
           }
@@ -1652,7 +1675,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         // Serialize right operand (from .b wire)
         let rightStr: string;
         if (info.bWire && "value" in info.bWire) {
-          rightStr = info.bWire.value;
+          rightStr = formatExprValue(info.bWire.value);
         } else if (info.bWire && "from" in info.bWire) {
           const bFrom = (info.bWire as FW).from;
           const bTk = refTrunkKey(bFrom);
@@ -1704,7 +1727,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // ── Concat (template string) detection ───────────────────────────
     if (concatForks.has(tk)) {
-      if (outWire.to.element) continue; // handled in serializeArrayElements
+      if (isUnderArrayScope(outWire.to)) continue; // handled in serializeArrayElements
       const templateStr = reconstructTemplateString(tk);
       if (templateStr) {
         const destStr = sRef(outWire.to, false);

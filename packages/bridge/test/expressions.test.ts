@@ -1,6 +1,3 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 
@@ -328,353 +325,308 @@ regressionTest("safe flag propagation in expressions", {
   },
 });
 
-// ── Tests that cannot be migrated to regressionTest ─────────────────────────
-// (compiler generates broken code for and/or without ?., serializer bugs)
+// ── String comparison and array mapping ─────────────────────────────────────
 
-forEachEngine("expressions: string comparison and array mapping", (run) => {
-  test("comparison == with string returns true/false", async () => {
-    const bridgeText = `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
+regressionTest("expressions: string comparison and array mapping", {
+  bridge: `
+    version 1.5
 
-  o.isActive <- i.status == "active"
-}`;
-    const rActive = await run(
-      bridgeText,
-      "Query.check",
-      { status: "active" },
-      {},
-    );
-    assert.equal(rActive.data.isActive, true);
+    bridge Query.check {
+      with input as i
+      with output as o
 
-    const rInactive = await run(
-      bridgeText,
-      "Query.check",
-      { status: "inactive" },
-      {},
-    );
-    assert.equal(rInactive.data.isActive, false);
-  });
+      o.isActive <- i.status == "active"
+    }
 
-  test("expression in array mapping", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.products {
-  with pricing.list as api
-  with output as o
+    bridge Query.products {
+      with pricing.list as api
+      with output as o
 
-  o <- api.items[] as item {
-    .name <- item.name
-    .cents <- item.price * 100
-  }
-}`,
-      "Query.products",
-      {},
-      {
-        "pricing.list": async () => ({
-          items: [
-            { name: "Widget", price: 9.99 },
-            { name: "Gadget", price: 24.5 },
-          ],
-        }),
-      },
-    );
-    assert.equal(data[0].name, "Widget");
-    assert.equal(data[0].cents, 999);
-    assert.equal(data[1].name, "Gadget");
-    assert.equal(data[1].cents, 2450);
-  });
-});
-
-forEachEngine("expressions: catch error fallback", (run, { engine }) => {
-  test(
-    "expression with catch error fallback: api.price * 100 catch -1",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.convert {
-  with pricing.lookup as api
-  with input as i
-  with output as o
-
-  api.id <- i.dollars
-  o.cents <- api.price * 100 catch -1
-}`,
-        "Query.convert",
-        { dollars: 5 },
-        {
-          "pricing.lookup": async () => {
-            throw new Error("service unavailable");
-          },
-        },
-      );
-      assert.equal(data.cents, -1);
-    },
-  );
-});
-
-forEachEngine("boolean logic: and/or end-to-end", (run, { engine }) => {
-  test(
-    "and expression: age > 18 and verified",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.approved <- i.age > 18 and i.verified
-}`;
-      const r1 = await run(
-        bridgeText,
-        "Query.check",
-        { age: 25, verified: true, role: "USER" },
-        {},
-      );
-      assert.equal(r1.data.approved, true);
-
-      const r2 = await run(
-        bridgeText,
-        "Query.check",
-        { age: 15, verified: true, role: "USER" },
-        {},
-      );
-      assert.equal(r2.data.approved, false);
-    },
-  );
-
-  test(
-    "or expression: approved or role == ADMIN",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
-}`,
-        "Query.check",
-        { age: 15, verified: false, role: "ADMIN" },
-        {},
-      );
-      assert.equal(data.approved, true);
-    },
-  );
-});
-
-forEachEngine(
-  "parenthesized boolean expressions: end-to-end",
-  (run, { engine }) => {
-    test(
-      "A or (B and C): true or (false and false) = true",
-      { skip: engine === "compiled" },
-      async () => {
-        const { data } = await run(
-          `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.a or (i.b and i.c)
-}`,
-          "Query.check",
-          { a: true, b: false, c: false },
-          {},
-        );
-        assert.equal(data.result, true);
-      },
-    );
-
-    test(
-      "A or (B and C): false or (true and true) = true",
-      { skip: engine === "compiled" },
-      async () => {
-        const { data } = await run(
-          `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- i.a or (i.b and i.c)
-}`,
-          "Query.check",
-          { a: false, b: true, c: true },
-          {},
-        );
-        assert.equal(data.result, true);
-      },
-    );
-
-    test(
-      "(A or B) and C: (true or false) and false = false",
-      { skip: engine === "compiled" },
-      async () => {
-        const { data } = await run(
-          `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- (i.a or i.b) and i.c
-}`,
-          "Query.check",
-          { a: true, b: false, c: false },
-          {},
-        );
-        assert.equal(data.result, false);
-      },
-    );
-
-    test(
-      "not (A and B): not (true and false) = true",
-      { skip: engine === "compiled" },
-      async () => {
-        const { data } = await run(
-          `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.result <- not (i.a and i.b)
-}`,
-          "Query.check",
-          { a: true, b: false, c: false },
-          {},
-        );
-        assert.equal(data.result, true);
-      },
-    );
+      o <- api.items[] as item {
+        .name <- item.name
+        .cents <- item.price * 100
+      }
+    }
+  `,
+  tools: {
+    "pricing.list": async () => ({
+      items: [
+        { name: "Widget", price: 9.99 },
+        { name: "Gadget", price: 24.5 },
+      ],
+    }),
   },
-);
-
-forEachEngine("condAnd / condOr with synchronous tools", (run, { engine }) => {
-  test(
-    "and expression with sync tools resolves correctly",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.test {
-  with api
-  with input as i
-  with output as o
-
-  api.x <- i.x
-  o.result <- api.score > 5 and api.active
-}`,
-        "Query.test",
-        { x: 1 },
-        {
-          api: (_p: any) => ({ score: 10, active: true }),
-        },
-      );
-      assert.equal(data.result, true);
+  scenarios: {
+    "Query.check": {
+      "comparison == with string returns true": {
+        input: { status: "active" },
+        assertData: { isActive: true },
+        assertTraces: 0,
+      },
+      "comparison == with string returns false": {
+        input: { status: "inactive" },
+        assertData: { isActive: false },
+        assertTraces: 0,
+      },
     },
-  );
-
-  test(
-    "or expression with sync tools resolves correctly",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.test {
-  with api
-  with input as i
-  with output as o
-
-  api.x <- i.x
-  o.result <- api.score > 100 or api.active
-}`,
-        "Query.test",
-        { x: 1 },
-        {
-          api: (_p: any) => ({ score: 10, active: true }),
+    "Query.products": {
+      "expression in array mapping": {
+        input: {},
+        assertData: [
+          { name: "Widget", cents: 999 },
+          { name: "Gadget", cents: 2450 },
+        ],
+        assertTraces: 1,
+      },
+      "empty items array": {
+        input: {},
+        tools: {
+          "pricing.list": async () => ({ items: [] }),
         },
-      );
-      assert.equal(data.result, true);
+        assertData: [],
+        assertTraces: 1,
+      },
     },
-  );
-
-  test(
-    "and short-circuits: false and sync-tool is false",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.test {
-  with api
-  with input as i
-  with output as o
-
-  api.x <- i.x
-  o.result <- api.score > 100 and api.active
-}`,
-        "Query.test",
-        { x: 1 },
-        {
-          api: (_p: any) => ({ score: 10, active: true }),
-        },
-      );
-      assert.equal(data.result, false);
-    },
-  );
+  },
 });
 
-forEachEngine("safe flag on right operand expressions", (run, { engine }) => {
-  test(
-    "safe flag on right operand: i.flag and api?.active does not crash",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.test {
-  with input as i
-  with failingApi as api
-  with output as o
+// ── Catch error fallback ────────────────────────────────────────────────────
 
-  api.in <- i.value
-  o.result <- i.flag and api?.active
-}`,
-        "Query.test",
-        { value: "test", flag: true },
-        {
-          failingApi: async () => {
-            throw new Error("HTTP 500");
-          },
-        },
-      );
-      assert.equal(data.result, false);
+regressionTest("expressions: catch error fallback", {
+  bridge: `
+    version 1.5
+
+    bridge Query.convert {
+      with pricing.lookup as api
+      with input as i
+      with output as o
+
+      api.id <- i.dollars
+      o.cents <- api.price * 100 catch -1
+    }
+  `,
+  tools: {
+    "pricing.lookup": async () => {
+      throw new Error("service unavailable");
     },
-  );
-
-  test(
-    "safe flag on right operand of or: i.flag or api?.fallback does not crash",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.test {
-  with input as i
-  with failingApi as api
-  with output as o
-
-  api.in <- i.value
-  o.result <- i.flag or api?.fallback
-}`,
-        "Query.test",
-        { value: "test", flag: false },
-        {
-          failingApi: async () => {
-            throw new Error("HTTP 500");
-          },
-        },
-      );
-      assert.equal(data.result, false);
+  },
+  scenarios: {
+    "Query.convert": {
+      "expression with catch error fallback: api.price * 100 catch -1": {
+        input: { dollars: 5 },
+        assertData: { cents: -1 },
+        allowDowngrade: true,
+        assertTraces: 1,
+      },
     },
-  );
+  },
+});
+
+// ── Boolean logic: and/or ───────────────────────────────────────────────────
+
+regressionTest("boolean logic: and/or end-to-end", {
+  bridge: `
+    version 1.5
+
+    bridge Query.andExpr {
+      with input as i
+      with output as o
+
+      o.approved <- i.age > 18 and i.verified
+    }
+
+    bridge Query.orExpr {
+      with input as i
+      with output as o
+
+      o.approved <- i.age > 18 and i.verified or i.role == "ADMIN"
+    }
+  `,
+  scenarios: {
+    "Query.andExpr": {
+      "and expression: age > 18 and verified — true": {
+        input: { age: 25, verified: true, role: "USER" },
+        assertData: { approved: true },
+        assertTraces: 0,
+      },
+      "and expression: age > 18 and verified — false (age too low)": {
+        input: { age: 15, verified: true, role: "USER" },
+        assertData: { approved: false },
+        assertTraces: 0,
+      },
+    },
+    "Query.orExpr": {
+      "or expression: approved or role == ADMIN": {
+        input: { age: 15, verified: false, role: "ADMIN" },
+        assertData: { approved: true },
+        assertTraces: 0,
+      },
+    },
+  },
+});
+
+// ── Parenthesized boolean expressions ───────────────────────────────────────
+
+regressionTest("parenthesized boolean expressions: end-to-end", {
+  bridge: `
+    version 1.5
+
+    bridge Query.aOrBandC {
+      with input as i
+      with output as o
+
+      o.result <- i.a or (i.b and i.c)
+    }
+
+    bridge Query.aOrBandC2 {
+      with input as i
+      with output as o
+
+      o.result <- (i.a or i.b) and i.c
+    }
+
+    bridge Query.notParen {
+      with input as i
+      with output as o
+
+      o.result <- not (i.a and i.b)
+    }
+  `,
+  scenarios: {
+    "Query.aOrBandC": {
+      "A or (B and C): true or (false and false) = true": {
+        input: { a: true, b: false, c: false },
+        assertData: { result: true },
+        assertTraces: 0,
+      },
+      "A or (B and C): false or (true and true) = true": {
+        input: { a: false, b: true, c: true },
+        assertData: { result: true },
+        assertTraces: 0,
+      },
+    },
+    "Query.aOrBandC2": {
+      "(A or B) and C: (true or false) and false = false": {
+        input: { a: true, b: false, c: false },
+        assertData: { result: false },
+        assertTraces: 0,
+      },
+    },
+    "Query.notParen": {
+      "not (A and B): not (true and false) = true": {
+        input: { a: true, b: false },
+        assertData: { result: true },
+        assertTraces: 0,
+      },
+    },
+  },
+});
+
+// ── condAnd / condOr with synchronous tools ─────────────────────────────────
+
+regressionTest("condAnd / condOr with synchronous tools", {
+  bridge: `
+    version 1.5
+
+    bridge Query.syncAnd {
+      with api
+      with input as i
+      with output as o
+
+      api.x <- i.x
+      o.result <- api.score > 5 and api.active
+    }
+
+    bridge Query.syncOr {
+      with api
+      with input as i
+      with output as o
+
+      api.x <- i.x
+      o.result <- api.score > 100 or api.active
+    }
+
+    bridge Query.syncAndShort {
+      with api
+      with input as i
+      with output as o
+
+      api.x <- i.x
+      o.result <- api.score > 100 and api.active
+    }
+  `,
+  tools: {
+    api: () => ({ score: 10, active: true }),
+  },
+  scenarios: {
+    "Query.syncAnd": {
+      "and expression with sync tools resolves correctly": {
+        input: { x: 1 },
+        assertData: { result: true },
+        assertTraces: 1,
+      },
+    },
+    "Query.syncOr": {
+      "or expression with sync tools resolves correctly": {
+        input: { x: 1 },
+        assertData: { result: true },
+        assertTraces: 1,
+      },
+    },
+    "Query.syncAndShort": {
+      "and short-circuits: false and sync-tool is false": {
+        input: { x: 1 },
+        assertData: { result: false },
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── Safe flag on right operand expressions ──────────────────────────────────
+
+regressionTest("safe flag on right operand expressions", {
+  bridge: `
+    version 1.5
+
+    bridge Query.safeRightAnd {
+      with input as i
+      with failingApi as api
+      with output as o
+
+      api.in <- i.value
+      o.result <- i.flag and api?.active
+    }
+
+    bridge Query.safeRightOr {
+      with input as i
+      with failingApi as api
+      with output as o
+
+      api.in <- i.value
+      o.result <- i.flag or api?.fallback
+    }
+  `,
+  tools: {
+    failingApi: async () => {
+      throw new Error("HTTP 500");
+    },
+  },
+  scenarios: {
+    "Query.safeRightAnd": {
+      "safe flag on right operand: i.flag and api?.active does not crash": {
+        input: { value: "test", flag: true },
+        assertData: { result: false },
+        assertTraces: 1,
+      },
+    },
+    "Query.safeRightOr": {
+      "safe flag on right operand of or: i.flag or api?.fallback does not crash":
+        {
+          input: { value: "test", flag: false },
+          assertData: { result: false },
+          assertTraces: 1,
+        },
+    },
+  },
 });

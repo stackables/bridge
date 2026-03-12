@@ -81,6 +81,20 @@ export function assertBridgeCompilerCompatible(
 
     if (!("from" in w)) continue;
 
+    // Catch fallback on pipe wires (expression results) — the catch must
+    // propagate to the upstream tool, not the internal operator; codegen
+    // does not handle this yet.
+    if (
+      "pipe" in w &&
+      w.pipe &&
+      ("catchFallback" in w || "catchFallbackRef" in w || "catchControl" in w)
+    ) {
+      throw new BridgeCompilerIncompatibleError(
+        op,
+        "Catch fallback on expression (pipe) wires is not yet supported by the compiler.",
+      );
+    }
+
     // Fallback chains (|| / ??) with tool-backed refs — compiler eagerly
     // calls all tools via Promise.all, so short-circuit semantics are lost
     // and tool side effects fire unconditionally.

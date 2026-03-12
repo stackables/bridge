@@ -601,14 +601,26 @@ class CodegenContext {
     // Detect tools whose output is only referenced by catch-guarded wires.
     // These tools need try/catch wrapping to prevent unhandled rejections.
     for (const w of outputWires) {
-      if (
-        (hasCatchFallback(w) ||
-          hasCatchControl(w) ||
-          ("safe" in w && w.safe)) &&
-        "from" in w
-      ) {
+      const needsCatch =
+        hasCatchFallback(w) ||
+        hasCatchControl(w) ||
+        ("safe" in w && w.safe) ||
+        ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
+        ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
+      if (!needsCatch) continue;
+      if ("from" in w) {
         const srcKey = refTrunkKey(w.from);
         this.catchGuardedTools.add(srcKey);
+      }
+      if ("condAnd" in w) {
+        this.catchGuardedTools.add(refTrunkKey(w.condAnd.leftRef));
+        if (w.condAnd.rightRef)
+          this.catchGuardedTools.add(refTrunkKey(w.condAnd.rightRef));
+      }
+      if ("condOr" in w) {
+        this.catchGuardedTools.add(refTrunkKey(w.condOr.leftRef));
+        if (w.condOr.rightRef)
+          this.catchGuardedTools.add(refTrunkKey(w.condOr.rightRef));
       }
     }
     // Also mark tools catch-guarded if referenced by catch-guarded or safe define wires
@@ -634,8 +646,8 @@ class CodegenContext {
       for (const w of twires) {
         const isSafe =
           ("safe" in w && w.safe) ||
-          ("condAnd" in w && w.condAnd.safe) ||
-          ("condOr" in w && w.condOr.safe);
+          ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
+          ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
         if (!isSafe) continue;
         if ("from" in w) {
           this.catchGuardedTools.add(refTrunkKey(w.from));
@@ -3748,7 +3760,8 @@ class CodegenContext {
       // so __get handles null bases gracefully. Don't re-throw; the natural Boolean()
       // evaluation produces the correct result (e.g. Boolean(undefined) → false).
       const isCondSafe =
-        ("condAnd" in w && w.condAnd.safe) || ("condOr" in w && w.condOr.safe);
+        ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
+        ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
       if (!isCondSafe) {
         // This wire has NO catch fallback but its source tool is catch-guarded by another
         // wire. If the tool failed, re-throw the stored error rather than silently
