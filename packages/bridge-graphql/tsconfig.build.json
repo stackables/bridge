@@ -6,7 +6,8 @@
     "declaration": true,
     "declarationMap": true,
     "rewriteRelativeImportExtensions": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {}
   },
   "include": ["src"]
 }
