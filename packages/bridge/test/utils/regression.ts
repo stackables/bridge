@@ -23,7 +23,10 @@ import {
 } from "../../src/index.ts";
 import { bridgeTransform } from "@stackables/bridge-graphql";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
-import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
+import {
+  executeBridge as executeCompiled,
+  type ExecuteBridgeOptions,
+} from "@stackables/bridge-compiler";
 import type { ToolTrace } from "@stackables/bridge-core";
 import {
   buildTraversalManifest,
@@ -592,6 +595,7 @@ export type Scenario = {
   input: Record<string, any>;
   fields?: string[];
   tools?: Record<string, any>;
+  timeout?: number;
   context?: Record<string, any>;
   /**
    * Allow the compiled engine to downgrade (fall back) to the runtime
@@ -892,13 +896,26 @@ export function regressionTest(name: string, data: RegressionTest) {
               test(engineName, async (t) => {
                 const { logs, logger } = createCapturingLogger();
 
-                const executeOpts = {
+                const timeout = new AbortController();
+
+                // cancel when tests are aborted, or when scenario timeout is reached
+                t.signal.onabort = () => timeout.abort();
+
+                if (scenario.timeout !== undefined) {
+                  if (scenario.timeout <= 0) {
+                    timeout.abort();
+                  } else {
+                    setTimeout(() => timeout.abort(), scenario.timeout);
+                  }
+                }
+
+                const executeOpts: ExecuteBridgeOptions = {
                   document,
                   operation,
                   input: scenario.input,
                   tools,
                   context,
-                  signal: t.signal,
+                  signal: timeout.signal,
                   toolTimeoutMs: 5_000,
                   requestedFields: scenario.fields,
                   logger,

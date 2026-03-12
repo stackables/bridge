@@ -49,6 +49,7 @@ export {
   BridgeRuntimeError,
   BridgeTimeoutError,
   MAX_EXECUTION_DEPTH,
+  isLoopControlSignal,
 } from "./tree-types.ts";
 export type { Logger } from "./tree-types.ts";
 

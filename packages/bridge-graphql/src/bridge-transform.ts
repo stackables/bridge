@@ -17,6 +17,7 @@ import {
   formatBridgeError,
   resolveStd,
   checkHandleVersions,
+  isLoopControlSignal,
   type Logger,
   type ToolTrace,
   type TraceLevel,
@@ -419,6 +420,16 @@ export function bridgeTransform(
                 }),
                 { cause: err },
               );
+            }
+
+            // Safety net: loop control signals (break/continue) must never
+            // reach GraphQL resolvers.  Normally, bridges that use
+            // break/continue inside array element sub-fields fall back to
+            // standalone mode (via assertBridgeGraphQLCompatible), but if
+            // a signal leaks through, coerce it to null rather than
+            // crashing GraphQL serialisation with a Symbol value.
+            if (isLoopControlSignal(result)) {
+              result = null;
             }
 
             // Scalar return types (JSON, JSONObject, etc.) won't trigger

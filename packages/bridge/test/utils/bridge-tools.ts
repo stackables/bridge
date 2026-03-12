@@ -6,10 +6,19 @@ import { setTimeout } from "node:timers/promises";
  * @param input
  */
 function cleanupInstructions(input: Record<string, any>): Record<string, any> {
+  if (Array.isArray(input)) {
+    return input.map((item) =>
+      typeof item === "object" && item !== null
+        ? cleanupInstructions(item)
+        : item,
+    ) as any;
+  }
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(input)) {
     if (key.startsWith("_")) continue;
-    if (typeof value === "object" && value !== null) {
+    if (Array.isArray(value)) {
+      result[key] = cleanupInstructions(value);
+    } else if (typeof value === "object" && value !== null) {
       result[key] = cleanupInstructions(value);
     } else {
       result[key] = value;
