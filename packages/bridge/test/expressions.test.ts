@@ -630,3 +630,85 @@ regressionTest("safe flag on right operand expressions", {
     },
   },
 });
+
+// ── Short-circuit data correctness ──────────────────────────────────────────
+
+regressionTest("and/or short-circuit data correctness", {
+  bridge: `
+    version 1.5
+
+    bridge Query.andFalse {
+      with input as i
+      with checker as c
+      with output as o
+
+      c.in <- i.value
+      o.result <- i.flag and c.ok
+    }
+
+    bridge Query.andTrue {
+      with input as i
+      with checker as c
+      with output as o
+
+      c.in <- i.value
+      o.result <- i.flag and c.ok
+    }
+
+    bridge Query.orTrue {
+      with input as i
+      with checker as c
+      with output as o
+
+      c.in <- i.value
+      o.result <- i.flag or c.ok
+    }
+
+    bridge Query.orFalse {
+      with input as i
+      with checker as c
+      with output as o
+
+      c.in <- i.value
+      o.result <- i.flag or c.ok
+    }
+  `,
+  tools: {
+    checker: async () => ({ ok: true }),
+  },
+  scenarios: {
+    "Query.andFalse": {
+      "and short-circuits: false and _ => false": {
+        input: { flag: false, value: "test" },
+        allowDowngrade: true,
+        assertData: { result: false },
+        assertTraces: (_traces) => {},
+      },
+    },
+    "Query.andTrue": {
+      "and evaluates right: true and true => true": {
+        input: { flag: true, value: "test" },
+        allowDowngrade: true,
+        assertData: { result: true },
+        assertTraces: (_traces) => {},
+      },
+    },
+    "Query.orTrue": {
+      "or short-circuits: true or _ => true": {
+        input: { flag: true, value: "test" },
+        allowDowngrade: true,
+        assertData: { result: true },
+        assertTraces: (_traces) => {},
+      },
+    },
+    "Query.orFalse": {
+      "or evaluates right: false or false => false": {
+        input: { flag: false, value: "test" },
+        tools: { checker: async () => ({ ok: false }) },
+        allowDowngrade: true,
+        assertData: { result: false },
+        assertTraces: (_traces) => {},
+      },
+    },
+  },
+});

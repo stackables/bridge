@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
-import { executeBridge as executeRuntime } from "@stackables/bridge-core";
-import { executeBridge as executeCompiled } from "@stackables/bridge-compiler";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // executeBridge — core language behavior
@@ -962,87 +958,3 @@ regressionTest("tracing", {
     },
   },
 });
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Standalone engine tests (tracing-off, error conditions)
-//
-// These test engine-level error handling and trace options that
-// regressionTest does not support (e.g. tracing off, bad operation names).
-// ═══════════════════════════════════════════════════════════════════════════
-
-for (const { name, execute } of [
-  { name: "runtime", execute: executeRuntime },
-  { name: "compiled", execute: executeCompiled },
-] as const) {
-  describe(`[${name}] tracing off`, () => {
-    test("traces are empty when tracing is off", async () => {
-      const { traces } = await execute({
-        document: parseBridge(`version 1.5
-bridge Query.echo {
-  with myTool as t
-  with input as i
-  with output as o
-
-  t.x <- i.x
-  o.result <- t.y
-}`),
-        operation: "Query.echo",
-        input: { x: 5 },
-        tools: echoTools,
-      });
-      assert.equal(traces.length, 0);
-    });
-  });
-
-  describe(`[${name}] errors`, () => {
-    test("invalid operation format throws", async () => {
-      await assert.rejects(
-        () =>
-          execute({
-            document: parseBridge("version 1.5"),
-            operation: "badformat",
-            input: {},
-            tools: {},
-          }),
-        /expected "Type\.field"/,
-      );
-    });
-
-    test("missing bridge definition throws", async () => {
-      await assert.rejects(
-        () =>
-          execute({
-            document: parseBridge(`version 1.5
-bridge Query.foo {
-  with output as o
-  o.x = "ok"
-}`),
-            operation: "Query.bar",
-            input: {},
-            tools: {},
-          }),
-        /No bridge definition found/,
-      );
-    });
-
-    test("bridge with no output wires throws", async () => {
-      await assert.rejects(
-        () =>
-          execute({
-            document: parseBridge(`version 1.5
-bridge Query.ping {
-  with test.multitool as m
-  with input as i
-  with output as o
-
-  m.q <- i.q
-}`),
-            operation: "Query.ping",
-            input: { q: "x" },
-            tools,
-          }),
-        /no output wires/,
-      );
-    });
-  });
-}

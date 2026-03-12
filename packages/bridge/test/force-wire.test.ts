@@ -80,6 +80,35 @@ bridge Mutation.fire {
   },
 });
 
-// ── Legacy tests (timing assertions / engine-specific skips) ────────────────
-// Tests that need custom tool spying or engine-specific skip logic live here.
-// See also: legacy/force-wire.test.ts
+// ── Fire-and-forget: force with catch null ──────────────────────────────────
+
+regressionTest("force with catch null (fire-and-forget)", {
+  bridge: `version 1.5
+
+bridge Query.search {
+  with mainApi as m
+  with audit.log as audit
+  with input as i
+  with output as o
+
+  m.q <- i.q
+  audit.action <- i.q
+  force audit catch null
+  o.title <- m.title
+}`,
+  tools: {
+    mainApi: async (_params: { q: string }) => ({ title: "OK" }),
+    "audit.log": async () => {
+      throw new Error("audit service unavailable");
+    },
+  },
+  scenarios: {
+    "Query.search": {
+      "fire-and-forget error does NOT break the response": {
+        input: { q: "test" },
+        assertData: { title: "OK" },
+        assertTraces: 2,
+      },
+    },
+  },
+});
