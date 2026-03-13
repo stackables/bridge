@@ -1,234 +1,214 @@
-import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import {
-  compileBridge,
-  executeBridge as executeCompiled,
-} from "@stackables/bridge-compiler";
-import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
 
-describe("memoized loop-scoped tools - invalid cases", () => {
-  test("memoize is only valid for tool references", () => {
-    assert.throws(
-      () =>
-        parseBridge(`version 1.5
+// ═══════════════════════════════════════════════════════════════════════════
+// Memoized loop-scoped tools — caching, isolation, dedup
+//
+// Migrated from legacy/memoized-loop-tools.test.ts, legacy/define-loop-tools.test.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
-bridge Query.processCatalog {
-  with output as o
-  with context as ctx memoize
+regressionTest("memoized loop-scoped tools - data correctness", {
+  bridge: `
+    version 1.5
 
-  o <- ctx.catalog
-}`),
-      /memoize|tool/i,
-    );
-  });
-});
+    bridge Query.singleMemoize {
+      with context as ctx
+      with output as o
 
-describe("memoized loop-scoped tools - compiler support", () => {
-  test("memoized loop-scoped tools compile without falling back", async () => {
-    const bridge = `version 1.5
+      o <- ctx.catalog[] as cat {
+        with std.httpCall as fetchItem memoize
 
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
+        fetchItem.value <- cat.id
+        .item <- fetchItem.data
+      }
+    }
 
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as fetchItem memoize
+    bridge Query.dualMemoize {
+      with context as ctx
+      with output as o
 
-    fetchItem.value <- cat.id
-    .item <- fetchItem.data
-  }
-}`;
+      o <- ctx.catalog1[] as cat {
+        with std.httpCall as outer memoize
 
-    const document = parseBridge(bridge);
-    assert.doesNotThrow(() =>
-      compileBridge(document, { operation: "Query.processCatalog" }),
-    );
+        outer.value <- cat.id
+        .outer <- outer.data
+        .inner <- ctx.catalog2[] as item {
+          with std.httpCall as fetchItem memoize
 
-    let calls = 0;
-    const warnings: string[] = [];
-    const result = await executeCompiled({
-      document,
-      operation: "Query.processCatalog",
-      tools: {
-        std: {
-          httpCall: async (params: { value: string }) => {
-            calls++;
-            return { data: `item:${params.value}` };
-          },
-        },
-      },
-      context: {
-        catalog: [{ id: "a" }, { id: "a" }, { id: "b" }, { id: "a" }],
-      },
-      logger: {
-        warn: (message: string) => warnings.push(message),
-      },
-    });
+          fetchItem.value <- item.id
+          .item <- fetchItem.data
+        }
+      }
+    }
 
-    assert.deepStrictEqual(result.data, [
-      { item: "item:a" },
-      { item: "item:a" },
-      { item: "item:b" },
-      { item: "item:a" },
-    ]);
-    assert.equal(calls, 2);
-    assert.deepStrictEqual(warnings, []);
-  });
-});
+    bridge Query.shadowMemoize {
+      with context as ctx
+      with output as o
 
-forEachEngine("memoized loop-scoped tools - valid behavior", (run) => {
-  test("same inputs reuse the cached result for one memoized handle", async () => {
-    const bridge = `version 1.5
+      o <- ctx.catalog1[] as cat {
+        with std.httpCall as fetch memoize
 
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
+        fetch.value <- cat.id
+        .outer <- fetch.data
+        .inner <- ctx.catalog2[] as item {
+          with std.httpCall as fetch memoize
 
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as fetchItem memoize
-
-    fetchItem.value <- cat.id
-    .item <- fetchItem.data
-  }
-}`;
-
-    let calls = 0;
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => {
-            calls++;
-            return { data: `item:${params.value}` };
-          },
-        },
-      },
-      {
+          fetch.value <- item.id
+          .item <- fetch.data
+        }
+      }
+    }
+  `,
+  tools: {
+    std: {
+      httpCall: async (params: { value: string }) => ({
+        data: `item:${params.value}`,
+      }),
+    },
+  },
+  scenarios: {
+    "Query.singleMemoize": {
+      "memoized tool produces correct data for duplicated ids": {
+        input: {},
         context: {
           catalog: [{ id: "a" }, { id: "a" }, { id: "b" }, { id: "a" }],
         },
+        assertData: [
+          { item: "item:a" },
+          { item: "item:a" },
+          { item: "item:b" },
+          { item: "item:a" },
+        ],
+        assertTraces: 2,
       },
-    );
-
-    assert.deepStrictEqual(result.data, [
-      { item: "item:a" },
-      { item: "item:a" },
-      { item: "item:b" },
-      { item: "item:a" },
-    ]);
-    assert.equal(calls, 2);
-  });
-
-  test("each memoized handle keeps its own cache", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-
-  o <- ctx.catalog1[] as cat {
-    with std.httpCall as outer memoize
-
-    outer.value <- cat.id
-    .outer <- outer.data
-    .inner <- ctx.catalog2[] as item {
-      with std.httpCall as fetchItem memoize
-
-      fetchItem.value <- item.id
-      .item <- fetchItem.data
-    }
-  }
-}`;
-
-    let calls = 0;
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => {
-            calls++;
-            return { data: `item:${params.value}` };
-          },
-        },
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
       },
-      {
+    },
+    "Query.dualMemoize": {
+      "each memoized handle keeps its own cache": {
+        input: {},
         context: {
           catalog1: [{ id: "same" }, { id: "same" }],
           catalog2: [{ id: "same" }, { id: "same" }],
         },
-      },
-    );
-
-    assert.deepStrictEqual(result.data, [
-      {
-        outer: "item:same",
-        inner: [{ item: "item:same" }, { item: "item:same" }],
-      },
-      {
-        outer: "item:same",
-        inner: [{ item: "item:same" }, { item: "item:same" }],
-      },
-    ]);
-    assert.equal(calls, 2);
-  });
-
-  test("memoized handles with the exact same alias at different scope levels maintain isolated caches", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-
-  o <- ctx.catalog1[] as cat {
-    with std.httpCall as fetch memoize
-
-    fetch.value <- cat.id
-    .outer <- fetch.data
-    .inner <- ctx.catalog2[] as item {
-      # This shadows the outer alias perfectly!
-      with std.httpCall as fetch memoize
-
-      fetch.value <- item.id
-      .item <- fetch.data
-    }
-  }
-}`;
-
-    let calls = 0;
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => {
-            calls++;
-            return { data: `item:${params.value}` };
+        assertData: [
+          {
+            outer: "item:same",
+            inner: [{ item: "item:same" }, { item: "item:same" }],
           },
-        },
+          {
+            outer: "item:same",
+            inner: [{ item: "item:same" }, { item: "item:same" }],
+          },
+        ],
+        assertTraces: 2,
       },
-      {
+      "empty outer catalog": {
+        input: {},
+        context: { catalog1: [], catalog2: [{ id: "x" }] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty inner catalog": {
+        input: {},
+        context: { catalog1: [{ id: "x" }], catalog2: [] },
+        assertData: [{ outer: "item:x", inner: [] }],
+        assertTraces: 1,
+      },
+    },
+    "Query.shadowMemoize": {
+      "shadowed memoize aliases maintain isolated caches": {
+        input: {},
         context: {
           catalog1: [{ id: "collision" }],
           catalog2: [{ id: "collision" }],
         },
+        assertData: [
+          {
+            outer: "item:collision",
+            inner: [{ item: "item:collision" }],
+          },
+        ],
+        assertTraces: 2,
       },
-    );
+      "empty outer catalog": {
+        input: {},
+        context: { catalog1: [], catalog2: [{ id: "x" }] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty inner catalog": {
+        input: {},
+        context: { catalog1: [{ id: "x" }], catalog2: [] },
+        assertData: [{ outer: "item:x", inner: [] }],
+        assertTraces: 1,
+      },
+    },
+  },
+});
 
-    // If the cache key relies on the string "fetch", the inner loop
-    // will accidentally hit the outer loop's cache and calls will be 1.
-    // Because we securely use TrunkKeys, it should be exactly 2!
-    assert.deepStrictEqual(result.data, [
-      {
-        outer: "item:collision",
-        inner: [{ item: "item:collision" }],
+// ═══════════════════════════════════════════════════════════════════════════
+// Define blocks with memoized tools inside loops
+//
+// Migrated from legacy/define-loop-tools.test.ts
+// (parser error test moved to bridge-parser/test/bridge-format.test.ts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+regressionTest("define blocks with memoized tools in loops", {
+  bridge: `
+    version 1.5
+
+    define formatProfile {
+      with input as i
+      with output as o
+      with std.httpCall as fetch memoize
+
+      fetch.value <- i.userId
+      o.data <- fetch.data
+    }
+
+    bridge Query.processCatalog {
+      with context as ctx
+      with output as o
+
+      o <- ctx.catalog[] as cat {
+        with formatProfile as profile
+
+        profile.userId <- cat.id
+        .item <- profile.data
+      }
+    }
+  `,
+  tools: {
+    std: {
+      httpCall: async (params: { value: string }) => ({
+        data: `profile:${params.value}`,
+      }),
+    },
+  },
+  scenarios: {
+    "Query.processCatalog": {
+      "memoized tool inside define block deduplicates across loop elements": {
+        input: {},
+        context: {
+          catalog: [{ id: "user-1" }, { id: "user-2" }, { id: "user-1" }],
+        },
+        assertData: [
+          { item: "profile:user-1" },
+          { item: "profile:user-2" },
+          { item: "profile:user-1" },
+        ],
+        assertTraces: 2,
       },
-    ]);
-    assert.equal(calls, 2);
-  });
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
+      },
+    },
+  },
 });

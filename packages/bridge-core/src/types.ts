@@ -1,4 +1,4 @@
-type SourceLocation = import("@stackables/bridge-types").SourceLocation;
+import type { SourceLocation } from "@stackables/bridge-types";
 
 /**
  * Structured node reference — identifies a specific data point in the execution graph.
@@ -182,6 +182,8 @@ export type HandleBinding =
       name: string;
       version?: string;
       memoize?: true;
+      /** True when this tool is declared inside an array-mapping block. */
+      element?: true;
     }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }
@@ -212,40 +214,16 @@ export type ToolDef = {
   fn?: string;
   /** Parent tool name — inherits fn, deps, and wires */
   extends?: string;
-  /** Dependencies declared via `with` inside the tool block */
-  deps: ToolDep[];
-  /** Wires: constants (`=`) and pulls (`<-`) defining the tool's input */
-  wires: ToolWire[];
+  /** Declared handles — same as Bridge/Define handles (tools, context, const, etc.)
+   *  Tools cannot declare `input` or `output` handles. */
+  handles: HandleBinding[];
+  /** Connection wires — same format as Bridge/Define wires */
+  wires: Wire[];
+  /** Synthetic fork handles for expressions, string interpolation, etc. */
+  pipeHandles?: Bridge["pipeHandles"];
+  /** Error fallback for the tool call — replaces the result when the tool throws. */
+  onError?: { value: string } | { source: string };
 };
-
-/**
- * A dependency declared inside a tool block.
- *
- *   with context                 — brings the full GraphQL context into scope
- *   with authService as auth     — brings another tool's output into scope
- */
-export type ToolDep =
-  | { kind: "context"; handle: string }
-  | { kind: "tool"; handle: string; tool: string; version?: string }
-  | { kind: "const"; handle: string };
-
-/**
- * A wire in a tool block — either a constant value, a pull from a dependency,
- * or an error fallback.
- *
- * Examples:
- *   baseUrl = "https://example.com/"         → constant
- *   method = POST                                     → constant (unquoted)
- *   headers.Authorization <- ctx.sendgrid.token      → pull from context
- *   headers.Authorization <- auth.access_token       → pull from tool dep
- *   on error = { "lat": 0, "lon": 0 }               → constant fallback
- *   on error <- ctx.fallbacks.geo                     → pull fallback from context
- */
-export type ToolWire =
-  | { target: string; kind: "constant"; value: string }
-  | { target: string; kind: "pull"; source: string }
-  | { kind: "onError"; value: string }
-  | { kind: "onError"; source: string };
 
 /**
  * Context passed to every tool function as the second argument.

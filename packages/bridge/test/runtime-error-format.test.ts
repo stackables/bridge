@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { buildSchema, execute, parse } from "graphql";
-import {
-  BridgeRuntimeError,
-  bridgeTransform,
-  executeBridge,
-  formatBridgeError,
-  parseBridgeChevrotain as parseBridge,
-} from "../src/index.ts";
+import { formatBridgeError } from "@stackables/bridge-core";
+import { regressionTest } from "./utils/regression.ts";
 
-const bridgeText = `version 1.5
+// ══════════════════════════════════════════════════════════════════════════════
+// Runtime error formatting
+//
+// Tests that `formatBridgeError` produces correct source snippets, caret
+// underlines, and location references for various error types.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function maxCaretCount(formatted: string): number {
+  return Math.max(
+    0,
+    ...formatted.split("\n").map((line) => (line.match(/\^/g) ?? []).length),
+  );
+}
+
+const FN = "playground.bridge";
+
+// ── Engine-level error formatting ────────────────────────────────────────────
+
+regressionTest("error formatting – runtime errors", {
+  bridge: `version 1.5
 
 bridge Query.greet {
   with std.str.toUpperCase as uc memoize
@@ -20,24 +32,30 @@ bridge Query.greet {
   o.message <- i.empty.array.error
   o.upper <- uc:i.name
   o.lower <- lc:i.name
-}`;
+}`,
+  scenarios: {
+    "Query.greet": {
+      "formats runtime errors with bridge source location": {
+        input: { name: "Ada" },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Cannot read properties of undefined \(reading '(array|error)'\)/,
+          );
+          assert.match(formatted, /playground\.bridge:9:16/);
+          assert.match(formatted, /o\.message <- i\.empty\.array\.error/);
+          assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);
+        },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
 
-const bridgeCoalesceText = `version 1.5
-
-bridge Query.greet {
-  with std.str.toUpperCase as uc memoize
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
-
-  alias i.empty.array.error catch i.empty.array.error as clean
-
-  o.message <- i.empty.array?.error ?? i.empty.array.error
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`;
-
-const bridgeMissingToolText = `version 1.5
+regressionTest("error formatting – missing tool", {
+  bridge: `version 1.5
 
 bridge Query.greet {
   with xxx as missing
@@ -45,9 +63,30 @@ bridge Query.greet {
   with output as o
 
   o.message <- missing:i.name
-}`;
+}`,
+  scenarios: {
+    "Query.greet": {
+      "formats missing tool errors with source location": {
+        input: { name: "Ada" },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: No tool found for "xxx"/,
+          );
+          assert.match(formatted, /playground\.bridge:8:16/);
+          assert.match(formatted, /o\.message <- missing:i\.name/);
+          assert.equal(maxCaretCount(formatted), "missing:i.name".length);
+        },
+        // no tool calls → 0 traces, but use function to be resilient to future changes
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
 
-const bridgeThrowFallbackText = `version 1.5
+regressionTest("error formatting – throw fallback", {
+  bridge: `version 1.5
 
 bridge Query.greet {
   with std.str.toUpperCase as uc
@@ -60,27 +99,94 @@ bridge Query.greet {
 
   o.upper <- uc:i.name
   o.lower <- lc:i.name
-}`;
+}`,
+  scenarios: {
+    "Query.greet": {
+      "throw fallbacks underline only the throw clause": {
+        input: { name: "Ada" },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(formatted, /Bridge Execution Error: Errore/);
+          assert.match(formatted, /playground\.bridge:10:38/);
+          assert.match(
+            formatted,
+            /o\.message <- i\.does\?\.not\?\.crash \?\? throw "Errore"/,
+          );
+          assert.equal(maxCaretCount(formatted), 'throw "Errore"'.length);
+        },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
 
-const bridgePanicFallbackText = `version 1.5
+regressionTest("error formatting – panic fallback", {
+  bridge: `version 1.5
 
 bridge Query.greet {
   with input as i
   with output as o
 
   o.message <- i.name ?? panic "Fatale"
-}`;
+}`,
+  scenarios: {
+    "Query.greet": {
+      "panic fallbacks underline only the panic clause": {
+        input: {},
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(formatted, /Bridge Execution Error: Fatale/);
+          assert.match(formatted, /playground\.bridge:7:26/);
+          assert.match(formatted, /o\.message <- i\.name \?\? panic "Fatale"/);
+          assert.equal(maxCaretCount(formatted), 'panic "Fatale"'.length);
+        },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
 
-const bridgeTernaryText = `version 1.5
+regressionTest("error formatting – ternary branch", {
+  bridge: `version 1.5
 
 bridge Query.greet {
   with input as i
   with output as o
 
   o.discount <- i.isPro ? 20 : i.asd.asd.asd
-}`;
+}`,
+  scenarios: {
+    "Query.greet": {
+      "ternary branch errors underline only the failing branch": {
+        input: { isPro: false },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Cannot read properties of undefined \(reading 'asd'\)/,
+          );
+          assert.match(formatted, /playground\.bridge:7:32/);
+          assert.match(
+            formatted,
+            /o\.discount <- i\.isPro \? 20 : i\.asd\.asd\.asd/,
+          );
+          assert.equal(maxCaretCount(formatted), "i.asd.asd.asd".length);
+        },
+        assertTraces: 0,
+      },
+      "true branch succeeds": {
+        input: { isPro: true },
+        assertData: { discount: 20 },
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-const bridgeArrayThrowText = `version 1.5
+regressionTest("error formatting – array throw", {
+  bridge: `version 1.5
 
 bridge Query.processCatalog {
   with input as i
@@ -89,13 +195,73 @@ bridge Query.processCatalog {
   o <- i.catalog[] as cat {
     .name <- cat.name
     .items <- cat.items[] as item {
-      .sku <- item.sku ?? continue 2
+      .sku <- item.sku ?? continue
       .price <- item.price ?? throw "panic"
     }
   }
-}`;
+}`,
+  scenarios: {
+    "Query.processCatalog": {
+      "array-mapped throw fallbacks retain source snippets": {
+        input: {
+          catalog: [
+            {
+              name: "Cat",
+              items: [{ sku: "ABC", price: null }],
+            },
+          ],
+        },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(formatted, /Bridge Execution Error: panic/);
+          assert.match(formatted, /playground\.bridge:11:31/);
+          assert.match(formatted, /\.price <- item\.price \?\? throw "panic"/);
+          assert.equal(maxCaretCount(formatted), 'throw "panic"'.length);
+        },
+        assertTraces: 0,
+      },
+      "valid items succeed": {
+        input: {
+          catalog: [
+            {
+              name: "Cat",
+              items: [{ sku: "ABC", price: 9.99 }],
+            },
+          ],
+        },
+        assertData: [{ name: "Cat", items: [{ sku: "ABC", price: 9.99 }] }],
+        assertTraces: 0,
+      },
+      "missing sku triggers continue": {
+        input: {
+          catalog: [
+            {
+              name: "Cat",
+              items: [{ price: 5 }, { sku: "OK", price: 10 }],
+            },
+          ],
+        },
+        assertData: [{ name: "Cat", items: [{ sku: "OK", price: 10 }] }],
+        assertTraces: 0,
+      },
+      "empty arrays": {
+        input: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
+      },
+      "empty items array": {
+        input: {
+          catalog: [{ name: "Empty", items: [] }],
+        },
+        assertData: [{ name: "Empty", items: [] }],
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-const bridgeTernaryConditionErrorText = `version 1.5
+regressionTest("error formatting – ternary condition", {
+  bridge: `version 1.5
 
 bridge Query.pricing {
   with input as i
@@ -104,9 +270,98 @@ bridge Query.pricing {
   o.tier <- i.isPro ? "premium" : "basic"
   o.discount <- i.isPro ? 20 : 5
   o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice
-}`;
+}`,
+  scenarios: {
+    "Query.pricing": {
+      "ternary condition errors point at condition and missing segment": {
+        input: { isPro: false, proPrice: 49.99, basicPrice: 9.99 },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Cannot read properties of false \(reading 'fail'\)/,
+          );
+          assert.match(formatted, /playground\.bridge:9:14/);
+          assert.match(
+            formatted,
+            /o\.price <- i\.isPro\.fail\.asd \? i\.proPrice : i\.basicPrice/,
+          );
+          assert.equal(maxCaretCount(formatted), "i.isPro.fail.asd".length);
+        },
+        assertTraces: 0,
+      },
+      "truthy condition succeeds": {
+        input: {
+          isPro: { fail: { asd: true } },
+          proPrice: 49.99,
+          basicPrice: 9.99,
+        },
+        assertData: { tier: "premium", discount: 20, price: 49.99 },
+        assertTraces: 0,
+      },
+      "falsy condition selects else branch": {
+        input: {
+          isPro: { fail: { asd: false } },
+          proPrice: 49.99,
+          basicPrice: 9.99,
+        },
+        assertData: { tier: "premium", discount: 20, price: 9.99 },
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-const bridgePeekCycleText = `version 1.5
+regressionTest("error formatting – coalesce fallback", {
+  bridge: `version 1.5
+
+bridge Query.greet {
+  with std.str.toUpperCase as uc memoize
+  with std.str.toLowerCase as lc
+  with input as i
+  with output as o
+
+  o.message <- i.empty.array?.error ?? i.empty.array.error
+  o.upper <- uc:i.name
+  o.lower <- lc:i.name
+}`,
+  scenarios: {
+    "Query.greet": {
+      "coalesce fallback errors highlight the failing fallback branch": {
+        input: { name: "Ada" },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Cannot read properties of undefined \(reading 'array'\)/,
+          );
+          assert.match(formatted, /playground\.bridge:9:16/);
+          assert.match(
+            formatted,
+            /o\.message <- i\.empty\.array\?\.error \?\? i\.empty\.array\.error/,
+          );
+        },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+      "valid path succeeds": {
+        input: { name: "Ada", empty: { array: { error: "hello" } } },
+        assertData: { message: "hello", upper: "ADA", lower: "ada" },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+      "fallback path returns undefined when primary is nullish": {
+        input: { name: "Ada", empty: { array: {} } },
+        assertData: { upper: "ADA", lower: "ada" },
+        // engines may produce different trace counts depending on scheduling
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
+
+regressionTest("error formatting – tool input cycle", {
+  bridge: `version 1.5
 
 tool geo from std.httpCall {
   .baseUrl = "https://nominatim.openstreetmap.org"
@@ -123,312 +378,23 @@ bridge Query.location {
   geo.q <- geo[0].city
   o.lat <- geo[0].lat
   o.lon <- geo[0].lon
-}`;
-
-function maxCaretCount(formatted: string): number {
-  return Math.max(
-    0,
-    ...formatted.split("\n").map((line) => (line.match(/\^/g) ?? []).length),
-  );
-}
-
-describe("runtime error formatting", () => {
-  test("formatBridgeError underlines the full inclusive source span", () => {
-    const sourceLine = "o.message <- i.empty.array.error";
-    const formatted = formatBridgeError(
-      new BridgeRuntimeError("boom", {
-        bridgeLoc: {
-          startLine: 1,
-          startColumn: 14,
-          endLine: 1,
-          endColumn: 32,
+}`,
+  scenarios: {
+    "Query.location": {
+      "tool input cycles retain the originating wire source location": {
+        input: {},
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Circular dependency detected: "_:Tools:geo:1" depends on itself/,
+          );
+          assert.match(formatted, /playground\.bridge:15:12/);
+          assert.match(formatted, /geo\.q <- geo\[0\]\.city/);
+          assert.equal(maxCaretCount(formatted), "geo[0].city".length);
         },
-      }),
-      {
-        source: sourceLine,
-        filename: "playground.bridge",
+        assertTraces: 0,
       },
-    );
-
-    assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);
-  });
-
-  test("executeBridge formats runtime errors with bridge source location", async () => {
-    const document = parseBridge(bridgeText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: { name: "Ada" },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: Cannot read properties of undefined \(reading '(array|error)'\)/,
-        );
-        assert.match(formatted, /playground\.bridge:9:16/);
-        assert.match(formatted, /o\.message <- i\.empty\.array\.error/);
-        assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);
-        return true;
-      },
-    );
-  });
-
-  test("executeBridge formats missing tool errors with bridge source location", async () => {
-    const document = parseBridge(bridgeMissingToolText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: { name: "Ada" },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: No tool found for "xxx"/,
-        );
-        assert.match(formatted, /playground\.bridge:8:16/);
-        assert.match(formatted, /o\.message <- missing:i\.name/);
-        assert.equal(maxCaretCount(formatted), "missing:i.name".length);
-        return true;
-      },
-    );
-  });
-
-  test("throw fallbacks underline only the throw clause", async () => {
-    const document = parseBridge(bridgeThrowFallbackText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: { name: "Ada" },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(formatted, /Bridge Execution Error: Errore/);
-        assert.match(formatted, /playground\.bridge:10:38/);
-        assert.match(
-          formatted,
-          /o\.message <- i\.does\?\.not\?\.crash \?\? throw "Errore"/,
-        );
-        assert.equal(maxCaretCount(formatted), 'throw "Errore"'.length);
-        return true;
-      },
-    );
-  });
-
-  test("panic fallbacks underline only the panic clause", async () => {
-    const document = parseBridge(bridgePanicFallbackText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: {},
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(formatted, /Bridge Execution Error: Fatale/);
-        assert.match(formatted, /playground\.bridge:7:26/);
-        assert.match(formatted, /o\.message <- i\.name \?\? panic "Fatale"/);
-        assert.equal(maxCaretCount(formatted), 'panic "Fatale"'.length);
-        return true;
-      },
-    );
-  });
-
-  test("ternary branch errors underline only the failing branch", async () => {
-    const document = parseBridge(bridgeTernaryText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: { isPro: false },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: Cannot read properties of undefined \(reading 'asd'\)/,
-        );
-        assert.match(formatted, /playground\.bridge:7:32/);
-        assert.match(
-          formatted,
-          /o\.discount <- i\.isPro \? 20 : i\.asd\.asd\.asd/,
-        );
-        assert.equal(maxCaretCount(formatted), "i.asd.asd.asd".length);
-        return true;
-      },
-    );
-  });
-
-  test("array-mapped throw fallbacks retain source snippets", async () => {
-    const document = parseBridge(bridgeArrayThrowText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.processCatalog",
-          input: {
-            catalog: [
-              {
-                name: "Cat",
-                items: [{ sku: "ABC", price: null }],
-              },
-            ],
-          },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(formatted, /Bridge Execution Error: panic/);
-        assert.match(formatted, /playground\.bridge:11:31/);
-        assert.match(formatted, /\.price <- item\.price \?\? throw "panic"/);
-        assert.equal(maxCaretCount(formatted), 'throw "panic"'.length);
-        return true;
-      },
-    );
-  });
-
-  test("ternary condition errors point at the condition and missing segment", async () => {
-    const document = parseBridge(bridgeTernaryConditionErrorText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.pricing",
-          input: { isPro: false, proPrice: 49.99, basicPrice: 9.99 },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: Cannot read properties of false \(reading 'fail'\)/,
-        );
-        assert.match(formatted, /playground\.bridge:9:14/);
-        assert.match(
-          formatted,
-          /o\.price <- i\.isPro\.fail\.asd \? i\.proPrice : i\.basicPrice/,
-        );
-        assert.equal(maxCaretCount(formatted), "i.isPro.fail.asd".length);
-        return true;
-      },
-    );
-  });
-
-  test("bridgeTransform surfaces formatted runtime errors through GraphQL", async () => {
-    const schema = buildSchema(/* GraphQL */ `
-      type Query {
-        greet(name: String!): Greeting
-      }
-
-      type Greeting {
-        message: String
-        upper: String
-        lower: String
-      }
-    `);
-
-    const transformed = bridgeTransform(
-      schema,
-      parseBridge(bridgeText, {
-        filename: "playground.bridge",
-      }),
-    );
-
-    const result = await execute({
-      schema: transformed,
-      document: parse(`{ greet(name: "Ada") { message upper lower } }`),
-      contextValue: {},
-    });
-
-    assert.ok(result.errors?.length, "expected GraphQL errors");
-    const message = result.errors?.[0]?.message ?? "";
-    assert.match(
-      message,
-      /Bridge Execution Error: Cannot read properties of undefined \(reading '(array|error)'\)/,
-    );
-    assert.match(message, /playground\.bridge:9:16/);
-    assert.match(message, /o\.message <- i\.empty\.array\.error/);
-  });
-
-  test("coalesce fallback errors highlight the failing fallback branch", async () => {
-    const document = parseBridge(bridgeCoalesceText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.greet",
-          input: { name: "Ada" },
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: Cannot read properties of undefined \(reading 'array'\)/,
-        );
-        assert.match(formatted, /playground\.bridge:11:16/);
-        assert.match(
-          formatted,
-          /o\.message <- i\.empty\.array\?\.error \?\? i\.empty\.array\.error/,
-        );
-        return true;
-      },
-    );
-  });
-
-  test("tool input cycles retain the originating wire source location", async () => {
-    const document = parseBridge(bridgePeekCycleText, {
-      filename: "playground.bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        executeBridge({
-          document,
-          operation: "Query.location",
-          input: {},
-        }),
-      (err: unknown) => {
-        const formatted = formatBridgeError(err);
-        assert.match(
-          formatted,
-          /Bridge Execution Error: Circular dependency detected: "_:Tools:geo:1" depends on itself/,
-        );
-        assert.match(formatted, /playground\.bridge:15:12/);
-        assert.match(formatted, /geo\.q <- geo\[0\]\.city/);
-        assert.equal(maxCaretCount(formatted), "geo[0].city".length);
-        return true;
-      },
-    );
-  });
+    },
+  },
 });

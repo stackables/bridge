@@ -24,7 +24,7 @@ import { resolve, join } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const PROFILES_DIR = join(ROOT, "profiles");
 const BENCH_CMD =
-  "node --experimental-transform-types --conditions source bench/engine.bench.ts";
+  "node --experimental-transform-types bench/engine.bench.ts";
 const BENCH_CWD = join(ROOT, "packages/bridge");
 
 // ── Parse args ───────────────────────────────────────────────────────────────

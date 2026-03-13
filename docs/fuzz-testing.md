@@ -108,9 +108,9 @@ When a fuzz run finds a new issue:
 pnpm test
 
 # Single fuzz file
-node --experimental-transform-types --conditions source --test packages/bridge-compiler/test/fuzz-runtime-parity.test.ts
-node --experimental-transform-types --conditions source --test packages/bridge/test/fuzz-parser.test.ts
-node --experimental-transform-types --conditions source --test packages/bridge-stdlib/test/fuzz-stdlib.test.ts
+node --experimental-transform-types --test packages/bridge-compiler/test/fuzz-runtime-parity.test.ts
+node --experimental-transform-types --test packages/bridge/test/fuzz-parser.test.ts
+node --experimental-transform-types --test packages/bridge-stdlib/test/fuzz-stdlib.test.ts
 
 # Reproduce a specific failing seed
 # Add { seed: -1234567, path: "0", endOnFailure: true } to fc.assert options

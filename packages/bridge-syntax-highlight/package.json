@@ -49,7 +49,7 @@
   "scripts": {
     "prebuild": "pnpm --recursive --filter '@stackables/*' --filter '!@stackables/bridge-playground' build",
     "build": "node build.mjs",
-    "lint:types": "tsc -p tsconfig.check.json",
+    "lint:types": "tsc -p tsconfig.json",
     "watch": "node build.mjs --watch",
     "prevscode:prepublish": "pnpm --recursive --filter '@stackables/*' --filter '!@stackables/bridge-playground' build",
     "vscode:prepublish": "node build.mjs"

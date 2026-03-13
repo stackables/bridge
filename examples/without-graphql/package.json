@@ -5,7 +5,7 @@
   "scripts": {
     "weather": "node --experimental-transform-types cli.ts weather.bridge '{\"city\":\"Berlin\"}'",
     "sbb": "node --experimental-transform-types cli.ts sbb.bridge '{\"from\":\"Bern\",\"to\":\"Zürich\"}'",
-    "e2e": "node --experimental-transform-types --conditions source --test e2e.test.ts"
+    "e2e": "node --experimental-transform-types --test e2e.test.ts"
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*"

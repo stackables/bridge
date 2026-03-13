@@ -172,6 +172,7 @@ export async function executeBridge<T = unknown>(
     if (err && typeof err === "object") {
       (err as { executionTraceId?: bigint }).executionTraceId =
         tree.getExecutionTrace();
+      (err as { traces?: ToolTrace[] }).traces = tree.getTraces();
     }
     throw attachBridgeErrorDocumentContext(err, doc);
   }

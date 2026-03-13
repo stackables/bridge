@@ -14,11 +14,7 @@
  */
 import { parseBridgeDiagnostics } from "./parser/index.ts";
 import type { BridgeDiagnostic } from "./parser/index.ts";
-import type {
-  Instruction,
-  HandleBinding,
-  ToolDep,
-} from "@stackables/bridge-core";
+import type { Instruction, HandleBinding } from "@stackables/bridge-core";
 import { collectVersionedHandles } from "@stackables/bridge-core";
 import { std, STD_VERSION } from "@stackables/bridge-stdlib";
 
@@ -273,8 +269,8 @@ export class BridgeLanguageService {
 
     // ── Tool ────────────────────────────────────────────────────────────
     if (closestInst.kind === "tool") {
-      const d = closestInst.deps.find((d) => d.handle === word);
-      if (d) return { content: toolDepMarkdown(d) };
+      const d = closestInst.handles.find((d) => d.handle === word);
+      if (d) return { content: handleBindingMarkdown(d) };
 
       if (
         word === closestInst.name ||
@@ -282,7 +278,7 @@ export class BridgeLanguageService {
         word === closestInst.extends
       ) {
         const fn = closestInst.fn ?? `extends ${closestInst.extends}`;
-        const dc = closestInst.deps.length;
+        const dc = closestInst.handles.length;
         const wc = closestInst.wires.length;
         return {
           content: `**Tool** \`${closestInst.name}\`\n\nFunction: \`${fn}\`\n\n${dc} dep${dc !== 1 ? "s" : ""} · ${wc} wire${wc !== 1 ? "s" : ""}`,
@@ -326,18 +322,5 @@ function handleBindingMarkdown(h: HandleBinding): string {
       return `**Const handle** \`${h.handle}\`\n\nNamed constants declared in this file`;
     case "define":
       return `**Define handle** \`${h.handle}\`\n\nInlined from \`define ${h.name}\``;
-  }
-}
-
-function toolDepMarkdown(d: ToolDep): string {
-  switch (d.kind) {
-    case "context":
-      return `**Context dep** \`${d.handle}\`\n\nGraphQL execution context`;
-    case "const":
-      return `**Const dep** \`${d.handle}\`\n\nNamed constants declared in this file`;
-    case "tool": {
-      const ver = d.version ? ` @${d.version}` : "";
-      return `**Tool dep** \`${d.handle}\`\n\nTool: \`${d.tool}${ver}\``;
-    }
   }
 }

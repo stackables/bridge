@@ -27,7 +27,7 @@ jobs:
         run: pnpm install
 
       - name: Run benchmarks
-        run: cd packages/bridge && CI=true node --experimental-transform-types --conditions source bench/engine.bench.ts > bench-results.json 2>/dev/null
+        run: cd packages/bridge && CI=true node --experimental-transform-types bench/engine.bench.ts > bench-results.json 2>/dev/null
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
@@ -75,7 +75,7 @@ jobs:
         run: pnpm install
 
       - name: Run benchmarks
-        run: cd packages/bridge && CI=true node --experimental-transform-types --conditions source bench/engine.bench.ts > bench-results.json 2>/dev/null
+        run: cd packages/bridge && CI=true node --experimental-transform-types bench/engine.bench.ts > bench-results.json 2>/dev/null
 
       - uses: bencherdev/bencher@main
 

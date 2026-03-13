@@ -45,6 +45,17 @@ export interface TraversalEntry {
     | "then"
     | "else"
     | "const";
+  /**
+   * When `true`, this entry represents the error path for its source —
+   * the source threw an exception that was not caught by the wire's own
+   * `catch` handler.
+   *
+   * Error entries are only generated for sources that can throw (tool
+   * calls without `?.` root-safe navigation).  When the wire already
+   * carries a `catch` clause, individual source error entries are
+   * omitted because the catch absorbs them.
+   */
+  error?: true;
   /** Fallback chain index (only when kind is `"fallback"`). */
   fallbackIndex?: number;
   /** Gate type (only when kind is `"fallback"`): `"falsy"` for `||`, `"nullish"` for `??`. */
@@ -75,6 +86,28 @@ function hasCatch(w: Wire): boolean {
     w.catchFallbackRef != null ||
     w.catchControl != null
   );
+}
+
+/**
+ * True when a NodeRef can throw at runtime — i.e. it targets a tool (or
+ * pipe) call and is NOT root-safe (`?.`).
+ *
+ * Refs that always resolve from in-memory state (input, output, context,
+ * alias, array element) cannot throw in a way that constitutes a distinct
+ * traversal path.
+ */
+function canRefError(ref: NodeRef | undefined): boolean {
+  if (!ref) return false;
+  if (ref.rootSafe) return false;
+  if (ref.element) return false;
+  if (ref.elementDepth) return false;
+  // Tool refs can throw (type "Tools", within the self module "_"),
+  // but synthetic expression tools (instance >= 100000) are pure ops.
+  if (ref.type === "Tools") return (ref.instance ?? 0) < 100000;
+  // Pipe refs (external modules like "std.str") can throw
+  if (ref.module !== "_" && ref.module !== "__local") return true;
+  // Input / output / context — always in-memory, cannot throw
+  return false;
 }
 
 /**
@@ -242,6 +275,110 @@ function addCatchEntry(
   }
 }
 
+/**
+ * Add error-path entries for wire sources that can throw.
+ *
+ * Rules:
+ * - When the wire has a `catch`, individual source error entries are
+ *   omitted because the catch absorbs all errors.  Only a `catch/error`
+ *   entry is added if the catch source itself can throw.
+ * - When the wire does NOT have a `catch`, each source ref that
+ *   {@link canRefError} adds an error variant.
+ * - The wire-level `safe` flag suppresses primary-source error entries
+ *   (errors are caught → undefined).
+ */
+function addErrorEntries(
+  entries: TraversalEntry[],
+  base: string,
+  wireIndex: number,
+  target: string[],
+  w: Wire,
+  hmap: Map<string, string>,
+  primaryRef: NodeRef | undefined,
+  wireSafe: boolean,
+  elseRef?: NodeRef | undefined,
+): void {
+  const wHasCatch = hasCatch(w);
+
+  if (wHasCatch) {
+    // Catch absorbs source errors — only check if the catch source itself
+    // can throw.
+    if (
+      "catchFallbackRef" in w &&
+      w.catchFallbackRef &&
+      canRefError(w.catchFallbackRef)
+    ) {
+      entries.push({
+        id: `${base}/catch/error`,
+        wireIndex,
+        target,
+        kind: "catch",
+        error: true,
+        bitIndex: -1,
+        loc: "catchLoc" in w ? w.catchLoc : undefined,
+        wireLoc: w.loc,
+        description: `${catchDescription(w, hmap)} error`,
+      });
+    }
+    return;
+  }
+
+  // No catch — add per-source error entries.
+
+  // Primary / then source
+  if (!wireSafe && canRefError(primaryRef)) {
+    const desc = primaryRef ? refLabel(primaryRef, hmap) : undefined;
+    entries.push({
+      id: `${base}/primary/error`,
+      wireIndex,
+      target,
+      kind: "primary",
+      error: true,
+      bitIndex: -1,
+      loc: primaryLoc(w),
+      wireLoc: w.loc,
+      description: desc ? `${desc} error` : "error",
+    });
+  }
+
+  // Else source (conditionals only)
+  if (elseRef && canRefError(elseRef)) {
+    entries.push({
+      id: `${base}/else/error`,
+      wireIndex,
+      target,
+      kind: "else",
+      error: true,
+      bitIndex: -1,
+      loc: "elseLoc" in w ? (w.elseLoc ?? w.loc) : w.loc,
+      wireLoc: w.loc,
+      description: `${refLabel(elseRef, hmap)} error`,
+    });
+  }
+
+  // Fallback sources
+  const fallbacks = "fallbacks" in w ? w.fallbacks : undefined;
+  if (fallbacks) {
+    for (let i = 0; i < fallbacks.length; i++) {
+      if (canRefError(fallbacks[i].ref)) {
+        entries.push({
+          id: `${base}/fallback:${i}/error`,
+          wireIndex,
+          target,
+          kind: "fallback",
+          error: true,
+          fallbackIndex: i,
+          gateType: fallbacks[i].type,
+          bitIndex: -1,
+          loc: fallbacks[i].loc,
+          wireLoc: w.loc,
+          description: `${fallbackDescription(fallbacks[i], hmap)} error`,
+        });
+      }
+    }
+  }
+}
+
 // ── Main function ───────────────────────────────────────────────────────────
 
 /**
@@ -305,6 +442,7 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
         });
         addFallbackEntries(entries, base, i, target, w, hmap);
         addCatchEntry(entries, base, i, target, w, hmap);
+        addErrorEntries(entries, base, i, target, w, hmap, w.from, !!w.safe);
       }
       continue;
     }
@@ -343,6 +481,17 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
       });
       addFallbackEntries(entries, base, i, target, w, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
+      addErrorEntries(
+        entries,
+        base,
+        i,
+        target,
+        w,
+        hmap,
+        w.thenRef,
+        false,
+        w.elseRef,
+      );
       continue;
     }
 
@@ -365,6 +514,16 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
       });
       addFallbackEntries(entries, base, i, target, w, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
+      addErrorEntries(
+        entries,
+        base,
+        i,
+        target,
+        w,
+        hmap,
+        w.condAnd.leftRef,
+        !!w.condAnd.safe,
+      );
     } else {
       // condOr
       const wo = w as Extract<Wire, { condOr: unknown }>;
@@ -385,6 +544,16 @@ export function enumerateTraversalIds(bridge: Bridge): TraversalEntry[] {
       });
       addFallbackEntries(entries, base, i, target, wo, hmap);
       addCatchEntry(entries, base, i, target, w, hmap);
+      addErrorEntries(
+        entries,
+        base,
+        i,
+        target,
+        w,
+        hmap,
+        wo.condOr.leftRef,
+        !!wo.condOr.safe,
+      );
     }
   }
 
@@ -467,6 +636,14 @@ export interface TraceWireBits {
   fallbacks?: number[];
   /** Bit index for the catch path. */
   catch?: number;
+  /** Bit index for the primary / then source error path. */
+  primaryError?: number;
+  /** Bit index for the else source error path (conditional wires only). */
+  elseError?: number;
+  /** Bit indices for each fallback source error path. */
+  fallbackErrors?: number[];
+  /** Bit index for the catch source error path. */
+  catchError?: number;
 }
 
 /**
@@ -482,7 +659,8 @@ export function buildTraceBitsMap(
 ): Map<Wire, TraceWireBits> {
   const map = new Map<Wire, TraceWireBits>();
   for (const entry of manifest) {
-    if (entry.wireIndex < 0) continue; // synthetic entries (empty-array)
+    if (entry.kind === "empty-array") continue; // handled by buildEmptyArrayBitsMap
+    if (entry.wireIndex < 0) continue;
     const wire = bridge.wires[entry.wireIndex];
     if (!wire) continue;
 
@@ -496,19 +674,54 @@ export function buildTraceBitsMap(
       case "primary":
       case "then":
       case "const":
-        bits.primary = entry.bitIndex;
+        if (entry.error) {
+          bits.primaryError = entry.bitIndex;
+        } else {
+          bits.primary = entry.bitIndex;
+        }
         break;
       case "else":
-        bits.else = entry.bitIndex;
+        if (entry.error) {
+          bits.elseError = entry.bitIndex;
+        } else {
+          bits.else = entry.bitIndex;
+        }
         break;
       case "fallback":
-        if (!bits.fallbacks) bits.fallbacks = [];
-        bits.fallbacks[entry.fallbackIndex ?? 0] = entry.bitIndex;
+        if (entry.error) {
+          if (!bits.fallbackErrors) bits.fallbackErrors = [];
+          bits.fallbackErrors[entry.fallbackIndex ?? 0] = entry.bitIndex;
+        } else {
+          if (!bits.fallbacks) bits.fallbacks = [];
+          bits.fallbacks[entry.fallbackIndex ?? 0] = entry.bitIndex;
+        }
         break;
       case "catch":
-        bits.catch = entry.bitIndex;
+        if (entry.error) {
+          bits.catchError = entry.bitIndex;
+        } else {
+          bits.catch = entry.bitIndex;
+        }
         break;
     }
+  }
+  return map;
+}
+
+/**
+ * Build a lookup map from array-iterator path keys to their "empty-array"
+ * trace bit positions.
+ *
+ * Path keys match `Object.keys(bridge.arrayIterators)` — `""` for a root
+ * array, `"entries"` for `o.entries <- src[] as x { ... }`, etc.
+ */
+export function buildEmptyArrayBitsMap(
+  manifest: TraversalEntry[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const entry of manifest) {
+    if (entry.kind !== "empty-array") continue;
+    map.set(entry.target.join("."), entry.bitIndex);
   }
   return map;
 }

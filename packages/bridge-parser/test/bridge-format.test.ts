@@ -1,0 +1,1454 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import {
+  parseBridgeFormat as parseBridge,
+  parseBridgeDiagnostics,
+  serializeBridge,
+} from "../src/index.ts";
+import type {
+  Bridge,
+  HandleBinding,
+  Instruction,
+  ToolDef,
+  Wire,
+} from "@stackables/bridge-core";
+import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
+import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+
+/** Pull wire — the Wire variant that has a `from` field */
+type PullWire = Extract<Wire, { from: unknown }>;
+
+// ── parsePath ───────────────────────────────────────────────────────────────
+
+describe("parsePath", () => {
+  test("simple field", () => {
+    assertDeepStrictEqualIgnoringLoc(parsePath("name"), ["name"]);
+  });
+
+  test("dotted path", () => {
+    assertDeepStrictEqualIgnoringLoc(parsePath("position.lat"), [
+      "position",
+      "lat",
+    ]);
+  });
+
+  test("array index", () => {
+    assertDeepStrictEqualIgnoringLoc(parsePath("items[0].position.lat"), [
+      "items",
+      "0",
+      "position",
+      "lat",
+    ]);
+  });
+
+  test("hyphenated key", () => {
+    assertDeepStrictEqualIgnoringLoc(parsePath("headers.x-message-id"), [
+      "headers",
+      "x-message-id",
+    ]);
+  });
+
+  test("empty brackets stripped", () => {
+    assertDeepStrictEqualIgnoringLoc(parsePath("properties[]"), ["properties"]);
+  });
+});
+
+// ── parseBridge ─────────────────────────────────────────────────────────────
+
+describe("parseBridge", () => {
+  test("simple bridge with input handle", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+  with output as o
+
+o.search <- i.search
+gc.q <- i.search
+
+}`);
+    assert.equal(result.instructions.length, 1);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assert.equal(bridge.kind, "bridge");
+    assert.equal(bridge.type, "Query");
+    assert.equal(bridge.field, "geocode");
+    assert.equal(bridge.handles.length, 3);
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[0], {
+      handle: "gc",
+      kind: "tool",
+      name: "hereapi.geocode",
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[1], {
+      handle: "i",
+      kind: "input",
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[2], {
+      handle: "o",
+      kind: "output",
+    });
+    assert.equal(bridge.wires.length, 2);
+
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
+      from: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "geocode",
+        path: ["search"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "geocode",
+        path: ["search"],
+      },
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
+      from: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "geocode",
+        path: ["search"],
+      },
+      to: {
+        module: "hereapi",
+        type: "Query",
+        field: "geocode",
+        instance: 1,
+        path: ["q"],
+      },
+    });
+  });
+
+  test("tool wires", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.health {
+  with api.data as a
+  with toInt as ti
+  with output as o
+
+ti.value <- a.raw
+o.output <- ti.result
+
+}`);
+    assert.equal(result.instructions.length, 1);
+
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assert.equal(bridge.handles.length, 3);
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
+      from: {
+        module: "api",
+        type: "Query",
+        field: "data",
+        instance: 1,
+        path: ["raw"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Tools",
+        field: "toInt",
+        instance: 1,
+        path: ["value"],
+      },
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
+      from: {
+        module: SELF_MODULE,
+        type: "Tools",
+        field: "toInt",
+        instance: 1,
+        path: ["result"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "health",
+        path: ["output"],
+      },
+    });
+  });
+
+  test("nested output paths", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.search {
+  with zillow.find as z
+  with output as o
+
+o.topPick.address <- z.properties[0].streetAddress
+o.topPick.city    <- z.properties[0].location.city
+
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[0] as PullWire).from, {
+      module: "zillow",
+      type: "Query",
+      field: "find",
+      instance: 1,
+      path: ["properties", "0", "streetAddress"],
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0].to, {
+      module: SELF_MODULE,
+      type: "Query",
+      field: "search",
+      path: ["topPick", "address"],
+    });
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[1] as PullWire).from.path, [
+      "properties",
+      "0",
+      "location",
+      "city",
+    ]);
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1].to.path, [
+      "topPick",
+      "city",
+    ]);
+  });
+
+  test("array mapping with element wires", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.search {
+  with provider.list as p
+  with output as o
+
+o.results <- p.items[] as item {
+  .name    <- item.title
+  .lat     <- item.position.lat
+}
+
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assert.equal(bridge.wires.length, 3);
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0], {
+      from: {
+        module: "provider",
+        type: "Query",
+        field: "list",
+        instance: 1,
+        path: ["items"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "search",
+        path: ["results"],
+      },
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[1], {
+      from: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "search",
+        element: true,
+        path: ["title"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "search",
+        path: ["results", "name"],
+      },
+    });
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[2], {
+      from: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "search",
+        element: true,
+        path: ["position", "lat"],
+      },
+      to: {
+        module: SELF_MODULE,
+        type: "Query",
+        field: "search",
+        path: ["results", "lat"],
+      },
+    });
+  });
+
+  test("Mutation type", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+  with output as o
+
+sg.content <- i.body
+o.messageId <- sg.headers.x-message-id
+
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assert.equal(bridge.type, "Mutation");
+    assertDeepStrictEqualIgnoringLoc(bridge.wires[0].to, {
+      module: "sendgrid",
+      type: "Mutation",
+      field: "send",
+      instance: 1,
+      path: ["content"],
+    });
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[1] as PullWire).from.path, [
+      "headers",
+      "x-message-id",
+    ]);
+  });
+
+  test("multiple bridges separated by ---", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.first {
+  with a.one as a
+  with input as i
+
+a.x <- i.input
+
+}
+
+bridge Query.second {
+  with b.two as b
+  with input as i
+
+b.y <- i.input
+
+}`);
+    const bridges = result.instructions.filter(
+      (i): i is Bridge => i.kind === "bridge",
+    );
+    assert.equal(bridges.length, 2);
+    assert.equal(bridges[0].field, "first");
+    assert.equal(bridges[1].field, "second");
+  });
+
+  test("context handle", () => {
+    const result = parseBridge(`version 1.5
+
+bridge Query.search {
+  with zillow.find as z
+  with input as i
+  with context as c
+
+z.maxPrice <- c.maxBudget
+z.lat <- i.lat
+
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    assert.equal(bridge.handles.length, 3);
+    assertDeepStrictEqualIgnoringLoc(bridge.handles[2], {
+      handle: "c",
+      kind: "context",
+    });
+    assertDeepStrictEqualIgnoringLoc((bridge.wires[0] as PullWire).from, {
+      module: SELF_MODULE,
+      type: "Context",
+      field: "context",
+      path: ["maxBudget"],
+    });
+  });
+});
+
+// ── serializeBridge ─────────────────────────────────────────────────────────
+
+describe("serializeBridge", () => {
+  test("simple bridge roundtrip", () => {
+    const input = `version 1.5
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+  with output as o
+
+o.search <- i.search
+gc.q <- i.search
+
+}`;
+    const instructions = parseBridge(input);
+    const output = serializeBridge(instructions);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(output), instructions);
+  });
+
+  test("tool bridge roundtrip", () => {
+    const input = `version 1.5
+bridge Query.health {
+  with hereapi.getCoordinates as geo
+  with companyX.getLivingStandard as cx
+  with input as i
+  with toInt as ti
+  with output as o
+
+geo.location <- i.q
+cx.x <- geo.lat
+cx.y <- geo.lon
+ti.value <- cx.lifeExpectancy
+o.lifeExpectancy <- ti.result
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("array mapping roundtrip", () => {
+    const input = `version 1.5
+bridge Query.search {
+  with hereapi.geocode as gc
+  with output as o
+
+o.results <- gc.items[] as item {
+  .name <- item.title
+  .lat <- item.position.lat
+  .lon <- item.position.lng
+}
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("Mutation with hyphenated path roundtrip", () => {
+    const input = `version 1.5
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+  with output as o
+
+sg.to <- i.to
+sg.from <- i.from
+sg.content <- i.body
+o.messageId <- sg.headers.x-message-id
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("multi-bridge roundtrip", () => {
+    const input = `version 1.5
+bridge Query.propertySearch {
+  with hereapi.geocode as gc
+  with zillow.search as z
+  with input as i
+  with centsToUsd as usd
+  with output as o
+
+o.location <- i.location
+gc.q <- i.location
+z.latitude <- gc.items[0].position.lat
+z.longitude <- gc.items[0].position.lng
+z.maxPrice <- i.budget
+o.topPick.address <- z.properties[0].streetAddress
+usd.cents <- z.properties[0].priceInCents
+o.topPick.price <- usd.dollars
+o.topPick.bedrooms <- z.properties[0].beds
+o.topPick.city <- z.properties[0].location.city
+o.listings <- z.properties[] as prop {
+  .address <- prop.streetAddress
+  .price <- prop.priceInCents
+  .bedrooms <- prop.beds
+  .city <- prop.location.city
+}
+
+}
+
+bridge Query.propertyComments {
+  with hereapi.geocode as gc
+  with reviews.getByLocation as rv
+  with input as i
+  with pluckText as pt
+  with output as o
+
+gc.q <- i.location
+rv.lat <- gc.items[0].position.lat
+rv.lng <- gc.items[0].position.lng
+pt.items <- rv.comments
+o.propertyComments <- pt.result
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("serialized output is human-readable", () => {
+    const instructions: Instruction[] = [
+      {
+        kind: "bridge",
+        type: "Mutation",
+        field: "sendEmail",
+        handles: [
+          {
+            handle: "sg",
+            kind: "tool",
+            name: "sendgrid.send",
+          },
+          { handle: "i", kind: "input" },
+          { handle: "o", kind: "output" },
+        ],
+        wires: [
+          {
+            from: {
+              module: SELF_MODULE,
+              type: "Mutation",
+              field: "sendEmail",
+              path: ["body"],
+            },
+            to: {
+              module: "sendgrid",
+              type: "Mutation",
+              field: "send",
+              instance: 1,
+              path: ["content"],
+            },
+          },
+          {
+            from: {
+              module: "sendgrid",
+              type: "Mutation",
+              field: "send",
+              instance: 1,
+              path: ["headers", "x-message-id"],
+            },
+            to: {
+              module: SELF_MODULE,
+              type: "Mutation",
+              field: "sendEmail",
+              path: ["messageId"],
+            },
+          },
+        ],
+      },
+    ];
+    const output = serializeBridge({ instructions });
+    assert.ok(output.includes("bridge Mutation.sendEmail"));
+    assert.ok(output.includes("with sendgrid.send as sg"));
+    assert.ok(output.includes("sg.content <- i.body"));
+    assert.ok(output.includes("o.messageId <- sg.headers.x-message-id"));
+  });
+
+  test("define block roundtrip", () => {
+    // Standalone define block (no bridge usage — bridge define handle
+    // serialization is tracked separately)
+    const input = `version 1.5
+define myTransform {
+  with input as i
+  with output as o
+
+  o.name <- i.rawName
+  o.count = 42
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("alias inside array mapping serializes correctly", () => {
+    // The alias-in-array serializer is idempotent (stable after first
+    // serialize/re-parse) even though iteration order may differ from input
+    const input = `version 1.5
+bridge Query.catalog {
+  with api as a
+  with output as o
+
+o.items <- a.data[] as item {
+  alias item.title as nm
+  .label <- nm
+  .price <- item.cost
+}
+
+}`;
+    const instructions = parseBridge(input);
+    const ser1 = serializeBridge(instructions);
+    // Validate the alias statement is present in serialized output
+    assert.ok(ser1.includes("alias item.title as nm"));
+    // Validate idempotency: re-serialize produces identical output
+    const ser2 = serializeBridge(parseBridge(ser1));
+    assert.equal(ser1, ser2);
+  });
+
+  test("top-level alias roundtrip", () => {
+    const input = `version 1.5
+bridge Query.test {
+  with myApi as api
+  with input as i
+  with output as o
+
+api.q <- i.search
+alias api.result.data as d
+
+o.name <- d.name
+o.email <- d.email
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("logic expression (and/or) roundtrip", () => {
+    const input = `version 1.5
+bridge Query.check {
+  with input as i
+  with output as o
+
+o.approved <- i.age > 18 and i.verified or i.admin
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+});
+
+// ── Tool blocks ─────────────────────────────────────────────────────────────
+
+describe("parseBridge: tool blocks", () => {
+  test("parses a simple GET tool", () => {
+    const result = parseBridge(`version 1.5
+
+tool hereapi from httpCall {
+  with context
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
+
+}
+tool hereapi.geocode from hereapi {
+  .method = GET
+  .path = /geocode
+
+}
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+
+gc.q <- i.search
+
+}`);
+    const tools = result.instructions.filter(
+      (i): i is ToolDef => i.kind === "tool",
+    );
+    assert.equal(tools.length, 2);
+
+    const root = tools.find((t) => t.name === "hereapi")!;
+    assert.equal(root.fn, "httpCall");
+    assert.equal(root.extends, undefined);
+    assertDeepStrictEqualIgnoringLoc(root.handles, [
+      { kind: "context", handle: "context" },
+    ]);
+    assertDeepStrictEqualIgnoringLoc(root.wires, [
+      {
+        value: "https://geocode.search.hereapi.com/v1",
+        to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
+      },
+      {
+        from: {
+          module: "_",
+          type: "Context",
+          field: "context",
+          path: ["hereapi", "apiKey"],
+        },
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi",
+          path: ["headers", "apiKey"],
+        },
+      },
+    ]);
+
+    const child = tools.find((t) => t.name === "hereapi.geocode")!;
+    assert.equal(child.fn, undefined);
+    assert.equal(child.extends, "hereapi");
+    assertDeepStrictEqualIgnoringLoc(child.wires, [
+      {
+        value: "GET",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi.geocode",
+          path: ["method"],
+        },
+      },
+      {
+        value: "/geocode",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "hereapi.geocode",
+          path: ["path"],
+        },
+      },
+    ]);
+  });
+
+  test("parses POST tool with constant and pull wires", () => {
+    const result = parseBridge(`version 1.5
+
+tool sendgrid from httpCall {
+  with context
+  .baseUrl = "https://api.sendgrid.com/v3"
+  .headers.Authorization <- context.sendgrid.bearerToken
+  .headers.X-Custom = "static-value"
+
+}
+tool sendgrid.send from sendgrid {
+  .method = POST
+  .path = /mail/send
+
+}
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+
+sg.content <- i.body
+
+}`);
+    const root = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
+    )!;
+    assertDeepStrictEqualIgnoringLoc(root.wires, [
+      {
+        value: "https://api.sendgrid.com/v3",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["baseUrl"],
+        },
+      },
+      {
+        from: {
+          module: "_",
+          type: "Context",
+          field: "context",
+          path: ["sendgrid", "bearerToken"],
+        },
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["headers", "Authorization"],
+        },
+      },
+      {
+        value: "static-value",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid",
+          path: ["headers", "X-Custom"],
+        },
+      },
+    ]);
+
+    const child = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
+    )!;
+    assert.equal(child.extends, "sendgrid");
+    assertDeepStrictEqualIgnoringLoc(child.wires, [
+      {
+        value: "POST",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid.send",
+          path: ["method"],
+        },
+      },
+      {
+        value: "/mail/send",
+        to: {
+          module: "_",
+          type: "Tools",
+          field: "sendgrid.send",
+          path: ["path"],
+        },
+      },
+    ]);
+  });
+
+  test("parses tool with deps (tool-to-tool)", () => {
+    const result = parseBridge(`version 1.5
+
+tool authService from httpCall {
+  with context
+  .method = POST
+  .baseUrl = "https://auth.example.com"
+  .path = /token
+  .body.client_id <- context.auth.clientId
+
+}
+tool serviceB from httpCall {
+  with context
+  with authService as auth
+  .baseUrl = "https://api.serviceb.com"
+  .headers.Authorization <- auth.access_token
+
+}
+bridge Query.data {
+  with serviceB as sb
+  with input as i
+
+sb.q <- i.query
+
+}`);
+    const serviceB = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool" && i.name === "serviceB",
+    )!;
+    assertDeepStrictEqualIgnoringLoc(serviceB.handles, [
+      { kind: "context", handle: "context" },
+      { kind: "tool", handle: "auth", name: "authService" },
+    ]);
+    assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
+      from: {
+        module: "_",
+        type: "Tools",
+        field: "authService",
+        path: ["access_token"],
+        instance: 1,
+      },
+      to: {
+        module: "_",
+        type: "Tools",
+        field: "serviceB",
+        path: ["headers", "Authorization"],
+      },
+    });
+  });
+});
+
+// ── Tool roundtrip ──────────────────────────────────────────────────────────
+
+describe("serializeBridge: tool roundtrip", () => {
+  test("GET tool roundtrips", () => {
+    const input = `version 1.5
+tool hereapi from httpCall {
+  with context
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
+
+}
+tool hereapi.geocode from hereapi {
+  .method = GET
+  .path = /geocode
+
+}
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+  with output as o
+
+o.search <- i.search
+gc.q <- i.search
+gc.limit <- i.limit
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("POST tool roundtrips", () => {
+    const input = `version 1.5
+tool sendgrid from httpCall {
+  with context
+  .baseUrl = "https://api.sendgrid.com/v3"
+  .headers.Authorization <- context.sendgrid.bearerToken
+
+}
+tool sendgrid.send from sendgrid {
+  .method = POST
+  .path = /mail/send
+
+}
+bridge Mutation.sendEmail {
+  with sendgrid.send as sg
+  with input as i
+  with output as o
+
+sg.to <- i.to
+sg.content <- i.body
+o.messageId <- sg.id
+
+}`;
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
+
+  test("serialized tool output is human-readable", () => {
+    const input = `version 1.5
+tool hereapi from httpCall {
+  with context
+  .baseUrl = "https://geocode.search.hereapi.com/v1"
+  .headers.apiKey <- context.hereapi.apiKey
+
+}
+tool hereapi.geocode from hereapi {
+  .method = GET
+  .path = /geocode
+
+}
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+
+gc.q <- i.search
+
+}`;
+    const output = serializeBridge(parseBridge(input));
+    assert.ok(output.includes("tool hereapi from httpCall"));
+    assert.ok(output.includes("tool hereapi.geocode from hereapi"));
+    assert.ok(
+      output.includes('baseUrl = "https://geocode.search.hereapi.com/v1"'),
+    );
+    assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
+  });
+});
+
+// ── Parser robustness ───────────────────────────────────────────────────────
+
+describe("parser robustness", () => {
+  test("CRLF line endings are handled", () => {
+    const result = parseBridge(
+      "version 1.5\r\nbridge Query.geocode {\r\n  with input as i\r\n  with output as o\r\n\r\no.search <- i.q\r\n}\r\n",
+    );
+    assert.equal(result.instructions.length, 1);
+    assert.equal(
+      result.instructions.find((i) => i.kind === "bridge")!.kind,
+      "bridge",
+    );
+  });
+
+  test("tabs are treated as spaces", () => {
+    const result = parseBridge(
+      "version 1.5\nbridge Query.geocode {\n\twith input as i\n\twith output as o\n\no.search <- i.q\n}\n",
+    );
+    assert.equal(result.instructions.length, 1);
+  });
+
+  test("keywords are case-insensitive", () => {
+    const bridge = parseBridge(`version 1.5
+
+Bridge Query.geocode {
+  With hereapi.geocode as gc
+  With Input as i
+
+gc.q <- i.search
+
+}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+    assert.equal(bridge.type, "Query");
+    assert.equal(bridge.field, "geocode");
+  });
+
+  test("tool keyword is case-insensitive", () => {
+    const tool = parseBridge(`version 1.5
+
+tool hereapi from httpCall {
+  .baseUrl = "https://example.com"
+
+}`).instructions.find((i): i is ToolDef => i.kind === "tool")!;
+    assert.equal(tool.name, "hereapi");
+    assert.equal(tool.fn, "httpCall");
+  });
+
+  test("--- separator with surrounding whitespace", () => {
+    const result = parseBridge(`version 1.5
+
+tool hereapi from httpCall {
+  .baseUrl = "https://example.com"
+
+}
+tool hereapi.geocode from hereapi {
+  .method = GET
+  .path = /geocode
+
+}
+
+bridge Query.geocode {
+  with hereapi.geocode as gc
+  with input as i
+
+gc.q <- i.search
+
+}`);
+    assert.equal(result.instructions.length, 3);
+  });
+
+  test("duplicate handle throws with line number", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+
+bridge Query.geocode {
+  with input as h
+  with context as h
+
+search <- h.q
+
+}`),
+      /[Ll]ine 5.*[Dd]uplicate handle.*"h"/,
+    );
+  });
+
+  test("with before bridge throws with line number", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+with input as i
+bridge Query.geocode {
+
+search <- i.q
+
+}`),
+      (err: unknown) => err instanceof Error,
+    );
+  });
+
+  test("error messages include line numbers", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+
+bridge Query.geocode {
+  with input as i
+
+not a valid line
+}`),
+      (err: unknown) => err instanceof Error,
+    );
+  });
+
+  test("with tool keyword is case-insensitive", () => {
+    const result = parseBridge(`version 1.5
+
+Bridge Query.geocode {
+  With myTool as t
+  With Input as i
+  With Output as o
+
+o.result <- t.output
+
+}`);
+    const bridge = result.instructions.find(
+      (i) => i.kind === "bridge",
+    ) as Bridge;
+    const toolHandle = bridge.handles.find((h) => h.kind === "tool");
+    assert.notEqual(toolHandle, undefined);
+  });
+
+  test("with context keyword is case-insensitive", () => {
+    const bridge = parseBridge(`version 1.5
+
+Bridge Query.geocode {
+  With Context as cfg
+  With Input as i
+  With Output as o
+
+o.result <- cfg.apiKey
+
+}`).instructions.find((i) => i.kind === "bridge") as Bridge;
+    assert.notEqual(
+      bridge.handles.find((h) => h.kind === "context"),
+      undefined,
+    );
+  });
+
+  test("element mapping works with tab indentation", () => {
+    const bridge = parseBridge(
+      "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
+    ).instructions.find((i) => i.kind === "bridge") as Bridge;
+    assert.equal(
+      bridge.wires.filter((w) => "from" in w && w.from.element).length,
+      2,
+    );
+  });
+
+  test("inline # comments are stripped from wire lines", () => {
+    const bridge = parseBridge(`version 1.5
+
+bridge Query.greet {
+  with input as i  # the request
+  with output as o # the response
+
+  o.name <- i.username # copy the name across
+}`).instructions.find((inst) => inst.kind === "bridge") as Bridge;
+    const wire = bridge.wires.find(
+      (w) => "from" in w && !("value" in w),
+    ) as PullWire;
+    assert.equal(wire.to.path.join("."), "name");
+    assert.equal(wire.from.path.join("."), "username");
+  });
+
+  test("# inside a string literal is not treated as a comment", () => {
+    const tool = parseBridge(`version 1.5
+
+tool myApi from httpCall {
+  .url = "https://example.com/things#anchor"
+}`).instructions.find((inst) => inst.kind === "tool") as ToolDef;
+    const urlWire = tool.wires.find(
+      (w) => "value" in w && w.to.path.join(".") === "url",
+    );
+    assert.ok(urlWire);
+    assert.equal(
+      (urlWire as { value: string }).value,
+      "https://example.com/things#anchor",
+    );
+  });
+});
+
+// ── Brace block syntax ──────────────────────────────────────────────────────
+
+describe("brace block syntax", () => {
+  test("bridge block with braces parses identically to indented style", () => {
+    const brace = parseBridge(`version 1.5
+
+bridge Query.demo {
+  with myApi as api
+  with input as i
+  with output as o
+
+  o.result <- api.value
+}`);
+    const indent = parseBridge(`version 1.5
+
+bridge Query.demo {
+  with myApi as api
+  with input as i
+  with output as o
+
+o.result <- api.value
+
+}`);
+    assertDeepStrictEqualIgnoringLoc(brace, indent);
+  });
+
+  test("tool block with braces parses identically to indented style", () => {
+    const brace = parseBridge(`version 1.5
+
+tool myApi from httpCall {
+  .baseUrl = "https://example.com"
+  .method = GET
+}`);
+    const indent = parseBridge(`version 1.5
+
+tool myApi from httpCall {
+  .baseUrl = "https://example.com"
+  .method = GET
+
+}`);
+    assertDeepStrictEqualIgnoringLoc(brace, indent);
+  });
+
+  test("indented } inside on error value is not stripped", () => {
+    const result = parseBridge(`version 1.5
+
+tool myApi from httpCall {
+  on error = {
+    "lat": 0,
+    "lon": 0
+  }
+}`);
+    const tool = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool",
+    )!;
+    const onError = tool.onError;
+    assert.ok(onError && "value" in onError);
+    if ("value" in onError!) {
+      assertDeepStrictEqualIgnoringLoc(JSON.parse(onError.value), {
+        lat: 0,
+        lon: 0,
+      });
+    }
+  });
+
+  test("mixed brace and indent blocks in same file", () => {
+    const result = parseBridge(`version 1.5
+
+tool api from httpCall {
+  .baseUrl = "https://example.com"
+}
+
+bridge Query.demo {
+  with api
+  with input as i
+  with output as o
+
+o.result <- api.value
+
+}`);
+    assert.equal(
+      result.instructions.filter((i) => i.kind === "tool").length,
+      1,
+    );
+    assert.equal(
+      result.instructions.filter((i) => i.kind === "bridge").length,
+      1,
+    );
+  });
+});
+
+// ── Version tags (@version) ─────────────────────────────────────────────────
+
+describe("version tags: parser produces version on HandleBinding", () => {
+  test("bridge handle with @version stores version string", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const toolHandle = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(toolHandle);
+    assert.equal(toolHandle.kind, "tool");
+    if (toolHandle.kind === "tool") {
+      assert.equal(toolHandle.name, "myCorp.utils");
+      assert.equal(toolHandle.version, "2.1");
+    }
+  });
+
+  test("bridge handle without @version has no version field", () => {
+    const result = parseBridge(`version 1.5
+bridge Query.test {
+  with myCorp.utils as utils
+  with output as o
+  o.val <- utils.result
+}`);
+    const bridge = result.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const toolHandle = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(toolHandle);
+    if (toolHandle.kind === "tool") {
+      assert.equal(toolHandle.version, undefined);
+    }
+  });
+
+  test("tool dep with @version stores version string", () => {
+    const result = parseBridge(`version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`);
+    const toolDef = result.instructions.find(
+      (i): i is ToolDef => i.kind === "tool",
+    )!;
+    const dep = toolDef.handles.find(
+      (d: HandleBinding) => d.kind === "tool" && d.handle === "pay",
+    );
+    assert.ok(dep);
+    if (dep?.kind === "tool") {
+      assert.equal(dep.name, "stripe");
+      assert.equal(dep.version, "2.0");
+    }
+  });
+});
+
+describe("version tags: round-trip serialization", () => {
+  test("bridge handle @version survives parse → serialize → parse", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with myCorp.utils@2.1 as utils
+  with input as i
+  with output as o
+  o.val <- utils.result
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.includes("myCorp.utils@2.1 as utils"),
+      `got: ${serialized}`,
+    );
+    // Re-parse and verify
+    const reparsed = parseBridge(serialized);
+    const bridge = reparsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const h = bridge.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(h);
+    if (h?.kind === "tool") assert.equal(h.version, "2.1");
+  });
+
+  test("tool dep @version survives round-trip", () => {
+    const src = `version 1.5
+tool myApi from std.httpCall {
+  with stripe@2.0 as pay
+  .baseUrl = "https://api.example.com"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("stripe@2.0 as pay"), `got: ${serialized}`);
+  });
+
+  test("unversioned handle stays unversioned in round-trip", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with myCorp.utils
+  with output as o
+  o.val <- utils.result
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("with myCorp.utils\n"), `got: ${serialized}`);
+    assert.ok(
+      !serialized.includes("@"),
+      `should have no @ sign: ${serialized}`,
+    );
+  });
+});
+
+describe("version tags: VersionDecl in serializer", () => {
+  test("serializer preserves declared version from VersionDecl", () => {
+    const src = `version 1.7
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.7\n"),
+      `expected 'version 1.7' header, got: ${serialized.slice(0, 30)}`,
+    );
+  });
+
+  test("version 1.5 round-trips correctly", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with output as o
+  o.x = "ok"
+}`;
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.5\n"),
+      `expected 'version 1.5' header, got: ${serialized.slice(0, 30)}`,
+    );
+  });
+});
+
+describe("serializeBridge string keyword quoting", () => {
+  test("keeps reserved-word strings quoted in constant wires", () => {
+    const src = `version 1.5
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.value = "const"
+}`;
+
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes('o.value = "const"'), serialized);
+    assert.doesNotThrow(() => parseBridge(serialized));
+  });
+});
+
+describe("parser diagnostics and serializer edge cases", () => {
+  test("parseBridgeDiagnostics reports lexer errors with a range", () => {
+    const result = parseBridgeDiagnostics(
+      'version 1.5\nbridge Query.x {\n  with output as o\n  o.x = "ok"\n}\n§',
+    );
+    assert.ok(result.diagnostics.length > 0);
+    assert.equal(result.diagnostics[0]?.severity, "error");
+    assert.equal(result.diagnostics[0]?.range.start.line, 5);
+    assert.equal(result.diagnostics[0]?.range.start.character, 0);
+  });
+
+  test("reserved source identifier is rejected as const name", () => {
+    assert.throws(
+      () => parseBridge('version 1.5\nconst input = "x"'),
+      /reserved source identifier.*const name/i,
+    );
+  });
+
+  test("serializeBridge keeps passthrough shorthand", () => {
+    const src = "version 1.5\nbridge Query.upper with std.str.toUpperCase";
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(
+      serialized.includes("bridge Query.upper with std.str.toUpperCase"),
+      serialized,
+    );
+  });
+
+  test("define handles cannot be memoized at the invocation site", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+
+define formatProfile {
+  with output as o
+
+  o.data = null
+}
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    with formatProfile as profile memoize
+
+    .item <- profile.data
+  }
+}`),
+      /memoize|tool/i,
+    );
+  });
+
+  test("serializeBridge uses compact default handle bindings", () => {
+    const src = `version 1.5
+bridge Query.defaults {
+  with input
+  with output
+  with const
+
+  output.value <- input.name
+}`;
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes("  with input\n"), serialized);
+    assert.ok(serialized.includes("  with output\n"), serialized);
+    assert.ok(serialized.includes("  with const\n"), serialized);
+  });
+});

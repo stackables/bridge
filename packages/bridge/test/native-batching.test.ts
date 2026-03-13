@@ -1,192 +1,168 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { parseBridgeFormat as parseBridge } from "../src/index.ts";
-import type { BatchToolFn, ToolMetadata } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { regressionTest, type LogEntry } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
 
-forEachEngine("native batched tools", (run, ctx) => {
-  test("tool metadata batches loop-scoped calls without userland loaders", async () => {
-    const bridge = `version 1.5
+regressionTest("native batching: loop-scoped calls", {
+  bridge: `
+    version 1.5
 
-bridge Query.users {
-  with context as ctx
-  with output as o
+    bridge Query.users {
+      with context as ctx
+      with output as o
 
-  o <- ctx.userIds[] as userId {
-    with app.fetchUser as user
+      o <- ctx.userIds[] as userId {
+        with test.batch.multitool as user
 
-    user.id <- userId
-    .id <- userId
-    .name <- user.name
-  }
-}`;
+        user.id <- userId.id
+        user.name <- userId.name
 
-    let batchCalls = 0;
-    let receivedInputs: Array<{ id: string }> | undefined;
-
-    const fetchUser: BatchToolFn<{ id: string }, { name: string }> = async (
-      inputs,
-    ) => {
-      batchCalls++;
-      receivedInputs = inputs;
-      return inputs.map((input) => ({
-        name: `user:${input.id}`,
-      }));
-    };
-
-    // Batching is opt-in through tool metadata, so bridge authors write
-    // ordinary wires and do not need to thread DataLoaders via context.
-    fetchUser.bridge = {
-      batch: {
-        maxBatchSize: 100,
-        flush: "microtask",
-      },
-    } satisfies ToolMetadata;
-
-    const result = await run(
-      bridge,
-      "Query.users",
-      {},
-      {
-        app: { fetchUser },
-      },
-      {
+        .id <- userId.id
+        .name <- user.name
+      }
+    }
+  `,
+  tools,
+  scenarios: {
+    "Query.users": {
+      "batches all loop items into a single call": {
+        input: {},
         context: {
-          userIds: ["u1", "u2", "u3"],
+          userIds: [
+            { id: "u1", name: "user:u1" },
+            { id: "u2", name: "user:u2" },
+            { id: "u3", name: "user:u3" },
+          ],
         },
+        assertData: [
+          { id: "u1", name: "user:u1" },
+          { id: "u2", name: "user:u2" },
+          { id: "u3", name: "user:u3" },
+        ],
+        assertTraces: 1,
       },
-    );
-
-    assert.deepEqual(result.data, [
-      { id: "u1", name: "user:u1" },
-      { id: "u2", name: "user:u2" },
-      { id: "u3", name: "user:u3" },
-    ]);
-
-    assert.deepEqual(receivedInputs, [
-      { id: "u1" },
-      { id: "u2" },
-      { id: "u3" },
-    ]);
-    assert.equal(batchCalls, 1);
-  });
-
-  test("batched tools emit one trace and log entry per flushed batch call", async () => {
-    const bridge = `version 1.5
-
-bridge Query.users {
-  with context as ctx
-  with output as o
-
-  o <- ctx.userIds[] as userId {
-    with app.fetchUser as user
-
-    user.id <- userId
-    .id <- userId
-    .name <- user.name
-  }
-}`;
-
-    const infos: Array<{ tool: string; fn: string; durationMs: number }> = [];
-
-    const fetchUser: BatchToolFn<{ id: string }, { name: string }> = async (
-      inputs,
-    ) => inputs.map((input) => ({ name: `user:${input.id}` }));
-
-    fetchUser.bridge = {
-      batch: true,
-      log: { execution: "info" },
-    } satisfies ToolMetadata;
-
-    const result = await ctx.executeFn({
-      document: parseBridge(bridge),
-      operation: "Query.users",
-      tools: {
-        app: { fetchUser },
+      "empty array produces empty output": {
+        input: {},
+        context: { userIds: [] },
+        assertData: [],
+        assertTraces: 0,
       },
-      context: {
-        userIds: ["u1", "u2", "u3"],
-      },
-      trace: "full",
-      logger: {
-        info: (meta: { tool: string; fn: string; durationMs: number }) => {
-          infos.push(meta);
-        },
-      },
-    });
+    },
+  },
+});
 
-    assert.deepEqual(result.data, [
-      { id: "u1", name: "user:u1" },
-      { id: "u2", name: "user:u2" },
-      { id: "u3", name: "user:u3" },
-    ]);
-    assert.equal(result.traces.length, 1);
-    assert.equal(result.traces[0]!.tool, "app.fetchUser");
-    assert.deepEqual(result.traces[0]!.input, [
-      { id: "u1" },
-      { id: "u2" },
-      { id: "u3" },
-    ]);
-    assert.deepEqual(result.traces[0]!.output, [
-      { name: "user:u1" },
-      { name: "user:u2" },
-      { name: "user:u3" },
-    ]);
-    assert.equal(infos.length, 1);
-  });
+regressionTest("native batching: traces and logs", {
+  bridge: `
+    version 1.5
 
-  test("partial batch failures route failed items through catch fallbacks", async () => {
-    const bridge = `version 1.5
+    bridge Query.users {
+      with context as ctx
+      with output as o
 
-bridge Query.users {
-  with context as ctx
-  with output as o
+      o <- ctx.userIds[] as userId {
+        with test.batch.multitool as user
 
-  o <- ctx.userIds[] as userId {
-    with app.fetchUser as user
+        user.id <- userId.id
+        user.name <- userId.name
 
-    user.id <- userId
-    .id <- userId
-    .name <- user.name catch "missing"
-  }
-}`;
-
-    let batchCalls = 0;
-
-    const fetchUser: BatchToolFn<{ id: string }, { name: string }> = async (
-      inputs,
-    ) => {
-      batchCalls++;
-      return inputs.map((input) =>
-        input.id === "u2"
-          ? new Error("Not Found")
-          : { name: `user:${input.id}` },
-      ) as Array<{ name: string } | Error>;
-    };
-
-    fetchUser.bridge = {
-      batch: true,
-    } satisfies ToolMetadata;
-
-    const result = await run(
-      bridge,
-      "Query.users",
-      {},
-      {
-        app: { fetchUser },
-      },
-      {
+        .id <- userId.id
+        .name <- user.name
+      }
+    }
+  `,
+  tools,
+  scenarios: {
+    "Query.users": {
+      "single trace with batched input/output": {
+        input: {},
         context: {
-          userIds: ["u1", "u2", "u3"],
+          userIds: [
+            { id: "u1", name: "user:u1" },
+            { id: "u2", name: "user:u2" },
+            { id: "u3", name: "user:u3" },
+          ],
+        },
+        assertData: [
+          { id: "u1", name: "user:u1" },
+          { id: "u2", name: "user:u2" },
+          { id: "u3", name: "user:u3" },
+        ],
+        assertTraces: (traces) => {
+          assert.equal(traces.length, 1);
+          assert.equal(traces[0]!.tool, "test.batch.multitool");
+          assert.deepEqual(traces[0]!.input, [
+            { id: "u1", name: "user:u1" },
+            { id: "u2", name: "user:u2" },
+            { id: "u3", name: "user:u3" },
+          ]);
+          assert.deepEqual(traces[0]!.output, [
+            { id: "u1", name: "user:u1" },
+            { id: "u2", name: "user:u2" },
+            { id: "u3", name: "user:u3" },
+          ]);
+        },
+        assertLogs: (logs: LogEntry[]) => {
+          const infos = logs.filter((entry) => entry.level === "info");
+          assert.ok(
+            infos.length >= 1,
+            `expected at least 1 info log, got ${infos.length}`,
+          );
         },
       },
-    );
+      "empty array produces empty output": {
+        input: {},
+        context: { userIds: [] },
+        assertData: [],
+        assertTraces: 0,
+      },
+    },
+  },
+});
 
-    assert.equal(batchCalls, 1);
-    assert.deepEqual(result.data, [
-      { id: "u1", name: "user:u1" },
-      { id: "u2", name: "missing" },
-      { id: "u3", name: "user:u3" },
-    ]);
-  });
+regressionTest("native batching: partial failures with catch", {
+  bridge: `
+    version 1.5
+
+    bridge Query.users {
+      with context as ctx
+      with output as o
+
+      o <- ctx.userIds[] as userId {
+        with test.batch.multitool as user
+
+        user.id <- userId.id
+        user.name <- userId.name
+        user._error <- userId._error
+
+        .id <- userId.id
+        .name <- user.name catch "missing"
+      }
+    }
+  `,
+  tools,
+  scenarios: {
+    "Query.users": {
+      "error item falls back to catch value": {
+        input: {},
+        context: {
+          userIds: [
+            { id: "u1", name: "user:u1" },
+            { id: "u2", name: "user:u2", _error: "Not Found" },
+            { id: "u3", name: "user:u3" },
+          ],
+        },
+        assertData: [
+          { id: "u1", name: "user:u1" },
+          { id: "u2", name: "missing" },
+          { id: "u3", name: "user:u3" },
+        ],
+        assertTraces: 1,
+      },
+      "empty array produces empty output": {
+        input: {},
+        context: { userIds: [] },
+        assertData: [],
+        assertTraces: 0,
+      },
+    },
+  },
 });

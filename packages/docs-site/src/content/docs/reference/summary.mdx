@@ -19,7 +19,7 @@ _The core primitives for mapping data from tools to the output._
 | **Root passthrough**          | `o <- api` (maps the entire object)                                                          |
 | **Context access**            | `api.token <- ctx.apiKey`                                                                    |
 | **Path scoping** (`{}`)       | `out.user { .name <- api.name }` (Groups nested paths)                                       |
-| **Spreading objects** (`...`) | `out.user { ...api.profile }` (Merges object fields)                                         |
+| **Spreading objects** (`...`) | `out.user { ... <- api.profile }` (Merges object fields)                                         |
 
 ### 2. Variables & Expressions
 

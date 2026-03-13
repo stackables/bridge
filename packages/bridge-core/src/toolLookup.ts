@@ -8,8 +8,14 @@
  * keeping the dependency surface explicit and testable.
  */
 
-import { parsePath } from "./utils.ts";
-import type { Instruction, ToolCallFn, ToolDef, ToolMap } from "./types.ts";
+import type {
+  Instruction,
+  NodeRef,
+  ToolCallFn,
+  ToolDef,
+  ToolMap,
+  Wire,
+} from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import type { MaybePromise } from "./tree-types.ts";
 import {
@@ -58,7 +64,13 @@ export function lookupToolFn(
 ): ToolCallFn | ((...args: any[]) => any) | undefined {
   const toolFns = ctx.toolFns;
   if (name.includes(".")) {
-    // Try namespace traversal first
+    // Check flat key first — explicit overrides (e.g. "std.httpCall" as a
+    // literal property) take precedence over namespace traversal so that
+    // users can override built-in tools without replacing the whole namespace.
+    const flat = (toolFns as any)?.[name];
+    if (typeof flat === "function") return flat;
+
+    // Namespace traversal (e.g. toolFns.std.httpCall)
     const parts = name.split(".");
     let current: any = toolFns;
     for (const part of parts) {
@@ -70,9 +82,6 @@ export function lookupToolFn(
       current = current[part];
     }
     if (typeof current === "function") return current;
-    // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
-    const flat = (toolFns as any)?.[name];
-    if (typeof flat === "function") return flat;
 
     // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
     // For "std.str.toLowerCase@999.1", check:
@@ -152,29 +161,39 @@ export function resolveToolDefByName(
     kind: "tool",
     name,
     fn: chain[0].fn, // fn from root ancestor
-    deps: [],
+    handles: [],
     wires: [],
   };
 
   for (const def of chain) {
-    // Merge deps (dedupe by handle)
-    for (const dep of def.deps) {
-      if (!merged.deps.some((d) => d.handle === dep.handle)) {
-        merged.deps.push(dep);
+    // Merge handles (dedupe by handle name)
+    for (const h of def.handles) {
+      if (!merged.handles.some((mh) => mh.handle === h.handle)) {
+        merged.handles.push(h);
       }
     }
-    // Merge wires (child overrides parent by target; onError replaces onError)
+    // Merge wires (child overrides parent by target path)
     for (const wire of def.wires) {
-      if (wire.kind === "onError") {
-        const idx = merged.wires.findIndex((w) => w.kind === "onError");
-        if (idx >= 0) merged.wires[idx] = wire;
-        else merged.wires.push(wire);
-      } else {
+      const wireTargetKey = "to" in wire ? wire.to.path.join(".") : undefined;
+      if (wireTargetKey != null) {
         const idx = merged.wires.findIndex(
-          (w) => "target" in w && w.target === wire.target,
+          (w) => "to" in w && w.to.path.join(".") === wireTargetKey,
         );
         if (idx >= 0) merged.wires[idx] = wire;
         else merged.wires.push(wire);
+      } else {
+        merged.wires.push(wire);
+      }
+    }
+    // Last onError wins
+    if (def.onError) merged.onError = def.onError;
+    // Merge pipeHandles (dedupe by key, child overrides parent)
+    if (def.pipeHandles) {
+      if (!merged.pipeHandles) merged.pipeHandles = [];
+      for (const ph of def.pipeHandles) {
+        const idx = merged.pipeHandles.findIndex((m) => m.key === ph.key);
+        if (idx >= 0) merged.pipeHandles[idx] = ph;
+        else merged.pipeHandles.push(ph);
       }
     }
   }
@@ -187,61 +206,284 @@ export function resolveToolDefByName(
 
 /**
  * Resolve a tool definition's wires into a nested input object.
+ * Wires use the unified Wire type — constant wires set fixed values,
+ * pull wires resolve sources from handles (context, const, tool deps).
  */
 export async function resolveToolWires(
   ctx: ToolLookupContext,
   toolDef: ToolDef,
   input: Record<string, any>,
 ): Promise<void> {
-  // Constants applied synchronously
+  // Build pipe-fork lookup: key → pipeHandle entry
+  const forkKeys = new Set<string>();
+  if (toolDef.pipeHandles) {
+    for (const ph of toolDef.pipeHandles) {
+      forkKeys.add(ph.key);
+    }
+  }
+
+  // Determine whether a wire targets a pipe fork or the main tool
+  const isForkTarget = (w: Wire): boolean => {
+    if (!("to" in w)) return false;
+    const key = trunkKey(w.to);
+    return forkKeys.has(key);
+  };
+
+  // Separate wires: main tool wires vs fork wires
+  const mainConstantWires: Wire[] = [];
+  const mainPullWires: Wire[] = [];
+  const mainTernaryWires: Wire[] = [];
+  // Fork wires grouped by trunk key, sorted by instance for chain ordering
+  const forkWireMap = new Map<string, { constants: Wire[]; pulls: Wire[] }>();
+
   for (const wire of toolDef.wires) {
-    if (wire.kind === "constant") {
-      setNested(input, parsePath(wire.target), coerceConstant(wire.value));
+    if (isForkTarget(wire)) {
+      const key = trunkKey(wire.to);
+      let group = forkWireMap.get(key);
+      if (!group) {
+        group = { constants: [], pulls: [] };
+        forkWireMap.set(key, group);
+      }
+      if ("value" in wire && !("cond" in wire)) {
+        group.constants.push(wire);
+      } else if ("from" in wire) {
+        group.pulls.push(wire);
+      }
+    } else if ("cond" in wire) {
+      mainTernaryWires.push(wire);
+    } else if ("value" in wire) {
+      mainConstantWires.push(wire);
+    } else if ("from" in wire) {
+      // Pull wires with fallbacks/catch are processed separately below
+      if ("fallbacks" in wire || "catchFallback" in wire) {
+        // handled by fallback loop
+      } else {
+        mainPullWires.push(wire);
+      }
+    }
+  }
+
+  // Execute pipe forks in instance order (lower instance first, chains depend on prior results)
+  const forkResults = new Map<string, any>();
+  if (forkWireMap.size > 0) {
+    // Sort fork keys by instance number to respect chain ordering
+    const sortedForkKeys = [...forkWireMap.keys()].sort((a, b) => {
+      const instA = parseInt(a.split(":").pop() ?? "0", 10);
+      const instB = parseInt(b.split(":").pop() ?? "0", 10);
+      return instA - instB;
+    });
+
+    for (const forkKey of sortedForkKeys) {
+      const group = forkWireMap.get(forkKey)!;
+      const forkInput: Record<string, any> = {};
+
+      // Apply constants
+      for (const wire of group.constants) {
+        if ("value" in wire && "to" in wire) {
+          setNested(forkInput, wire.to.path, coerceConstant(wire.value));
+        }
+      }
+
+      // Resolve pull wires (sources may be handles or prior fork results)
+      for (const wire of group.pulls) {
+        if (!("from" in wire)) continue;
+        const fromKey = trunkKey(wire.from);
+        let value: any;
+        if (forkResults.has(fromKey)) {
+          // Source is a prior fork's result
+          value = forkResults.get(fromKey);
+          for (const seg of wire.from.path) {
+            value = value?.[seg];
+          }
+        } else {
+          value = await resolveToolNodeRef(ctx, wire.from, toolDef);
+        }
+        setNested(forkInput, wire.to.path, value);
+      }
+
+      // Look up and execute the fork tool function
+      const forkToolName = forkKey.split(":")[2] ?? "";
+      const fn = lookupToolFn(ctx, forkToolName);
+      if (fn) {
+        forkResults.set(forkKey, await fn(forkInput));
+      }
+    }
+  }
+
+  // Constants applied synchronously
+  for (const wire of mainConstantWires) {
+    if ("value" in wire && "to" in wire) {
+      setNested(input, wire.to.path, coerceConstant(wire.value));
     }
   }
 
   // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
-  const pullWires = toolDef.wires.filter((w) => w.kind === "pull");
-  if (pullWires.length > 0) {
+  if (mainPullWires.length > 0) {
     const resolved = await Promise.all(
-      pullWires.map(async (wire) => ({
-        target: wire.target,
-        value: await resolveToolSource(ctx, wire.source, toolDef),
-      })),
+      mainPullWires.map(async (wire) => {
+        if (!("from" in wire)) return null;
+        const fromKey = trunkKey(wire.from);
+        let value: any;
+        if (forkResults.has(fromKey)) {
+          // Source is a fork result (e.g., expression chain output)
+          value = forkResults.get(fromKey);
+          for (const seg of wire.from.path) {
+            value = value?.[seg];
+          }
+        } else {
+          value = await resolveToolNodeRef(ctx, wire.from, toolDef);
+        }
+        return { path: wire.to.path, value };
+      }),
     );
-    for (const { target, value } of resolved) {
-      setNested(input, parsePath(target), value);
+    for (const entry of resolved) {
+      if (entry) setNested(input, entry.path, entry.value);
     }
+  }
+
+  // Ternary wires: evaluate condition and pick branch
+  for (const wire of mainTernaryWires) {
+    if (!("cond" in wire)) continue;
+    const condValue = await resolveToolNodeRef(ctx, wire.cond, toolDef);
+    let value: any;
+    if (condValue) {
+      if ("thenRef" in wire && wire.thenRef) {
+        const fromKey = trunkKey(wire.thenRef);
+        if (forkResults.has(fromKey)) {
+          value = forkResults.get(fromKey);
+          for (const seg of wire.thenRef.path) value = value?.[seg];
+        } else {
+          value = await resolveToolNodeRef(ctx, wire.thenRef, toolDef);
+        }
+      } else if ("thenValue" in wire && wire.thenValue !== undefined) {
+        value = coerceConstant(wire.thenValue);
+      }
+    } else {
+      if ("elseRef" in wire && wire.elseRef) {
+        const fromKey = trunkKey(wire.elseRef);
+        if (forkResults.has(fromKey)) {
+          value = forkResults.get(fromKey);
+          for (const seg of wire.elseRef.path) value = value?.[seg];
+        } else {
+          value = await resolveToolNodeRef(ctx, wire.elseRef, toolDef);
+        }
+      } else if ("elseValue" in wire && wire.elseValue !== undefined) {
+        value = coerceConstant(wire.elseValue);
+      }
+    }
+    if (value !== undefined) setNested(input, wire.to.path, value);
+  }
+
+  // Handle fallback wires (coalesce/catch) on main pull wires
+  for (const wire of toolDef.wires) {
+    if (isForkTarget(wire)) continue;
+    if (!("from" in wire) || !("fallbacks" in wire)) continue;
+    // The value was already set by the pull wire resolution above.
+    // Check if it needs fallback processing.
+    const fromKey = trunkKey(wire.from);
+    let value: any;
+    if (forkResults.has(fromKey)) {
+      value = forkResults.get(fromKey);
+      for (const seg of wire.from.path) value = value?.[seg];
+    } else {
+      try {
+        value = await resolveToolNodeRef(ctx, wire.from, toolDef);
+      } catch {
+        value = undefined;
+      }
+    }
+
+    // Apply fallback chain
+    if (wire.fallbacks) {
+      for (const fb of wire.fallbacks) {
+        const shouldFallback = fb.type === "nullish" ? value == null : !value;
+        if (shouldFallback) {
+          if (fb.value !== undefined) {
+            value = coerceConstant(fb.value);
+          } else if (fb.ref) {
+            const fbKey = trunkKey(fb.ref);
+            if (forkResults.has(fbKey)) {
+              value = forkResults.get(fbKey);
+              for (const seg of fb.ref.path) value = value?.[seg];
+            } else {
+              value = await resolveToolNodeRef(ctx, fb.ref, toolDef);
+            }
+          }
+        }
+      }
+    }
+
+    // Apply catch fallback
+    if ("catchFallback" in wire && wire.catchFallback !== undefined) {
+      if (value == null) {
+        value = coerceConstant(wire.catchFallback);
+      }
+    }
+
+    setNested(input, wire.to.path, value);
   }
 }
 
-// ── Tool source resolution ──────────────────────────────────────────────────
+// ── Tool NodeRef resolution ─────────────────────────────────────────────────
 
 /**
- * Resolve a source reference from a tool wire against its dependencies.
+ * Resolve a NodeRef from a tool wire against the tool's handles.
  */
-export async function resolveToolSource(
+export async function resolveToolNodeRef(
   ctx: ToolLookupContext,
-  source: string,
+  ref: NodeRef,
   toolDef: ToolDef,
 ): Promise<any> {
-  const dotIdx = source.indexOf(".");
-  const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
-  const restPath = dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
+  // Find the matching handle by looking at how the ref was built
+  // The ref's module/type/field encode which handle it came from
+  const handle = toolDef.handles.find((h) => {
+    if (h.kind === "context") {
+      return (
+        ref.module === SELF_MODULE &&
+        ref.type === "Context" &&
+        ref.field === "context"
+      );
+    }
+    if (h.kind === "const") {
+      return (
+        ref.module === SELF_MODULE &&
+        ref.type === "Const" &&
+        ref.field === "const"
+      );
+    }
+    if (h.kind === "tool") {
+      // Tool handle: module is the namespace part, field is the tool name part
+      const lastDot = h.name.lastIndexOf(".");
+      if (lastDot !== -1) {
+        return (
+          ref.module === h.name.substring(0, lastDot) &&
+          ref.field === h.name.substring(lastDot + 1)
+        );
+      }
+      return (
+        ref.module === SELF_MODULE &&
+        ref.type === "Tools" &&
+        ref.field === h.name
+      );
+    }
+    return false;
+  });
 
-  const dep = toolDef.deps.find((d) => d.handle === handle);
-  if (!dep)
-    throw new Error(`Unknown source "${handle}" in tool "${toolDef.name}"`);
+  if (!handle) {
+    throw new Error(
+      `Cannot resolve source in tool "${toolDef.name}": no handle matches ref ${ref.module}:${ref.type}:${ref.field}`,
+    );
+  }
 
   let value: any;
-  if (dep.kind === "context") {
+  if (handle.kind === "context") {
     // Walk the full parent chain for context
     let cursor: ToolLookupContext | undefined = ctx;
     while (cursor && value === undefined) {
       value = cursor.context;
       cursor = cursor.parent;
     }
-  } else if (dep.kind === "const") {
+  } else if (handle.kind === "const") {
     // Walk the full parent chain for const state
     const constKey = trunkKey({
       module: SELF_MODULE,
@@ -253,14 +495,97 @@ export async function resolveToolSource(
       value = cursor.state[constKey];
       cursor = cursor.parent;
     }
-  } else if (dep.kind === "tool") {
-    value = await resolveToolDep(ctx, dep.tool);
+  } else if (handle.kind === "tool") {
+    value = await resolveToolDep(ctx, handle.name);
   }
 
-  for (const segment of restPath) {
+  for (const segment of ref.path) {
     value = value[segment];
   }
   return value;
+}
+
+// ── Tool source resolution (string-based, for onError) ──────────────────────
+
+/**
+ * Resolve a dotted source string against the tool's handles.
+ * Used for onError source references which remain string-based.
+ */
+export async function resolveToolSource(
+  ctx: ToolLookupContext,
+  source: string,
+  toolDef: ToolDef,
+): Promise<any> {
+  const dotIdx = source.indexOf(".");
+  const handleName = dotIdx === -1 ? source : source.substring(0, dotIdx);
+  const restPath = dotIdx === -1 ? [] : source.substring(dotIdx + 1).split(".");
+
+  const handle = toolDef.handles.find((h) => h.handle === handleName);
+  if (!handle)
+    throw new Error(`Unknown source "${handleName}" in tool "${toolDef.name}"`);
+
+  let value: any;
+  if (handle.kind === "context") {
+    let cursor: ToolLookupContext | undefined = ctx;
+    while (cursor && value === undefined) {
+      value = cursor.context;
+      cursor = cursor.parent;
+    }
+  } else if (handle.kind === "const") {
+    const constKey = trunkKey({
+      module: SELF_MODULE,
+      type: "Const",
+      field: "const",
+    });
+    let cursor: ToolLookupContext | undefined = ctx;
+    while (cursor && value === undefined) {
+      value = cursor.state[constKey];
+      cursor = cursor.parent;
+    }
+  } else if (handle.kind === "tool") {
+    value = await resolveToolDep(ctx, handle.name);
+  }
+
+  for (const segment of restPath) {
+    if (value == null) return undefined;
+    value = value[segment];
+  }
+  return value;
+}
+
+// ── Constant wire merging ───────────────────────────────────────────────────
+
+/**
+ * Merge constant self-wires from a ToolDef into the tool's return value,
+ * so that dependents can read constant fields (e.g. `.token = "x"`) as
+ * if the tool produced them.  Tool-returned fields take precedence.
+ */
+export function mergeToolDefConstants(toolDef: ToolDef, result: any): any {
+  if (result == null || typeof result !== "object" || Array.isArray(result))
+    return result;
+
+  // Build fork keys to skip fork-targeted constants
+  const forkKeys = new Set<string>();
+  if (toolDef.pipeHandles) {
+    for (const ph of toolDef.pipeHandles) {
+      forkKeys.add(ph.key);
+    }
+  }
+
+  for (const wire of toolDef.wires) {
+    if (!("value" in wire) || "cond" in wire || !("to" in wire)) continue;
+    if (forkKeys.size > 0 && forkKeys.has(trunkKey(wire.to))) continue;
+
+    const path = wire.to.path;
+    if (path.length === 0) continue;
+
+    // Only fill in fields the tool didn't already produce
+    if (!(path[0] in result)) {
+      setNested(result, path, coerceConstant(wire.value));
+    }
+  }
+
+  return result;
 }
 
 // ── Tool dependency execution ───────────────────────────────────────────────
@@ -288,14 +613,14 @@ export function resolveToolDep(
     const fn = lookupToolFn(ctx, toolDef.fn!);
     if (!fn) throw new Error(`Tool function "${toolDef.fn}" not registered`);
 
-    // on error: wrap the tool call with fallback from onError wire
-    const onErrorWire = toolDef.wires.find((w) => w.kind === "onError");
+    // on error: wrap the tool call with fallback
     try {
-      return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+      const raw = await ctx.callTool(toolName, toolDef.fn!, fn, input);
+      return mergeToolDefConstants(toolDef, raw);
     } catch (err) {
-      if (!onErrorWire) throw err;
-      if ("value" in onErrorWire) return JSON.parse(onErrorWire.value);
-      return resolveToolSource(ctx, onErrorWire.source, toolDef);
+      if (!toolDef.onError) throw err;
+      if ("value" in toolDef.onError) return JSON.parse(toolDef.onError.value);
+      return resolveToolSource(ctx, toolDef.onError.source, toolDef);
     }
   })();
 

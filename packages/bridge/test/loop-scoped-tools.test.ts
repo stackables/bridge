@@ -1,242 +1,93 @@
-import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import {
-  compileBridge,
-  executeBridge as executeCompiled,
-} from "@stackables/bridge-compiler";
-import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./_dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
 
-describe("loop scoped tools - invalid cases", () => {
-  test("outer bridge tools cannot be wired inside array loops without a local with", () => {
-    assert.throws(
-      () =>
-        parseBridge(`version 1.5
+// ═══════════════════════════════════════════════════════════════════════════
+// Loop-scoped tools — declaring tools inside array loops
+//
+// Migrated from legacy/loop-scoped-tools.test.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
-bridge Query.processCatalog {
-  with output as o
-  with context as ctx
-  with std.httpCall as http
+const httpTool = {
+  std: {
+    httpCall: async (params: { value: string }) => ({
+      data: `tool:${params.value}`,
+    }),
+  },
+};
 
-  o <- ctx.catalog[] as cat {
-    http.value <- cat.val
-    .val <- http.data
-  }
-}`),
-      /current scope|local with|loop scope|writable/i,
-    );
-  });
+regressionTest("loop scoped tools - valid behavior", {
+  bridge: `
+    version 1.5
 
-  test("parent loop tools cannot be wired from nested loops", () => {
-    assert.throws(
-      () =>
-        parseBridge(`version 1.5
+    bridge Query.simple {
+      with context as ctx
+      with output as o
 
-bridge Query.processCatalog {
-  with output as o
-  with context as ctx
+      o <- ctx.catalog[] as cat {
+        with std.httpCall as http
 
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-    http.value <- cat.val
-    .children <- cat.children[] as child {
-      http.value <- child.val
-      .val <- http.data
+        http.value <- cat.val
+        .val <- http.data
+      }
     }
-  }
-}`),
-      /current scope|local with|loop scope|writable/i,
-    );
-  });
 
-  test("loop scoped tools are not visible outside their loop", () => {
-    assert.throws(
-      () =>
-        parseBridge(`version 1.5
+    bridge Query.nested {
+      with context as ctx
+      with output as o
 
-bridge Query.processCatalog {
-  with output as o
-  with context as ctx
+      o <- ctx.catalog[] as cat {
+        with std.httpCall as http
 
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-    http.value <- cat.val
-    .val <- http.data
-  }
+        http.value <- cat.val
+        .outer <- http.data
+        .children <- cat.children[] as child {
+          with std.httpCall as http
 
-  o.last <- http.data
-}`),
-      /Undeclared handle "http"|not visible|scope/i,
-    );
-  });
-});
+          http.value <- child.val
+          .inner <- http.data
+        }
+      }
+    }
 
-describe("loop scoped tools - compiler support", () => {
-  test("nested loop-scoped tools compile without falling back", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-
-    http.value <- cat.val
-    .outer <- http.data
-    .children <- cat.children[] as child {
+    bridge Query.shadow {
+      with context as ctx
+      with output as o
       with std.httpCall as http
 
-      http.value <- child.val
-      .inner <- http.data
+      http.value <- ctx.prefix
+      o.bridgeHttp <- http.data
+      o.items <- ctx.catalog[] as cat {
+        with std.httpCall as http
+
+        http.value <- cat.val
+        .outer <- http.data
+        .children <- cat.children[] as child {
+          with std.httpCall as http
+
+          http.value <- child.val
+          .inner <- http.data
+        }
+      }
     }
-  }
-}`;
-
-    const document = parseBridge(bridge);
-    assert.doesNotThrow(() =>
-      compileBridge(document, { operation: "Query.processCatalog" }),
-    );
-
-    const warnings: string[] = [];
-    const result = await executeCompiled({
-      document,
-      operation: "Query.processCatalog",
-      tools: {
-        std: {
-          httpCall: async (params: { value: string }) => ({
-            data: `tool:${params.value}`,
-          }),
-        },
+  `,
+  tools: httpTool,
+  scenarios: {
+    "Query.simple": {
+      "tools can be declared and called inside array loops": {
+        input: {},
+        context: { catalog: [{ val: "a" }, { val: "b" }] },
+        assertData: [{ val: "tool:a" }, { val: "tool:b" }],
+        assertTraces: 2,
       },
-      context: {
-        catalog: [
-          {
-            val: "outer-a",
-            children: [{ val: "inner-a1" }, { val: "inner-a2" }],
-          },
-        ],
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
       },
-      logger: {
-        warn: (message: string) => warnings.push(message),
-      },
-    });
-
-    assert.deepStrictEqual(result.data, [
-      {
-        outer: "tool:outer-a",
-        children: [{ inner: "tool:inner-a1" }, { inner: "tool:inner-a2" }],
-      },
-    ]);
-    assert.deepStrictEqual(warnings, []);
-  });
-
-  test("unused repeated tool bindings still compile to distinct synthetic instances", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-  with std.httpCall as http
-
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-    .val <- cat.val
-  }
-}`;
-
-    const document = parseBridge(bridge);
-    assert.doesNotThrow(() =>
-      compileBridge(document, { operation: "Query.processCatalog" }),
-    );
-
-    const warnings: string[] = [];
-    const result = await executeCompiled({
-      document,
-      operation: "Query.processCatalog",
-      context: {
-        catalog: [{ val: "a" }, { val: "b" }],
-      },
-      logger: {
-        warn: (message: string) => warnings.push(message),
-      },
-    });
-
-    assert.deepStrictEqual(result.data, [{ val: "a" }, { val: "b" }]);
-    assert.deepStrictEqual(warnings, []);
-  });
-});
-
-forEachEngine("loop scoped tools - valid behavior", (run) => {
-  test("tools can be declared and called inside array loops", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-
-    http.value <- cat.val
-    .val <- http.data
-  }
-}`;
-
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => ({
-            data: `tool:${params.value}`,
-          }),
-        },
-      },
-      {
-        context: {
-          catalog: [{ val: "a" }, { val: "b" }],
-        },
-      },
-    );
-
-    assert.deepStrictEqual(result.data, [{ val: "tool:a" }, { val: "tool:b" }]);
-  });
-
-  test("nested loops can introduce their own writable tool handles", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-
-    http.value <- cat.val
-    .outer <- http.data
-    .children <- cat.children[] as child {
-      with std.httpCall as http
-
-      http.value <- child.val
-      .inner <- http.data
-    }
-  }
-}`;
-
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => ({
-            data: `tool:${params.value}`,
-          }),
-        },
-      },
-      {
+    },
+    "Query.nested": {
+      "nested loops can introduce their own writable tool handles": {
+        input: {},
         context: {
           catalog: [
             {
@@ -245,52 +96,32 @@ bridge Query.processCatalog {
             },
           ],
         },
+        assertData: [
+          {
+            outer: "tool:outer-a",
+            children: [{ inner: "tool:inner-a1" }, { inner: "tool:inner-a2" }],
+          },
+        ],
+        assertTraces: 3,
       },
-    );
-
-    assert.deepStrictEqual(result.data, [
-      {
-        outer: "tool:outer-a",
-        children: [{ inner: "tool:inner-a1" }, { inner: "tool:inner-a2" }],
+      "empty catalog": {
+        input: {},
+        context: { catalog: [] },
+        assertData: [],
+        assertTraces: 0,
       },
-    ]);
-  });
-
-  test("inner loop-scoped tools shadow outer and bridge level handles", async () => {
-    const bridge = `version 1.5
-
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
-  with std.httpCall as http
-
-  http.value <- ctx.prefix
-  o <- ctx.catalog[] as cat {
-    with std.httpCall as http
-
-    http.value <- cat.val
-    .outer <- http.data
-    .children <- cat.children[] as child {
-      with std.httpCall as http
-
-      http.value <- child.val
-      .inner <- http.data
-    }
-  }
-}`;
-
-    const result = await run(
-      bridge,
-      "Query.processCatalog",
-      {},
-      {
-        std: {
-          httpCall: async (params: { value: string }) => ({
-            data: `tool:${params.value}`,
-          }),
+      "empty children": {
+        input: {},
+        context: {
+          catalog: [{ val: "outer-a", children: [] }],
         },
+        assertData: [{ outer: "tool:outer-a", children: [] }],
+        assertTraces: 1,
       },
-      {
+    },
+    "Query.shadow": {
+      "inner loop-scoped tools shadow outer and bridge level handles": {
+        input: {},
         context: {
           prefix: "bridge-level",
           catalog: [
@@ -300,14 +131,35 @@ bridge Query.processCatalog {
             },
           ],
         },
+        assertData: {
+          bridgeHttp: "tool:bridge-level",
+          items: [
+            {
+              outer: "tool:outer-a",
+              children: [{ inner: "tool:inner-a1" }],
+            },
+          ],
+        },
+        assertTraces: 3,
       },
-    );
-
-    assert.deepStrictEqual(result.data, [
-      {
-        outer: "tool:outer-a",
-        children: [{ inner: "tool:inner-a1" }],
+      "empty catalog": {
+        input: {},
+        context: { prefix: "bridge-level", catalog: [] },
+        assertData: { bridgeHttp: "tool:bridge-level", items: [] },
+        assertTraces: 1,
       },
-    ]);
-  });
+      "empty children": {
+        input: {},
+        context: {
+          prefix: "bridge-level",
+          catalog: [{ val: "outer-a", children: [] }],
+        },
+        assertData: {
+          bridgeHttp: "tool:bridge-level",
+          items: [{ outer: "tool:outer-a", children: [] }],
+        },
+        assertTraces: 2,
+      },
+    },
+  },
 });
