@@ -21,7 +21,7 @@ import {
   serializeBridge,
   type BridgeDocument,
 } from "../../src/index.ts";
-import { bridgeTransform } from "@stackables/bridge-graphql";
+import { bridgeTransform, getBridgeTraces } from "@stackables/bridge-graphql";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import {
   executeBridge as executeCompiled,
@@ -596,8 +596,8 @@ function synthesizeSelectedGraphQLData(
  * Lets assertions branch on engine or inspect wall-clock timing.
  */
 export type AssertContext = {
-  /** Which engine is running: "runtime" | "compiled". */
-  engine: "runtime" | "compiled";
+  /** Which engine is running: "runtime" | "compiled" | "graphql". */
+  engine: "runtime" | "compiled" | "graphql";
   /** High-resolution timestamp (ms) captured just before execution started. */
   startMs: number;
 };
@@ -1174,6 +1174,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                   tools,
                   signalMapper: (ctx) => ctx.__bridgeSignal,
                   toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
+                  trace: "full",
                 });
                 const source = buildGraphQLOperationSource(
                   rawSchema,
@@ -1194,6 +1195,10 @@ export function regressionTest(name: string, data: RegressionTest) {
                 });
 
                 // console.log(source, result);
+
+                const graphqlTraces = getBridgeTraces(context);
+                const startMs = performance.now();
+                const assertCtx: AssertContext = { engine: "graphql", startMs };
 
                 const [, fieldName] = operation.split(".");
                 const normalizedGraphQLData = normalizeGraphQLValue(
@@ -1226,6 +1231,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                     graphQLData,
                     graphQLErrors,
                   );
+                  assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
                   return;
                 }
 
@@ -1234,6 +1240,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                     (graphQLErrors?.length ?? 0) > 0,
                     `GraphQL replay expected errors for ${operation}.${scenarioName}`,
                   );
+                  assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
                   return;
                 }
 
@@ -1243,7 +1250,8 @@ export function regressionTest(name: string, data: RegressionTest) {
                   `GraphQL execution failed for ${operation}.${scenarioName}: ${JSON.stringify(result.errors)}`,
                 );
 
-                assertDataExpectation(scenario.assertData, graphQLData);
+                assertDataExpectation(scenario.assertData, graphQLData, assertCtx);
+                assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
               });
             }
           });

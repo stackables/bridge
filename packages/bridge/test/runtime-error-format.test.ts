@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { BridgeRuntimeError, formatBridgeError } from "@stackables/bridge-core";
+import { formatBridgeError } from "@stackables/bridge-core";
 import { regressionTest } from "./utils/regression.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
