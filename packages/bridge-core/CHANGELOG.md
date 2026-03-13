@@ -1,5 +1,24 @@
 # @stackables/bridge-core
 
+## 1.7.0
+
+### Minor Changes
+
+- [`848282b`](https://github.com/stackables/bridge/commit/848282b28f506a77128c4645c874f0099dfd7dac) Thanks [@aarne](https://github.com/aarne)! - Get syntax highlighting directly in typescript files
+
+  ```typescript
+  import { bridge, parseBridge } from "@stackables/bridge";
+
+  const doc = parseBridge(bridge`
+    version 1.5
+    bridge Query.hello {
+      with input as i
+      with output as o
+      o.message <- i.name
+    }
+  `);
+  ```
+
 ## 1.6.2
 
 ### Patch Changes

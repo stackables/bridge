@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-compiler",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "Compiles a BridgeDocument into highly optimized JavaScript code",
   "main": "./src/index.ts",
   "type": "module",

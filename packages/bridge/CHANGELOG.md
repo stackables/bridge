@@ -1,5 +1,14 @@
 # @stackables/bridge
 
+## 2.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`848282b`](https://github.com/stackables/bridge/commit/848282b28f506a77128c4645c874f0099dfd7dac)]:
+  - @stackables/bridge-core@1.7.0
+  - @stackables/bridge-graphql@1.2.4
+  - @stackables/bridge-parser@1.4.4
+
 ## 2.3.2
 
 ### Patch Changes

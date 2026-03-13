@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-parser",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Bridge DSL parser — turns .bridge text into a BridgeDocument (AST)",
   "main": "./src/index.ts",
   "type": "module",
