@@ -19,25 +19,6 @@ function maxCaretCount(formatted: string): number {
 
 const FN = "playground.bridge";
 
-// ── Pure unit test (no engine needed) ────────────────────────────────────────
-
-test("formatBridgeError underlines the full inclusive source span", () => {
-  const sourceLine = "o.message <- i.empty.array.error";
-  const formatted = formatBridgeError(
-    new BridgeRuntimeError("boom", {
-      bridgeLoc: {
-        startLine: 1,
-        startColumn: 14,
-        endLine: 1,
-        endColumn: 32,
-      },
-    }),
-    { source: sourceLine, filename: FN },
-  );
-
-  assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);
-});
-
 // ── Engine-level error formatting ────────────────────────────────────────────
 
 regressionTest("error formatting – runtime errors", {

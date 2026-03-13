@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { ToolTrace } from "@stackables/bridge-core";
 import { tools } from "./utils/bridge-tools.ts";
-import { regressionTest, type AssertContext } from "./utils/regression.ts";
+import { regressionTest } from "./utils/regression.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scheduling — diamond dependencies, tool deduplication, pipe fork
@@ -13,26 +13,17 @@ import { regressionTest, type AssertContext } from "./utils/regression.ts";
 /**
  * Assert that a set of tool traces ran in parallel:
  * all started before any finished (start overlap within delay window).
- * In runtime, match by ToolDef name; in compiled, just verify the
- * first N traces (by start time) overlap.
  */
 function assertParallel(
   traces: ToolTrace[],
   toolNames: string[],
   delayMs: number,
-  ctx: AssertContext,
 ) {
-  const matched =
-    ctx.engine === "runtime"
-      ? toolNames.map((name) => {
-          const t = traces.find((tr) => tr.tool === name);
-          assert.ok(t, `expected trace for ${name}`);
-          return t;
-        })
-      : // compiled: ToolDef names become fn names, pick N earliest by startedAt
-        [...traces]
-          .sort((a, b) => a.startedAt - b.startedAt)
-          .slice(0, toolNames.length);
+  const matched = toolNames.map((name) => {
+    const t = traces.find((tr) => tr.tool === name);
+    assert.ok(t, `expected trace for ${name}`);
+    return t;
+  });
 
   assert.equal(
     matched.length,
@@ -49,20 +40,12 @@ function assertParallel(
 
 /**
  * Assert that tool B started only after tool A finished.
- * In runtime, match by ToolDef name; in compiled, match by position
- * (last trace should have started after earlier ones finished).
  */
 function assertSequential(
   traces: ToolTrace[],
   before: string,
   after: string,
-  ctx: AssertContext,
 ) {
-  if (ctx.engine === "compiled") {
-    // compiled traces lose ToolDef names — skip per-name sequential check
-    // (parallel assertion already covers the timing structure)
-    return;
-  }
   const a = traces.find((t) => t.tool === before);
   const b = traces.find((t) => t.tool === after);
   assert.ok(a, `expected trace for ${before}`);
@@ -291,9 +274,9 @@ regressionTest("scheduling: parallel independent tools", {
       "three independent tools run in parallel": {
         input: { x: 1, y: 2, z: 3 },
         assertData: { a: 1, b: 2, c: 3 },
-        assertTraces: (traces: ToolTrace[], ctx: AssertContext) => {
+        assertTraces: (traces: ToolTrace[]) => {
           assert.equal(traces.length, 3);
-          assertParallel(traces, ["apiA", "apiB", "apiC"], 50, ctx);
+          assertParallel(traces, ["apiA", "apiB", "apiC"], 50);
         },
       },
     },
@@ -406,13 +389,13 @@ regressionTest("scheduling: tool-level deps resolve in parallel", {
             q: "search",
           },
         },
-        assertTraces: (traces: ToolTrace[], ctx: AssertContext) => {
+        assertTraces: (traces: ToolTrace[]) => {
           assert.equal(traces.length, 3);
           // auth and quota should start in parallel
-          assertParallel(traces, ["authProvider", "quotaChecker"], 50, ctx);
+          assertParallel(traces, ["authProvider", "quotaChecker"], 50);
           // mainApi should start after both deps finish
-          assertSequential(traces, "authProvider", "mainApi", ctx);
-          assertSequential(traces, "quotaChecker", "mainApi", ctx);
+          assertSequential(traces, "authProvider", "mainApi");
+          assertSequential(traces, "quotaChecker", "mainApi");
         },
       },
     },

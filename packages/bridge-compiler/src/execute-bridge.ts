@@ -98,7 +98,8 @@ type BridgeFn = (
     toolTimeoutMs?: number;
     logger?: Logger;
     __trace?: (
-      toolName: string,
+      toolDefName: string,
+      fnName: string,
       start: number,
       end: number,
       input: any,
@@ -310,7 +311,8 @@ export async function executeBridge<T = unknown>(
     __BridgeRuntimeError: BridgeRuntimeError,
     __trace: tracer
       ? (
-          toolName: string,
+          toolDefName: string,
+          fnName: string,
           start: number,
           end: number,
           toolInput: any,
@@ -321,8 +323,8 @@ export async function executeBridge<T = unknown>(
           const durationMs = Math.round((end - start) * 1000) / 1000;
           tracer!.record(
             tracer!.entry({
-              tool: toolName,
-              fn: toolName,
+              tool: toolDefName,
+              fn: fnName,
               startedAt: Math.max(0, startedAt - durationMs),
               durationMs,
               input: toolInput,
