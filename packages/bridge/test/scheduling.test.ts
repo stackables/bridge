@@ -115,7 +115,6 @@ regressionTest("scheduling: diamond dependency dedup", {
         },
         // geocode + weatherForecast + census + formatGreeting = 4
         assertTraces: 4,
-        disable: ["graphql"],
       },
     },
   },

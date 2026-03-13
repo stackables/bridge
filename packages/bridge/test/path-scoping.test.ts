@@ -435,7 +435,6 @@ regressionTest("path scoping: spread syntax", {
           api: () => ({ name: "Alice", age: 30 }),
         },
         assertData: { name: "Alice", age: 30, extra: "added" },
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -446,7 +445,6 @@ regressionTest("path scoping: spread syntax", {
           api: () => ({ data: { x: 1, y: 2 } }),
         },
         assertData: { x: 1, y: 2, source: "api" },
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -459,7 +457,6 @@ regressionTest("path scoping: spread syntax", {
         assertData: {
           info: { author: "Bob", year: 2024, verified: true },
         },
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },

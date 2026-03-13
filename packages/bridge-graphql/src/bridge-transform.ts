@@ -457,7 +457,10 @@ export function bridgeTransform(
             if (scalar) {
               if (result instanceof ExecutionTree) {
                 try {
-                  return result.collectOutput();
+                  const data = result.collectOutput();
+                  const forced = result.getForcedExecution();
+                  if (forced) await forced;
+                  return data;
                 } catch (err) {
                   throw new Error(
                     formatBridgeError(err, {
@@ -470,11 +473,15 @@ export function bridgeTransform(
               }
               if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
                 try {
-                  return await Promise.all(
+                  const firstTree = result[0] as ExecutionTree;
+                  const forced = firstTree.getForcedExecution();
+                  const collected = await Promise.all(
                     result.map((shadow: ExecutionTree) =>
                       shadow.collectOutput(),
                     ),
                   );
+                  if (forced) await forced;
+                  return collected;
                 } catch (err) {
                   throw new Error(
                     formatBridgeError(err, {

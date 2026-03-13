@@ -366,7 +366,6 @@ regressionTest("parity: array mapping", {
         input: {},
         tools: { api: () => ({ list: null }) },
         assertData: { items: null },
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "non-empty items map correctly": {
@@ -665,7 +664,6 @@ regressionTest("parity: force statements", {
           },
         },
         assertError: /audit failed/,
-        disable: ["graphql"],
         assertTraces: 2,
       },
     },
@@ -1734,7 +1732,6 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["price"],
         assertData: { price: 99 },
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -1900,14 +1897,12 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
         assertData: [
           { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "empty items returns empty array": {
         input: { from: "A", to: "B" },
         tools: { api: () => ({ items: [] }) },
         assertData: [],
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -1934,7 +1929,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             legs: [{ destination: "Zürich" }, { destination: "Basel" }],
           },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "all fields returned when no requestedFields": {
@@ -1958,14 +1952,12 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             legs: [{ trainName: "IC1", destination: "Zürich" }],
           },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "empty connections returns empty array": {
         input: { from: "Bern", to: "Zürich" },
         tools: { api: () => ({ connections: [] }) },
         assertData: [],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "connection with empty sections": {
@@ -1978,7 +1970,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
         assertData: [
           { id: 1, provider: "SBB", departureTime: "09:00", legs: [] },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -2009,7 +2000,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             legs: [{ destination: { actualTime: "08:32" } }],
           },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "all fields returned when no requestedFields": {
@@ -2049,14 +2039,12 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             ],
           },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "empty connections returns empty array": {
         input: { from: "Bern" },
         tools: { api: () => ({ connections: [] }) },
         assertData: [],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "connection with empty sections": {
@@ -2067,7 +2055,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
           }),
         },
         assertData: [{ id: 1, provider: "SBB", legs: [] }],
-        disable: ["graphql"],
         assertTraces: 1,
       },
     },
