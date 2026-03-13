@@ -9,6 +9,7 @@ import {
   getBridgeTraces,
   useBridgeTracing,
 } from "../src/index.ts";
+import { bridge } from "@stackables/bridge-core";
 
 describe("bridgeTransform coverage branches", () => {
   test("supports contextMapper with per-request document selection", async () => {
@@ -22,18 +23,22 @@ describe("bridgeTransform coverage branches", () => {
       }
     `;
 
-    const v1 = parseBridge(`version 1.5
-bridge Query.pick {
-  with context as c
-  with output as o
-  o.value <- c.allowed
-  o.secret <- c.secret
-}`);
-    const v2 = parseBridge(`version 1.5
-bridge Query.pick {
-  with output as o
-  o.value = "v2"
-}`);
+    const v1 = parseBridge(bridge`
+      version 1.5
+      bridge Query.pick {
+        with context as c
+        with output as o
+        o.value <- c.allowed
+        o.secret <- c.secret
+      }
+    `);
+    const v2 = parseBridge(bridge`
+      version 1.5
+      bridge Query.pick {
+        with output as o
+        o.value = "v2"
+      }
+    `);
 
     const rawSchema = createSchema({ typeDefs });
     const schema = bridgeTransform(
@@ -66,12 +71,14 @@ bridge Query.pick {
         value: String
       }
     `;
-    const instructions = parseBridge(`version 1.5
-bridge Query.slow {
-  with waitTool as w
-  with output as o
-  o.value <- w.value
-}`);
+    const instructions = parseBridge(bridge`
+      version 1.5
+      bridge Query.slow {
+        with waitTool as w
+        with output as o
+        o.value <- w.value
+      }
+    `);
     const rawSchema = createSchema({ typeDefs });
     const schema = bridgeTransform(rawSchema, instructions, {
       tools: {
@@ -119,18 +126,20 @@ describe("bridge tracing helpers", () => {
 
 describe("bridgeTransform: error surfacing", () => {
   test("surfaces formatted runtime errors through GraphQL", async () => {
-    const bridgeText = `version 1.5
+    const bridgeText = bridge`
+      version 1.5
 
-bridge Query.greet {
-  with std.str.toUpperCase as uc memoize
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
+      bridge Query.greet {
+        with std.str.toUpperCase as uc memoize
+        with std.str.toLowerCase as lc
+        with input as i
+        with output as o
 
-  o.message <- i.empty.array.error
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`;
+        o.message <- i.empty.array.error
+        o.upper <- uc:i.name
+        o.lower <- lc:i.name
+      }
+    `;
 
     const schema = buildSchema(/* GraphQL */ `
       type Query {

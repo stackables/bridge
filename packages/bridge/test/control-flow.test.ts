@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { BridgeAbortError, BridgePanicError } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // throw control flow
@@ -15,7 +16,7 @@ import { tools } from "./utils/bridge-tools.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("throw control flow", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Throw.test {
@@ -95,7 +96,7 @@ regressionTest("throw control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("panic control flow", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Panic.test {
@@ -170,7 +171,7 @@ regressionTest("panic control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("continue and break in arrays", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge ContinueSkip.items {
@@ -393,7 +394,7 @@ regressionTest("continue and break in arrays", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("AbortSignal control flow", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Abort.test {

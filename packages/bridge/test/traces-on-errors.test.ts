@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 import { BridgeRuntimeError } from "@stackables/bridge-core";
+import { bridge } from "@stackables/bridge";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Traces on errors
@@ -12,30 +13,30 @@ import { BridgeRuntimeError } from "@stackables/bridge-core";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("traces on errors", {
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.chainedFailure {
-  with test.multitool as g
-  with test.multitool as f
-  with input as i
-  with output as o
+    bridge Query.chainedFailure {
+      with test.multitool as g
+      with test.multitool as f
+      with input as i
+      with output as o
 
-  g <- i.good
-  f <- i.bad
-  f.dep <- g.greeting
-  o.result <- f
-}
+      g <- i.good
+      f <- i.bad
+      f.dep <- g.greeting
+      o.result <- f
+    }
 
-bridge Query.soloFailure {
-  with test.multitool as f
-  with input as i
-  with output as o
+    bridge Query.soloFailure {
+      with test.multitool as f
+      with input as i
+      with output as o
 
-  f <- i.bad
-  o.result <- f
-}
-`,
+      f <- i.bad
+      o.result <- f
+    }
+  `,
   tools,
   scenarios: {
     "Query.chainedFailure": {

@@ -1,4 +1,5 @@
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Memoized loop-scoped tools — caching, isolation, dedup
@@ -7,7 +8,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("memoized loop-scoped tools - data correctness", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.singleMemoize {
@@ -158,7 +159,7 @@ regressionTest("memoized loop-scoped tools - data correctness", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("define blocks with memoized tools in loops", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     define formatProfile {

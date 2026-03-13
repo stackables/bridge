@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { BridgePanicError } from "../src/index.ts";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ── Basic ternary: ref + literal branches ─────────────────────────────────
 
 regressionTest("ternary: basic + literal branches", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Ternary.basic {
@@ -37,7 +38,7 @@ regressionTest("ternary: basic + literal branches", {
 // ── Expression condition ──────────────────────────────────────────────────
 
 regressionTest("ternary: expression condition", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Ternary.expression {
@@ -66,7 +67,7 @@ regressionTest("ternary: expression condition", {
 // ── Fallbacks ─────────────────────────────────────────────────────────────
 
 regressionTest("ternary: fallbacks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Ternary.literalFallback {
@@ -169,7 +170,7 @@ regressionTest("ternary: fallbacks", {
 // ── Tool branches (lazy evaluation) ───────────────────────────────────────
 
 regressionTest("ternary: tool branches (lazy evaluation)", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Ternary.toolBranches {
@@ -212,7 +213,7 @@ regressionTest("ternary: tool branches (lazy evaluation)", {
 // ── Ternary in array mapping ──────────────────────────────────────────
 
 regressionTest("ternary: array element mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.products {
@@ -278,7 +279,7 @@ regressionTest("ternary: array element mapping", {
 // ── Alias ternary: geo + panic gate ───────────────────────────────────
 
 regressionTest("alias ternary: panic gate on age check", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.location {
@@ -319,7 +320,7 @@ regressionTest("alias ternary: panic gate on age check", {
 // ── Alias ternary: fallback variants ──────────────────────────────────
 
 regressionTest("alias ternary: fallback variants", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge AliasTernary.literalFallback {

@@ -2,6 +2,24 @@ import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 import { BridgeRuntimeError } from "@stackables/bridge-core";
+import { bridge } from "@stackables/bridge";
+
+/**
+ * Returns the source text segment that would be underlined with ^^^^^ carets
+ * in the formatted error output.  Uses the `bridgeLoc` + `bridgeSource`
+ * attached to the error by the execution engine.
+ */
+function locatedSegment(
+  err: BridgeRuntimeError & { bridgeSource?: string },
+): string {
+  const loc = err.bridgeLoc;
+  const source = err.bridgeSource;
+  if (!loc || !source) return "<no source location>";
+  const line = source.split("\n")[loc.startLine - 1] ?? "";
+  return loc.endLine === loc.startLine
+    ? line.slice(loc.startColumn - 1, loc.endColumn)
+    : line.slice(loc.startColumn - 1);
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Tool error location
@@ -16,60 +34,60 @@ import { BridgeRuntimeError } from "@stackables/bridge-core";
 // ── Non-timeout tests ───────────────────────────────────────────────────────
 
 regressionTest("tool error location", {
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.basicError {
-  with test.multitool as api
-  with input as i
-  with output as o
+    bridge Query.basicError {
+      with test.multitool as api
+      with input as i
+      with output as o
 
-  api <- i
-  o.result <- api
-}
+      api <- i
+      o.result <- api
+    }
 
-bridge Query.outputWire {
-  with test.multitool as api
-  with input as i
-  with output as o
+    bridge Query.outputWire {
+      with test.multitool as api
+      with input as i
+      with output as o
 
-  api <- i
-  o.result <- api.body
-}
+      api <- i
+      o.result <- api.body
+    }
 
-bridge Query.chainError {
-  with test.multitool as api
-  with test.multitool as e
-  with input as i
-  with output as o
+    bridge Query.chainError {
+      with test.multitool as api
+      with test.multitool as e
+      with input as i
+      with output as o
 
-  api <- i
-  e <- api
-  o.result <- e
-}
+      api <- i
+      e <- api
+      o.result <- e
+    }
 
-tool apiDef from test.multitool {
-  ._error = "Failed to fetch"
-}
+    tool apiDef from test.multitool {
+      ._error = "Failed to fetch"
+    }
 
-bridge Query.toolDefError {
-  with apiDef
-  with input as i
-  with output as o
+    bridge Query.toolDefError {
+      with apiDef
+      with input as i
+      with output as o
 
-  apiDef.path <- i.path
-  o.result <- apiDef.body
-}
+      apiDef.path <- i.path
+      o.result <- apiDef.body
+    }
 
-bridge Query.syncError {
-  with test.sync.multitool as s
-  with input as i
-  with output as o
+    bridge Query.syncError {
+      with test.sync.multitool as s
+      with input as i
+      with output as o
 
-  s <- i
-  o.result <- s
-}
-`,
+      s <- i
+      o.result <- s
+    }
+  `,
   tools,
   scenarios: {
     "Query.basicError": {
@@ -90,8 +108,8 @@ bridge Query.syncError {
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
           assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-          // o.result <- api.body is the wire that pulls from the errored tool
-          assert.equal(err.bridgeLoc!.startLine, 19);
+          // The caret underlines the `api.body` source reference in `o.result <- api.body`
+          assert.equal(locatedSegment(err), "api.body");
         },
         // Error scenarios: the tool always throws so no traces are guaranteed
         assertTraces: (t) => assert.ok(t.length >= 0),
@@ -103,12 +121,8 @@ bridge Query.syncError {
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
           assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-          // e <- api is the closest wire pulling from the errored tool (not o.result <- e)
-          assert.equal(
-            err.bridgeLoc!.startLine,
-            29,
-            `Expected error on line 29 (e <- api), got line ${err.bridgeLoc!.startLine}`,
-          );
+          // The caret underlines `api` in `e <- api`, not `e` in `o.result <- e`
+          assert.equal(locatedSegment(err), "api");
         },
         // Error scenarios: the tool always throws so no traces are guaranteed
         assertTraces: (t) => assert.ok(t.length >= 0),
@@ -148,31 +162,31 @@ bridge Query.syncError {
 
 regressionTest("timeout error location", {
   toolTimeoutMs: 200,
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.timeout {
-  with test.async.multitool as api
-  with input as i
-  with output as o
+    bridge Query.timeout {
+      with test.async.multitool as api
+      with input as i
+      with output as o
 
-  api <- i
-  o.result <- api.body
-}
+      api <- i
+      o.result <- api.body
+    }
 
-tool apiDef from test.async.multitool {
-  ._delay = 500
-}
+    tool apiDef from test.async.multitool {
+      ._delay = 500
+    }
 
-bridge Query.timeoutToolDef {
-  with apiDef
-  with input as i
-  with output as o
+    bridge Query.timeoutToolDef {
+      with apiDef
+      with input as i
+      with output as o
 
-  apiDef.path <- i.path
-  o.result <- apiDef.body
-}
-`,
+      apiDef.path <- i.path
+      o.result <- apiDef.body
+    }
+  `,
   tools,
   scenarios: {
     "Query.timeout": {

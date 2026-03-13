@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { BridgeLanguageService } from "../src/index.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ── getDiagnostics ─────────────────────────────────────────────────────────
 
@@ -26,25 +27,29 @@ describe("BridgeLanguageService.getDiagnostics", () => {
 
   test("valid bridge has no error diagnostics", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
+    svc.update(bridge`
+      version 1.5
 
-bridge Query.getCity {
-  with input as i
-  with output as o
+      bridge Query.getCity {
+        with input as i
+        with output as o
 
-  o.name <- i.query
-}`);
+        o.name <- i.query
+      }
+    `);
     const errors = svc.getDiagnostics().filter((d) => d.severity === "error");
     assert.equal(errors.length, 0);
   });
 
   test("unknown std.* ref reports an error diagnostic", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.test {
-  with std.unknownToolXYZ as t
-  with input as i
-  with output as o
-}`);
+    svc.update(bridge`
+      bridge Query.test {
+        with std.unknownToolXYZ as t
+        with input as i
+        with output as o
+      }
+    `);
     const diags = svc.getDiagnostics();
     const errors = diags.filter((d) => d.severity === "error");
     assert.ok(errors.length > 0, "expected an error for the unknown std ref");
@@ -56,11 +61,13 @@ bridge Query.getCity {
 
   test("unknown std.* ref carries correct range", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.test {
-  with std.badTool as t
-  with input as i
-  with output as o
-}`);
+    svc.update(bridge`
+      bridge Query.test {
+        with std.badTool as t
+        with input as i
+        with output as o
+      }
+    `);
     const diags = svc.getDiagnostics();
     const err = diags.find(
       (d) => d.severity === "error" && d.message.includes("std.badTool"),
@@ -72,12 +79,14 @@ bridge Query.getCity {
 
   test("std.* ref on a comment line is not reported", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.test {
-  with input as i
-  with output as o
-  # std.nonExistent is just a comment
-  o.x <- i.x
-}`);
+    svc.update(bridge`
+      bridge Query.test {
+        with input as i
+        with output as o
+        # std.nonExistent is just a comment
+        o.x <- i.x
+      }
+    `);
     const unknownErrors = svc
       .getDiagnostics()
       .filter(
@@ -92,12 +101,14 @@ bridge Query.getCity {
 
   test("versioned std tool exceeding bundled version reports a warning", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.test {
-  with std.httpCall@99.0 as http
-  with input as i
-  with output as o
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.test {
+        with std.httpCall@99.0 as http
+        with input as i
+        with output as o
+      }
+    `);
     const warnings = svc
       .getDiagnostics()
       .filter((d) => d.severity === "warning");
@@ -113,11 +124,13 @@ bridge Query.test {
 
   test("versioned non-std tool does not produce a version warning", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.test {
-  with myApi@2.0 as api
-  with input as i
-  with output as o
-}`);
+    svc.update(bridge`
+      bridge Query.test {
+        with myApi@2.0 as api
+        with input as i
+        with output as o
+      }
+    `);
     const versionWarnings = svc
       .getDiagnostics()
       .filter(
@@ -129,11 +142,13 @@ bridge Query.test {
 
   test("update with empty text after content resets diagnostics", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.test {
-  with std.badRef as t
-  with input as i
-  with output as o
-}`);
+    svc.update(bridge`
+      bridge Query.test {
+        with std.badRef as t
+        with input as i
+        with output as o
+      }
+    `);
     assert.ok(svc.getDiagnostics().length > 0);
     svc.update("   ");
     assert.deepStrictEqual(svc.getDiagnostics(), []);
@@ -254,11 +269,13 @@ describe("BridgeLanguageService.getHover", () => {
 
   test("hover on bridge type name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+      }
+    `);
     // "version 1.5" at line 0; "bridge Query.getCity {" at line 1 — "Query" at char 7
     const hover = svc.getHover({ line: 1, character: 7 });
     assert.ok(hover !== null, "should return hover for bridge type");
@@ -270,11 +287,13 @@ bridge Query.getCity {
 
   test("hover on bridge field name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+      }
+    `);
     // "version 1.5" at line 0; "bridge Query.getCity {" at line 1 — "getCity" at char 13
     const hover = svc.getHover({ line: 1, character: 13 });
     assert.ok(hover !== null, "should return hover for bridge field");
@@ -283,12 +302,14 @@ bridge Query.getCity {
 
   test("bridge hover reports handle and wire count", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output as out
-  out.name <- inp.query
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+        out.name <- inp.query
+      }
+    `);
     const hover = svc.getHover({ line: 1, character: 7 }); // "Query" on line 1
     assert.ok(hover !== null);
     // Should mention handles and wires
@@ -301,12 +322,14 @@ bridge Query.getCity {
     //                          012345678901234567890123456789
     // "  with hereapi.geocode as geo"
     //   char positions: hereapi=7..13, .geocode=14..21, " as "=22..25, geo=26..28
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with hereapi.geocode as geo
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with hereapi.geocode as geo
+        with input as inp
+        with output as out
+      }
+    `);
     const hover = svc.getHover({ line: 2, character: 26 }); // "geo" on line 2
     assert.ok(hover !== null, "should return hover for tool handle");
     assert.ok(hover.content.includes("geo"), hover.content);
@@ -320,12 +343,14 @@ bridge Query.getCity {
     //                          0123456789012345678901234567890123456
     // "  with hereapi.geocode@2.1 as geo"
     //   "geo" at char 30
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with hereapi.geocode@2.1 as geo
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with hereapi.geocode@2.1 as geo
+        with input as inp
+        with output as out
+      }
+    `);
     const hover = svc.getHover({ line: 2, character: 30 }); // "geo" on line 2
     assert.ok(hover !== null, "should return hover for versioned handle");
     assert.ok(hover.content.includes("geo"), hover.content);
@@ -334,11 +359,13 @@ bridge Query.getCity {
 
   test("hover on input handle", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+      }
+    `);
     //                   0         1
     //                   0123456789012345678
     // "  with input as inp" — "inp" at char 16, now on line 2
@@ -350,11 +377,13 @@ bridge Query.getCity {
 
   test("hover on output handle", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+      }
+    `);
     //                    0         1
     //                    01234567890123456789
     // "  with output as out" — "out" at char 17, now on line 3
@@ -366,12 +395,14 @@ bridge Query.getCity {
 
   test("hover on context handle in bridge", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with context as ctx
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with context as ctx
+        with input as inp
+        with output as out
+      }
+    `);
     //                     0         1
     //                     012345678901234567890
     // "  with context as ctx" — "ctx" at char 18, now on line 2
@@ -383,13 +414,15 @@ bridge Query.getCity {
 
   test("hover on const handle in bridge", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-const defaults = "x"
-bridge Query.getCity {
-  with const as consts
-  with input as inp
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      const defaults = "x"
+      bridge Query.getCity {
+        with const as consts
+        with input as inp
+        with output as out
+      }
+    `);
     //                    0         1
     //                    01234567890123456789012
     // "  with const as consts" — "consts" at char 16, now on line 3
@@ -401,10 +434,12 @@ bridge Query.getCity {
 
   test("hover on tool block name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-tool myApi httpCall {
-  with context as ctx
-}`);
+    svc.update(bridge`
+      version 1.5
+      tool myApi httpCall {
+        with context as ctx
+      }
+    `);
     // "tool myApi httpCall {" at line 1 — "myApi" at char 5
     const hover = svc.getHover({ line: 1, character: 5 }); // "myApi"
     assert.ok(hover !== null, "should return hover for tool name");
@@ -414,10 +449,12 @@ tool myApi httpCall {
 
   test("hover on tool block function name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-tool myApi httpCall {
-  with context as ctx
-}`);
+    svc.update(bridge`
+      version 1.5
+      tool myApi httpCall {
+        with context as ctx
+      }
+    `);
     // "tool myApi httpCall {" at line 1 — "httpCall" at char 11
     const hover = svc.getHover({ line: 1, character: 11 }); // "httpCall"
     assert.ok(hover !== null, "should return hover for tool fn name");
@@ -426,10 +463,12 @@ tool myApi httpCall {
 
   test("hover on context dep in tool block", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-tool myApi httpCall {
-  with context as ctx
-}`);
+    svc.update(bridge`
+      version 1.5
+      tool myApi httpCall {
+        with context as ctx
+      }
+    `);
     // "  with context as ctx" on line 2 — "ctx" at char 18
     const hover = svc.getHover({ line: 2, character: 18 }); // "ctx"
     assert.ok(hover !== null, "should return hover for context dep");
@@ -439,10 +478,12 @@ tool myApi httpCall {
 
   test("hover on tool dep (tool kind) in tool block", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-tool childApi httpCall {
-  with parentApi as dep
-}`);
+    svc.update(bridge`
+      version 1.5
+      tool childApi httpCall {
+        with parentApi as dep
+      }
+    `);
     //                   0         1         2
     //                   012345678901234567890123
     // "  with parentApi as dep" on line 2 — "dep" at char 20
@@ -454,11 +495,13 @@ tool childApi httpCall {
 
   test("hover on const dep in tool block", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-const defaults = "x"
-tool myApi httpCall {
-  with const as cfg
-}`);
+    svc.update(bridge`
+      version 1.5
+      const defaults = "x"
+      tool myApi httpCall {
+        with const as cfg
+      }
+    `);
     //                   0         1
     //                   0123456789012345678
     // "  with const as cfg" on line 3 — "cfg" at char 16
@@ -470,8 +513,10 @@ tool myApi httpCall {
 
   test("hover on const instruction name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-const myTimeout = 30`);
+    svc.update(bridge`
+      version 1.5
+      const myTimeout = 30
+    `);
     // "const myTimeout = 30" at line 1 — "myTimeout" at char 6
     const hover = svc.getHover({ line: 1, character: 6 }); // "myTimeout"
     assert.ok(hover !== null, "should return hover for const name");
@@ -482,12 +527,14 @@ const myTimeout = 30`);
 
   test("hover on define block name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-define myShape {
-  with input as inp
-  with output as out
-  out.x <- inp.y
-}`);
+    svc.update(bridge`
+      version 1.5
+      define myShape {
+        with input as inp
+        with output as out
+        out.x <- inp.y
+      }
+    `);
     // "define myShape {" at line 1 — "myShape" at char 7
     const hover = svc.getHover({ line: 1, character: 7 }); // "myShape"
     assert.ok(hover !== null, "should return hover for define name");
@@ -497,12 +544,14 @@ define myShape {
 
   test("hover on define block shows handle and wire counts", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-define myPipe {
-  with input as inp
-  with output as out
-  out.x <- inp.y
-}`);
+    svc.update(bridge`
+      version 1.5
+      define myPipe {
+        with input as inp
+        with output as out
+        out.x <- inp.y
+      }
+    `);
     const hover = svc.getHover({ line: 1, character: 7 }); // "myPipe" at line 1
     assert.ok(hover !== null);
     assert.ok(hover.content.includes("handle"), hover.content);
@@ -511,11 +560,13 @@ define myPipe {
 
   test("hover on unrecognized word returns null", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`bridge Query.getCity {
-  with input as inp
-  with output as out
-  out.name <- inp.query
-}`);
+    svc.update(bridge`
+      bridge Query.getCity {
+        with input as inp
+        with output as out
+        out.name <- inp.query
+      }
+    `);
     // "  out.name <- inp.query" — "query" at char 16
     // "query" is not a handle name, type, field, or anything semantic
     const hover = svc.getHover({ line: 3, character: 16 }); // "query"
@@ -524,11 +575,13 @@ define myPipe {
 
   test("hover on input handle with default name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input
-  with output as out
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input
+        with output as out
+      }
+    `);
     // "  with input" on line 2 — "input" at char 7
     const hover = svc.getHover({ line: 2, character: 7 }); // "input"
     assert.ok(hover !== null, "should hover on default input handle");
@@ -537,11 +590,13 @@ bridge Query.getCity {
 
   test("hover on output handle with default name", () => {
     const svc = new BridgeLanguageService();
-    svc.update(`version 1.5
-bridge Query.getCity {
-  with input as inp
-  with output
-}`);
+    svc.update(bridge`
+      version 1.5
+      bridge Query.getCity {
+        with input as inp
+        with output
+      }
+    `);
     // "  with output" on line 3 — "output" at char 7
     const hover = svc.getHover({ line: 3, character: 7 }); // "output"
     assert.ok(hover !== null, "should hover on default output handle");

@@ -10,21 +10,24 @@ import {
   TraceCollector,
 } from "../src/index.ts";
 import { coerceConstant, setNested } from "../src/tree-utils.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Step 1: Tool timeout
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("engine hardening: tool timeout", () => {
-  const bridgeText = `version 1.5
-bridge Query.test {
-  with slow as s
-  with input as i
-  with output as o
+  const bridgeText = bridge`
+    version 1.5
+    bridge Query.test {
+      with slow as s
+      with input as i
+      with output as o
 
-  s.q <- i.q
-  o.result <- s.data
-}`;
+      s.q <- i.q
+      o.result <- s.data
+    }
+  `;
 
   test("tool that resolves within timeout succeeds", async () => {
     const tools = {
@@ -88,15 +91,17 @@ bridge Query.test {
   });
 
   test("BridgeTimeoutError is catchable by error boundaries", async () => {
-    const bridgeTextCatch = `version 1.5
-bridge Query.test {
-  with slow as s
-  with input as i
-  with output as o
+    const bridgeTextCatch = bridge`
+      version 1.5
+      bridge Query.test {
+        with slow as s
+        with input as i
+        with output as o
 
-  s.q <- i.q
-  o.result <- s.data catch "fallback"
-}`;
+        s.q <- i.q
+        o.result <- s.data catch "fallback"
+      }
+    `;
     const tools = {
       slow: () => new Promise(() => {}),
     };
@@ -177,17 +182,19 @@ describe("engine hardening: bounded clone", () => {
 
 describe("engine hardening: abort discipline", () => {
   test("aborting mid-execution halts subsequent tool calls", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with first as f
-  with second as s
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with first as f
+        with second as s
+        with input as i
+        with output as o
 
-  f.q <- i.q
-  s.q <- f.result
-  o.result <- s.data
-}`;
+        f.q <- i.q
+        s.q <- f.result
+        o.result <- s.data
+      }
+    `;
     const ac = new AbortController();
     let secondCalled = false;
     const tools = {
@@ -228,15 +235,17 @@ bridge Query.test {
   });
 
   test("pre-aborted signal throws immediately", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with api as a
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with api as a
+        with input as i
+        with output as o
 
-  a.q <- i.q
-  o.result <- a.data
-}`;
+        a.q <- i.q
+        o.result <- a.data
+      }
+    `;
     const ac = new AbortController();
     ac.abort(); // pre-abort
     const tools = {
@@ -366,13 +375,15 @@ describe("engine hardening: setNested primitive guard", () => {
 
 describe("engine hardening: configurable maxDepth", () => {
   test("custom maxDepth is respected", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.q
-}`;
+        o.result <- i.q
+      }
+    `;
     const doc = parseBridge(bridgeText);
     // Should work with default maxDepth
     const { data } = await executeBridge({
@@ -387,15 +398,17 @@ bridge Query.test {
   test("low maxDepth causes BridgePanicError on deep nesting", async () => {
     // Array mapping creates shadow trees via shadow(), incrementing depth.
     // With maxDepth: 0, the shadow for the array element (depth 1) exceeds the limit.
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o <- i.items[] as el {
-    .val <- el.v
-  }
-}`;
+        o <- i.items[] as el {
+          .val <- el.v
+        }
+      }
+    `;
     const doc = parseBridge(bridgeText);
     await assert.rejects(
       () =>

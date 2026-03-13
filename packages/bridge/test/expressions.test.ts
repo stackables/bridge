@@ -1,10 +1,11 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ── Execution tests (regressionTest) ────────────────────────────────────────
 
 regressionTest("expressions: execution", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.multiply {
@@ -163,7 +164,7 @@ regressionTest("expressions: execution", {
 // ── Operator precedence tests (regressionTest) ──────────────────────────────
 
 regressionTest("expressions: operator precedence", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.addMul {
@@ -220,7 +221,7 @@ regressionTest("expressions: operator precedence", {
 // ── Safe flag propagation in expressions (regressionTest) ───────────────────
 
 regressionTest("safe flag propagation in expressions", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.safeCompare {
@@ -328,7 +329,7 @@ regressionTest("safe flag propagation in expressions", {
 // ── String comparison and array mapping ─────────────────────────────────────
 
 regressionTest("expressions: string comparison and array mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.check {
@@ -393,7 +394,7 @@ regressionTest("expressions: string comparison and array mapping", {
 // ── Catch error fallback ────────────────────────────────────────────────────
 
 regressionTest("expressions: catch error fallback", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.convert {
@@ -425,7 +426,7 @@ regressionTest("expressions: catch error fallback", {
 // ── Boolean logic: and/or ───────────────────────────────────────────────────
 
 regressionTest("boolean logic: and/or end-to-end", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.andExpr {
@@ -468,7 +469,7 @@ regressionTest("boolean logic: and/or end-to-end", {
 // ── Parenthesized boolean expressions ───────────────────────────────────────
 
 regressionTest("parenthesized boolean expressions: end-to-end", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.aOrBandC {
@@ -525,7 +526,7 @@ regressionTest("parenthesized boolean expressions: end-to-end", {
 // ── condAnd / condOr with synchronous tools ─────────────────────────────────
 
 regressionTest("condAnd / condOr with synchronous tools", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.syncAnd {
@@ -586,7 +587,7 @@ regressionTest("condAnd / condOr with synchronous tools", {
 // ── Safe flag on right operand expressions ──────────────────────────────────
 
 regressionTest("safe flag on right operand expressions", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.safeRightAnd {
@@ -634,7 +635,7 @@ regressionTest("safe flag on right operand expressions", {
 // ── Short-circuit data correctness ──────────────────────────────────────────
 
 regressionTest("and/or short-circuit data correctness", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.andBehavior {

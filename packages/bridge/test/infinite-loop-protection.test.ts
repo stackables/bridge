@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Circular dependency detection
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("circular dependency detection", {
-  bridge: `
+  bridge: bridge`
     version 1.5
     bridge Query.loop {
       with test.multitool as a
@@ -39,7 +40,7 @@ regressionTest("circular dependency detection", {
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("infinite loop protection: array mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge ArrayMap.basic {
@@ -68,7 +69,7 @@ regressionTest("infinite loop protection: array mapping", {
 });
 
 regressionTest("infinite loop protection: non-circular chain", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Chain.normal {

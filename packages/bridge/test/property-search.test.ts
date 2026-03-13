@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Property search — chained tools, array mapping, pipe syntax
@@ -43,7 +44,7 @@ const propertyTools: Record<string, any> = {
 };
 
 regressionTest("property search (.bridge file)", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.propertySearch {

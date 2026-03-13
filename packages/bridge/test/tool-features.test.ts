@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tool features — extends chains, context pull, tool-to-tool dependencies,
@@ -14,7 +15,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ── 1. Missing tool ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: missing tool", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.missing {
@@ -40,7 +41,7 @@ regressionTest("tool features: missing tool", {
 // ── 2. Extends chain ────────────────────────────────────────────────────────
 
 regressionTest("tool features: extends chain", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool parentTool from baseFn {
@@ -100,7 +101,7 @@ regressionTest("tool features: extends chain", {
 // ── 3. Context pull ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: context pull", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool authApi from apiImpl {
@@ -138,7 +139,7 @@ regressionTest("tool features: context pull", {
 // ── 4. Tool-to-tool dependency ──────────────────────────────────────────────
 
 regressionTest("tool features: tool-to-tool dependency", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool authProvider from authFn {
@@ -213,7 +214,7 @@ regressionTest("tool features: tool-to-tool dependency", {
 // ── 5. Pipe operator (basic) ────────────────────────────────────────────────
 
 regressionTest("tool features: pipe operator", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.pipeBasic {
@@ -241,7 +242,7 @@ regressionTest("tool features: pipe operator", {
 // ── 6. Pipe with extra tool params ──────────────────────────────────────────
 
 regressionTest("tool features: pipe with extra ToolDef params", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool convertToEur from currencyConverter {
@@ -299,7 +300,7 @@ regressionTest("tool features: pipe with extra ToolDef params", {
 // ── 7. Pipe forking ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: pipe forking", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool double from doubler
@@ -330,7 +331,7 @@ regressionTest("tool features: pipe forking", {
 // ── 8. Named pipe input field ───────────────────────────────────────────────
 
 regressionTest("tool features: named pipe input field", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool divide from divider

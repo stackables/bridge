@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scope & edge cases — nested scopes, tool extends, array indices,
@@ -11,7 +12,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ── 1. Nested shadow scope chain ────────────────────────────────────────────
 
 regressionTest("nested shadow scope chain", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.plan {
@@ -140,7 +141,7 @@ regressionTest("nested shadow scope chain", {
 // ── 2. Tool extends: duplicate target override ──────────────────────────────
 
 regressionTest("tool extends with duplicate target override", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool base from myTool {
@@ -212,7 +213,7 @@ const mockHttpCall = async () => ({
 });
 
 regressionTest("nested array-in-array mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool trainApi from httpCall {

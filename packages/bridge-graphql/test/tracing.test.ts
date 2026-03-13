@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 import type { ToolTrace } from "@stackables/bridge-core";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { createGateway } from "./utils/gateway.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tracing / Observability
@@ -54,18 +55,20 @@ async function execute(
 
 describe("tracing: basics", () => {
   test("traces are returned when trace is enabled", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with geocoder as g
+        with input as i
+        with output as o
 
-g.q <- i.q
-o.label <- g.label
+      g.q <- i.q
+      o.label <- g.label
 
-}`;
+      }
+    `;
     const { data, traces } = await execute(
-      bridge,
+      instr,
       `{ lookup(q: "Berlin") { label } }`,
       { geocoder: async () => ({ label: "Berlin, DE" }) },
     );
@@ -81,17 +84,19 @@ o.label <- g.label
   });
 
   test("no traces when tracing is disabled (default)", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with geocoder as g
+        with input as i
+        with output as o
 
-g.q <- i.q
-o.label <- g.label
+      g.q <- i.q
+      o.label <- g.label
 
-}`;
-    const instructions = parseBridge(bridge);
+      }
+    `;
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: { geocoder: async () => ({ label: "X" }) },
       // trace: "off" (default)
@@ -113,19 +118,21 @@ o.label <- g.label
 
 describe("tracing: call order", () => {
   test("traces record sequential order for || chains", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with primary as p
+        with backup as b
+        with input as i
+        with output as o
 
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
+      p.q <- i.q
+      b.q <- i.q
+      o.label <- p.label || b.label
 
-}`;
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      }
+    `;
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       primary: async () => ({ label: null }),
       backup: async () => ({ label: "B" }),
     });
@@ -140,19 +147,21 @@ o.label <- p.label || b.label
   });
 
   test("traces show short-circuit: backup not called when primary succeeds", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with primary as p
+        with backup as b
+        with input as i
+        with output as o
 
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
+      p.q <- i.q
+      b.q <- i.q
+      o.label <- p.label || b.label
 
-}`;
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      }
+    `;
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       primary: async () => ({ label: "P" }),
       backup: async () => ({ label: "B" }),
     });
@@ -166,18 +175,20 @@ o.label <- p.label || b.label
 
 describe("tracing: errors", () => {
   test("traces capture error message on tool failure", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with geocoder as g
+        with input as i
+        with output as o
 
-g.q <- i.q
-o.label <- g.label
+      g.q <- i.q
+      o.label <- g.label
 
-}`;
+      }
+    `;
     // The tool throws — the GQL query will error, but traces should still be captured
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
         geocoder: async () => {
@@ -200,19 +211,21 @@ o.label <- g.label
   });
 
   test("traces capture both erroring and catch fallback tool", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with fallback as f
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with primary as p
+        with fallback as f
+        with input as i
+        with output as o
 
-p.q <- i.q
-f.q <- i.q
-o.label <- p.label catch f.label
+      p.q <- i.q
+      f.q <- i.q
+      o.label <- p.label catch f.label
 
-}`;
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      }
+    `;
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       primary: async () => {
         throw new Error("boom");
       },
@@ -231,21 +244,23 @@ o.label <- p.label catch f.label
 
 describe("tracing: multi-tool", () => {
   test("multiple independent tools are all traced", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with alpha as a
-  with beta as b
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with alpha as a
+        with beta as b
+        with input as i
+        with output as o
 
-a.q <- i.q
-b.q <- i.q
-o.label <- a.label
-o.score <- b.score
+      a.q <- i.q
+      b.q <- i.q
+      o.label <- a.label
+      o.score <- b.score
 
-}`;
+      }
+    `;
     const { data, traces } = await execute(
-      bridge,
+      instr,
       `{ lookup(q: "x") { label score } }`,
       {
         alpha: async () => ({ label: "A" }),
@@ -261,23 +276,25 @@ o.score <- b.score
   });
 
   test("trace inputs reflect bridge wire resolution", async () => {
-    const bridge = `version 1.5
+    const instr = bridge`
+      version 1.5
 
-const limits = { "limit": 5 }
+      const limits = { "limit": 5 }
 
-bridge Query.lookup {
-  with geocoder as g
-  with const as c
-  with input as i
-  with output as o
+      bridge Query.lookup {
+        with geocoder as g
+        with const as c
+        with input as i
+        with output as o
 
-g.limit <- c.limits.limit
-g.q <- i.q
-o.label <- g.label
+      g.limit <- c.limits.limit
+      g.q <- i.q
+      o.label <- g.label
 
-}`;
+      }
+    `;
     const { traces } = await execute(
-      bridge,
+      instr,
       `{ lookup(q: "Berlin") { label } }`,
       { geocoder: async (input: any) => ({ label: input.q }) },
     );
@@ -292,29 +309,31 @@ o.label <- g.label
 
 describe("tracing: tool-dep (tool blocks)", () => {
   test("tool block calls are traced with fn name", async () => {
-    const bridge = `version 1.5
-tool geocoder from httpCall {
-  .baseUrl = "https://api.example.com"
-  .method = "GET"
-  .path = "/geocode"
+    const instr = bridge`
+      version 1.5
+      tool geocoder from httpCall {
+        .baseUrl = "https://api.example.com"
+        .method = "GET"
+        .path = "/geocode"
 
-}
+      }
 
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+      bridge Query.lookup {
+        with geocoder as g
+        with input as i
+        with output as o
 
-g.q <- i.q
-o.label <- g.label
+      g.q <- i.q
+      o.label <- g.label
 
-}`;
+      }
+    `;
     const mockHttpCall = async (input: any) => ({
       label: `resolved-${input.q}`,
     });
 
     const { data, traces } = await execute(
-      bridge,
+      instr,
       `{ lookup(q: "Berlin") { label } }`,
       { httpCall: mockHttpCall },
     );
@@ -334,17 +353,19 @@ o.label <- g.label
 
 describe("tracing: timing", () => {
   test("durationMs reflects actual tool execution time", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with slow as s
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with slow as s
+        with input as i
+        with output as o
 
-s.q <- i.q
-o.label <- s.label
+      s.q <- i.q
+      o.label <- s.label
 
-}`;
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      }
+    `;
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       slow: async () => {
         await new Promise((r) => setTimeout(r, 50));
         return { label: "done" };
@@ -359,19 +380,21 @@ o.label <- s.label
   });
 
   test("startedAt values are monotonically ordered", async () => {
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with first as f
-  with second as s
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with first as f
+        with second as s
+        with input as i
+        with output as o
 
-f.q <- i.q
-s.q <- i.q
-o.label <- f.label || s.label
+      f.q <- i.q
+      s.q <- i.q
+      o.label <- f.label || s.label
 
-}`;
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+      }
+    `;
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       first: async () => {
         await new Promise((r) => setTimeout(r, 10));
         return { label: null };
@@ -390,19 +413,21 @@ o.label <- f.label || s.label
 // ── Trace levels ──────────────────────────────────────────────────────────
 
 describe("tracing: levels", () => {
-  const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+  const instr = bridge`
+    version 1.5
+    bridge Query.lookup {
+      with geocoder as g
+      with input as i
+      with output as o
 
-g.q <- i.q
-o.label <- g.label
+    g.q <- i.q
+    o.label <- g.label
 
-}`;
+    }
+  `;
 
   test("basic level omits input and output", async () => {
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: { geocoder: async () => ({ label: "X" }) },
       trace: "basic",
@@ -431,7 +456,7 @@ o.label <- g.label
   });
 
   test("basic level still includes error string", async () => {
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
         geocoder: async () => {
@@ -452,7 +477,7 @@ o.label <- g.label
   });
 
   test("full level includes input and output", async () => {
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: { geocoder: async () => ({ label: "Y" }) },
       trace: "full",
@@ -469,7 +494,7 @@ o.label <- g.label
   });
 
   test("true is equivalent to full", async () => {
-    const { traces } = await execute(bridge, `{ lookup(q: "x") { label } }`, {
+    const { traces } = await execute(instr, `{ lookup(q: "x") { label } }`, {
       geocoder: async () => ({ label: "Z" }),
     });
 
@@ -501,57 +526,59 @@ describe("tracing: weather-style diagnostic", () => {
   `;
 
   // Mirrors Weather.bridge: define + bridge + tool blocks
-  const weatherBridge = `version 1.5
+  const weatherBridge = bridge`
+    version 1.5
 
-tool geo from httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .method = "GET"
-  .path = "/search"
-}
+    tool geo from httpCall {
+      .baseUrl = "https://nominatim.openstreetmap.org"
+      .method = "GET"
+      .path = "/search"
+    }
 
-tool weather from httpCall {
-  .baseUrl = "https://api.open-meteo.com/v1"
-  .method = "GET"
-  .path = "/forecast"
-}
+    tool weather from httpCall {
+      .baseUrl = "https://api.open-meteo.com/v1"
+      .method = "GET"
+      .path = "/forecast"
+    }
 
-tool first from std.arr.first
+    tool first from std.arr.first
 
-define weatherByCoordinates {
-  with weather as w
-  with input as i
-  with output as o
+    define weatherByCoordinates {
+      with weather as w
+      with input as i
+      with output as o
 
-  w.latitude  <- i.lat
-  w.longitude <- i.lon
-  w.current_weather = true
+      w.latitude  <- i.lat
+      w.longitude <- i.lon
+      w.current_weather = true
 
-  o.lat         <- i.lat
-  o.lon         <- i.lon
-  o.currentTemp <- w.current_weather.temperature catch 0.0
-  o.timezone    <- w.timezone catch "UTC"
-  o.city        <- i.cityName
-}
+      o.lat         <- i.lat
+      o.lon         <- i.lon
+      o.currentTemp <- w.current_weather.temperature catch 0.0
+      o.timezone    <- w.timezone catch "UTC"
+      o.city        <- i.cityName
+    }
 
-bridge Query.getWeather {
-  with geo as g
-  with weatherByCoordinates as w
-  with first as f
-  with input as i
-  with output as o
-  with std.str.toUpperCase as upper
+    bridge Query.getWeather {
+      with geo as g
+      with weatherByCoordinates as w
+      with first as f
+      with input as i
+      with output as o
+      with std.str.toUpperCase as upper
 
-  g.q <- i.cityName
-  g.format = "json"
+      g.q <- i.cityName
+      g.format = "json"
 
-  f.in <- g
+      f.in <- g
 
-  w.lat  <- i.lat || f?.lat
-  w.lon <- i.lon || f?.lon
-  w.cityName <- upper:i.cityName || f?.display_name || "Unknown"
+      w.lat  <- i.lat || f?.lat
+      w.lon <- i.lon || f?.lon
+      w.cityName <- upper:i.cityName || f?.display_name || "Unknown"
 
-  o <- w
-}`;
+      o <- w
+    }
+  `;
 
   function createWeatherGateway() {
     const callLog: string[] = [];

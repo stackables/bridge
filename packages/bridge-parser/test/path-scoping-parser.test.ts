@@ -6,26 +6,29 @@ import {
 } from "../src/index.ts";
 import type { Bridge, Wire } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
 
 describe("path scoping – parser", () => {
   test("simple scope block with constants", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with output as o
+      bridge Query.test {
+        with output as o
 
-  o.settings {
-    .theme = "dark"
-    .lang = "en"
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.settings {
+          .theme = "dark"
+          .lang = "en"
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(bridge);
-    const constWires = bridge.wires.filter(
+    assert.ok(instr);
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 2);
@@ -42,21 +45,23 @@ bridge Query.test {
   });
 
   test("scope block with pull wires", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.user {
-    .name <- i.name
-    .email <- i.email
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.user {
+          .name <- i.name
+          .email <- i.email
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     assert.equal(pullWires.length, 2);
@@ -71,27 +76,29 @@ bridge Query.test {
   });
 
   test("nested scope blocks", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.body.user {
-    .profile {
-      .id <- i.id
-      .name <- i.name
-    }
-    .settings {
-      .theme = "dark"
-      .notifications = true
-    }
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.body.user {
+          .profile {
+            .id <- i.id
+            .name <- i.name
+          }
+          .settings {
+            .theme = "dark"
+            .notifications = true
+          }
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wires = bridge.wires;
+    const wires = instr.wires;
 
     // Pull wires
     const pullWires = wires.filter(
@@ -125,40 +132,44 @@ bridge Query.test {
   });
 
   test("scope block with pipe operator", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with std.str.toUpperCase as uc
-  with input as i
-  with output as o
+      bridge Query.test {
+        with std.str.toUpperCase as uc
+        with input as i
+        with output as o
 
-  o.profile {
-    .name <- uc:i.name
-    .id <- i.id
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.profile {
+          .name <- uc:i.name
+          .id <- i.id
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
+    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
   });
 
   test("scope block with fallback operators", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.data {
-    .name <- i.name || "anonymous"
-    .value <- i.value catch 0
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.data {
+          .name <- i.name || "anonymous"
+          .value <- i.value catch 0
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
@@ -175,78 +186,86 @@ bridge Query.test {
   });
 
   test("scope block with expression", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.pricing {
-    .cents <- i.dollars * 100
-    .eligible <- i.amount >= 50
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.pricing {
+          .cents <- i.dollars * 100
+          .eligible <- i.amount >= 50
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
+    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
   });
 
   test("scope block with ternary", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result {
-    .tier <- i.isPro ? "premium" : "basic"
-    .price <- i.isPro ? i.proPrice : i.basicPrice
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.result {
+          .tier <- i.isPro ? "premium" : "basic"
+          .price <- i.isPro ? i.proPrice : i.basicPrice
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const ternaryWires = bridge.wires.filter((w) => "cond" in w);
+    const ternaryWires = instr.wires.filter((w) => "cond" in w);
     assert.equal(ternaryWires.length, 2);
   });
 
   test("scope block with string interpolation", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.display {
-    .greeting <- "Hello, {i.name}!"
-    .url <- "/users/{i.id}/profile"
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.display {
+          .greeting <- "Hello, {i.name}!"
+          .url <- "/users/{i.id}/profile"
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(bridge.pipeHandles && bridge.pipeHandles.length > 0);
+    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
   });
 
   test("mixed flat wires and scope blocks", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.method = "POST"
-  o.body {
-    .name <- i.name
-    .value = "test"
-  }
-  o.status = true
-}`);
-    const bridge = result.instructions.find(
+        o.method = "POST"
+        o.body {
+          .name <- i.name
+          .value = "test"
+        }
+        o.status = true
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = bridge.wires.filter(
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 3);
@@ -256,28 +275,30 @@ bridge Query.test {
   });
 
   test("scope block on tool handle", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-tool api from std.httpCall {
-  .baseUrl = "https://api.example.com"
-  .method = POST
-}
+      tool api from std.httpCall {
+        .baseUrl = "https://api.example.com"
+        .method = POST
+      }
 
-bridge Mutation.createUser {
-  with api
-  with input as i
-  with output as o
+      bridge Mutation.createUser {
+        with api
+        with input as i
+        with output as o
 
-  api.body {
-    .name <- i.name
-    .email <- i.email
-  }
-  o.success = true
-}`);
-    const bridge = result.instructions.find(
+        api.body {
+          .name <- i.name
+          .email <- i.email
+        }
+        o.success = true
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "body.name");
@@ -289,33 +310,37 @@ bridge Mutation.createUser {
   });
 
   test("scope blocks produce same wires as flat syntax", () => {
-    const scopedResult = parseBridge(`version 1.5
+    const scopedResult = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.user {
-    .profile {
-      .id <- i.id
-      .name <- i.name
-    }
-    .settings {
-      .theme = "dark"
-    }
-  }
-}`);
+        o.user {
+          .profile {
+            .id <- i.id
+            .name <- i.name
+          }
+          .settings {
+            .theme = "dark"
+          }
+        }
+      }
+    `);
 
-    const flatResult = parseBridge(`version 1.5
+    const flatResult = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.user.profile.id <- i.id
-  o.user.profile.name <- i.name
-  o.user.settings.theme = "dark"
-}`);
+        o.user.profile.id <- i.id
+        o.user.profile.name <- i.name
+        o.user.settings.theme = "dark"
+      }
+    `);
 
     const scopedBridge = scopedResult.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
@@ -328,25 +353,27 @@ bridge Query.test {
   });
 
   test("scope block on tool input wires to tool correctly", () => {
-    const bridge = `version 1.5
+    const instr = bridge`
+      version 1.5
 
-tool api from std.httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .method = GET
-  .path = "/search"
-}
+      tool api from std.httpCall {
+        .baseUrl = "https://nominatim.openstreetmap.org"
+        .method = GET
+        .path = "/search"
+      }
 
-bridge Query.test {
-  with api
-  with input as i
-  with output as o
+      bridge Query.test {
+        with api
+        with input as i
+        with output as o
 
-  api {
-    .q <- i.city
-  }
-  o.success = true
-}`;
-    const parsed = parseBridge(bridge);
+        api {
+          .q <- i.city
+        }
+        o.success = true
+      }
+    `;
+    const parsed = parseBridge(instr);
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
@@ -358,22 +385,24 @@ bridge Query.test {
   });
 
   test("alias inside nested scope blocks parses correctly", () => {
-    const bridge = `version 1.5
+    const instr = bridge`
+      version 1.5
 
-bridge Query.user {
-  with std.str.toUpperCase as uc
-  with input as i
-  with output as o
+      bridge Query.user {
+        with std.str.toUpperCase as uc
+        with input as i
+        with output as o
 
-  o {
-    .info {
-      alias uc:i.name as upper
-      .displayName <- upper
-      .email <- i.email
-    }
-  }
-}`;
-    const parsed = parseBridge(bridge);
+        o {
+          .info {
+            alias uc:i.name as upper
+            .displayName <- upper
+            .email <- i.email
+          }
+        }
+      }
+    `;
+    const parsed = parseBridge(instr);
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
@@ -404,17 +433,19 @@ bridge Query.user {
 
 describe("path scoping – serializer round-trip", () => {
   test("scoped wires round-trip through serializer as flat wires", () => {
-    const input = `version 1.5
+    const input = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.user {
-    .name <- i.name
-    .email <- i.email
-  }
-}`;
+        o.user {
+          .name <- i.name
+          .email <- i.email
+        }
+      }
+    `;
     const parsed = parseBridge(input);
     const serialized = serializeBridge(parsed);
     const reparsed = parseBridge(serialized);
@@ -429,22 +460,24 @@ bridge Query.test {
   });
 
   test("deeply nested scope round-trips correctly", () => {
-    const input = `version 1.5
+    const input = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.body.user {
-    .profile {
-      .id <- i.id
-      .name <- i.name
-    }
-    .settings {
-      .theme = "dark"
-    }
-  }
-}`;
+        o.body.user {
+          .profile {
+            .id <- i.id
+            .name <- i.name
+          }
+          .settings {
+            .theme = "dark"
+          }
+        }
+      }
+    `;
     const parsed = parseBridge(input);
     const serialized = serializeBridge(parsed);
     const reparsed = parseBridge(serialized);
@@ -463,22 +496,24 @@ bridge Query.test {
 
 describe("path scoping – array mapper blocks", () => {
   test("scope block with constant inside array mapper produces element wire", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o <- i.items[] as item {
-    .obj {
-      .etc = 1
-    }
-  }
-}`);
-    const bridge = result.instructions.find(
+        o <- i.items[] as item {
+          .obj {
+            .etc = 1
+          }
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = bridge.wires.filter(
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 1);
@@ -489,22 +524,24 @@ bridge Query.test {
   });
 
   test("scope block with pull wire inside array mapper references iterator", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o <- i.items[] as item {
-    .obj {
-      .name <- item.title
-    }
-  }
-}`);
-    const bridge = result.instructions.find(
+        o <- i.items[] as item {
+          .obj {
+            .name <- item.title
+          }
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "obj.name");
@@ -514,24 +551,26 @@ bridge Query.test {
   });
 
   test("nested scope blocks inside array mapper flatten to correct paths", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o <- i.items[] as item {
-    .a {
-      .b {
-        .c = "deep"
+        o <- i.items[] as item {
+          .a {
+            .b {
+              .c = "deep"
+            }
+          }
+        }
       }
-    }
-  }
-}`);
-    const bridge = result.instructions.find(
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = bridge.wires.filter(
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.equal(constWires.length, 1);
@@ -540,27 +579,29 @@ bridge Query.test {
   });
 
   test("array mapper scope block and flat element lines coexist", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o <- i.items[] as item {
-    .flat <- item.id
-    .nested {
-      .x = 1
-      .y <- item.val
-    }
-  }
-}`);
-    const bridge = result.instructions.find(
+        o <- i.items[] as item {
+          .flat <- item.id
+          .nested {
+            .x = 1
+            .y <- item.val
+          }
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = bridge.wires.filter(
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     assert.ok(
@@ -582,23 +623,25 @@ bridge Query.test {
 
 describe("path scoping – spread syntax parser", () => {
   test("spread in top-level scope block produces root pull wire", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
+      bridge Query.test {
+        with input as i
+        with myTool as t
+        with output as o
 
-  t {
-    ... <- i
-  }
+        t {
+          ... <- i
+        }
 
-  o.result <- t
-}`);
-    const bridge = result.instructions.find(
+        o.result <- t
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
@@ -607,27 +650,29 @@ bridge Query.test {
   });
 
   test("spread combined with constant wires in scope block", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
+      bridge Query.test {
+        with input as i
+        with myTool as t
+        with output as o
 
-  t {
-    ... <- i
-    .extra = "added"
-  }
+        t {
+          ... <- i
+          .extra = "added"
+        }
 
-  o.result <- t
-}`);
-    const bridge = result.instructions.find(
+        o.result <- t
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
-    const constWires = bridge.wires.filter(
+    const constWires = instr.wires.filter(
       (w): w is Extract<Wire, { value: string }> => "value" in w,
     );
     assert.ok(
@@ -641,23 +686,25 @@ bridge Query.test {
   });
 
   test("spread with sub-path source in scope block", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
+      bridge Query.test {
+        with input as i
+        with myTool as t
+        with output as o
 
-  t {
-    ... <- i.profile
-  }
+        t {
+          ... <- i.profile
+        }
 
-  o.result <- t
-}`);
-    const bridge = result.instructions.find(
+        o.result <- t
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
@@ -666,21 +713,23 @@ bridge Query.test {
   });
 
   test("spread in nested scope block produces wire to nested path", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.wrapper {
-    ... <- i
-    .flag = "true"
-  }
-}`);
-    const bridge = result.instructions.find(
+        o.wrapper {
+          ... <- i
+          .flag = "true"
+        }
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const spreadWire = pullWires.find(
@@ -690,23 +739,25 @@ bridge Query.test {
   });
 
   test("spread in deeply nested scope block", () => {
-    const result = parseBridge(`version 1.5
+    const result = parseBridge(bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with myTool as t
-  with output as o
+      bridge Query.test {
+        with input as i
+        with myTool as t
+        with output as o
 
-  t.nested {
-    ... <- i
-  }
+        t.nested {
+          ... <- i
+        }
 
-  o.result <- t
-}`);
-    const bridge = result.instructions.find(
+        o.result <- t
+      }
+    `);
+    const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = bridge.wires.filter(
+    const pullWires = instr.wires.filter(
       (w): w is Extract<Wire, { from: any }> => "from" in w,
     );
     const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");

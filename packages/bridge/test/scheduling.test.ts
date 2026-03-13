@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { ToolTrace } from "@stackables/bridge-core";
 import { tools } from "./utils/bridge-tools.ts";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scheduling — diamond dependencies, tool deduplication, pipe fork
@@ -68,7 +69,7 @@ function assertSequential(
 // after geocode, formatGreeting runs independently in parallel.
 
 regressionTest("scheduling: diamond dependency dedup", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.diamond {
@@ -127,7 +128,7 @@ regressionTest("scheduling: diamond dependency dedup", {
 // timing (two 60ms calls completing in ~60ms, not 120ms).
 
 regressionTest("scheduling: pipe forks run independently", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.pipeFork {
@@ -160,7 +161,7 @@ regressionTest("scheduling: pipe forks run independently", {
 // Execution: i.text → toUpper → normalize (right-to-left)
 
 regressionTest("scheduling: chained pipes execute right-to-left", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.chainedPipe {
@@ -193,7 +194,7 @@ regressionTest("scheduling: chained pipes execute right-to-left", {
 // The tool should be called the minimum number of times necessary.
 
 regressionTest("scheduling: shared tool dedup across pipe and direct", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.sharedDedup {
@@ -238,7 +239,7 @@ regressionTest("scheduling: shared tool dedup across pipe and direct", {
 // ~50ms (not 150ms). Verified via trace startedAt overlap.
 
 regressionTest("scheduling: parallel independent tools", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool apiA from test.async.multitool {
@@ -292,7 +293,7 @@ regressionTest("scheduling: parallel independent tools", {
 // Converted to data correctness only.
 
 regressionTest("scheduling: A||B parallel with C depending on A", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.abParallel {
@@ -346,7 +347,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
 // starts after both finish.
 
 regressionTest("scheduling: tool-level deps resolve in parallel", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool authProvider from test.async.multitool {

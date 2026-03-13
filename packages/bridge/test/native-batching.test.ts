@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { regressionTest, type LogEntry } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 regressionTest("native batching: loop-scoped calls", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.users {
@@ -51,7 +52,7 @@ regressionTest("native batching: loop-scoped calls", {
 });
 
 regressionTest("native batching: traces and logs", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.users {
@@ -119,7 +120,7 @@ regressionTest("native batching: traces and logs", {
 });
 
 regressionTest("native batching: partial failures with catch", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.users {

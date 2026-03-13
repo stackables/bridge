@@ -1,8 +1,9 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 regressionTest("tool self-wire runtime", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     const apiUrl = "https://example.com"

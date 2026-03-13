@@ -4,6 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ── Pipe operator parser tests ──────────────────────────────────────────────
 
@@ -11,28 +12,32 @@ describe("pipe operator – parser", () => {
   test("pipe fails when handle is not declared", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.5
-bridge Query.shout {
-  with input as i
-  with output as o
+        parseBridge(bridge`
+          version 1.5
+          bridge Query.shout {
+            with input as i
+            with output as o
 
-o.loud <- undeclared:i.text
+          o.loud <- undeclared:i.text
 
-}`),
+          }
+        `),
       /Undeclared handle in pipe: "undeclared"/,
     );
   });
 
   test("serializer round-trips pipe syntax", () => {
-    const bridgeText = `version 1.5
-bridge Query.shout {
-  with input as i
-  with toUpper as tu
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.shout {
+        with input as i
+        with toUpper as tu
+        with output as o
 
-o.loud <- tu:i.text
+      o.loud <- tu:i.text
 
-}`;
+      }
+    `;
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("with toUpper as tu"), "handle declaration");
@@ -45,30 +50,32 @@ o.loud <- tu:i.text
   });
 
   test("with <name> shorthand round-trips through serializer", () => {
-    const bridgeText = `version 1.5
-tool convertToEur from currencyConverter {
-  .currency = EUR
+    const bridgeText = bridge`
+      version 1.5
+      tool convertToEur from currencyConverter {
+        .currency = EUR
 
-}
+      }
 
-bridge Query.priceEur {
-  with convertToEur
-  with input as i
-  with output as o
+      bridge Query.priceEur {
+        with convertToEur
+        with input as i
+        with output as o
 
-o.priceEur <- convertToEur:i.amount
+      o.priceEur <- convertToEur:i.amount
 
-}
+      }
 
-bridge Query.priceAny {
-  with convertToEur
-  with input as i
-  with output as o
+      bridge Query.priceAny {
+        with convertToEur
+        with input as i
+        with output as o
 
-convertToEur.currency <- i.currency
-o.priceAny <- convertToEur:i.amount
+      convertToEur.currency <- i.currency
+      o.priceAny <- convertToEur:i.amount
 
-}`;
+      }
+    `;
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("  with convertToEur\n"), "short with form");
@@ -78,19 +85,21 @@ o.priceAny <- convertToEur:i.amount
   });
 
   test("pipe forking serializes and round-trips correctly", () => {
-    const bridgeText = `version 1.5
-tool double from doubler
+    const bridgeText = bridge`
+      version 1.5
+      tool double from doubler
 
 
-bridge Query.doubled {
-  with double as d
-  with input as i
-  with output as o
+      bridge Query.doubled {
+        with double as d
+        with input as i
+        with output as o
 
-o.a <- d:i.a
-o.b <- d:i.b
+      o.a <- d:i.a
+      o.b <- d:i.b
 
-}`;
+      }
+    `;
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("o.a <- d:i.a"), "first fork");
@@ -101,19 +110,21 @@ o.b <- d:i.b
   });
 
   test("named input field round-trips through serializer", () => {
-    const bridgeText = `version 1.5
-tool divide from divider
+    const bridgeText = bridge`
+      version 1.5
+      tool divide from divider
 
 
-bridge Query.converted {
-  with divide as dv
-  with input as i
-  with output as o
+      bridge Query.converted {
+        with divide as dv
+        with input as i
+        with output as o
 
-o.converted <- dv.dividend:i.amount
-dv.divisor <- i.rate
+      o.converted <- dv.dividend:i.amount
+      dv.divisor <- i.rate
 
-}`;
+      }
+    `;
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(
@@ -126,23 +137,25 @@ dv.divisor <- i.rate
   });
 
   test("cache param round-trips through serializer", () => {
-    const bridgeText = `version 1.5
-tool api from httpCall {
-  .cache = 60
-  .baseUrl = "http://mock"
-  .method = GET
-  .path = /search
+    const bridgeText = bridge`
+      version 1.5
+      tool api from httpCall {
+        .cache = 60
+        .baseUrl = "http://mock"
+        .method = GET
+        .path = /search
 
-}
-bridge Query.lookup {
-  with api as a
-  with input as i
-  with output as o
+      }
+      bridge Query.lookup {
+        with api as a
+        with input as i
+        with output as o
 
-a.q <- i.q
-o.answer <- a.value
+      a.q <- i.q
+      o.answer <- a.value
 
-}`;
+      }
+    `;
     const instructions = parseBridge(bridgeText);
     const serialized = serializeBridge(instructions);
     assert.ok(serialized.includes("cache = 60"), "cache param");

@@ -1,10 +1,11 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ── String interpolation execution tests ────────────────────────────────────
 
 regressionTest("string interpolation", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Interpolation.basic {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Resilience — error handling, fallback operators, on error, catch,
@@ -11,7 +12,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ── 1. Const in bridge ──────────────────────────────────────────────────────
 
 regressionTest("resilience: const in bridge", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     const defaults = { "currency": "USD" }
@@ -47,7 +48,7 @@ regressionTest("resilience: const in bridge", {
 // ── 2. Tool on error ────────────────────────────────────────────────────────
 
 regressionTest("resilience: tool on error", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool safeApi from api {
@@ -156,7 +157,7 @@ regressionTest("resilience: tool on error", {
 // ── 3. Wire catch ───────────────────────────────────────────────────────────
 
 regressionTest("resilience: wire catch", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.catchFallback {
@@ -236,7 +237,7 @@ regressionTest("resilience: wire catch", {
 // ── 4. Combined: on error + catch + const ───────────────────────────────────
 
 regressionTest("resilience: combined on error + catch + const", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     const fallbackVal = { "msg": "const-fallback" }
@@ -301,7 +302,7 @@ regressionTest("resilience: combined on error + catch + const", {
 // ── 5. Wire || falsy-fallback ───────────────────────────────────────────────
 
 regressionTest("resilience: wire falsy-fallback (||)", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.falsyLiteral {
@@ -387,7 +388,7 @@ regressionTest("resilience: wire falsy-fallback (||)", {
 // ── 6. Multi-wire null-coalescing ───────────────────────────────────────────
 
 regressionTest("resilience: multi-wire null-coalescing", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.firstWins {
@@ -480,7 +481,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
 // ── 7. || source + catch source ─────────────────────────────────────────────
 
 regressionTest("resilience: || source + catch source (COALESCE)", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.backupWhenNull {

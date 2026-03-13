@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { createGateway } from "./utils/gateway.ts";
+import { bridge } from "@stackables/bridge-core";
 
 const typeDefs = /* GraphQL */ `
   type Query {
@@ -20,22 +21,24 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridgeText = `version 1.5
-bridge Query.geocode {
-  with hereapi.geocode as gc
-  with input as i
-  with output as o
+const bridgeText = bridge`
+  version 1.5
+  bridge Query.geocode {
+    with hereapi.geocode as gc
+    with input as i
+    with output as o
 
-o.search <- i.search
-gc.q <- i.search
-gc.limit <- i.limit
-o.results <- gc.items[] as item {
-  .name <- item.title
-  .lat  <- item.position.lat
-  .lon  <- item.position.lng
-}
+  o.search <- i.search
+  gc.q <- i.search
+  gc.limit <- i.limit
+  o.results <- gc.items[] as item {
+    .name <- item.title
+    .lat  <- item.position.lat
+    .lon  <- item.position.lng
+  }
 
-}`;
+  }
+`;
 
 const cache: Record<string, any> = {
   "Berlin|10": {
@@ -136,21 +139,23 @@ describe("executeGraph", () => {
   });
 
   test("versioned handle resolves and executes normally", async () => {
-    const versionedBridge = `version 1.5
-bridge Query.geocode {
-  with hereapi.geocode@2.1 as gc
-  with input as i
-  with output as o
+    const versionedBridge = bridge`
+      version 1.5
+      bridge Query.geocode {
+        with hereapi.geocode@2.1 as gc
+        with input as i
+        with output as o
 
-  o.search <- i.search
-  gc.q <- i.search
-  gc.limit <- i.limit
-  o.results <- gc.items[] as item {
-    .name <- item.title
-    .lat  <- item.position.lat
-    .lon  <- item.position.lng
-  }
-}`;
+        o.search <- i.search
+        gc.q <- i.search
+        gc.limit <- i.limit
+        o.results <- gc.items[] as item {
+          .name <- item.title
+          .lat  <- item.position.lat
+          .lon  <- item.position.lng
+        }
+      }
+    `;
     const instructions = parseBridge(versionedBridge);
     // Provide the versioned tool key to satisfy @2.1, plus the base tool
     const versionedTools = {
@@ -184,17 +189,19 @@ describe("executeGraph: scalar return types (JSONObject / JSON)", () => {
       }
     `;
 
-    const scalarBridge = `version 1.5
-bridge Query.greet {
-  with std.str.toUpperCase as uc
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
+    const scalarBridge = bridge`
+      version 1.5
+      bridge Query.greet {
+        with std.str.toUpperCase as uc
+        with std.str.toLowerCase as lc
+        with input as i
+        with output as o
 
-  o.message <- i.name
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`;
+        o.message <- i.name
+        o.upper <- uc:i.name
+        o.lower <- lc:i.name
+      }
+    `;
 
     const instructions = parseBridge(scalarBridge);
     const gateway = createGateway(scalarTypeDefs, instructions);
@@ -218,15 +225,17 @@ bridge Query.greet {
       }
     `;
 
-    const scalarBridge = `version 1.5
-bridge Query.fetchData {
-  with myApi as api
-  with input as i
-  with output as o
+    const scalarBridge = bridge`
+      version 1.5
+      bridge Query.fetchData {
+        with myApi as api
+        with input as i
+        with output as o
 
-  api.id <- i.id
-  o <- api
-}`;
+        api.id <- i.id
+        o <- api
+      }
+    `;
 
     const instructions = parseBridge(scalarBridge);
     const gateway = createGateway(scalarTypeDefs, instructions, {
@@ -256,13 +265,15 @@ bridge Query.fetchData {
       }
     `;
 
-    const scalarBridge = `version 1.5
-bridge Query.info {
-  with input as i
-  with output as o
+    const scalarBridge = bridge`
+      version 1.5
+      bridge Query.info {
+        with input as i
+        with output as o
 
-  o.greeting <- i.name
-}`;
+        o.greeting <- i.name
+      }
+    `;
 
     const instructions = parseBridge(scalarBridge);
     const gateway = createGateway(scalarTypeDefs, instructions);
@@ -284,16 +295,18 @@ bridge Query.info {
       }
     `;
 
-    const scalarBridge = `version 1.5
-bridge Query.items {
-  with myApi as api
-  with output as o
+    const scalarBridge = bridge`
+      version 1.5
+      bridge Query.items {
+        with myApi as api
+        with output as o
 
-  o <- api.results[] as item {
-    .name <- item.title
-    .score <- item.value
-  }
-}`;
+        o <- api.results[] as item {
+          .name <- item.title
+          .score <- item.value
+        }
+      }
+    `;
 
     const instructions = parseBridge(scalarBridge);
     const gateway = createGateway(scalarTypeDefs, instructions, {
@@ -325,17 +338,19 @@ bridge Query.items {
       }
     `;
 
-    const scalarBridge = `version 1.5
-bridge Query.catalog {
-  with api as src
-  with output as o
+    const scalarBridge = bridge`
+      version 1.5
+      bridge Query.catalog {
+        with api as src
+        with output as o
 
-  o.title <- src.name
-  o.entries <- src.items[] as item {
-    .id <- item.item_id
-    .label <- item.item_name
-  }
-}`;
+        o.title <- src.name
+        o.entries <- src.items[] as item {
+          .id <- item.item_id
+          .label <- item.item_name
+        }
+      }
+    `;
 
     const instructions = parseBridge(scalarBridge);
     const gateway = createGateway(scalarTypeDefs, instructions, {
@@ -386,18 +401,20 @@ describe("executeGraph: per-field error handling", () => {
       }
     `;
 
-    const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+    const instr = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with geocoder as g
+        with input as i
+        with output as o
 
-  g.q <- i.q
-  o.label <- g.label
-  o.score <- g.score
-}`;
+        g.q <- i.q
+        o.label <- g.label
+        o.score <- g.score
+      }
+    `;
 
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
         geocoder: async () => {
@@ -443,19 +460,21 @@ bridge Query.lookup {
       }
     `;
 
-    const bridge = `version 1.5
-bridge Query.good {
-  with output as o
-  o.value = "hello"
-}
+    const instr = bridge`
+      version 1.5
+      bridge Query.good {
+        with output as o
+        o.value = "hello"
+      }
 
-bridge Query.bad {
-  with failing as f
-  with output as o
-  o.value <- f.value
-}`;
+      bridge Query.bad {
+        with failing as f
+        with output as o
+        o.value <- f.value
+      }
+    `;
 
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const gateway = createGateway(typeDefs, instructions, {
       tools: {
         failing: async () => {
@@ -491,14 +510,16 @@ describe("executeGraph: field fallthrough", () => {
       }
     `;
 
-    const bridge = `version 1.5
-bridge Query.bridged {
-  with input as i
-  with output as o
-  o.greeting <- i.name
-}`;
+    const instr = bridge`
+      version 1.5
+      bridge Query.bridged {
+        with input as i
+        with output as o
+        o.greeting <- i.name
+      }
+    `;
 
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     // unbridged has no bridge instruction — should use default resolver
     const { createSchema } = await import("graphql-yoga");
     const { bridgeTransform } = await import("../src/index.ts");
@@ -544,18 +565,20 @@ describe("executeGraph: mutations via GraphQL", () => {
       }
     `;
 
-    const bridgeText = `version 1.5
-bridge Mutation.sendEmail {
-  with sendgrid.send as sg
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Mutation.sendEmail {
+        with sendgrid.send as sg
+        with input as i
+        with output as o
 
-  sg.to <- i.to
-  sg.from <- i.from
-  sg.subject <- i.subject
-  sg.content <- i.body
-  o.messageId <- sg.headers.x-message-id
-}`;
+        sg.to <- i.to
+        sg.from <- i.from
+        sg.subject <- i.subject
+        sg.content <- i.body
+        o.messageId <- sg.headers.x-message-id
+      }
+    `;
 
     const fakeEmailTool = async (_params: Record<string, any>) => ({
       statusCode: 202,
@@ -604,18 +627,20 @@ bridge Mutation.sendEmail {
       }
     `;
 
-    const bridgeText = `version 1.5
-bridge Mutation.sendEmail {
-  with sendgrid.send as sg
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Mutation.sendEmail {
+        with sendgrid.send as sg
+        with input as i
+        with output as o
 
-  sg.to <- i.to
-  sg.from <- i.from
-  sg.subject <- i.subject
-  sg.content <- i.body
-  o.messageId <- sg.headers.x-message-id
-}`;
+        sg.to <- i.to
+        sg.from <- i.from
+        sg.subject <- i.subject
+        sg.content <- i.body
+        o.messageId <- sg.headers.x-message-id
+      }
+    `;
 
     let capturedParams: Record<string, any> = {};
     const capture = async (params: Record<string, any>) => {
@@ -668,19 +693,21 @@ describe("executeGraph: multilevel break/continue in nested arrays", () => {
 
   // continue 2 = skip the outer (category) element
   // break 2    = stop iterating outer (category) array entirely
-  const catalogBridge = `version 1.5
-bridge Query.processCatalog {
-  with context as ctx
-  with output as o
+  const catalogBridge = bridge`
+    version 1.5
+    bridge Query.processCatalog {
+      with context as ctx
+      with output as o
 
-  o <- ctx.catalog[] as cat {
-    .name <- cat.name
-    .items <- cat.items[] as item {
-      .sku <- item.sku ?? continue 2
-      .price <- item.price ?? break 2
+      o <- ctx.catalog[] as cat {
+        .name <- cat.name
+        .items <- cat.items[] as item {
+          .sku <- item.sku ?? continue 2
+          .price <- item.price ?? break 2
+        }
+      }
     }
-  }
-}`;
+  `;
 
   const catalog = [
     // sku present, price present → emitted

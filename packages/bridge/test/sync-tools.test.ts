@@ -1,5 +1,6 @@
 import type { ToolMetadata } from "@stackables/bridge-types";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Sync tool flag — enforcement, optimisation, array maps
@@ -31,7 +32,7 @@ async function asyncTool(input: { q: string }) {
 // ── 1. Enforcement ──────────────────────────────────────────────────────────
 
 regressionTest("sync tool enforcement", {
-  bridge: `
+  bridge: bridge`
     version 1.5
     bridge Query.bad {
       with api as a
@@ -59,7 +60,7 @@ regressionTest("sync tool enforcement", {
 // ── 2. Sync tool execution ──────────────────────────────────────────────────
 
 regressionTest("sync tool execution", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.double {
@@ -170,7 +171,7 @@ const syncEnrich = (input: any) => ({
 (syncEnrich as any).bridge = { sync: true } satisfies ToolMetadata;
 
 regressionTest("sync array map", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.items {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // executeBridge — core language behavior
@@ -13,7 +14,7 @@ import { tools } from "./utils/bridge-tools.ts";
 // ── Object output: chained tools, root passthrough, constants ─────────────
 
 regressionTest("object output: chained tools and passthrough", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.chained {
@@ -77,7 +78,7 @@ regressionTest("object output: chained tools and passthrough", {
 // ── Array output ──────────────────────────────────────────────────────────
 
 regressionTest("array output: root and sub-field mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.arrayRoot {
@@ -165,7 +166,7 @@ regressionTest("array output: root and sub-field mapping", {
 // ── Pipe, alias and ternary inside array blocks ───────────────────────────
 
 regressionTest("array blocks: pipe, alias, and ternary", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.pipeInArray {
@@ -290,7 +291,7 @@ regressionTest("array blocks: pipe, alias, and ternary", {
 // ── Nested structures: scope blocks and nested arrays ─────────────────────
 
 regressionTest("nested structures: scope blocks and nested arrays", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.scopeBlock {
@@ -445,7 +446,7 @@ regressionTest("nested structures: scope blocks and nested arrays", {
 // ── Alias declarations ───────────────────────────────────────────────────
 
 regressionTest("alias: iterator-scoped aliases", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.aliasPipeIter {
@@ -560,7 +561,7 @@ regressionTest("alias: iterator-scoped aliases", {
 });
 
 regressionTest("alias: top-level aliases", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.aliasTopPipe {
@@ -659,7 +660,7 @@ regressionTest("alias: top-level aliases", {
 });
 
 regressionTest("alias: expressions and modifiers", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge AliasOr.test {
@@ -903,7 +904,7 @@ const noTraceTool = (p: any) => ({ y: p.x * 3 });
 (noTraceTool as any).bridge = { sync: true, trace: false };
 
 regressionTest("tracing", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.echo {

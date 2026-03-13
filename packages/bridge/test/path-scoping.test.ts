@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Path scoping — scope blocks, nested scopes, array mapper scoping,
@@ -15,7 +16,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ── 1. Scope block execution — constants ────────────────────────────────────
 
 regressionTest("path scoping: scope block constants", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.scopeConst {
@@ -44,7 +45,7 @@ regressionTest("path scoping: scope block constants", {
 // ── 2. Scope block execution — pull wires ───────────────────────────────────
 
 regressionTest("path scoping: scope block pull wires", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.scopePull {
@@ -78,7 +79,7 @@ regressionTest("path scoping: scope block pull wires", {
 // ── 3. Scope block execution — nested scopes ────────────────────────────────
 
 regressionTest("path scoping: nested scope blocks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.nestedScope {
@@ -118,7 +119,7 @@ regressionTest("path scoping: nested scope blocks", {
 // ── 4. Scope block on tool input ────────────────────────────────────────────
 
 regressionTest("path scoping: scope block on tool input", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.toolInputScope {
@@ -153,7 +154,7 @@ regressionTest("path scoping: scope block on tool input", {
 // ── 5. Alias inside nested scope blocks ─────────────────────────────────────
 
 regressionTest("path scoping: alias inside nested scope", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.aliasInScope {
@@ -193,7 +194,7 @@ regressionTest("path scoping: alias inside nested scope", {
 // ── 6. Array mapper scope blocks ────────────────────────────────────────────
 
 regressionTest("path scoping: array mapper scope blocks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.arrayConst {
@@ -394,7 +395,7 @@ regressionTest("path scoping: array mapper scope blocks", {
 // ── 7. Spread syntax ────────────────────────────────────────────────────────
 
 regressionTest("path scoping: spread syntax", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.spreadBasic {

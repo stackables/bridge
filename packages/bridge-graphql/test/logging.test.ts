@@ -6,6 +6,7 @@ import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { bridgeTransform } from "../src/index.ts";
 import type { Logger } from "@stackables/bridge-core";
+import { bridge } from "@stackables/bridge-core";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Logging
@@ -24,16 +25,18 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const bridge = `version 1.5
-bridge Query.lookup {
-  with geocoder as g
-  with input as i
-  with output as o
+const instr = bridge`
+  version 1.5
+  bridge Query.lookup {
+    with geocoder as g
+    with input as i
+    with output as o
 
-g.q <- i.q
-o.label <- g.label
+  g.q <- i.q
+  o.label <- g.label
 
-}`;
+  }
+`;
 
 function createLogCapture(): Logger & {
   debugMessages: string[];
@@ -59,7 +62,7 @@ function createLogCapture(): Logger & {
 
 describe("logging: basics", () => {
   test("logger.debug is called on successful tool call", async () => {
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const logger = createLogCapture();
     const geocoder = async () => ({ label: "Berlin, DE" });
     geocoder.bridge = { log: { execution: "debug" as const } };
@@ -81,7 +84,7 @@ describe("logging: basics", () => {
   });
 
   test("logger.error is called when a tool throws", async () => {
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const logger = createLogCapture();
     const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
       tools: {
@@ -105,7 +108,7 @@ describe("logging: basics", () => {
 
   test("no output when no logger is provided (default noop)", async () => {
     // Just checks that not providing a logger doesn't throw
-    const instructions = parseBridge(bridge);
+    const instructions = parseBridge(instr);
     const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
       tools: { geocoder: async () => ({ label: "X" }) },
       // no logger
@@ -121,16 +124,18 @@ describe("logging: basics", () => {
   test("logger.warn is called when accessing a named field on an array result", async () => {
     // Bridge accesses .firstName on items[] (an array) without using array mapping.
     // This should trigger the array-access warning path.
-    const arrayBridge = `version 1.5
-bridge Query.lookup {
-  with listTool as l
-  with input as i
-  with output as o
+    const arrayBridge = bridge`
+      version 1.5
+      bridge Query.lookup {
+        with listTool as l
+        with input as i
+        with output as o
 
-l.q <- i.q
-o.label <- l.items.firstName
+      l.q <- i.q
+      o.label <- l.items.firstName
 
-}`;
+      }
+    `;
     const instructions = parseBridge(arrayBridge);
     const warnMessages: string[] = [];
     const logger = {

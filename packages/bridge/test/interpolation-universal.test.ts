@@ -1,5 +1,6 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Universal interpolation — templates combined with other operators
@@ -13,7 +14,7 @@ import { tools } from "./utils/bridge-tools.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("universal interpolation: fallback", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Interp.fallback {
@@ -86,7 +87,7 @@ regressionTest("universal interpolation: fallback", {
 });
 
 regressionTest("universal interpolation: ternary", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Interp.ternary {

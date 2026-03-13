@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { prettyPrintToSource } from "../src/index.ts";
 import { formatSnippet } from "./utils/formatter-test-utils.ts";
+import { bridge } from "@stackables/bridge-core";
 
 /**
  * ============================================================================
@@ -102,12 +103,16 @@ on error {
 
 describe("formatBridge - blank lines", () => {
   test("blank line after version", () => {
-    const input = `version 1.5
-tool geo from std.httpCall`;
-    const expected = `version 1.5
+    const input = bridge`
+      version 1.5
+      tool geo from std.httpCall
+    `;
+    const expected = bridge`
+      version 1.5
 
-tool geo from std.httpCall
-`;
+      tool geo from std.httpCall
+
+    `;
     assert.equal(formatSnippet(input), expected);
   });
 
@@ -223,7 +228,13 @@ describe("prettyPrintToSource - edge cases", () => {
 
 describe("prettyPrintToSource - safety and options", () => {
   test("is idempotent", () => {
-    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
+    const input = bridge`
+      version 1.5
+      bridge Query.test {
+      with input as i
+      o.x<-i.y
+      }
+    `;
     const once = prettyPrintToSource(input);
     const twice = prettyPrintToSource(once);
     assert.equal(twice, once);
@@ -234,8 +245,23 @@ describe("prettyPrintToSource - safety and options", () => {
   });
 
   test("uses tabSize when insertSpaces is true", () => {
-    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
-    const expected = `version 1.5\n\nbridge Query.test {\n    with input as i\n\n    o.x <- i.y\n}\n`;
+    const input = bridge`
+      version 1.5
+      bridge Query.test {
+      with input as i
+      o.x<-i.y
+      }
+    `;
+    const expected = bridge`
+      version 1.5
+
+      bridge Query.test {
+          with input as i
+
+          o.x <- i.y
+      }
+
+    `;
     assert.equal(
       prettyPrintToSource(input, { tabSize: 4, insertSpaces: true }),
       expected,
@@ -243,8 +269,23 @@ describe("prettyPrintToSource - safety and options", () => {
   });
 
   test("uses tabs when insertSpaces is false", () => {
-    const input = `version 1.5\nbridge Query.test {\nwith input as i\no.x<-i.y\n}`;
-    const expected = `version 1.5\n\nbridge Query.test {\n\twith input as i\n\n\to.x <- i.y\n}\n`;
+    const input = bridge`
+      version 1.5
+      bridge Query.test {
+      with input as i
+      o.x<-i.y
+      }
+    `;
+    const expected = bridge`
+      version 1.5
+
+      bridge Query.test {
+      	with input as i
+
+      	o.x <- i.y
+      }
+
+    `;
     assert.equal(
       prettyPrintToSource(input, { tabSize: 4, insertSpaces: false }),
       expected,

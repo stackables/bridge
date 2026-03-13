@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
 import type { Bridge, Wire } from "@stackables/bridge-core";
+import { bridge } from "@stackables/bridge-core";
 
 function getBridge(text: string): Bridge {
   const document = parseBridge(text);
-  const bridge = document.instructions.find(
+  const instr = document.instructions.find(
     (instruction): instruction is Bridge => instruction.kind === "bridge",
   );
-  assert.ok(bridge, "expected a bridge instruction");
-  return bridge;
+  assert.ok(instr, "expected a bridge instruction");
+  return instr;
 }
 
 function assertLoc(wire: Wire | undefined, line: number, column: number): void {
@@ -22,35 +23,41 @@ function assertLoc(wire: Wire | undefined, line: number, column: number): void {
 
 describe("parser source locations", () => {
   it("pull wire loc is populated", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  o.name <- i.user.name
-}`);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.name <- i.user.name
+      }
+    `);
 
-    assertLoc(bridge.wires[0], 5, 3);
+    assertLoc(instr.wires[0], 5, 3);
   });
 
   it("constant wire loc is populated", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with output as o
-  o.name = "Ada"
-}`);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with output as o
+        o.name = "Ada"
+      }
+    `);
 
-    assertLoc(bridge.wires[0], 4, 3);
+    assertLoc(instr.wires[0], 4, 3);
   });
 
   it("ternary wire loc is populated", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  o.name <- i.user ? i.user.name : "Anonymous"
-}`);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.name <- i.user ? i.user.name : "Anonymous"
+      }
+    `);
 
-    const ternaryWire = bridge.wires.find((wire) => "cond" in wire);
+    const ternaryWire = instr.wires.find((wire) => "cond" in wire);
     assertLoc(ternaryWire, 5, 3);
     assert.equal(ternaryWire?.condLoc?.startLine, 5);
     assert.equal(ternaryWire?.condLoc?.startColumn, 13);
@@ -61,36 +68,40 @@ bridge Query.test {
   });
 
   it("desugared template wires inherit the originating source loc", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  o.label <- "Hello {i.name}"
-}`);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.label <- "Hello {i.name}"
+      }
+    `);
 
-    const concatPartWire = bridge.wires.find(
+    const concatPartWire = instr.wires.find(
       (wire) => wire.to.field === "concat",
     );
     assertLoc(concatPartWire, 5, 3);
   });
 
   it("fallback and catch refs carry granular locations", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  alias i.empty.array.error catch i.empty.array.error as clean
-  o.message <- i.empty.array?.error ?? i.empty.array.error catch clean
-}`);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        alias i.empty.array.error catch i.empty.array.error as clean
+        o.message <- i.empty.array?.error ?? i.empty.array.error catch clean
+      }
+    `);
 
-    const aliasWire = bridge.wires.find(
+    const aliasWire = instr.wires.find(
       (wire) => "to" in wire && wire.to.field === "clean",
     );
     assert.ok(aliasWire && "catchLoc" in aliasWire);
     assert.equal(aliasWire.catchLoc?.startLine, 5);
     assert.equal(aliasWire.catchLoc?.startColumn, 35);
 
-    const messageWire = bridge.wires.find(
+    const messageWire = instr.wires.find(
       (wire) => "to" in wire && wire.to.path.join(".") === "message",
     );
     assert.ok(
@@ -105,23 +116,25 @@ bridge Query.test {
   });
 
   it("element scope wires in nested blocks carry source locations", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
-  o.legs <- i.legs[] as s {
-    .destination {
-      .station {
-        .id <- s.arrival.station.id
-        .name <- s.arrival.station.name
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.legs <- i.legs[] as s {
+          .destination {
+            .station {
+              .id <- s.arrival.station.id
+              .name <- s.arrival.station.name
+            }
+            .plannedTime <- s.arrival.arrival
+            .delayMinutes <- s.arrival.delay || 0
+          }
+        }
       }
-      .plannedTime <- s.arrival.arrival
-      .delayMinutes <- s.arrival.delay || 0
-    }
-  }
-}`);
+    `);
 
-    const destinationIdWire = bridge.wires.find(
+    const destinationIdWire = instr.wires.find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.station.id",
@@ -131,7 +144,7 @@ bridge Query.test {
     assert.equal(destinationIdWire.fromLoc?.startLine, 8);
     assert.equal(destinationIdWire.fromLoc?.startColumn, 16);
 
-    const destinationPlannedTimeWire = bridge.wires.find(
+    const destinationPlannedTimeWire = instr.wires.find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.plannedTime",
@@ -143,7 +156,7 @@ bridge Query.test {
     assert.equal(destinationPlannedTimeWire.fromLoc?.startLine, 11);
     assert.equal(destinationPlannedTimeWire.fromLoc?.startColumn, 23);
 
-    const destinationDelayWire = bridge.wires.find(
+    const destinationDelayWire = instr.wires.find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.delayMinutes",

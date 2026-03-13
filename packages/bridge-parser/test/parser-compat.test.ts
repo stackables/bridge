@@ -10,6 +10,7 @@ import {
   parseBridgeChevrotain as parseBridge,
   PARSER_VERSION,
 } from "../src/index.ts";
+import { bridge } from "@stackables/bridge-core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..", "..");
@@ -589,40 +590,48 @@ tool myApi from std.httpCall {
 
 describe("parser — version declaration", () => {
   it("version 1.5 is accepted", () => {
-    const result = parseBridge(`version 1.5
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`);
+    const result = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with output as o
+        o.x = "ok"
+      }
+    `);
     assert.ok(result.instructions.length > 0);
   });
 
   it("version 1.7 is accepted (future minor within same major)", () => {
-    const result = parseBridge(`version 1.7
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`);
+    const result = parseBridge(bridge`
+      version 1.7
+      bridge Query.test {
+        with output as o
+        o.x = "ok"
+      }
+    `);
     assert.ok(result.instructions.length > 0);
   });
 
   it("version 1.12 is accepted", () => {
-    const result = parseBridge(`version 1.12
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`);
+    const result = parseBridge(bridge`
+      version 1.12
+      bridge Query.test {
+        with output as o
+        o.x = "ok"
+      }
+    `);
     assert.ok(result.instructions.length > 0);
   });
 
   it("version 2.0 is rejected (above max supported major)", () => {
     assert.throws(
       () =>
-        parseBridge(`version 2.0
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`),
+        parseBridge(bridge`
+          version 2.0
+          bridge Query.test {
+            with output as o
+            o.x = "ok"
+          }
+        `),
       /major version/i,
     );
   });
@@ -630,31 +639,37 @@ bridge Query.test {
   it("version 0.9 is rejected (below min supported major)", () => {
     assert.throws(
       () =>
-        parseBridge(`version 0.9
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`),
+        parseBridge(bridge`
+          version 0.9
+          bridge Query.test {
+            with output as o
+            o.x = "ok"
+          }
+        `),
       /major version/i,
     );
   });
 
   it("VersionDecl instruction is emitted", () => {
-    const result = parseBridge(`version 1.5
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`);
+    const result = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with output as o
+        o.x = "ok"
+      }
+    `);
     assert.ok(result.version);
     assert.equal(result.version, "1.5");
   });
 
   it("VersionDecl preserves declared version (1.7)", () => {
-    const result = parseBridge(`version 1.7
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`);
+    const result = parseBridge(bridge`
+      version 1.7
+      bridge Query.test {
+        with output as o
+        o.x = "ok"
+      }
+    `);
     assert.ok(result.version);
     assert.equal(result.version, "1.7");
   });
@@ -674,11 +689,13 @@ bridge Query.test {
     // When they differ it would say "1.x – 2.x" — we verify current single-major case
     assert.throws(
       () =>
-        parseBridge(`version 99.0
-bridge Query.test {
-  with output as o
-  o.x = "ok"
-}`),
+        parseBridge(bridge`
+          version 99.0
+          bridge Query.test {
+            with output as o
+            o.x = "ok"
+          }
+        `),
       /This parser supports version 1\.x/,
     );
   });

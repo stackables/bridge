@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Prototype pollution guards
@@ -10,33 +11,33 @@ import { regressionTest } from "./utils/regression.ts";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("prototype pollution – setNested guard", {
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.setProto {
-  with api as a
-  with input as i
-  with output as o
-  a.__proto__ <- i.x
-  o.result <- a.safe
-}
+    bridge Query.setProto {
+      with api as a
+      with input as i
+      with output as o
+      a.__proto__ <- i.x
+      o.result <- a.safe
+    }
 
-bridge Query.setConstructor {
-  with api as a
-  with input as i
-  with output as o
-  a.constructor <- i.x
-  o.result <- a.safe
-}
+    bridge Query.setConstructor {
+      with api as a
+      with input as i
+      with output as o
+      a.constructor <- i.x
+      o.result <- a.safe
+    }
 
-bridge Query.setPrototype {
-  with api as a
-  with input as i
-  with output as o
-  a.prototype <- i.x
-  o.result <- a.safe
-}
-`,
+    bridge Query.setPrototype {
+      with api as a
+      with input as i
+      with output as o
+      a.prototype <- i.x
+      o.result <- a.safe
+    }
+  `,
   tools: { api: async () => ({ safe: "ok" }) },
   scenarios: {
     "Query.setProto": {
@@ -64,21 +65,21 @@ bridge Query.setPrototype {
 });
 
 regressionTest("prototype pollution – pullSingle guard", {
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.pullProto {
-  with api as a
-  with output as o
-  o.result <- a.__proto__
-}
+    bridge Query.pullProto {
+      with api as a
+      with output as o
+      o.result <- a.__proto__
+    }
 
-bridge Query.pullConstructor {
-  with api as a
-  with output as o
-  o.result <- a.constructor
-}
-`,
+    bridge Query.pullConstructor {
+      with api as a
+      with output as o
+      o.result <- a.constructor
+    }
+  `,
   tools: { api: async () => ({ data: "ok" }) },
   scenarios: {
     "Query.pullProto": {
@@ -102,27 +103,27 @@ bridge Query.pullConstructor {
 });
 
 regressionTest("prototype pollution – tool lookup guard", {
-  bridge: `
-version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.toolProto {
-  with foo.__proto__.bar as evil
-  with output as o
-  o.result <- evil.data
-}
+    bridge Query.toolProto {
+      with foo.__proto__.bar as evil
+      with output as o
+      o.result <- evil.data
+    }
 
-bridge Query.toolConstructor {
-  with foo.constructor as evil
-  with output as o
-  o.result <- evil.data
-}
+    bridge Query.toolConstructor {
+      with foo.constructor as evil
+      with output as o
+      o.result <- evil.data
+    }
 
-bridge Query.toolPrototype {
-  with foo.prototype as evil
-  with output as o
-  o.result <- evil.data
-}
-`,
+    bridge Query.toolPrototype {
+      with foo.prototype as evil
+      with output as o
+      o.result <- evil.data
+    }
+  `,
   tools: {
     foo: {
       bar: async () => ({ data: "ok" }),

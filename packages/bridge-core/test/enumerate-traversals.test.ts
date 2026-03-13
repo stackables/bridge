@@ -12,12 +12,13 @@ import type {
   TraversalEntry,
   BridgeDocument,
 } from "@stackables/bridge-core";
+import { bridge } from "@stackables/bridge-core";
 
 function getBridge(source: string): Bridge {
   const doc = parseBridge(source);
-  const bridge = doc.instructions.find((i): i is Bridge => i.kind === "bridge");
-  assert.ok(bridge, "expected a bridge instruction");
-  return bridge;
+  const instr = doc.instructions.find((i): i is Bridge => i.kind === "bridge");
+  assert.ok(instr, "expected a bridge instruction");
+  return instr;
 }
 
 function ids(entries: TraversalEntry[]): string[] {
@@ -28,15 +29,17 @@ function ids(entries: TraversalEntry[]): string[] {
 
 describe("enumerateTraversalIds", () => {
   test("simple pull wire — 1 traversal (primary)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const primaries = entries.filter((e) => e.kind === "primary");
     assert.ok(primaries.length >= 2, "at least 2 primary wires");
     assert.ok(
@@ -46,14 +49,16 @@ bridge Query.demo {
   });
 
   test("constant wire — 1 traversal (const)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with output as o
-  api.mode = "fast"
-  o.result <- api.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with output as o
+        api.mode = "fast"
+        o.result <- api.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const consts = entries.filter((e) => e.kind === "const");
     assert.equal(consts.length, 1);
     assert.ok(consts[0].id.endsWith("/const"));
@@ -62,17 +67,19 @@ bridge Query.demo {
   // ── Fallback chains ───────────────────────────────────────────────────────
 
   test("|| fallback — 2 non-error traversals (primary + fallback)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
@@ -84,15 +91,17 @@ bridge Query.demo {
   });
 
   test("?? fallback — 2 non-error traversals (primary + nullish fallback)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- api.label ?? "default"
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.label <- api.label ?? "default"
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
@@ -103,17 +112,19 @@ bridge Query.demo {
   });
 
   test("|| || — 3 non-error traversals (primary + 2 fallbacks)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label || "fallback"
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label || "fallback"
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1 && !e.error,
     );
@@ -128,15 +139,17 @@ bridge Query.demo {
   // ── Catch ─────────────────────────────────────────────────────────────────
 
   test("catch — 2 traversals (primary + catch)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.lat <- api.lat catch 0
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.lat <- api.lat catch 0
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const latEntries = entries.filter(
       (e) => e.target.includes("lat") && e.target.length === 1,
     );
@@ -148,17 +161,19 @@ bridge Query.demo {
   // ── Problem statement example: || + catch ─────────────────────────────────
 
   test("o <- i.a || i.b catch i.c — 3 traversals", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.result <- a.value || b.value catch i.fallback
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.result <- a.value || b.value catch i.fallback
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const resultEntries = entries.filter(
       (e) => e.target.includes("result") && e.target.length === 1,
     );
@@ -171,17 +186,19 @@ bridge Query.demo {
   // ── Error traversal entries ───────────────────────────────────────────────
 
   test("a.label || b.label — 4 traversals (primary, fallback, primary/error, fallback/error)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -199,17 +216,19 @@ bridge Query.demo {
   });
 
   test("a.label || b?.label — 3 traversals (primary, fallback, primary/error)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b?.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b?.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -225,17 +244,19 @@ bridge Query.demo {
   });
 
   test("a.label || b.label catch 'whatever' — 3 traversals (primary, fallback, catch)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label catch "whatever"
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label catch "whatever"
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -250,17 +271,19 @@ bridge Query.demo {
   });
 
   test("catch with tool ref — catch/error entry added", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label catch b.fallback
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label catch b.fallback
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -275,15 +298,17 @@ bridge Query.demo {
   });
 
   test("simple pull wire — primary + primary/error", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.value
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.value
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const resultEntries = entries.filter(
       (e) => e.target.includes("result") && e.target.length === 1,
     );
@@ -295,15 +320,17 @@ bridge Query.demo {
   });
 
   test("input ref wire — no error entry (inputs cannot throw)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.value
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.value
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const qEntries = entries.filter(
       (e) => e.target.includes("q") && e.target.length === 1,
     );
@@ -314,15 +341,17 @@ bridge Query.demo {
   });
 
   test("safe (?.) wire — no primary/error entry", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api?.value
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api?.value
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const resultEntries = entries.filter(
       (e) => e.target.includes("result") && e.target.length === 1,
     );
@@ -333,17 +362,19 @@ bridge Query.demo {
   });
 
   test("error entries have unique IDs", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const allIds = ids(entries);
     const unique = new Set(allIds);
     assert.equal(
@@ -356,16 +387,18 @@ bridge Query.demo {
   // ── Array iterators ───────────────────────────────────────────────────────
 
   test("array block — adds empty-array traversal", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with output as o
-  o <- api.items[] as it {
-    .id <- it.id
-    .name <- it.name
-  }
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with output as o
+        o <- api.items[] as it {
+          .id <- it.id
+          .name <- it.name
+        }
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const emptyArr = entries.filter((e) => e.kind === "empty-array");
     assert.equal(emptyArr.length, 1);
     assert.equal(emptyArr[0].wireIndex, -1);
@@ -374,15 +407,17 @@ bridge Query.demo {
   // ── Problem statement example: array + ?? ─────────────────────────────────
 
   test("o.out <- i.array[] as a { .data <- a.a ?? a.b } — 3 traversals", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with output as o
-  o <- api.items[] as a {
-    .data <- a.a ?? a.b
-  }
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with output as o
+        o <- api.items[] as a {
+          .data <- a.a ?? a.b
+        }
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     // Should have: empty-array + primary(.data) + fallback(.data)
     assert.equal(entries.length, 3);
     const emptyArr = entries.filter((e) => e.kind === "empty-array");
@@ -399,18 +434,20 @@ bridge Query.demo {
   // ── Nested arrays ─────────────────────────────────────────────────────────
 
   test("nested array blocks — 2 empty-array entries", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with output as o
-  o <- api.journeys[] as j {
-    .label <- j.label
-    .legs <- j.legs[] as l {
-      .name <- l.name
-    }
-  }
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with output as o
+        o <- api.journeys[] as j {
+          .label <- j.label
+          .legs <- j.legs[] as l {
+            .name <- l.name
+          }
+        }
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const emptyArr = entries.filter((e) => e.kind === "empty-array");
     assert.equal(emptyArr.length, 2, "two array scopes");
   });
@@ -418,18 +455,20 @@ bridge Query.demo {
   // ── IDs are unique ────────────────────────────────────────────────────────
 
   test("all IDs within a bridge are unique", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label catch "none"
-  o.score <- a.score ?? 0
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label catch "none"
+        o.score <- a.score ?? 0
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const allIds = ids(entries);
     const unique = new Set(allIds);
     assert.equal(
@@ -442,15 +481,17 @@ bridge Query.demo {
   // ── TraversalEntry shape ──────────────────────────────────────────────────
 
   test("entries have correct structure", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.value || "default" catch 0
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.value || "default" catch 0
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     for (const entry of entries) {
       assert.ok(typeof entry.id === "string", "id is string");
       assert.ok(typeof entry.wireIndex === "number", "wireIndex is number");
@@ -466,15 +507,17 @@ bridge Query.demo {
   // ── Conditional wire ──────────────────────────────────────────────────────
 
   test("conditional (ternary) wire — 2 traversals (then + else)", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- i.flag ? api.a : api.b
-}`);
-    const entries = enumerateTraversalIds(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.label <- i.flag ? api.a : api.b
+      }
+    `);
+    const entries = enumerateTraversalIds(instr);
     const labelEntries = entries.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -488,26 +531,30 @@ bridge Query.demo {
   // ── Total count is a complexity proxy ─────────────────────────────────────
 
   test("total traversal count reflects complexity", () => {
-    const simple = getBridge(`version 1.5
-bridge Query.simple {
-  with api
-  with output as o
-  o.value <- api.value
-}`);
-    const complex = getBridge(`version 1.5
-bridge Query.complex {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.x <- a.x || b.x catch "none"
-  o.y <- a.y ?? b.y
-  o.items <- a.items[] as it {
-    .name <- it.name || "anon"
-  }
-}`);
+    const simple = getBridge(bridge`
+      version 1.5
+      bridge Query.simple {
+        with api
+        with output as o
+        o.value <- api.value
+      }
+    `);
+    const complex = getBridge(bridge`
+      version 1.5
+      bridge Query.complex {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.x <- a.x || b.x catch "none"
+        o.y <- a.y ?? b.y
+        o.items <- a.items[] as it {
+          .name <- it.name || "anon"
+        }
+      }
+    `);
     const simpleCount = enumerateTraversalIds(simple).length;
     const complexCount = enumerateTraversalIds(complex).length;
     assert.ok(
@@ -525,18 +572,20 @@ describe("buildTraversalManifest", () => {
   });
 
   test("entries have sequential bitIndex starting at 0", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label catch "none"
-  o.score <- a.score ?? 0
-}`);
-    const manifest = buildTraversalManifest(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label catch "none"
+        o.score <- a.score ?? 0
+      }
+    `);
+    const manifest = buildTraversalManifest(instr);
     for (let i = 0; i < manifest.length; i++) {
       assert.equal(
         manifest[i].bitIndex,
@@ -551,29 +600,33 @@ bridge Query.demo {
 
 describe("decodeExecutionTrace", () => {
   test("empty trace returns empty array", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.label
-}`);
-    const manifest = buildTraversalManifest(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.label
+      }
+    `);
+    const manifest = buildTraversalManifest(instr);
     const result = decodeExecutionTrace(manifest, 0n);
     assert.equal(result.length, 0);
   });
 
   test("single bit decodes to one entry", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.result <- api.label || "fallback"
-}`);
-    const manifest = buildTraversalManifest(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.result <- api.label || "fallback"
+      }
+    `);
+    const manifest = buildTraversalManifest(instr);
     const primary = manifest.find(
       (e) => e.kind === "primary" && e.target.includes("result"),
     );
@@ -587,17 +640,19 @@ bridge Query.demo {
   });
 
   test("multiple bits decode to multiple entries", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with a
-  with b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label || b.label catch "none"
-}`);
-    const manifest = buildTraversalManifest(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with a
+        with b
+        with input as i
+        with output as o
+        a.q <- i.q
+        b.q <- i.q
+        o.label <- a.label || b.label catch "none"
+      }
+    `);
+    const manifest = buildTraversalManifest(instr);
     const labelEntries = manifest.filter(
       (e) => e.target.includes("label") && e.target.length === 1,
     );
@@ -617,15 +672,17 @@ bridge Query.demo {
   });
 
   test("round-trip: build manifest, set bits, decode", () => {
-    const bridge = getBridge(`version 1.5
-bridge Query.demo {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- i.flag ? api.a : api.b
-}`);
-    const manifest = buildTraversalManifest(bridge);
+    const instr = getBridge(bridge`
+      version 1.5
+      bridge Query.demo {
+        with api
+        with input as i
+        with output as o
+        api.q <- i.q
+        o.label <- i.flag ? api.a : api.b
+      }
+    `);
+    const manifest = buildTraversalManifest(instr);
     const thenEntry = manifest.find((e) => e.kind === "then");
     assert.ok(thenEntry);
     const decoded = decodeExecutionTrace(
@@ -664,10 +721,10 @@ bridge Query.demo {
     assert.ok(executionTraceId > 0n, "trace should have bits set");
 
     // Decode and verify
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("primary"), "should include primary paths");
@@ -691,10 +748,10 @@ bridge Query.demo {
 
     assert.equal((data as any).label, "default");
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("fallback"), "should include fallback path");
@@ -722,10 +779,10 @@ bridge Query.demo {
 
     assert.equal((data as any).lat, 0);
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("catch"), "should include catch path");
@@ -747,10 +804,10 @@ bridge Query.demo {
       tools: { api: async () => ({ a: "yes", b: "no" }) },
     });
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("then"), "should include then path");
@@ -773,10 +830,10 @@ bridge Query.demo {
       tools: { api: async () => ({ a: "yes", b: "no" }) },
     });
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("else"), "should include else path");
@@ -798,10 +855,10 @@ bridge Query.demo {
       tools: { api: async () => ({ label: "done" }) },
     });
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const kinds = decoded.map((e) => e.kind);
     assert.ok(kinds.includes("const"), "should include const path");
@@ -856,10 +913,10 @@ bridge Query.demo {
         "error should carry executionTraceId",
       );
 
-      const bridge = doc.instructions.find(
+      const instr = doc.instructions.find(
         (i): i is Bridge => i.kind === "bridge",
       )!;
-      const manifest = buildTraversalManifest(bridge);
+      const manifest = buildTraversalManifest(instr);
       const decoded = decodeExecutionTrace(manifest, executionTraceId);
       const primaryError = decoded.find((e) => e.kind === "primary" && e.error);
       assert.ok(primaryError, "primary error bit should be set");
@@ -882,10 +939,10 @@ bridge Query.demo {
       tools: { api: async () => ({ value: "ok" }) },
     });
 
-    const bridge = doc.instructions.find(
+    const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const manifest = buildTraversalManifest(bridge);
+    const manifest = buildTraversalManifest(instr);
     const decoded = decodeExecutionTrace(manifest, executionTraceId);
     const errorEntries = decoded.filter((e) => e.error);
     assert.equal(errorEntries.length, 0, "no error bits when tool succeeds");

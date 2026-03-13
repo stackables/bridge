@@ -4,22 +4,25 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "@stackables/bridge-parser";
+import { bridge } from "@stackables/bridge-core";
 
 // ── Parser desugaring tests ─────────────────────────────────────────────────
 
 describe("expressions: parser desugaring", () => {
   test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.convert {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.convert {
+        with input as i
+        with output as o
 
-  o.cents <- i.dollars * 100
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    assert.ok(!bridge.wires.some((w) => "expr" in w), "no ExprWire in output");
-    assert.ok(bridge.pipeHandles!.length > 0, "has pipe handles");
-    const exprHandle = bridge.pipeHandles!.find((ph) =>
+        o.cents <- i.dollars * 100
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    assert.ok(!instr.wires.some((w) => "expr" in w), "no ExprWire in output");
+    assert.ok(instr.pipeHandles!.length > 0, "has pipe handles");
+    const exprHandle = instr.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(exprHandle, "has __expr_ pipe handle");
@@ -40,15 +43,17 @@ bridge Query.convert {
       "<=": "lte",
     };
     for (const [op, fn] of Object.entries(ops)) {
-      const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+      const doc = parseBridge(bridge`
+        version 1.5
+        bridge Query.test {
+          with input as i
+          with output as o
 
-  o.result <- i.value ${op} 1
-}`);
-      const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = bridge.pipeHandles!.find((ph) =>
+          o.result <- i.value ${op} 1
+        }
+      `);
+      const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+      const exprHandle = instr.pipeHandles!.find((ph) =>
         ph.handle.startsWith("__expr_"),
       );
       assert.ok(exprHandle, `${op} should create a pipe handle`);
@@ -57,15 +62,17 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 5 / 10", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.times * 5 / 10
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- i.times * 5 / 10
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.equal(
@@ -78,15 +85,17 @@ bridge Query.test {
   });
 
   test("chained expression: i.times * 2 > 6", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.times * 2 > 6
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- i.times * 2 > 6
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.equal(exprHandles.length, 2);
@@ -95,15 +104,17 @@ bridge Query.test {
   });
 
   test("two source refs: i.price * i.qty", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.calc {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.calc {
+        with input as i
+        with output as o
 
-  o.total <- i.price * i.qty
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const bWire = bridge.wires.find(
+        o.total <- i.price * i.qty
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const bWire = instr.wires.find(
       (w) => "from" in w && w.to.path.length === 1 && w.to.path[0] === "b",
     );
     assert.ok(bWire, "should have a .b wire");
@@ -111,19 +122,21 @@ bridge Query.calc {
   });
 
   test("expression in array mapping element", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.list {
-  with pricing.list as api
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.list {
+        with pricing.list as api
+        with input as i
+        with output as o
 
-  o.items <- api.items[] as item {
-    .name <- item.name
-    .cents <- item.price * 100
-  }
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find((ph) =>
+        o.items <- api.items[] as item {
+          .name <- item.name
+          .cents <- item.price * 100
+        }
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandle = instr.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(exprHandle, "should have expression pipe handle");
@@ -135,13 +148,15 @@ bridge Query.list {
 
 describe("expressions: round-trip serialization", () => {
   test("multiply expression serializes and re-parses", () => {
-    const text = `version 1.5
-bridge Query.convert {
-  with input as i
-  with output as o
+    const text = bridge`
+      version 1.5
+      bridge Query.convert {
+        with input as i
+        with output as o
 
-  o.cents <- i.dollars * 100
-}`;
+        o.cents <- i.dollars * 100
+      }
+    `;
     const doc = parseBridge(text);
     const serialized = serializeBridge(doc);
     assert.ok(
@@ -150,8 +165,8 @@ bridge Query.convert {
     );
 
     const reparsed = parseBridge(serialized);
-    const bridge = reparsed.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find((ph) =>
+    const instr = reparsed.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandle = instr.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(exprHandle, "re-parsed should contain synthetic tool");
@@ -159,39 +174,45 @@ bridge Query.convert {
   });
 
   test("comparison expression round-trips", () => {
-    const text = `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
+    const text = bridge`
+      version 1.5
+      bridge Query.check {
+        with input as i
+        with output as o
 
-  o.eligible <- i.age >= 18
-}`;
+        o.eligible <- i.age >= 18
+      }
+    `;
     const doc = parseBridge(text);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("i.age >= 18"), `got: ${serialized}`);
   });
 
   test("chained expression round-trips", () => {
-    const text = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const text = bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.times * 5 / 10
-}`;
+        o.result <- i.times * 5 / 10
+      }
+    `;
     const doc = parseBridge(text);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("i.times * 5 / 10"), `got: ${serialized}`);
   });
 
   test("two source refs round-trip", () => {
-    const text = `version 1.5
-bridge Query.calc {
-  with input as i
-  with output as o
+    const text = bridge`
+      version 1.5
+      bridge Query.calc {
+        with input as i
+        with output as o
 
-  o.total <- i.price * i.quantity
-}`;
+        o.total <- i.price * i.quantity
+      }
+    `;
     const doc = parseBridge(text);
     const serialized = serializeBridge(doc);
     assert.ok(
@@ -205,15 +226,17 @@ bridge Query.calc {
 
 describe("expressions: operator precedence (parser)", () => {
   test("i.base + i.tax * 2 — multiplication before addition", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.calc {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.calc {
+        with input as i
+        with output as o
 
-  o.total <- i.base + i.tax * 2
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.total <- i.base + i.tax * 2
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.equal(exprHandles.length, 2, "two synthetic forks");
@@ -222,13 +245,15 @@ bridge Query.calc {
   });
 
   test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
-    const text = `version 1.5
-bridge Query.calc {
-  with input as i
-  with output as o
+    const text = bridge`
+      version 1.5
+      bridge Query.calc {
+        with input as i
+        with output as o
 
-  o.total <- i.base + i.tax * 2
-}`;
+        o.total <- i.base + i.tax * 2
+      }
+    `;
     const doc = parseBridge(text);
     const serialized = serializeBridge(doc);
     assert.ok(
@@ -248,15 +273,17 @@ describe("boolean logic: parser desugaring", () => {
       or: "__or",
     };
     for (const [op, fn] of Object.entries(boolOps)) {
-      const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+      const doc = parseBridge(bridge`
+        version 1.5
+        bridge Query.test {
+          with input as i
+          with output as o
 
-  o.result <- i.a ${op} i.b
-}`);
-      const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = bridge.pipeHandles!.find((ph) =>
+          o.result <- i.a ${op} i.b
+        }
+      `);
+      const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+      const exprHandle = instr.pipeHandles!.find((ph) =>
         ph.handle.startsWith("__expr_"),
       );
       assert.ok(exprHandle, `${op}: has __expr_ pipe handle`);
@@ -265,30 +292,34 @@ bridge Query.test {
   });
 
   test("not prefix desugars to not tool fork", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- not i.trusted
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = bridge.pipeHandles!.find(
+        o.result <- not i.trusted
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandle = instr.pipeHandles!.find(
       (ph) => ph.baseTrunk.field === "not",
     );
     assert.ok(exprHandle, "has not pipe handle");
   });
 
   test('combined: (a > 18 and b) or c == "ADMIN"', () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(
@@ -307,15 +338,17 @@ bridge Query.test {
 
 describe("boolean logic: serializer round-trip", () => {
   test("and expression round-trips", () => {
-    const src = `version 1.5
+    const src = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.a and i.b
+        o.result <- i.a and i.b
 
-}`;
+      }
+    `;
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes(" and "), "serialized contains 'and'");
@@ -324,15 +357,17 @@ bridge Query.test {
   });
 
   test("or expression round-trips", () => {
-    const src = `version 1.5
+    const src = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.a or i.b
+        o.result <- i.a or i.b
 
-}`;
+      }
+    `;
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes(" or "), "serialized contains 'or'");
@@ -341,15 +376,17 @@ bridge Query.test {
   });
 
   test("not prefix round-trips", () => {
-    const src = `version 1.5
+    const src = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- not i.flag
+        o.result <- not i.flag
 
-}`;
+      }
+    `;
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("not "), "serialized contains 'not'");
@@ -362,15 +399,17 @@ bridge Query.test {
 
 describe("parenthesized expressions: parser desugaring", () => {
   test("(A and B) or C — groups correctly", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- (i.a and i.b) or i.c
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- (i.a and i.b) or i.c
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
@@ -380,15 +419,17 @@ bridge Query.test {
   });
 
   test("A or (B and C) — groups correctly", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.a or (i.b and i.c)
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- i.a or (i.b and i.c)
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
@@ -398,15 +439,17 @@ bridge Query.test {
   });
 
   test("not (A and B) — not wraps grouped expr", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- not (i.a and i.b)
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- not (i.a and i.b)
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
@@ -415,15 +458,17 @@ bridge Query.test {
   });
 
   test("(i.price + i.discount) * i.qty — math with parens", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- (i.price + i.discount) * i.qty
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = bridge.pipeHandles!.filter((ph) =>
+        o.result <- (i.price + i.discount) * i.qty
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const exprHandles = instr.pipeHandles!.filter((ph) =>
       ph.handle.startsWith("__expr_"),
     );
     const fields = exprHandles.map((ph) => ph.baseTrunk.field);
@@ -436,15 +481,17 @@ bridge Query.test {
 
 describe("parenthesized expressions: serializer round-trip", () => {
   test("(A + B) * C round-trips with parentheses", () => {
-    const src = `version 1.5
+    const src = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- (i.a + i.b) * i.c
+        o.result <- (i.a + i.b) * i.c
 
-}`;
+      }
+    `;
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes("("), "serialized contains '(' for grouping");
@@ -454,15 +501,17 @@ bridge Query.test {
   });
 
   test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
-    const src = `version 1.5
+    const src = bridge`
+      version 1.5
 
-bridge Query.test {
-  with input as i
-  with output as o
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.result <- i.a or (i.b and i.c)
+        o.result <- i.a or (i.b and i.c)
 
-}`;
+      }
+    `;
     const doc = parseBridge(src);
     const serialized = serializeBridge(doc);
     assert.ok(serialized.includes(" or "), "serialized contains 'or'");
@@ -505,7 +554,13 @@ describe("serializeBridge: keyword strings are quoted", () => {
 
   for (const kw of keywords) {
     test(`constant value "${kw}" round-trips through serializer`, () => {
-      const src = `version 1.5\nbridge Query.x {\n  with output as o\n  o.result = "${kw}"\n}`;
+      const src = bridge`
+        version 1.5
+        bridge Query.x {
+          with output as o
+          o.result = "${kw}"
+        }
+      `;
       const doc = parseBridge(src);
       const serialized = serializeBridge(doc);
       assert.ok(
@@ -513,10 +568,10 @@ describe("serializeBridge: keyword strings are quoted", () => {
         `Expected "${kw}" to be quoted in: ${serialized}`,
       );
       const reparsed = parseBridge(serialized);
-      const bridge = reparsed.instructions.find(
+      const instr = reparsed.instructions.find(
         (i) => i.kind === "bridge",
       ) as any;
-      const wire = bridge.wires.find(
+      const wire = instr.wires.find(
         (w: any) => "value" in w && w.to?.path?.[0] === "result",
       );
       assert.equal(wire?.value, kw);

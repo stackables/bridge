@@ -27,7 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@stackables/bridge-types": "workspace:*",
-    "lru-cache": "^11.2.6"
+    "lru-cache": "^11.2.7"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

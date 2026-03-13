@@ -1,5 +1,6 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Coalesce & cost-based resolution
@@ -16,7 +17,7 @@ import { tools } from "./utils/bridge-tools.ts";
 // ── || short-circuit evaluation ────────────────────────────────────────────
 
 regressionTest("|| fallback chains", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Fallback.lookup {
@@ -121,7 +122,7 @@ regressionTest("|| fallback chains", {
 // ── Cost-based resolution: overdefinition ────────────────────────────────
 
 regressionTest("overdefinition: cost-based prioritization", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Overdef.lookup {
@@ -268,7 +269,7 @@ regressionTest("overdefinition: cost-based prioritization", {
 // ── ?. safe execution modifier ────────────────────────────────────────────
 
 regressionTest("?. safe execution modifier", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     const lorem = {
@@ -344,7 +345,7 @@ regressionTest("?. safe execution modifier", {
 // ── Mixed || and ?? chains ──────────────────────────────────────────────────
 
 regressionTest("mixed || and ?? chains", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Mixed.lookup {

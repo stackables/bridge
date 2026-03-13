@@ -4,6 +4,7 @@ import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge, formatBridgeError } from "@stackables/bridge-core";
 import type { BridgeDocument } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,20 +59,22 @@ function compileOnly(bridgeText: string, operation: string): string {
 
 describe("AOT codegen: from wires + constants", () => {
   test("chained tool calls resolve all fields", async () => {
-    const bridgeText = `version 1.5
-bridge Query.livingStandard {
-  with hereapi.geocode as gc
-  with companyX.getLivingStandard as cx
-  with input as i
-  with toInt as ti
-  with output as out
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.livingStandard {
+        with hereapi.geocode as gc
+        with companyX.getLivingStandard as cx
+        with input as i
+        with toInt as ti
+        with output as out
 
-  gc.q <- i.location
-  cx.x <- gc.lat
-  cx.y <- gc.lon
-  ti.value <- cx.lifeExpectancy
-  out.lifeExpectancy <- ti.result
-}`;
+        gc.q <- i.location
+        cx.x <- gc.lat
+        cx.y <- gc.lon
+        ti.value <- cx.lifeExpectancy
+        out.lifeExpectancy <- ti.result
+      }
+    `;
 
     const tools = {
       "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
@@ -93,16 +96,18 @@ bridge Query.livingStandard {
   });
 
   test("constant wires emit literal values", async () => {
-    const bridgeText = `version 1.5
-bridge Query.info {
-  with api as a
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.info {
+        with api as a
+        with output as o
 
-  a.method = "GET"
-  a.timeout = 5000
-  a.enabled = true
-  o.result <- a.data
-}`;
+        a.method = "GET"
+        a.timeout = 5000
+        a.enabled = true
+        o.result <- a.data
+      }
+    `;
 
     const tools = {
       api: (p: any) => {
@@ -118,15 +123,17 @@ bridge Query.info {
   });
 
   test("root passthrough returns tool output directly", async () => {
-    const bridgeText = `version 1.5
-bridge Query.user {
-  with api as a
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.user {
+        with api as a
+        with input as i
+        with output as o
 
-  a.id <- i.userId
-  o <- a
-}`;
+        a.id <- i.userId
+        o <- a
+      }
+    `;
 
     const tools = {
       api: (p: any) => ({ name: "Alice", id: p.id }),
@@ -142,17 +149,19 @@ bridge Query.user {
   });
 
   test("tools receive correct chained inputs", async () => {
-    const bridgeText = `version 1.5
-bridge Query.chain {
-  with first as f
-  with second as s
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.chain {
+        with first as f
+        with second as s
+        with input as i
+        with output as o
 
-  f.x <- i.a
-  s.y <- f.result
-  o.final <- s.result
-}`;
+        f.x <- i.a
+        s.y <- f.result
+        o.final <- s.result
+      }
+    `;
 
     let firstInput: any;
     let secondInput: any;
@@ -179,17 +188,19 @@ bridge Query.chain {
   });
 
   test("context references resolve correctly", async () => {
-    const bridgeText = `version 1.5
-bridge Query.secured {
-  with api as a
-  with context as ctx
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.secured {
+        with api as a
+        with context as ctx
+        with input as i
+        with output as o
 
-  a.token <- ctx.apiKey
-  a.query <- i.q
-  o.data <- a.result
-}`;
+        a.token <- ctx.apiKey
+        a.query <- i.q
+        o.data <- a.result
+      }
+    `;
 
     const tools = {
       api: (p: any) => ({ result: `${p.query}:${p.token}` }),
@@ -206,10 +217,12 @@ bridge Query.secured {
   });
 
   test("empty output throws descriptive error", async () => {
-    const bridgeText = `version 1.5
-bridge Query.empty {
-  with output as o
-}`;
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.empty {
+        with output as o
+      }
+    `;
 
     await assert.rejects(
       () => compileAndRun(bridgeText, "Query.empty", {}),
@@ -225,15 +238,17 @@ bridge Query.empty {
 
 describe("AOT codegen: fallback operators", () => {
   test("?? nullish coalescing with constant fallback", async () => {
-    const bridgeText = `version 1.5
-bridge Query.defaults {
-  with api as a
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.defaults {
+        with api as a
+        with input as i
+        with output as o
 
-  a.id <- i.id
-  o.name <- a.name ?? "unknown"
-}`;
+        a.id <- i.id
+        o.name <- a.name ?? "unknown"
+      }
+    `;
 
     const tools = {
       api: () => ({ name: null }),
@@ -249,13 +264,15 @@ bridge Query.defaults {
   });
 
   test("?? does not trigger on falsy non-null values", async () => {
-    const bridgeText = `version 1.5
-bridge Query.falsy {
-  with api as a
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.falsy {
+        with api as a
+        with output as o
 
-  o.count <- a.count ?? 42
-}`;
+        o.count <- a.count ?? 42
+      }
+    `;
 
     const tools = {
       api: () => ({ count: 0 }),
@@ -266,13 +283,15 @@ bridge Query.falsy {
   });
 
   test("|| falsy fallback with constant", async () => {
-    const bridgeText = `version 1.5
-bridge Query.fallback {
-  with api as a
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.fallback {
+        with api as a
+        with output as o
 
-  o.label <- a.label || "default"
-}`;
+        o.label <- a.label || "default"
+      }
+    `;
 
     const tools = {
       api: () => ({ label: "" }),
@@ -283,14 +302,16 @@ bridge Query.fallback {
   });
 
   test("|| falsy fallback with ref throws incompatible when tool-backed", () => {
-    const bridgeText = `version 1.5
-bridge Query.refFallback {
-  with primary as p
-  with backup as b
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.refFallback {
+        with primary as p
+        with backup as b
+        with output as o
 
-  o.value <- p.val || b.val
-}`;
+        o.value <- p.val || b.val
+      }
+    `;
 
     assert.throws(
       () => compileOnly(bridgeText, "Query.refFallback"),
@@ -354,18 +375,20 @@ bridge Query.refFallback {
 
 describe("AOT codegen: array mapping", () => {
   test("array mapping renames fields", async () => {
-    const bridgeText = `version 1.5
-bridge Query.catalog {
-  with api as src
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.catalog {
+        with api as src
+        with output as o
 
-  o.title <- src.name
-  o.entries <- src.items[] as item {
-    .id <- item.item_id
-    .label <- item.item_name
-    .cost <- item.unit_price
-  }
-}`;
+        o.title <- src.name
+        o.entries <- src.items[] as item {
+          .id <- item.item_id
+          .label <- item.item_name
+          .cost <- item.unit_price
+        }
+      }
+    `;
 
     const tools = {
       api: async () => ({
@@ -388,15 +411,17 @@ bridge Query.catalog {
   });
 
   test("array mapping with empty array returns empty array", async () => {
-    const bridgeText = `version 1.5
-bridge Query.empty {
-  with api as src
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.empty {
+        with api as src
+        with output as o
 
-  o.items <- src.list[] as item {
-    .name <- item.label
-  }
-}`;
+        o.items <- src.list[] as item {
+          .name <- item.label
+        }
+      }
+    `;
 
     const tools = {
       api: () => ({ list: [] }),
@@ -407,15 +432,17 @@ bridge Query.empty {
   });
 
   test("array mapping with null source returns empty array", async () => {
-    const bridgeText = `version 1.5
-bridge Query.nullable {
-  with api as src
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.nullable {
+        with api as src
+        with output as o
 
-  o.items <- src.list[] as item {
-    .name <- item.label
-  }
-}`;
+        o.items <- src.list[] as item {
+          .name <- item.label
+        }
+      }
+    `;
 
     const tools = {
       api: () => ({ list: null }),
@@ -457,15 +484,17 @@ bridge Query.test {
   });
 
   test("generated code is deterministic", () => {
-    const bridgeText = `version 1.5
-bridge Query.det {
-  with api as a
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.det {
+        with api as a
+        with input as i
+        with output as o
 
-  a.x <- i.x
-  o.y <- a.y
-}`;
+        a.x <- i.x
+        o.y <- a.y
+      }
+    `;
     const code1 = compileOnly(bridgeText, "Query.det");
     const code2 = compileOnly(bridgeText, "Query.det");
     assert.equal(code1, code2);
@@ -473,15 +502,17 @@ bridge Query.det {
 });
 
 describe("AOT codegen: requestedFields matching", () => {
-  const bridgeText = `version 1.5
-bridge Query.profile {
-  with input as i
-  with output as o
+  const bridgeText = bridge`
+    version 1.5
+    bridge Query.profile {
+      with input as i
+      with output as o
 
-  o.name <- i.name
-  o.meta.age <- i.age
-  o.meta.deep.city <- i.city
-}`;
+      o.name <- i.name
+      o.meta.age <- i.age
+      o.meta.deep.city <- i.city
+    }
+  `;
 
   test("parent field pattern includes nested child fields", async () => {
     const document = parseBridgeFormat(bridgeText);
@@ -521,15 +552,17 @@ bridge Query.profile {
 
 describe("AOT codegen: conditional wires", () => {
   test("ternary expression compiles correctly", async () => {
-    const bridgeText = `version 1.5
-bridge Query.conditional {
-  with api as a
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.conditional {
+        with api as a
+        with input as i
+        with output as o
 
-  a.mode <- i.premium ? "full" : "basic"
-  o.result <- a.data
-}`;
+        a.mode <- i.premium ? "full" : "basic"
+        o.result <- a.data
+      }
+    `;
 
     let capturedInput: any;
     const tools = {
@@ -662,19 +695,21 @@ bridge Query.conditional {
 // ── Benchmark: AOT vs Runtime ────────────────────────────────────────────────
 
 describe("AOT codegen: performance comparison", () => {
-  const bridgeText = `version 1.5
-bridge Query.chain {
-  with first as f
-  with second as s
-  with third as t
-  with input as i
-  with output as o
+  const bridgeText = bridge`
+    version 1.5
+    bridge Query.chain {
+      with first as f
+      with second as s
+      with third as t
+      with input as i
+      with output as o
 
-  f.x <- i.value
-  s.y <- f.result
-  t.z <- s.result
-  o.final <- t.result ?? 0
-}`;
+      f.x <- i.value
+      s.y <- f.result
+      t.z <- s.result
+      o.final <- t.result ?? 0
+    }
+  `;
 
   const tools = {
     first: (p: any) => ({ result: (p.x ?? 0) + 1 }),
@@ -757,18 +792,20 @@ bridge Query.chain {
 });
 
 describe("AOT codegen: memoized tool handles", () => {
-  const bridgeText = `version 1.5
-bridge Query.memoized {
-  with input as i
-  with output as o
+  const bridgeText = bridge`
+    version 1.5
+    bridge Query.memoized {
+      with input as i
+      with output as o
 
-  o <- i.items[] as item {
-    with worker as w memoize
+      o <- i.items[] as item {
+        with worker as w memoize
 
-    w.id <- item.id
-    .item <- w.data
-  }
-}`;
+        w.id <- item.id
+        .item <- w.data
+      }
+    }
+  `;
 
   test("generated code emits memoization helper for memoized handles", () => {
     const code = compileOnly(bridgeText, "Query.memoized");
@@ -837,13 +874,15 @@ bridge Query.memoized {
 
 describe("AOT codegen: catch fallback", () => {
   test("catch with constant fallback value", async () => {
-    const bridgeText = `version 1.5
-bridge Query.safe {
-  with api as a
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.safe {
+        with api as a
+        with output as o
 
-  o.data <- a.result catch "fallback"
-}`;
+        o.data <- a.result catch "fallback"
+      }
+    `;
 
     const tools = {
       api: () => {
@@ -856,13 +895,15 @@ bridge Query.safe {
   });
 
   test("catch does not trigger on success", async () => {
-    const bridgeText = `version 1.5
-bridge Query.noerr {
-  with api as a
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.noerr {
+        with api as a
+        with output as o
 
-  o.data <- a.result catch "fallback"
-}`;
+        o.data <- a.result catch "fallback"
+      }
+    `;
 
     const tools = {
       api: () => ({ result: "success" }),
@@ -873,14 +914,16 @@ bridge Query.noerr {
   });
 
   test("catch with ref fallback", async () => {
-    const bridgeText = `version 1.5
-bridge Query.refCatch {
-  with primary as p
-  with backup as b
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.refCatch {
+        with primary as p
+        with backup as b
+        with output as o
 
-  o.data <- p.result catch b.fallback
-}`;
+        o.data <- p.result catch b.fallback
+      }
+    `;
 
     const tools = {
       primary: () => {
@@ -901,18 +944,20 @@ describe("AOT codegen: force statements", () => {
     let auditCalled = false;
     let auditInput: any = null;
 
-    const bridgeText = `version 1.5
-bridge Query.search {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.search {
+        with mainApi as m
+        with audit.log as audit
+        with input as i
+        with output as o
 
-  m.q <- i.q
-  audit.action <- i.q
-  force audit
-  o.title <- m.title
-}`;
+        m.q <- i.q
+        audit.action <- i.q
+        force audit
+        o.title <- m.title
+      }
+    `;
 
     const tools = {
       mainApi: async (_p: any) => ({ title: "Hello World" }),
@@ -936,18 +981,20 @@ bridge Query.search {
   });
 
   test("fire-and-forget force does not break response on error", async () => {
-    const bridgeText = `version 1.5
-bridge Query.safe {
-  with mainApi as m
-  with analytics as ping
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.safe {
+        with mainApi as m
+        with analytics as ping
+        with input as i
+        with output as o
 
-  m.q <- i.q
-  ping.event <- i.q
-  force ping catch null
-  o.title <- m.title
-}`;
+        m.q <- i.q
+        ping.event <- i.q
+        force ping catch null
+        o.title <- m.title
+      }
+    `;
 
     const tools = {
       mainApi: async () => ({ title: "OK" }),
@@ -967,18 +1014,20 @@ bridge Query.safe {
   });
 
   test("critical force propagates errors", async () => {
-    const bridgeText = `version 1.5
-bridge Query.critical {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.critical {
+        with mainApi as m
+        with audit.log as audit
+        with input as i
+        with output as o
 
-  m.q <- i.q
-  audit.action <- i.q
-  force audit
-  o.title <- m.title
-}`;
+        m.q <- i.q
+        audit.action <- i.q
+        force audit
+        o.title <- m.title
+      }
+    `;
 
     const tools = {
       mainApi: async () => ({ title: "OK" }),
@@ -996,16 +1045,18 @@ bridge Query.critical {
   test("force with constant-only wires (no pull)", async () => {
     let sideEffectCalled = false;
 
-    const bridgeText = `version 1.5
-bridge Mutation.fire {
-  with sideEffect as se
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Mutation.fire {
+        with sideEffect as se
+        with input as i
+        with output as o
 
-  se.action = "fire"
-  force se
-  o.ok = "true"
-}`;
+        se.action = "fire"
+        force se
+        o.ok = "true"
+      }
+    `;
 
     const tools = {
       sideEffect: async (input: any) => {
@@ -1033,22 +1084,24 @@ describe("AOT codegen: ToolDef support", () => {
   test("ToolDef constant wires merged with bridge wires", async () => {
     let apiInput: any = null;
 
-    const bridgeText = `version 1.5
-tool restApi from std.httpCall {
-  with context
-  .method = "GET"
-  .baseUrl = "https://api.example.com"
-  .headers.Authorization <- context.token
-}
+    const bridgeText = bridge`
+      version 1.5
+      tool restApi from std.httpCall {
+        with context
+        .method = "GET"
+        .baseUrl = "https://api.example.com"
+        .headers.Authorization <- context.token
+      }
 
-bridge Query.data {
-  with restApi as api
-  with input as i
-  with output as o
+      bridge Query.data {
+        with restApi as api
+        with input as i
+        with output as o
 
-  api.path <- i.path
-  o.result <- api.body
-}`;
+        api.path <- i.path
+        o.result <- api.body
+      }
+    `;
 
     const tools = {
       "std.httpCall": async (input: any) => {
@@ -1074,19 +1127,21 @@ bridge Query.data {
   test("bridge wires override ToolDef wires", async () => {
     let apiInput: any = null;
 
-    const bridgeText = `version 1.5
-tool restApi from std.httpCall {
-  .method = "GET"
-  .timeout = 5000
-}
+    const bridgeText = bridge`
+      version 1.5
+      tool restApi from std.httpCall {
+        .method = "GET"
+        .timeout = 5000
+      }
 
-bridge Query.custom {
-  with restApi as api
-  with output as o
+      bridge Query.custom {
+        with restApi as api
+        with output as o
 
-  api.method = "POST"
-  o.result <- api.data
-}`;
+        api.method = "POST"
+        o.result <- api.data
+      }
+    `;
 
     const tools = {
       "std.httpCall": async (input: any) => {
@@ -1105,19 +1160,21 @@ bridge Query.custom {
   });
 
   test("ToolDef onError provides fallback on failure", async () => {
-    const bridgeText = `version 1.5
-tool safeApi from std.httpCall {
-  on error = {"status":"error","message":"service unavailable"}
-}
+    const bridgeText = bridge`
+      version 1.5
+      tool safeApi from std.httpCall {
+        on error = {"status":"error","message":"service unavailable"}
+      }
 
-bridge Query.safe {
-  with safeApi as api
-  with input as i
-  with output as o
+      bridge Query.safe {
+        with safeApi as api
+        with input as i
+        with output as o
 
-  api.url <- i.url
-  o <- api
-}`;
+        api.url <- i.url
+        o <- api
+      }
+    `;
 
     const tools = {
       "std.httpCall": async () => {
@@ -1138,22 +1195,24 @@ bridge Query.safe {
   test("ToolDef extends chain", async () => {
     let apiInput: any = null;
 
-    const bridgeText = `version 1.5
-tool baseApi from std.httpCall {
-  .method = "GET"
-  .baseUrl = "https://api.example.com"
-}
+    const bridgeText = bridge`
+      version 1.5
+      tool baseApi from std.httpCall {
+        .method = "GET"
+        .baseUrl = "https://api.example.com"
+      }
 
-tool userApi from baseApi {
-  .path = "/users"
-}
+      tool userApi from baseApi {
+        .path = "/users"
+      }
 
-bridge Query.users {
-  with userApi as api
-  with output as o
+      bridge Query.users {
+        with userApi as api
+        with output as o
 
-  o <- api
-}`;
+        o <- api
+      }
+    `;
 
     const tools = {
       "std.httpCall": async (input: any) => {
@@ -1174,15 +1233,17 @@ bridge Query.users {
 // ── Phase 9: executeAot integration ──────────────────────────────────────────
 
 describe("executeAot: compile-once, run-many", () => {
-  const bridgeText = `version 1.5
-bridge Query.echo {
-  with api as a
-  with input as i
-  with output as o
+  const bridgeText = bridge`
+    version 1.5
+    bridge Query.echo {
+      with api as a
+      with input as i
+      with output as o
 
-  a.msg <- i.msg
-  o.reply <- a.echo
-}`;
+      a.msg <- i.msg
+      o.reply <- a.echo
+    }
+  `;
 
   test("basic executeAot works", async () => {
     const document = parseBridgeFormat(bridgeText);
@@ -1239,15 +1300,17 @@ bridge Query.echo {
   });
 
   test("executeAot with context", async () => {
-    const ctxBridge = `version 1.5
-bridge Query.secure {
-  with api as a
-  with context as ctx
-  with output as o
+    const ctxBridge = bridge`
+      version 1.5
+      bridge Query.secure {
+        with api as a
+        with context as ctx
+        with output as o
 
-  a.token <- ctx.key
-  o.result <- a.data
-}`;
+        a.token <- ctx.key
+        o.result <- a.data
+      }
+    `;
     const document = parseBridgeFormat(ctxBridge);
     const { data } = await executeAot({
       document,
@@ -1263,13 +1326,15 @@ bridge Query.secure {
 
 describe("executeAot: abort signal & timeout", () => {
   test("runtime errors retain document formatting context", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
 
-  o.name <- i.missing.value
-}`;
+        o.name <- i.missing.value
+      }
+    `;
     const document = parseBridgeFormat(bridgeText);
     document.source = bridgeText;
     document.filename = "playground.bridge";
@@ -1475,15 +1540,17 @@ bridge Query.test {
   });
 
   test("overdefinition parity — matches runtime behavior", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with expensiveApi
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with expensiveApi
+        with input as i
+        with output as o
 
-  o.val <- i.cached
-  o.val <- expensiveApi.data
-}`;
+        o.val <- i.cached
+        o.val <- expensiveApi.data
+      }
+    `;
     const document = parseBridgeFormat(bridgeText);
     const tools = {
       expensiveApi: () => ({ data: "expensive" }),
@@ -1521,15 +1588,17 @@ bridge Query.test {
   });
 
   test("overdefinition parity — zero-cost sources win before tool calls", async () => {
-    const bridgeText = `version 1.5
-bridge Query.test {
-  with expensiveApi
-  with input as i
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.test {
+        with expensiveApi
+        with input as i
+        with output as o
 
-  o.val <- expensiveApi.data
-  o.val <- i.cached
-}`;
+        o.val <- expensiveApi.data
+        o.val <- i.cached
+      }
+    `;
     const document = parseBridgeFormat(bridgeText);
     const callLog: string[] = [];
     const tools = {
@@ -1884,15 +1953,17 @@ describe("AOT codegen: async array mapping", () => {
   test("catch fallback inside array mapping does not generate await in .map()", async () => {
     // Bug 1: catch on element ref generates await (async () => { try ... })()
     // inside a synchronous .map() callback → SyntaxError
-    const bridgeText = `version 1.5
-bridge Query.catchElem {
-  with api
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.catchElem {
+        with api
+        with output as o
 
-  o.items <- api.results[] as item {
-    .name <- item.name catch "unknown"
-  }
-}`;
+        o.items <- api.results[] as item {
+          .name <- item.name catch "unknown"
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.catchElem");
     // The generated code must be valid JS — try building & running it
@@ -1910,18 +1981,20 @@ bridge Query.catchElem {
   test("continue control flow with element-scoped tool uses async loop", async () => {
     // Bug 2: ?? continue triggers flatMap, but element-scoped tool generates
     // await __call() inside the non-async flatMap callback → SyntaxError
-    const bridgeText = `version 1.5
-bridge Query.contTool {
-  with api
-  with enricher
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.contTool {
+        with api
+        with enricher
+        with output as o
 
-  o.items <- api.results[] as item {
-    alias enricher:item as e
-    .name <- item.name ?? continue
-    .extra <- e.data
-  }
-}`;
+        o.items <- api.results[] as item {
+          alias enricher:item as e
+          .name <- item.name ?? continue
+          .extra <- e.data
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.contTool");
     // Must produce valid JS
@@ -1950,18 +2023,20 @@ bridge Query.contTool {
 
   test("nested sub-array with catch does not generate await in .map()", async () => {
     // Bug 3: inner sub-array uses .map() but catch generates await inside it
-    const bridgeText = `version 1.5
-bridge Query.nestedCatch {
-  with api
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.nestedCatch {
+        with api
+        with output as o
 
-  o <- api.groups[] as g {
-    .label <- g.name
-    .items <- g.items[] as sub {
-      .value <- sub.val catch "default"
-    }
-  }
-}`;
+        o <- api.groups[] as g {
+          .label <- g.name
+          .items <- g.items[] as sub {
+            .value <- sub.val catch "default"
+          }
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.nestedCatch");
     const fn = buildAotFn(code);
@@ -1990,20 +2065,22 @@ bridge Query.nestedCatch {
   test("nested sub-array with element-scoped tool uses async loop", async () => {
     // Bug 3 variant: inner sub-array has element-scoped tool that generates
     // await __call() inside synchronous .map() → SyntaxError
-    const bridgeText = `version 1.5
-bridge Query.nestedTool {
-  with api
-  with enricher
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.nestedTool {
+        with api
+        with enricher
+        with output as o
 
-  o <- api.groups[] as g {
-    .label <- g.name
-    .items <- g.items[] as sub {
-      alias enricher:sub as e
-      .value <- e.data
-    }
-  }
-}`;
+        o <- api.groups[] as g {
+          .label <- g.name
+          .items <- g.items[] as sub {
+            alias enricher:sub as e
+            .value <- e.data
+          }
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.nestedTool");
     const fn = buildAotFn(code);
@@ -2028,18 +2105,20 @@ bridge Query.nestedTool {
 
   test("continue control flow with catch inside array uses async loop", async () => {
     // Bug 1+2 combined: continue + catch fallback
-    const bridgeText = `version 1.5
-bridge Query.contCatch {
-  with api
-  with enricher
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.contCatch {
+        with api
+        with enricher
+        with output as o
 
-  o.items <- api.results[] as item {
-    alias enricher:item as e
-    .name <- item.name ?? continue
-    .extra <- e.data catch "n/a"
-  }
-}`;
+        o.items <- api.results[] as item {
+          alias enricher:item as e
+          .name <- item.name ?? continue
+          .extra <- e.data catch "n/a"
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.contCatch");
     const fn = buildAotFn(code);
@@ -2058,19 +2137,21 @@ bridge Query.contCatch {
 
   test("non-root array field with continue and element-scoped tool uses async loop", async () => {
     // Bug 2 for non-root arrays: the same flatMap issue in the sub-array codepath
-    const bridgeText = `version 1.5
-bridge Query.subContTool {
-  with api
-  with enricher
-  with output as o
+    const bridgeText = bridge`
+      version 1.5
+      bridge Query.subContTool {
+        with api
+        with enricher
+        with output as o
 
-  o.title <- api.title
-  o.items <- api.items[] as item {
-    alias enricher:item as e
-    .name <- item.name ?? continue
-    .extra <- e.data
-  }
-}`;
+        o.title <- api.title
+        o.items <- api.items[] as item {
+          alias enricher:item as e
+          .name <- item.name ?? continue
+          .extra <- e.data
+        }
+      }
+    `;
 
     const code = compileOnly(bridgeText, "Query.subContTool");
     const fn = buildAotFn(code);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Strict scope rules — tool input wiring restrictions & scope shadowing
@@ -8,7 +9,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("strict scope rules - valid behavior", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.nestedPull {

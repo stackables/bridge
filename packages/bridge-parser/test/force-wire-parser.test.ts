@@ -7,66 +7,73 @@ import {
 import type { Bridge } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import { bridge } from "@stackables/bridge-core";
 
 // ── Parser: `force <handle>` creates forces entries ─────────────────────────
 
 describe("parseBridge: force <handle>", () => {
   test("regular bridge has no forces", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Query.demo {
-  with myTool as t
-  with input as i
-  with output as o
+      bridge Query.demo {
+        with myTool as t
+        with input as i
+        with output as o
 
-t.action <- i.name
-o.result <- t.output
+      t.action <- i.name
+      o.result <- t.output
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.equal(bridge.forces, undefined);
+    assert.equal(instr.forces, undefined);
   });
 
   test("force statement creates a forces entry", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Mutation.audit {
-  with logger.log as lg
-  with input as i
+      bridge Mutation.audit {
+        with logger.log as lg
+        with input as i
 
-lg.action <- i.event
-force lg
+      lg.action <- i.event
+      force lg
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces, "should have forces");
-    assert.equal(bridge.forces!.length, 1);
-    assert.equal(bridge.forces![0].handle, "lg");
-    assert.equal(bridge.forces![0].module, "logger");
-    assert.equal(bridge.forces![0].field, "log");
-    assert.equal(bridge.forces![0].instance, 1);
+    assert.ok(instr.forces, "should have forces");
+    assert.equal(instr.forces!.length, 1);
+    assert.equal(instr.forces![0].handle, "lg");
+    assert.equal(instr.forces![0].module, "logger");
+    assert.equal(instr.forces![0].field, "log");
+    assert.equal(instr.forces![0].instance, 1);
   });
 
   test("force and regular wires coexist", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Query.demo {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
+      bridge Query.demo {
+        with mainApi as m
+        with audit.log as audit
+        with input as i
+        with output as o
 
-m.q <- i.query
-audit.action <- i.query
-force audit
-o.result <- m.data
+      m.q <- i.query
+      audit.action <- i.query
+      force audit
+      o.result <- m.data
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces!.length, 1);
-    assert.equal(bridge.forces![0].handle, "audit");
-    for (const w of bridge.wires) {
+    assert.ok(instr.forces);
+    assert.equal(instr.forces!.length, 1);
+    assert.equal(instr.forces![0].handle, "audit");
+    for (const w of instr.wires) {
       if ("from" in w) {
         assert.equal(
           (w as any).force,
@@ -78,128 +85,140 @@ o.result <- m.data
   });
 
   test("multiple force statements", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Mutation.multi {
-  with logger.log as lg
-  with metrics.emit as mt
-  with input as i
+      bridge Mutation.multi {
+        with logger.log as lg
+        with metrics.emit as mt
+        with input as i
 
-lg.action <- i.event
-mt.name <- i.event
-force lg
-force mt
+      lg.action <- i.event
+      mt.name <- i.event
+      force lg
+      force mt
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces!.length, 2);
-    assert.equal(bridge.forces![0].handle, "lg");
-    assert.equal(bridge.forces![1].handle, "mt");
+    assert.ok(instr.forces);
+    assert.equal(instr.forces!.length, 2);
+    assert.equal(instr.forces![0].handle, "lg");
+    assert.equal(instr.forces![1].handle, "mt");
   });
 
   test("force on undeclared handle throws", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.5
+        parseBridge(bridge`
+          version 1.5
 
-bridge Query.demo {
-  with input as i
-  with output as o
+          bridge Query.demo {
+            with input as i
+            with output as o
 
-force unknown
+          force unknown
 
-}`),
+          }
+        `),
       /Cannot force undeclared handle "unknown"/,
     );
   });
 
   test("force on simple (non-dotted) tool handle", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Query.demo {
-  with myTool as t
-  with input as i
-  with output as o
+      bridge Query.demo {
+        with myTool as t
+        with input as i
+        with output as o
 
-t.in <- i.name
-force t
-o.result <- t.out
+      t.in <- i.name
+      force t
+      o.result <- t.out
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces!.length, 1);
-    assert.equal(bridge.forces![0].handle, "t");
-    assert.equal(bridge.forces![0].module, SELF_MODULE);
-    assert.equal(bridge.forces![0].type, "Tools");
-    assert.equal(bridge.forces![0].field, "myTool");
+    assert.ok(instr.forces);
+    assert.equal(instr.forces!.length, 1);
+    assert.equal(instr.forces![0].handle, "t");
+    assert.equal(instr.forces![0].module, SELF_MODULE);
+    assert.equal(instr.forces![0].type, "Tools");
+    assert.equal(instr.forces![0].field, "myTool");
   });
 
   test("force without any wires to the handle", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Mutation.fire {
-  with sideEffect as se
-  with input as i
-  with output as o
+      bridge Mutation.fire {
+        with sideEffect as se
+        with input as i
+        with output as o
 
-se.action = "fire"
-force se
-o.ok = "true"
+      se.action = "fire"
+      force se
+      o.ok = "true"
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces![0].handle, "se");
+    assert.ok(instr.forces);
+    assert.equal(instr.forces![0].handle, "se");
     assert.equal(
-      bridge.forces![0].catchError,
+      instr.forces![0].catchError,
       undefined,
       "default is critical",
     );
   });
 
   test("force catch null sets catchError flag", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Mutation.fire {
-  with analytics as ping
-  with input as i
-  with output as o
+      bridge Mutation.fire {
+        with analytics as ping
+        with input as i
+        with output as o
 
-ping.event <- i.event
-force ping catch null
-o.ok = "true"
+      ping.event <- i.event
+      force ping catch null
+      o.ok = "true"
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces!.length, 1);
-    assert.equal(bridge.forces![0].handle, "ping");
-    assert.equal(bridge.forces![0].catchError, true);
+    assert.ok(instr.forces);
+    assert.equal(instr.forces!.length, 1);
+    assert.equal(instr.forces![0].handle, "ping");
+    assert.equal(instr.forces![0].catchError, true);
   });
 
   test("mixed critical and fire-and-forget forces", () => {
-    const bridge = parseBridge(`version 1.5
+    const instr = parseBridge(bridge`
+      version 1.5
 
-bridge Mutation.multi {
-  with logger.log as lg
-  with metrics.emit as mt
-  with input as i
+      bridge Mutation.multi {
+        with logger.log as lg
+        with metrics.emit as mt
+        with input as i
 
-lg.action <- i.event
-mt.name <- i.event
-force lg
-force mt catch null
+      lg.action <- i.event
+      mt.name <- i.event
+      force lg
+      force mt catch null
 
-}`).instructions.find((i): i is Bridge => i.kind === "bridge")!;
+      }
+    `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(bridge.forces);
-    assert.equal(bridge.forces!.length, 2);
-    assert.equal(bridge.forces![0].handle, "lg");
-    assert.equal(bridge.forces![0].catchError, undefined, "lg is critical");
-    assert.equal(bridge.forces![1].handle, "mt");
-    assert.equal(bridge.forces![1].catchError, true, "mt is fire-and-forget");
+    assert.ok(instr.forces);
+    assert.equal(instr.forces!.length, 2);
+    assert.equal(instr.forces![0].handle, "lg");
+    assert.equal(instr.forces![0].catchError, undefined, "lg is critical");
+    assert.equal(instr.forces![1].handle, "mt");
+    assert.equal(instr.forces![1].catchError, true, "mt is fire-and-forget");
   });
 });
 
@@ -207,16 +226,18 @@ force mt catch null
 
 describe("serializeBridge: force statement roundtrip", () => {
   test("force statement roundtrips", () => {
-    const input = `version 1.5
-bridge Mutation.audit {
-  with logger.log as lg
-  with input as i
+    const input = bridge`
+      version 1.5
+      bridge Mutation.audit {
+        with logger.log as lg
+        with input as i
 
-lg.action <- i.event
-lg.userId <- i.userId
-force lg
+      lg.action <- i.event
+      lg.userId <- i.userId
+      force lg
 
-}`;
+      }
+    `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -224,19 +245,21 @@ force lg
   });
 
   test("mixed force and regular wires roundtrip", () => {
-    const input = `version 1.5
-bridge Query.demo {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
+    const input = bridge`
+      version 1.5
+      bridge Query.demo {
+        with mainApi as m
+        with audit.log as audit
+        with input as i
+        with output as o
 
-m.q <- i.query
-audit.action <- i.query
-force audit
-o.result <- m.data
+      m.q <- i.query
+      audit.action <- i.query
+      force audit
+      o.result <- m.data
 
-}`;
+      }
+    `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -244,15 +267,17 @@ o.result <- m.data
   });
 
   test("serialized output contains force syntax", () => {
-    const input = `version 1.5
-bridge Mutation.audit {
-  with logger.log as lg
-  with input as i
+    const input = bridge`
+      version 1.5
+      bridge Mutation.audit {
+        with logger.log as lg
+        with input as i
 
-lg.action <- i.event
-force lg
+      lg.action <- i.event
+      force lg
 
-}`;
+      }
+    `;
     const output = serializeBridge(parseBridge(input));
     assert.ok(
       output.includes("force lg"),
@@ -265,15 +290,17 @@ force lg
   });
 
   test("force catch null roundtrips", () => {
-    const input = `version 1.5
-bridge Mutation.audit {
-  with analytics as ping
-  with input as i
+    const input = bridge`
+      version 1.5
+      bridge Mutation.audit {
+        with analytics as ping
+        with input as i
 
-ping.event <- i.event
-force ping catch null
+      ping.event <- i.event
+      force ping catch null
 
-}`;
+      }
+    `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     assert.ok(
@@ -285,18 +312,20 @@ force ping catch null
   });
 
   test("mixed critical and fire-and-forget roundtrip", () => {
-    const input = `version 1.5
-bridge Mutation.multi {
-  with logger.log as lg
-  with metrics.emit as mt
-  with input as i
+    const input = bridge`
+      version 1.5
+      bridge Mutation.multi {
+        with logger.log as lg
+        with metrics.emit as mt
+        with input as i
 
-lg.action <- i.event
-mt.name <- i.event
-force lg
-force mt catch null
+      lg.action <- i.event
+      mt.name <- i.event
+      force lg
+      force mt catch null
 
-}`;
+      }
+    `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);
@@ -304,18 +333,20 @@ force mt catch null
   });
 
   test("multiple force statements roundtrip", () => {
-    const input = `version 1.5
-bridge Mutation.multi {
-  with logger.log as lg
-  with metrics.emit as mt
-  with input as i
+    const input = bridge`
+      version 1.5
+      bridge Mutation.multi {
+        with logger.log as lg
+        with metrics.emit as mt
+        with input as i
 
-lg.action <- i.event
-mt.name <- i.event
-force lg
-force mt
+      lg.action <- i.event
+      mt.name <- i.event
+      force lg
+      force mt
 
-}`;
+      }
+    `;
     const instructions = parseBridge(input);
     const serialized = serializeBridge(instructions);
     const reparsed = parseBridge(serialized);

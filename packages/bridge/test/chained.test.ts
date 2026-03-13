@@ -1,5 +1,6 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Chained providers
@@ -10,7 +11,7 @@ import { tools } from "./utils/bridge-tools.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("chained providers", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Chained.livingStandard {

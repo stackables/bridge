@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared engine parity — behavioural tests run against both runtime and
@@ -11,7 +12,7 @@ import { regressionTest } from "./utils/regression.ts";
 // ── 1. Pull wires + constants ───────────────────────────────────────────────
 
 regressionTest("parity: pull wires + constants", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.livingStandard {
@@ -171,7 +172,7 @@ regressionTest("parity: pull wires + constants", {
 // ── 2. Fallback operators (??, ||) ──────────────────────────────────────────
 
 regressionTest("parity: fallback operators", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.nullishConst {
@@ -272,7 +273,7 @@ regressionTest("parity: fallback operators", {
 // ── 3. Array mapping ────────────────────────────────────────────────────────
 
 regressionTest("parity: array mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.catalog {
@@ -411,7 +412,7 @@ regressionTest("parity: array mapping", {
 // ── 4. Ternary / conditional wires ──────────────────────────────────────────
 
 regressionTest("parity: ternary / conditional wires", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.conditional {
@@ -489,7 +490,7 @@ regressionTest("parity: ternary / conditional wires", {
 // ── 5. Catch fallbacks ──────────────────────────────────────────────────────
 
 regressionTest("parity: catch fallbacks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.catchConst {
@@ -590,7 +591,7 @@ regressionTest("parity: catch fallbacks", {
 // ── 6. Force statements ─────────────────────────────────────────────────────
 
 regressionTest("parity: force statements", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.forceRuns {
@@ -673,7 +674,7 @@ regressionTest("parity: force statements", {
 // ── 7. ToolDef support ──────────────────────────────────────────────────────
 
 regressionTest("parity: ToolDef support", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     tool restApi from myHttp {
@@ -825,7 +826,7 @@ regressionTest("parity: ToolDef support", {
 // ── 8. Tool context injection ───────────────────────────────────────────────
 
 regressionTest("parity: tool context injection", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.ctx {
@@ -857,7 +858,7 @@ regressionTest("parity: tool context injection", {
 // ── 9. Const blocks ─────────────────────────────────────────────────────────
 
 regressionTest("parity: const blocks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     const fallbackGeo = { "lat": 0, "lon": 0 }
@@ -904,7 +905,7 @@ regressionTest("parity: const blocks", {
 // ── 10. String interpolation ────────────────────────────────────────────────
 
 regressionTest("parity: string interpolation", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.greet {
@@ -945,7 +946,7 @@ regressionTest("parity: string interpolation", {
 // ── 11. Expressions (math, comparison) ──────────────────────────────────────
 
 regressionTest("parity: expressions", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.calc {
@@ -983,7 +984,7 @@ regressionTest("parity: expressions", {
 // ── 12. Nested scope blocks ─────────────────────────────────────────────────
 
 regressionTest("parity: nested scope blocks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.weather {
@@ -1024,7 +1025,7 @@ regressionTest("parity: nested scope blocks", {
 // ── 13. Nested arrays ───────────────────────────────────────────────────────
 
 regressionTest("parity: nested arrays", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.searchTrains {
@@ -1111,7 +1112,7 @@ regressionTest("parity: nested arrays", {
 // ── 14. Pipe operators ──────────────────────────────────────────────────────
 
 regressionTest("parity: pipe operators", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.shout {
@@ -1139,7 +1140,7 @@ regressionTest("parity: pipe operators", {
 // ── 15. Define blocks ───────────────────────────────────────────────────────
 
 regressionTest("parity: define blocks", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     define userProfile {
@@ -1234,7 +1235,7 @@ regressionTest("parity: define blocks", {
 // ── 16. Alias declarations ──────────────────────────────────────────────────
 
 regressionTest("parity: alias declarations", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.aliasSimple {
@@ -1281,7 +1282,7 @@ regressionTest("parity: alias declarations", {
 // ── 17. Overdefinition ──────────────────────────────────────────────────────
 
 regressionTest("parity: overdefinition", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.lookup {
@@ -1381,7 +1382,7 @@ regressionTest("parity: overdefinition", {
 // ── 18. Break/continue in array mapping ─────────────────────────────────────
 
 regressionTest("parity: break/continue in array mapping", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.continueNull {
@@ -1576,7 +1577,7 @@ regressionTest("parity: break/continue in array mapping", {
 // ── 19. Sparse fieldsets (requestedFields) ──────────────────────────────────
 
 regressionTest("parity: sparse fieldsets — basic", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.sparseBasic {
@@ -1670,7 +1671,7 @@ regressionTest("parity: sparse fieldsets — basic", {
 });
 
 regressionTest("parity: sparse fieldsets — wildcard and chains", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.trip {
@@ -1771,7 +1772,7 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
 });
 
 regressionTest("parity: sparse fieldsets — nested and array paths", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.sparseNested {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { formatBridgeError } from "@stackables/bridge-core";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Runtime error formatting
@@ -21,18 +22,20 @@ const FN = "playground.bridge";
 // ── Engine-level error formatting ────────────────────────────────────────────
 
 regressionTest("error formatting – runtime errors", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with std.str.toUpperCase as uc memoize
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with std.str.toUpperCase as uc memoize
+      with std.str.toLowerCase as lc
+      with input as i
+      with output as o
 
-  o.message <- i.empty.array.error
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`,
+      o.message <- i.empty.array.error
+      o.upper <- uc:i.name
+      o.lower <- lc:i.name
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "formats runtime errors with bridge source location": {
@@ -55,15 +58,17 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – missing tool", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with xxx as missing
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with xxx as missing
+      with input as i
+      with output as o
 
-  o.message <- missing:i.name
-}`,
+      o.message <- missing:i.name
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "formats missing tool errors with source location": {
@@ -86,20 +91,22 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – throw fallback", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with std.str.toUpperCase as uc
-  with std.str.toLowerCase as lc
-  with kala as k
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with std.str.toUpperCase as uc
+      with std.str.toLowerCase as lc
+      with kala as k
+      with input as i
+      with output as o
 
-  o.message <- i.does?.not?.crash ?? throw "Errore"
+      o.message <- i.does?.not?.crash ?? throw "Errore"
 
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`,
+      o.upper <- uc:i.name
+      o.lower <- lc:i.name
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "throw fallbacks underline only the throw clause": {
@@ -122,14 +129,16 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – panic fallback", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with input as i
+      with output as o
 
-  o.message <- i.name ?? panic "Fatale"
-}`,
+      o.message <- i.name ?? panic "Fatale"
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "panic fallbacks underline only the panic clause": {
@@ -149,14 +158,16 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – ternary branch", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with input as i
+      with output as o
 
-  o.discount <- i.isPro ? 20 : i.asd.asd.asd
-}`,
+      o.discount <- i.isPro ? 20 : i.asd.asd.asd
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "ternary branch errors underline only the failing branch": {
@@ -186,20 +197,22 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – array throw", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.processCatalog {
-  with input as i
-  with output as o
+    bridge Query.processCatalog {
+      with input as i
+      with output as o
 
-  o <- i.catalog[] as cat {
-    .name <- cat.name
-    .items <- cat.items[] as item {
-      .sku <- item.sku ?? continue
-      .price <- item.price ?? throw "panic"
+      o <- i.catalog[] as cat {
+        .name <- cat.name
+        .items <- cat.items[] as item {
+          .sku <- item.sku ?? continue
+          .price <- item.price ?? throw "panic"
+        }
+      }
     }
-  }
-}`,
+  `,
   scenarios: {
     "Query.processCatalog": {
       "array-mapped throw fallbacks retain source snippets": {
@@ -261,16 +274,18 @@ bridge Query.processCatalog {
 });
 
 regressionTest("error formatting – ternary condition", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.pricing {
-  with input as i
-  with output as o
+    bridge Query.pricing {
+      with input as i
+      with output as o
 
-  o.tier <- i.isPro ? "premium" : "basic"
-  o.discount <- i.isPro ? 20 : 5
-  o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice
-}`,
+      o.tier <- i.isPro ? "premium" : "basic"
+      o.discount <- i.isPro ? 20 : 5
+      o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice
+    }
+  `,
   scenarios: {
     "Query.pricing": {
       "ternary condition errors point at condition and missing segment": {
@@ -313,18 +328,20 @@ bridge Query.pricing {
 });
 
 regressionTest("error formatting – coalesce fallback", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-bridge Query.greet {
-  with std.str.toUpperCase as uc memoize
-  with std.str.toLowerCase as lc
-  with input as i
-  with output as o
+    bridge Query.greet {
+      with std.str.toUpperCase as uc memoize
+      with std.str.toLowerCase as lc
+      with input as i
+      with output as o
 
-  o.message <- i.empty.array?.error ?? i.empty.array.error
-  o.upper <- uc:i.name
-  o.lower <- lc:i.name
-}`,
+      o.message <- i.empty.array?.error ?? i.empty.array.error
+      o.upper <- uc:i.name
+      o.lower <- lc:i.name
+    }
+  `,
   scenarios: {
     "Query.greet": {
       "coalesce fallback errors highlight the failing fallback branch": {
@@ -361,24 +378,26 @@ bridge Query.greet {
 });
 
 regressionTest("error formatting – tool input cycle", {
-  bridge: `version 1.5
+  bridge: bridge`
+    version 1.5
 
-tool geo from std.httpCall {
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .path = "/search"
-  .format = "json"
-  .limit = "1"
-}
+    tool geo from std.httpCall {
+      .baseUrl = "https://nominatim.openstreetmap.org"
+      .path = "/search"
+      .format = "json"
+      .limit = "1"
+    }
 
-bridge Query.location {
-  with geo
-  with input as i
-  with output as o
+    bridge Query.location {
+      with geo
+      with input as i
+      with output as o
 
-  geo.q <- geo[0].city
-  o.lat <- geo[0].lat
-  o.lon <- geo[0].lon
-}`,
+      geo.q <- geo[0].city
+      o.lat <- geo[0].lat
+      o.lon <- geo[0].lon
+    }
+  `,
   scenarios: {
     "Query.location": {
       "tool input cycles retain the originating wire source location": {

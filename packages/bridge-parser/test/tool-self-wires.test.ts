@@ -4,6 +4,7 @@ import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import type { ToolDef } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import { bridge } from "@stackables/bridge-core";
 
 /** Shorthand to make a NodeRef for Tools */
 function toolRef(
@@ -57,10 +58,12 @@ function parseTool(text: string): ToolDef {
 
 describe("tool self-wires: constant (=)", () => {
   test("constant string value", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  .baseUrl = "https://example.com"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        .baseUrl = "https://example.com"
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       value: "https://example.com",
       to: toolRef("api", ["baseUrl"]),
@@ -68,10 +71,12 @@ tool api from httpCall {
   });
 
   test("constant bare value", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  .method = GET
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        .method = GET
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       value: "GET",
       to: toolRef("api", ["method"]),
@@ -79,10 +84,12 @@ tool api from httpCall {
   });
 
   test("constant nested path", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  .headers.Content-Type = "application/json"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        .headers.Content-Type = "application/json"
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       value: "application/json",
       to: toolRef("api", ["headers", "Content-Type"]),
@@ -92,11 +99,13 @@ tool api from httpCall {
 
 describe("tool self-wires: simple pull (<-)", () => {
   test("pull from context handle", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  with context
-  .headers.Authorization <- context.auth.token
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        with context
+        .headers.Authorization <- context.auth.token
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       from: contextRef(["auth", "token"]),
       to: toolRef("api", ["headers", "Authorization"]),
@@ -104,12 +113,14 @@ tool api from httpCall {
   });
 
   test("pull from const handle", () => {
-    const tool = parseTool(`version 1.5
-const timeout = 5000
-tool api from httpCall {
-  with const
-  .timeout <- const.timeout
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const timeout = 5000
+      tool api from httpCall {
+        with const
+        .timeout <- const.timeout
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       from: constRef(["timeout"]),
       to: toolRef("api", ["timeout"]),
@@ -117,14 +128,16 @@ tool api from httpCall {
   });
 
   test("pull from tool handle", () => {
-    const tool = parseTool(`version 1.5
-tool authService from httpCall {
-  .baseUrl = "https://auth.example.com"
-}
-tool api from httpCall {
-  with authService as auth
-  .headers.Authorization <- auth.access_token
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool authService from httpCall {
+        .baseUrl = "https://auth.example.com"
+      }
+      tool api from httpCall {
+        with authService as auth
+        .headers.Authorization <- auth.access_token
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       from: { ...toolRef("authService", ["access_token"]), instance: 1 },
       to: toolRef("api", ["headers", "Authorization"]),
@@ -134,10 +147,12 @@ tool api from httpCall {
 
 describe('tool self-wires: plain string (<- "...")', () => {
   test("plain string without interpolation", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  .format <- "json"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        .format <- "json"
+      }
+    `);
     assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       value: "json",
       to: toolRef("api", ["format"]),
@@ -147,12 +162,14 @@ tool api from httpCall {
 
 describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
   test("string interpolation with const ref", () => {
-    const tool = parseTool(`version 1.5
-const apiVer = "v2"
-tool api from httpCall {
-  with const
-  .path <- "/api/{const.apiVer}/search"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const apiVer = "v2"
+      tool api from httpCall {
+        with const
+        .path <- "/api/{const.apiVer}/search"
+      }
+    `);
     // Should produce a concat fork + pipeHandle, similar to bridge blocks
     const pathWire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "path",
@@ -168,11 +185,13 @@ tool api from httpCall {
   });
 
   test("string interpolation with context ref", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  with context
-  .path <- "/users/{context.userId}/profile"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        with context
+        .path <- "/users/{context.userId}/profile"
+      }
+    `);
     const pathWire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "path",
     )!;
@@ -184,10 +203,12 @@ tool api from httpCall {
   test("self-reference in interpolation is circular dependency error", () => {
     assert.throws(
       () =>
-        parseBridge(`version 1.5
-tool geo from httpCall {
-  .q <- "Berlin{.query}"
-}`),
+        parseBridge(bridge`
+          version 1.5
+          tool geo from httpCall {
+            .q <- "Berlin{.query}"
+          }
+        `),
       (err: Error) => {
         assert.ok(
           err.message.includes("circular dependency"),
@@ -201,12 +222,14 @@ tool geo from httpCall {
 
 describe("tool self-wires: expression chain (<- ref + expr)", () => {
   test("expression with + operator", () => {
-    const tool = parseTool(`version 1.5
-const one = 1
-tool api from httpCall {
-  with const
-  .limit <- const.one + 1
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const one = 1
+      tool api from httpCall {
+        with const
+        .limit <- const.one + 1
+      }
+    `);
     const limitWire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "limit",
     )!;
@@ -217,12 +240,14 @@ tool api from httpCall {
   });
 
   test("expression with > operator", () => {
-    const tool = parseTool(`version 1.5
-const threshold = 10
-tool api from httpCall {
-  with const
-  .verbose <- const.threshold > 5
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const threshold = 10
+      tool api from httpCall {
+        with const
+        .verbose <- const.threshold > 5
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "verbose",
     )!;
@@ -234,12 +259,14 @@ tool api from httpCall {
 
 describe("tool self-wires: ternary (<- cond ? then : else)", () => {
   test("ternary with literal branches", () => {
-    const tool = parseTool(`version 1.5
-const flag = true
-tool api from httpCall {
-  with const
-  .method <- const.flag ? "POST" : "GET"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const flag = true
+      tool api from httpCall {
+        with const
+        .method <- const.flag ? "POST" : "GET"
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "method",
     )!;
@@ -251,14 +278,16 @@ tool api from httpCall {
   });
 
   test("ternary with ref branches", () => {
-    const tool = parseTool(`version 1.5
-const flag = true
-const urlA = "https://a.example.com"
-const urlB = "https://b.example.com"
-tool api from httpCall {
-  with const
-  .baseUrl <- const.flag ? const.urlA : const.urlB
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const flag = true
+      const urlA = "https://a.example.com"
+      const urlB = "https://b.example.com"
+      tool api from httpCall {
+        with const
+        .baseUrl <- const.flag ? const.urlA : const.urlB
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "baseUrl",
     )!;
@@ -271,11 +300,13 @@ tool api from httpCall {
 
 describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
   test("nullish coalesce with literal fallback", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  with context
-  .timeout <- context.settings.timeout ?? "5000"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        with context
+        .timeout <- context.settings.timeout ?? "5000"
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "timeout",
     )!;
@@ -288,11 +319,13 @@ tool api from httpCall {
   });
 
   test("falsy coalesce with literal fallback", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  with context
-  .format <- context.settings.format || "json"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        with context
+        .format <- context.settings.format || "json"
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "format",
     )!;
@@ -304,11 +337,13 @@ tool api from httpCall {
 
 describe("tool self-wires: catch fallback", () => {
   test("catch with literal fallback", () => {
-    const tool = parseTool(`version 1.5
-tool api from httpCall {
-  with context
-  .path <- context.settings.path catch "/default"
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      tool api from httpCall {
+        with context
+        .path <- context.settings.path catch "/default"
+      }
+    `);
     const wire = tool.wires.find((w) => "to" in w && w.to.path[0] === "path")!;
     assert.ok(wire, "Expected a wire targeting .path");
     assert.ok("from" in wire, "Expected a pull wire");
@@ -318,12 +353,14 @@ tool api from httpCall {
 
 describe("tool self-wires: not prefix", () => {
   test("not prefix on source", () => {
-    const tool = parseTool(`version 1.5
-const debug = true
-tool api from httpCall {
-  with const
-  .silent <- not const.debug
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const debug = true
+      tool api from httpCall {
+        with const
+        .silent <- not const.debug
+      }
+    `);
     const wire = tool.wires.find(
       (w) => "to" in w && w.to.path[0] === "silent",
     )!;
@@ -336,15 +373,17 @@ tool api from httpCall {
 
 describe("tool self-wires: integration", () => {
   test("full tool with mixed self-wire types", () => {
-    const tool = parseTool(`version 1.5
-const one = 1
-tool geo from std.httpCall {
-  with const
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .path = "/search"
-  .format = "json"
-  .limit <- const.one + 1
-}`);
+    const tool = parseTool(bridge`
+      version 1.5
+      const one = 1
+      tool geo from std.httpCall {
+        with const
+        .baseUrl = "https://nominatim.openstreetmap.org"
+        .path = "/search"
+        .format = "json"
+        .limit <- const.one + 1
+      }
+    `);
     assert.equal(tool.name, "geo");
     assert.equal(tool.fn, "std.httpCall");
     // 3 constants + expression fork wires (input to fork + constant operand + pipe output)

@@ -1,4 +1,5 @@
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Loop-scoped tools — declaring tools inside array loops
@@ -15,7 +16,7 @@ const httpTool = {
 };
 
 regressionTest("loop scoped tools - valid behavior", {
-  bridge: `
+  bridge: bridge`
     version 1.5
 
     bridge Query.simple {
