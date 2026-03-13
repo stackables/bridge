@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { assertGraphqlExpectation } from "./utils/regression.ts";
+import { assertGraphqlExpectation } from "../utils/regression.ts";
 
 describe("assertGraphql asserter", () => {
   test("rejects partial object expectations for multi-field GraphQL results", () => {

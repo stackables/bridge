@@ -11,13 +11,13 @@
  *
  * Or directly (useful for manual --cpu-prof / --prof):
  *   BRIDGE_PROFILE_FILTER="flat array 1000" BRIDGE_PROFILE_ITERATIONS=5000 \
- *     node --experimental-transform-types --conditions source --cpu-prof scripts/profile-target.mjs
+ *     node --experimental-transform-types --cpu-prof scripts/profile-target.mjs
  *
  * Environment variables:
  *   BRIDGE_PROFILE_FILTER      Substring match for scenario name (default: first scenario)
  *   BRIDGE_PROFILE_ITERATIONS  Number of iterations (default: 5000)
  */
-// Must be run with: --experimental-transform-types --conditions source
+// Must be run with: --experimental-transform-types
 // Import from the umbrella package's source entry point directly.
 import {
   parseBridgeFormat as parseBridge,

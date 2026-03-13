@@ -1,226 +1,208 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { parseBridge } from "../src/index.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
 
-describe("strict scope rules - invalid cases", () => {
-  test("tool inputs can be wired only in the scope that imports the tool", () => {
-    assert.throws(
-      () =>
-        parseBridge(`version 1.5
+// ═══════════════════════════════════════════════════════════════════════════
+// Strict scope rules — tool input wiring restrictions & scope shadowing
+//
+// Migrated from legacy/strict-scope-rules.test.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
-bridge Query.test {
-  with std.httpCall as fetch
-  with input as i
-  with output as o
+regressionTest("strict scope rules - valid behavior", {
+  bridge: `
+    version 1.5
 
-  o.items <- i.list[] as item {
-    fetch {
-      .id <- item.id
+    bridge Query.nestedPull {
+      with std.httpCall as fetch
+      with input as i
+      with output as o
+
+      fetch.id <- i.requestId
+      o.items <- i.list[] as item {
+        .id <- item.id
+        .result <- fetch.data
+        .sub <- item.list[] as p {
+          .more <- item.id
+          .value <- p.value
+          .result <- fetch.data
+        }
+      }
     }
-    .result <- fetch.data
-    .sub <- item.list[] as p {
-      .more <- item.id
-      .result <- fetch.data
+
+    bridge Query.shadow {
+      with std.httpCall as whatever
+      with input as i
+      with output as o
+
+      whatever.id <- i.requestId
+      o.toolResult <- whatever.data
+      o.items <- i.list[] as whatever {
+        .id <- whatever.id
+        .data <- whatever.data
+        .sub <- whatever.list[] as whatever {
+          .id <- whatever.id
+          .data <- whatever.data
+        }
+      }
     }
-  }
-}`),
-      (error: unknown) => {
-        assert.ok(
-          error instanceof Error,
-          "expected parseBridge to throw an Error",
-        );
-        assert.ok(
-          error.message.length > 0,
-          "expected parseBridge to provide a non-empty error message",
-        );
-        return true;
-      },
-    );
-  });
-});
 
-forEachEngine("strict scope rules - valid behavior", (run, ctx) => {
-  test("nested scopes can pull data from visible parent scopes", async (t) => {
-    if (ctx.engine === "compiled")
-      return t.skip("compiler: nested loop scope pull NYI");
-    const bridge = `version 1.5
+    bridge Query.nearestScope {
+      with std.httpCall as whatever
+      with input as i
+      with output as o
 
-bridge Query.test {
-  with std.httpCall as fetch
-  with input as i
-  with output as o
-
-  fetch.id <- i.requestId
-  o.items <- i.list[] as item {
-    .id <- item.id
-    .result <- fetch.data
-    .sub <- item.list[] as p {
-      .more <- item.id
-      .value <- p.value
-      .result <- fetch.data
+      whatever.id <- i.requestId
+      o.toolResult <- whatever.data
+      o.items <- i.list[] as whatever {
+        .value <- whatever.id
+        .sub <- whatever.list[] as whatever {
+          .value <- whatever.id
+          .result <- whatever.data
+        }
+      }
     }
-  }
-}`;
-
-    const { data } = await run(
-      bridge,
-      "Query.test",
-      {
-        requestId: "req-1",
-        list: [
-          {
-            id: "outer-a",
-            list: [{ value: "a-1" }, { value: "a-2" }],
-          },
-          {
-            id: "outer-b",
-            list: [{ value: "b-1" }],
-          },
-        ],
-      },
-      {
-        std: {
-          httpCall: async (params: { id: string }) => ({
-            data: `fetch:${params.id}`,
-          }),
-        },
-      },
-    );
-
-    assert.deepStrictEqual(data, {
-      items: [
-        {
-          id: "outer-a",
-          result: "fetch:req-1",
-          sub: [
+  `,
+  tools: {
+    "std.httpCall": async (params: { id: string }) => ({
+      data: `fetch:${params.id}`,
+    }),
+  },
+  scenarios: {
+    "Query.nestedPull": {
+      "nested scopes can pull data from visible parent scopes": {
+        input: {
+          requestId: "req-1",
+          list: [
             {
-              more: "outer-a",
-              value: "a-1",
-              result: "fetch:req-1",
+              id: "outer-a",
+              list: [{ value: "a-1" }, { value: "a-2" }],
             },
             {
-              more: "outer-a",
-              value: "a-2",
-              result: "fetch:req-1",
+              id: "outer-b",
+              list: [{ value: "b-1" }],
             },
           ],
         },
-        {
-          id: "outer-b",
-          result: "fetch:req-1",
-          sub: [
+        assertData: {
+          items: [
             {
-              more: "outer-b",
-              value: "b-1",
+              id: "outer-a",
               result: "fetch:req-1",
+              sub: [
+                { more: "outer-a", value: "a-1", result: "fetch:req-1" },
+                { more: "outer-a", value: "a-2", result: "fetch:req-1" },
+              ],
+            },
+            {
+              id: "outer-b",
+              result: "fetch:req-1",
+              sub: [{ more: "outer-b", value: "b-1", result: "fetch:req-1" }],
             },
           ],
         },
-      ],
-    });
-  });
-
-  test("inner scopes shadow outer tool names during execution", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with std.httpCall as whatever
-  with input as i
-  with output as o
-
-  whatever.id <- i.requestId
-  o.items <- i.list[] as whatever {
-    .id <- whatever.id
-    .data <- whatever.data
-    .sub <- whatever.list[] as whatever {
-      .id <- whatever.id
-      .data <- whatever.data
-    }
-  }
-}`;
-
-    const { data } = await run(
-      bridge,
-      "Query.test",
-      {
-        requestId: "tool-value",
-        list: [
-          {
-            id: "item-a",
-            data: "item-a-data",
-            list: [{ id: "sub-a1", data: "sub-a1-data" }],
-          },
-        ],
+        assertTraces: 1,
       },
-      {
-        "std.httpCall": async (params: { id: string }) => ({
-          data: `tool:${params.id}`,
-        }),
+      "empty outer list": {
+        input: { requestId: "req-1", list: [] },
+        assertData: { items: [] },
+        // runtime: 0 (pull-based, tool output never consumed); compiled: 1 (eagerly calls bridge-level tools)
+        assertTraces: (traces) => assert.ok(traces.length <= 1),
       },
-    );
-
-    assert.deepStrictEqual(data, {
-      items: [
-        {
-          id: "item-a",
-          data: "item-a-data",
-          sub: [{ id: "sub-a1", data: "sub-a1-data" }],
+      "empty inner list": {
+        input: {
+          requestId: "req-1",
+          list: [{ id: "a", list: [] }],
         },
-      ],
-    });
-  });
-
-  test("nearest scope binding wins during execution when names overlap repeatedly", async () => {
-    const bridge = `version 1.5
-
-bridge Query.test {
-  with std.httpCall as whatever
-  with input as i
-  with output as o
-
-  whatever.id <- i.requestId
-  o.items <- i.list[] as whatever {
-    .value <- whatever.id
-    .sub <- whatever.list[] as whatever {
-      .value <- whatever.id
-      .result <- whatever.data
-    }
-  }
-}`;
-
-    const { data } = await run(
-      bridge,
-      "Query.test",
-      {
-        requestId: "tool-value",
-        list: [
-          {
-            id: "outer-a",
-            list: [
-              { id: "inner-a1", data: "inner-a1-data" },
-              { id: "inner-a2", data: "inner-a2-data" },
-            ],
-          },
-        ],
+        assertData: {
+          items: [{ id: "a", result: "fetch:req-1", sub: [] }],
+        },
+        assertTraces: 1,
       },
-      {
-        "std.httpCall": async (params: { id: string }) => ({
-          data: `tool:${params.id}`,
-        }),
-      },
-    );
-
-    assert.deepStrictEqual(data, {
-      items: [
-        {
-          value: "outer-a",
-          sub: [
-            { value: "inner-a1", result: "inner-a1-data" },
-            { value: "inner-a2", result: "inner-a2-data" },
+    },
+    "Query.shadow": {
+      "inner scopes shadow outer tool names during execution": {
+        input: {
+          requestId: "tool-value",
+          list: [
+            {
+              id: "item-a",
+              data: "item-a-data",
+              list: [{ id: "sub-a1", data: "sub-a1-data" }],
+            },
           ],
         },
-      ],
-    });
-  });
+        assertData: {
+          toolResult: "fetch:tool-value",
+          items: [
+            {
+              id: "item-a",
+              data: "item-a-data",
+              sub: [{ id: "sub-a1", data: "sub-a1-data" }],
+            },
+          ],
+        },
+        assertTraces: 1,
+      },
+      "empty outer list": {
+        input: { requestId: "x", list: [] },
+        assertData: { toolResult: "fetch:x", items: [] },
+        assertTraces: 1,
+      },
+      "empty inner list": {
+        input: {
+          requestId: "x",
+          list: [{ id: "a", data: "a-data", list: [] }],
+        },
+        assertData: {
+          toolResult: "fetch:x",
+          items: [{ id: "a", data: "a-data", sub: [] }],
+        },
+        assertTraces: 1,
+      },
+    },
+    "Query.nearestScope": {
+      "nearest scope binding wins when names overlap repeatedly": {
+        input: {
+          requestId: "tool-value",
+          list: [
+            {
+              id: "outer-a",
+              list: [
+                { id: "inner-a1", data: "inner-a1-data" },
+                { id: "inner-a2", data: "inner-a2-data" },
+              ],
+            },
+          ],
+        },
+        assertData: {
+          toolResult: "fetch:tool-value",
+          items: [
+            {
+              value: "outer-a",
+              sub: [
+                { value: "inner-a1", result: "inner-a1-data" },
+                { value: "inner-a2", result: "inner-a2-data" },
+              ],
+            },
+          ],
+        },
+        assertTraces: 1,
+      },
+      "empty outer list": {
+        input: { requestId: "x", list: [] },
+        assertData: { toolResult: "fetch:x", items: [] },
+        assertTraces: 1,
+      },
+      "empty inner list": {
+        input: {
+          requestId: "x",
+          list: [{ id: "a", list: [] }],
+        },
+        assertData: {
+          toolResult: "fetch:x",
+          items: [{ value: "a", sub: [] }],
+        },
+        assertTraces: 1,
+      },
+    },
+  },
 });

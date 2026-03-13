@@ -150,6 +150,8 @@ export class ExecutionTree implements TreeContext {
     new Map();
   /** Promise that resolves when all critical `force` handles have settled. */
   private forcedExecution?: Promise<void>;
+  /** Cached spread data for field-by-field GraphQL resolution. */
+  private spreadCache?: Record<string, unknown>;
   /** Shared trace collector — present only when tracing is enabled. */
   tracer?: TraceCollector;
   /**
@@ -1280,6 +1282,7 @@ export class ExecutionTree implements TreeContext {
     const result = this.resolveWires(matches);
     if (!array) return result;
     const resolved = await result;
+    if (resolved == null || !Array.isArray(resolved)) return resolved;
     const arrayPathKey = path.join(".");
     if (isLoopControlSignal(resolved)) {
       this.recordEmptyArray(arrayPathKey);
@@ -1447,6 +1450,16 @@ export class ExecutionTree implements TreeContext {
     // For scalar arrays ([JSON!]) GraphQL won't call sub-field resolvers,
     // so we eagerly materialise each element here.
     if (this.parent) {
+      const elementData = this.state[this.elementTrunkKey];
+
+      // Scalar element (string, number, boolean, null): return directly.
+      // Shadow trees wrapping non-object values have no sub-fields to
+      // resolve — re-entering wire resolution would incorrectly re-trigger
+      // the array-level wire that produced this element.
+      if (typeof elementData !== "object" || elementData === null) {
+        return elementData;
+      }
+
       const outputFields = new Set<string>();
       for (const wire of bridge.wires) {
         if (
@@ -1653,7 +1666,7 @@ export class ExecutionTree implements TreeContext {
     return _materializeShadows(this, items, pathPrefix);
   }
 
-  async response(ipath: Path, array: boolean): Promise<any> {
+  async response(ipath: Path, array: boolean, scalar = false): Promise<any> {
     // Build path segments from GraphQL resolver info
     const pathSegments: string[] = [];
     let index = ipath;
@@ -1662,7 +1675,7 @@ export class ExecutionTree implements TreeContext {
       index = index.prev;
     }
 
-    if (pathSegments.length === 0) {
+    if (pathSegments.length === 0 && (array || scalar)) {
       // Direct output for scalar/list return types (e.g. [String!])
       const directOutput =
         this.bridge?.wires.filter(
@@ -1709,6 +1722,29 @@ export class ExecutionTree implements TreeContext {
         return this;
       }
 
+      // ── Lazy spread resolution ─────────────────────────────────────
+      // When ALL matches are spread wires, resolve them eagerly, cache
+      // the result, then return `this` so GraphQL sub-field resolvers
+      // can pick up both spread properties and explicit wires.
+      if (
+        !array &&
+        matches.every(
+          (w): boolean => "from" in w && "spread" in w && !!w.spread,
+        )
+      ) {
+        const spreadData = await this.resolveWires(matches);
+        if (spreadData != null && typeof spreadData === "object") {
+          const prefix = cleanPath.join(".");
+          this.spreadCache ??= {};
+          if (prefix === "") {
+            Object.assign(this.spreadCache, spreadData as Record<string, unknown>);
+          } else {
+            (this.spreadCache as Record<string, unknown>)[prefix] = spreadData;
+          }
+        }
+        return this;
+      }
+
       const response = this.resolveWires(matches);
 
       if (!array) {
@@ -1717,6 +1753,7 @@ export class ExecutionTree implements TreeContext {
 
       // Array: create shadow trees for per-element resolution
       const resolved = await response;
+      if (resolved == null || !Array.isArray(resolved)) return resolved;
       const arrayPathKey = cleanPath.join(".");
       if (isLoopControlSignal(resolved)) {
         this.recordEmptyArray(arrayPathKey);
@@ -1735,12 +1772,36 @@ export class ExecutionTree implements TreeContext {
         const response = this.resolveWires(defineFieldWires);
         if (!array) return response;
         const resolved = await response;
+        if (resolved == null || !Array.isArray(resolved)) return resolved;
         const definePathKey = cleanPath.join(".");
         if (isLoopControlSignal(resolved)) {
           this.recordEmptyArray(definePathKey);
           return [];
         }
         return this.createShadowArray(resolved as any[], definePathKey);
+      }
+    }
+
+    // ── Spread cache fallback ─────────────────────────────────────────
+    // If a spread wire was resolved at a parent path, field-by-field GraphQL
+    // resolution consults the cached spread data for fields not covered by
+    // explicit wires.
+    if (cleanPath.length > 0 && this.spreadCache) {
+      // Check for a parent-level spread: e.g. cleanPath=["author"] with
+      // spread cached under "" (root spread), or cleanPath=["info","author"]
+      // with spread cached under "info".
+      const fieldName = cleanPath[cleanPath.length - 1]!;
+      const parentPrefix = cleanPath.slice(0, -1).join(".");
+      const parentSpread =
+        parentPrefix === ""
+          ? this.spreadCache
+          : (this.spreadCache[parentPrefix] as Record<string, unknown> | undefined);
+      if (
+        parentSpread != null &&
+        typeof parentSpread === "object" &&
+        fieldName in parentSpread
+      ) {
+        return (parentSpread as Record<string, unknown>)[fieldName];
       }
     }
 

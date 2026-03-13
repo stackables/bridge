@@ -2,22 +2,18 @@
   "name": "@stackables/bridge-types",
   "version": "1.2.0",
   "description": "Shared type definitions for the Bridge ecosystem",
-  "main": "./build/index.js",
+  "main": "./src/index.ts",
   "type": "module",
-  "types": "./build/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "source": "./src/index.ts",
-      "import": "./build/index.js",
-      "types": "./build/index.d.ts"
-    }
+    ".": "./src/index.ts"
   },
   "files": [
     "build"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "lint:types": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "lint:types": "tsc -p tsconfig.json",
     "prepack": "pnpm build"
   },
   "repository": {
@@ -30,6 +26,14 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "main": "./build/index.js",
+    "types": "./build/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./build/index.d.ts",
+        "default": "./build/index.js"
+      }
+    }
   }
 }

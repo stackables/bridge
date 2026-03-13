@@ -1,263 +1,204 @@
-/**
- * Runtime execution tests for tool self-wires.
- *
- * These verify that tool self-wires with expressions, string interpolation,
- * ternary, coalesce, catch, and not prefix actually EXECUTE correctly
- * at runtime — not just parse correctly.
- */
-import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+regressionTest("tool self-wire runtime", {
+  bridge: `
+    version 1.5
 
-/** A simple echo tool that returns its entire input. */
-async function echo(input: Record<string, any>) {
-  return input;
-}
+    const apiUrl = "https://example.com"
+    const one = 1
+    const base = 10
+    const age = 21
+    const city = "Berlin"
+    const flag = true
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Tool self-wire runtime execution tests
-// ══════════════════════════════════════════════════════════════════════════════
+    tool constants from test.multitool {
+      .greeting = "hello"
+      .count = 42
+    }
 
-forEachEngine("tool self-wire runtime", (run) => {
-  // ── Constants ─────────────────────────────────────────────────────────────
+    tool constPull from test.multitool {
+      with const
+      .url <- const.apiUrl
+    }
 
-  test("constant self-wires pass values to tool", async () => {
-    const { data } = await run(
-      `version 1.5
-tool myApi from echo {
-  .greeting = "hello"
-  .count = 42
-}
+    tool addExpr from test.multitool {
+      with const
+      .limit <- const.one + 1
+    }
 
-bridge Query.test {
-  with myApi as t
-  with output as o
+    tool mulExpr from test.multitool {
+      with const
+      .scaled <- const.base * 5
+    }
 
-  o.greeting <- t.greeting
-  o.count <- t.count
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.greeting, "hello");
-    assert.equal(data.count, 42);
-  });
+    tool compareExpr from test.multitool {
+      with const
+      .eligible <- const.age >= 18
+    }
 
-  // ── Simple pull from const ────────────────────────────────────────────────
+    tool interpolation from test.multitool {
+      with const
+      .query <- "city={const.city}"
+    }
 
-  test("pull from const handle passes value to tool", async () => {
-    const { data } = await run(
-      `version 1.5
-const apiUrl = "https://example.com"
+    tool ternaryTool from test.multitool {
+      with const
+      .method <- const.flag ? "POST" : "GET"
+    }
 
-tool myApi from echo {
-  with const
-  .url <- const.apiUrl
-}
+    tool coalesceTool from test.multitool {
+      with context
+      .timeout <- context.settings.timeout ?? "5000"
+    }
 
-bridge Query.test {
-  with myApi as t
-  with output as o
+    tool geo from test.multitool {
+      with const
+      .baseUrl = "https://nominatim.openstreetmap.org"
+      .path = "/search"
+      .format = "json"
+      .limit <- const.one + 1
+    }
 
-  o.url <- t.url
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.url, "https://example.com");
-  });
+    bridge Query.constants {
+      with constants as t
+      with output as o
 
-  // ── Expression chain (+ operator) ─────────────────────────────────────────
+      o.greeting <- t.greeting
+      o.count <- t.count
+    }
 
-  test("expression chain: const + literal produces computed value", async () => {
-    const { data } = await run(
-      `version 1.5
-const one = 1
+    bridge Query.constPull {
+      with constPull as t
+      with output as o
 
-tool myApi from echo {
-  with const
-  .limit <- const.one + 1
-}
+      o.url <- t.url
+    }
 
-bridge Query.test {
-  with myApi as t
-  with output as o
+    bridge Query.addExpr {
+      with addExpr as t
+      with output as o
 
-  o.limit <- t.limit
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.limit, 2);
-  });
+      o.limit <- t.limit
+    }
 
-  test("expression chain: const * literal produces computed value", async () => {
-    const { data } = await run(
-      `version 1.5
-const base = 10
+    bridge Query.mulExpr {
+      with mulExpr as t
+      with output as o
 
-tool myApi from echo {
-  with const
-  .scaled <- const.base * 5
-}
+      o.scaled <- t.scaled
+    }
 
-bridge Query.test {
-  with myApi as t
-  with output as o
+    bridge Query.compareExpr {
+      with compareExpr as t
+      with output as o
 
-  o.scaled <- t.scaled
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.scaled, 50);
-  });
+      o.eligible <- t.eligible
+    }
 
-  test("expression chain: comparison operator", async () => {
-    const { data } = await run(
-      `version 1.5
-const age = 21
+    bridge Query.interpolation {
+      with interpolation as t
+      with output as o
 
-tool myApi from echo {
-  with const
-  .eligible <- const.age >= 18
-}
+      o.query <- t.query
+    }
 
-bridge Query.test {
-  with myApi as t
-  with output as o
+    bridge Query.ternary {
+      with ternaryTool as t
+      with output as o
 
-  o.eligible <- t.eligible
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.eligible, true);
-  });
+      o.method <- t.method
+    }
 
-  // ── String interpolation ──────────────────────────────────────────────────
+    bridge Query.coalesce {
+      with coalesceTool as t
+      with output as o
 
-  test("string interpolation in tool self-wire", async () => {
-    const { data } = await run(
-      `version 1.5
-const city = "Berlin"
+      o.timeout <- t.timeout
+    }
 
-tool myApi from echo {
-  with const
-  .query <- "city={const.city}"
-}
+    bridge Query.integration {
+      with geo
+      with input as i
+      with output as o
 
-bridge Query.test {
-  with myApi as t
-  with output as o
-
-  o.query <- t.query
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.query, "city=Berlin");
-  });
-
-  // ── Ternary ───────────────────────────────────────────────────────────────
-
-  test("ternary with literal branches", async () => {
-    const { data } = await run(
-      `version 1.5
-const flag = true
-
-tool myApi from echo {
-  with const
-  .method <- const.flag ? "POST" : "GET"
-}
-
-bridge Query.test {
-  with myApi as t
-  with output as o
-
-  o.method <- t.method
-}`,
-      "Query.test",
-      {},
-      { echo },
-    );
-    assert.equal(data.method, "POST");
-  });
-
-  // ── Coalesce ──────────────────────────────────────────────────────────────
-
-  test("nullish coalesce with fallback value", async () => {
-    const { data } = await run(
-      `version 1.5
-tool myApi from echo {
-  with context
-  .timeout <- context.settings.timeout ?? "5000"
-}
-
-bridge Query.test {
-  with myApi as t
-  with output as o
-
-  o.timeout <- t.timeout
-}`,
-      "Query.test",
-      {},
-      { echo },
-      { context: { settings: {} } },
-    );
-    assert.equal(data.timeout, "5000");
-  });
-
-  // ── Integration: the user's original example ──────────────────────────────
-
-  test("httpCall-style tool with const + expression", async () => {
-    const { data } = await run(
-      `version 1.5
-const one = 1
-
-tool geo from fakeHttp {
-  with const
-  .baseUrl = "https://nominatim.openstreetmap.org"
-  .path = "/search"
-  .format = "json"
-  .limit <- const.one + 1
-}
-
-bridge Query.location {
-  with geo
-  with input as i
-  with output as o
-
-  geo.q <- i.city
-  o.result <- geo
-}`,
-      "Query.location",
-      { city: "Zurich" },
-      {
-        fakeHttp: async (input: any) => {
-          // Verify the tool received correct inputs
-          return {
-            baseUrl: input.baseUrl,
-            path: input.path,
-            format: input.format,
-            limit: input.limit,
-            q: input.q,
-          };
-        },
+      geo.q <- i.city
+      o.result <- geo
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Query.constants": {
+      "constant self-wires pass values to tool": {
+        input: {},
+        assertData: { greeting: "hello", count: 42 },
+        assertTraces: 1,
       },
-    );
-    assert.equal(data.result.baseUrl, "https://nominatim.openstreetmap.org");
-    assert.equal(data.result.path, "/search");
-    assert.equal(data.result.format, "json");
-    assert.equal(data.result.limit, 2, "const.one + 1 should equal 2");
-    assert.equal(data.result.q, "Zurich");
-  });
+    },
+    "Query.constPull": {
+      "pull from const handle passes value to tool": {
+        input: {},
+        assertData: { url: "https://example.com" },
+        assertTraces: 1,
+      },
+    },
+    "Query.addExpr": {
+      "expression chain: const + literal produces computed value": {
+        input: {},
+        assertData: { limit: 2 },
+        assertTraces: 1,
+      },
+    },
+    "Query.mulExpr": {
+      "expression chain: const * literal produces computed value": {
+        input: {},
+        assertData: { scaled: 50 },
+        assertTraces: 1,
+      },
+    },
+    "Query.compareExpr": {
+      "expression chain: comparison operator": {
+        input: {},
+        assertData: { eligible: true },
+        assertTraces: 1,
+      },
+    },
+    "Query.interpolation": {
+      "string interpolation in tool self-wire": {
+        input: {},
+        assertData: { query: "city=Berlin" },
+        assertTraces: 1,
+      },
+    },
+    "Query.ternary": {
+      "ternary with literal branches": {
+        input: {},
+        assertData: { method: "POST" },
+        assertTraces: 1,
+      },
+    },
+    "Query.coalesce": {
+      "nullish coalesce with fallback value": {
+        input: {},
+        context: { settings: {} },
+        assertData: { timeout: "5000" },
+        assertTraces: 1,
+      },
+    },
+    "Query.integration": {
+      "httpCall-style tool with const + expression": {
+        input: { city: "Zurich" },
+        assertData: {
+          result: {
+            baseUrl: "https://nominatim.openstreetmap.org",
+            path: "/search",
+            format: "json",
+            limit: 2,
+            q: "Zurich",
+          },
+        },
+        assertTraces: 1,
+      },
+    },
+  },
 });

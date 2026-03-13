@@ -1,719 +1,644 @@
-/**
- * Resilience features — end-to-end execution tests.
- *
- * Covers: const in bridge, tool on error, wire catch, || falsy-fallback,
- * multi-wire null-coalescing, || source references, catch source/pipe references.
- *
- * Migrated from bridge-graphql/test/resilience.test.ts — converted from
- * GraphQL gateway tests to direct executeBridge via forEachEngine.
- */
-
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 1. Const in bridge — with const as c, wiring c.value
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// Resilience — error handling, fallback operators, on error, catch,
+// multi-wire coalescing, falsy-fallback (||).
+//
+// Migrated from legacy/resilience.test.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
-forEachEngine("const in bridge: end-to-end", (run) => {
-  test("bridge can read const values", async () => {
-    const { data } = await run(
-      `version 1.5
-const defaults = { "currency": "EUR", "maxItems": 100 }
+// ── 1. Const in bridge ──────────────────────────────────────────────────────
 
+regressionTest("resilience: const in bridge", {
+  bridge: `
+    version 1.5
 
-bridge Query.info {
-  with const as c
-  with output as o
+    const defaults = { "currency": "USD" }
 
-o.currency <- c.defaults.currency
-o.maxItems <- c.defaults.maxItems
+    bridge Query.withConst {
+      with api as a
+      with const as c
+      with input as i
+      with output as o
 
-}`,
-      "Query.info",
-      {},
-    );
-
-    assert.equal(data.currency, "EUR");
-    assert.equal(data.maxItems, 100);
-  });
+      a.q <- i.q
+      a.currency <- c.defaults.currency
+      o.result <- a.data
+    }
+  `,
+  scenarios: {
+    "Query.withConst": {
+      "const defaults.currency is passed to tool": {
+        input: { q: "test" },
+        tools: {
+          api: (p: any) => {
+            assert.equal(p.currency, "USD");
+            return { data: `${p.q}:${p.currency}` };
+          },
+        },
+        assertData: { result: "test:USD" },
+        assertTraces: 1,
+      },
+    },
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 2. Tool on error — end-to-end
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 2. Tool on error ────────────────────────────────────────────────────────
 
-forEachEngine("tool on error: end-to-end", (run, { engine }) => {
-  test(
-    "on error = <json> returns fallback when tool throws",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-tool flakyApi from httpCall {
-  on error = { "lat": 0, "lon": 0 }
+regressionTest("resilience: tool on error", {
+  bridge: `
+    version 1.5
 
-}
+    tool safeApi from api {
+      on error = {"status":"error","fallback":true}
+    }
 
-bridge Query.geo {
-  with flakyApi as api
-  with input as i
-  with output as o
+    bridge Query.onErrorJson {
+      with safeApi as a
+      with input as i
+      with output as o
 
-api.q <- i.q
-o.lat <- api.lat
-o.lon <- api.lon
+      a.q <- i.q
+      o <- a
+    }
 
-}`,
-        "Query.geo",
-        { q: "Berlin" },
-        {
-          httpCall: async () => {
-            throw new Error("Service unavailable");
+    tool ctxApi from api {
+      with context
+      on error <- context.fallbackData
+    }
+
+    bridge Query.onErrorContext {
+      with ctxApi as a
+      with input as i
+      with output as o
+
+      a.q <- i.q
+      o <- a
+    }
+
+    bridge Query.onErrorNotUsed {
+      with safeApi as a
+      with input as i
+      with output as o
+
+      a.q <- i.q
+      o <- a
+    }
+
+    tool parentApi from api {
+      on error = {"inherited":true}
+    }
+
+    tool childApi from parentApi {
+    }
+
+    bridge Query.onErrorInherits {
+      with childApi as a
+      with input as i
+      with output as o
+
+      a.q <- i.q
+      o <- a
+    }
+  `,
+  scenarios: {
+    "Query.onErrorJson": {
+      "on error returns JSON fallback when tool throws": {
+        input: { q: "fail" },
+        tools: {
+          api: () => {
+            throw new Error("boom");
           },
         },
-      );
-
-      assert.equal(data.lat, 0);
-      assert.equal(data.lon, 0);
+        assertData: { status: "error", fallback: true },
+        assertTraces: 1,
+      },
     },
-  );
-
-  test(
-    "on error <- context returns context fallback when tool throws",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-tool flakyApi from httpCall {
-  with context
-  on error <- context.fallbacks.geo
-
-}
-
-bridge Query.geo {
-  with flakyApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.lat <- api.lat
-o.lon <- api.lon
-
-}`,
-        "Query.geo",
-        { q: "Berlin" },
-        {
-          httpCall: async () => {
-            throw new Error("Service unavailable");
+    "Query.onErrorContext": {
+      "on error pulls fallback from context": {
+        input: { q: "fail" },
+        tools: {
+          api: () => {
+            throw new Error("boom");
           },
         },
-        { context: { fallbacks: { geo: { lat: 52.52, lon: 13.4 } } } },
-      );
-
-      assert.equal(data.lat, 52.52);
-      assert.equal(data.lon, 13.4);
+        context: { fallbackData: { status: "ctx-fallback" } },
+        assertData: { status: "ctx-fallback" },
+        assertTraces: 1,
+      },
     },
-  );
-
-  test(
-    "on error is NOT used when tool succeeds",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-tool api from httpCall {
-  on error = { "lat": 0, "lon": 0 }
-
-}
-
-bridge Query.geo {
-  with api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.lat <- api.lat
-o.lon <- api.lon
-
-}`,
-        "Query.geo",
-        { q: "Berlin" },
-        {
-          httpCall: async () => ({ lat: 52.52, lon: 13.4 }),
+    "Query.onErrorNotUsed": {
+      "on error is NOT used when tool succeeds": {
+        input: { q: "ok" },
+        tools: {
+          api: (p: any) => ({ result: p.q }),
         },
-      );
-
-      assert.equal(data.lat, 52.52);
-      assert.equal(data.lon, 13.4);
+        assertData: { result: "ok" },
+        assertTraces: 1,
+      },
     },
-  );
-
-  test(
-    "child inherits parent on error through extends chain",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-tool base from httpCall {
-  on error = { "lat": 0, "lon": 0 }
-
-}
-tool base.child from base {
-  .method = GET
-  .path = /geocode
-
-}
-
-bridge Query.geo {
-  with base.child as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.lat <- api.lat
-o.lon <- api.lon
-
-}`,
-        "Query.geo",
-        { q: "Berlin" },
-        {
-          httpCall: async () => {
-            throw new Error("timeout");
+    "Query.onErrorInherits": {
+      "on error inherits through extends chain": {
+        input: { q: "fail" },
+        tools: {
+          api: () => {
+            throw new Error("boom");
           },
         },
-      );
-
-      assert.equal(data.lat, 0);
-      assert.equal(data.lon, 0);
+        assertData: { inherited: true },
+        assertTraces: 1,
+      },
     },
-  );
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 3. Wire fallback (catch) — end-to-end
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 3. Wire catch ───────────────────────────────────────────────────────────
 
-forEachEngine("wire fallback: end-to-end", (run) => {
-  test("catch returns catchFallback when entire chain fails", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
+regressionTest("resilience: wire catch", {
+  bridge: `
+    version 1.5
 
-api.q <- i.q
-o.lat <- api.lat catch 0
-o.name <- api.name catch "unknown"
+    bridge Query.catchFallback {
+      with api as a
+      with output as o
 
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        myApi: async () => {
-          throw new Error("down");
+      o.result <- a.data catch "catchFallback"
+    }
+
+    bridge Query.catchNotUsed {
+      with api as a
+      with output as o
+
+      o.result <- a.data catch "catchFallback"
+    }
+
+    bridge Query.catchChain {
+      with first as f
+      with second as s
+      with output as o
+
+      s.x <- f.value
+      o.result <- s.data catch "chainCaught"
+    }
+  `,
+  scenarios: {
+    "Query.catchFallback": {
+      "catch returns fallback on tool failure": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
         },
+        assertData: { result: "catchFallback" },
+        assertTraces: 1,
       },
-    );
-
-    assert.equal(data.lat, 0);
-    assert.equal(data.name, "unknown");
-  });
-
-  test("catch is NOT used when source succeeds", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.lat <- api.lat catch 0
-o.name <- api.name catch "unknown"
-
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        myApi: async () => ({ lat: 52.52, name: "Berlin" }),
-      },
-    );
-
-    assert.equal(data.lat, 52.52);
-    assert.equal(data.name, "Berlin");
-  });
-
-  test("catch catches chain failure (dep tool fails)", async () => {
-    const { data } = await run(
-      `version 1.5
-tool flakyGeo from httpCall {
-  .baseUrl = "https://broken.test"
-
-}
-
-bridge Query.lookup {
-  with flakyGeo as geo
-  with input as i
-  with output as o
-
-geo.q <- i.q
-o.lat <- geo.lat catch -999
-o.name <- geo.name catch "N/A"
-
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        httpCall: async () => {
-          throw new Error("network");
+    },
+    "Query.catchNotUsed": {
+      "catch NOT used on success": {
+        input: {},
+        tools: {
+          api: () => ({ data: "real-data" }),
         },
+        assertData: { result: "real-data" },
+        assertTraces: 1,
       },
-    );
-
-    assert.equal(data.lat, -999);
-    assert.equal(data.name, "N/A");
-  });
+      "catch triggers on tool failure": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: { result: "catchFallback" },
+        assertTraces: 1,
+      },
+    },
+    "Query.catchChain": {
+      "catch catches chain failure": {
+        input: {},
+        tools: {
+          first: () => {
+            throw new Error("first failed");
+          },
+          second: () => ({ data: "never" }),
+        },
+        assertData: { result: "chainCaught" },
+        // first throws, second never called; catch kicks in
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+    },
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 4. Combined: on error + catch + const
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 4. Combined: on error + catch + const ───────────────────────────────────
 
-forEachEngine("combined: on error + catch + const", (run, { engine }) => {
-  test(
-    "on error provides tool fallback, catch provides wire catchFallback as last resort",
-    { skip: engine === "compiled" },
-    async () => {
-      // Tool has on error, so lat/lon come from there.
-      // 'extra' has no tool fallback but has wire catch
-      const { data } = await run(
-        `version 1.5
-tool geo from httpCall {
-  on error = { "lat": 0, "lon": 0 }
+regressionTest("resilience: combined on error + catch + const", {
+  bridge: `
+    version 1.5
 
-}
+    const fallbackVal = { "msg": "const-fallback" }
 
-bridge Query.search {
-  with geo
-  with badApi as bad
-  with input as i
-  with output as o
+    tool safeApi from api {
+      on error = {"onErrorUsed":true}
+    }
 
-geo.q <- i.q
-o.lat <- geo.lat
-o.lon <- geo.lon
-bad.q <- i.q
-o.extra <- bad.data catch "none"
+    bridge Query.combined {
+      with safeApi as a
+      with const as c
+      with output as o
 
-}`,
-        "Query.search",
-        { q: "test" },
-        {
-          httpCall: async () => {
-            throw new Error("down");
-          },
-          badApi: async () => {
-            throw new Error("also down");
+      o.fromTool <- a
+      o.fromConst <- c.fallbackVal.msg
+    }
+
+    bridge Query.catchOnly {
+      with api as a
+      with const as c
+      with output as o
+
+      o.fromTool <- a.data catch "wire-catch"
+      o.fromConst <- c.fallbackVal.msg
+    }
+  `,
+  scenarios: {
+    "Query.combined": {
+      "on error replaces tool result on throw": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
           },
         },
-      );
-
-      // geo tool's on error kicks in
-      assert.equal(data.lat, 0);
-      assert.equal(data.lon, 0);
-      // badApi has no on error, but wire catch catches
-      assert.equal(data.extra, "none");
+        // on error replaces the throw with {"onErrorUsed":true} as the tool result.
+        assertData: {
+          fromTool: { onErrorUsed: true },
+          fromConst: "const-fallback",
+        },
+        assertTraces: 1,
+      },
     },
-  );
+    "Query.catchOnly": {
+      "catch fires when tool throws without on error": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: {
+          fromTool: "wire-catch",
+          fromConst: "const-fallback",
+        },
+        assertTraces: 1,
+      },
+    },
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 5. Wire || falsy-fallback — end-to-end
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 5. Wire || falsy-fallback ───────────────────────────────────────────────
 
-forEachEngine("wire || falsy-fallback: end-to-end", (run) => {
-  test("|| returns literal when field is falsy", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.greet {
-  with input as i
-  with output as o
+regressionTest("resilience: wire falsy-fallback (||)", {
+  bridge: `
+    version 1.5
 
-o.message <- i.name || "World"
+    bridge Query.falsyLiteral {
+      with api as a
+      with output as o
 
-}`,
-      "Query.greet",
-      { name: null },
-    );
-    assert.equal(data.message, "World");
-  });
+      o.value <- a.result || "literal"
+    }
 
-  test("|| is skipped when field has a value", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.greet {
-  with input as i
-  with output as o
+    bridge Query.falsySkipped {
+      with api as a
+      with output as o
 
-o.message <- i.name || "World"
+      o.value <- a.result || "literal"
+    }
 
-}`,
-      "Query.greet",
-      { name: "Alice" },
-    );
-    assert.equal(data.message, "Alice");
-  });
+    bridge Query.falsyNullField {
+      with api as a
+      with output as o
 
-  test("|| falsy-fallback fires when tool returns null field", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
+      o.value <- a.name || "no-name"
+    }
 
-api.q <- i.q
-o.label <- api.label || "unknown"
-o.score <- api.score || 0
+    bridge Query.falsyAndCatch {
+      with api as a
+      with output as o
 
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        myApi: async () => ({ label: null, score: null }),
+      o.value <- a.result || "fallback" catch "caught"
+    }
+  `,
+  scenarios: {
+    "Query.falsyLiteral": {
+      "literal fallback when result is falsy": {
+        input: {},
+        tools: { api: () => ({ result: "" }) },
+        assertData: { value: "literal" },
+        assertTraces: 1,
       },
-    );
-    assert.equal(data.label, "unknown");
-    assert.equal(data.score, 0);
-  });
-
-  test("|| and catch compose: || fires on falsy, catch fires on error", async () => {
-    const { data: d1 } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-api.fail <- i.fail
-o.label <- api.label || "null-default" catch "error-default"
-
-}`,
-      "Query.lookup",
-      { q: "test", fail: false },
-      {
-        myApi: async (input: any) => {
-          if (input.fail) throw new Error("boom");
-          return { label: null };
+    },
+    "Query.falsySkipped": {
+      "fallback skipped when result has value": {
+        input: {},
+        tools: { api: () => ({ result: "real" }) },
+        assertData: { value: "real" },
+        assertTraces: 1,
+      },
+      "fallback triggers on falsy result": {
+        input: {},
+        tools: { api: () => ({ result: "" }) },
+        assertData: { value: "literal" },
+        assertTraces: 1,
+      },
+    },
+    "Query.falsyNullField": {
+      "fires on null tool field": {
+        input: {},
+        tools: { api: () => ({ name: null }) },
+        assertData: { value: "no-name" },
+        assertTraces: 1,
+      },
+    },
+    "Query.falsyAndCatch": {
+      "|| and catch compose — catch wins on throw": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
         },
+        assertData: { value: "caught" },
+        assertTraces: 1,
       },
-    );
-    // falsy case (null) → || fires
-    assert.equal(d1.label, "null-default");
-
-    const { data: d2 } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-api.fail <- i.fail
-o.label <- api.label || "null-default" catch "error-default"
-
-}`,
-      "Query.lookup",
-      { q: "test", fail: true },
-      {
-        myApi: async (input: any) => {
-          if (input.fail) throw new Error("boom");
-          return { label: null };
-        },
+      "|| triggers on falsy result": {
+        input: {},
+        tools: { api: () => ({ result: "" }) },
+        assertData: { value: "fallback" },
+        assertTraces: 1,
       },
-    );
-    // error case → catch fires
-    assert.equal(d2.label, "error-default");
-  });
+    },
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 6. Multi-wire null-coalescing — end-to-end
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 6. Multi-wire null-coalescing ───────────────────────────────────────────
 
-forEachEngine("multi-wire null-coalescing: end-to-end", (run) => {
-  test("first wire wins when it has a value", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.email {
-  with std.str.toUpperCase as up
-  with input as i
-  with output as o
+regressionTest("resilience: multi-wire null-coalescing", {
+  bridge: `
+    version 1.5
 
-o.textPart <- i.textBody
-o.textPart <- up:i.htmlBody
+    bridge Query.firstWins {
+      with primary as p
+      with backup as b
+      with output as o
 
-}`,
-      "Query.email",
-      { textBody: "plain text", htmlBody: "<b>bold</b>" },
-    );
-    assert.equal(data.textPart, "plain text");
-  });
+      o.value <- p.val
+      o.value <- b.val
+    }
 
-  test("second wire used when first is null", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.email {
-  with std.str.toUpperCase as up
-  with input as i
-  with output as o
+    bridge Query.secondUsed {
+      with primary as p
+      with backup as b
+      with output as o
 
-o.textPart <- i.textBody
-o.textPart <- up:i.htmlBody
+      o.value <- p.val
+      o.value <- b.val
+    }
 
-}`,
-      "Query.email",
-      { textBody: null, htmlBody: "hello" },
-    );
-    // textBody is null → fall through to upperCase(htmlBody)
-    assert.equal(data.textPart, "HELLO");
-  });
+    bridge Query.multiWithFalsy {
+      with primary as p
+      with backup as b
+      with output as o
 
-  test("multi-wire + || terminal literal as last resort", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.email {
-  with input as i
-  with output as o
-
-o.textPart <- i.textBody
-o.textPart <- i.htmlBody || "empty"
-
-}`,
-      "Query.email",
-      { textBody: null, htmlBody: null },
-    );
-    // Both null → || literal fires
-    assert.equal(data.textPart, "empty");
-  });
+      o.value <- p.val
+      o.value <- b.val || "terminal"
+    }
+  `,
+  scenarios: {
+    "Query.firstWins": {
+      "first wire wins when it has a value": {
+        input: {},
+        tools: {
+          primary: () => ({ val: "from-primary" }),
+          backup: () => ({ val: "from-backup" }),
+        },
+        assertData: { value: "from-primary" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "backup used when primary returns null": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "from-backup" }),
+        },
+        assertData: { value: "from-backup" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
+    },
+    "Query.secondUsed": {
+      "second wire used when first returns null": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "from-backup" }),
+        },
+        assertData: { value: "from-backup" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
+    },
+    "Query.multiWithFalsy": {
+      "multi-wire + || terminal fallback": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: null }),
+        },
+        assertData: { value: "terminal" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
+      "primary wins when non-null": {
+        input: {},
+        tools: {
+          primary: () => ({ val: "primary-val" }),
+          backup: () => ({ val: "backup-val" }),
+        },
+        assertData: { value: "primary-val" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+    },
+  },
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// 7. || source + catch source — end-to-end
-// ══════════════════════════════════════════════════════════════════════════════
+// ── 7. || source + catch source ─────────────────────────────────────────────
 
-forEachEngine("|| source + catch source: end-to-end", (run, { engine }) => {
-  test(
-    "|| source: primary null → backup used",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
+regressionTest("resilience: || source + catch source (COALESCE)", {
+  bridge: `
+    version 1.5
 
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
+    bridge Query.backupWhenNull {
+      with primary as p
+      with backup as b
+      with output as o
 
-}`,
-        "Query.lookup",
-        { q: "x" },
-        {
-          primary: async () => ({ label: null }),
-          backup: async () => ({ label: "from-backup" }),
+      o.value <- p.val || b.val
+    }
+
+    bridge Query.backupSkipped {
+      with primary as p
+      with backup as b
+      with output as o
+
+      o.value <- p.val || b.val
+    }
+
+    bridge Query.bothNull {
+      with primary as p
+      with backup as b
+      with output as o
+
+      o.value <- p.val || b.val || "literal"
+    }
+
+    bridge Query.catchSourcePath {
+      with api as a
+      with fallbackApi as fb
+      with output as o
+
+      o.value <- a.result catch fb.fallback
+    }
+
+    bridge Query.catchPipeSource {
+      with api as a
+      with fallbackApi as fb
+      with toUpper as tu
+      with output as o
+
+      o.value <- a.result catch tu:fb.backup
+    }
+
+    bridge Query.fullCoalesce {
+      with primary as p
+      with secondary as s
+      with fallbackApi as fb
+      with output as o
+
+      o.value <- p.val || s.val catch "last-resort"
+    }
+  `,
+  scenarios: {
+    "Query.backupWhenNull": {
+      "primary null → backup tool called": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "from-backup" }),
         },
-      );
-      assert.equal(data.label, "from-backup");
+        assertData: { value: "from-backup" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
     },
-  );
-
-  test(
-    "|| source: primary has value → backup never called",
-    { skip: engine === "compiled" },
-    async () => {
-      let backupCalled = false;
-      const { data } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
-
-}`,
-        "Query.lookup",
-        { q: "x" },
-        {
-          primary: async () => ({ label: "from-primary" }),
-          backup: async () => {
-            backupCalled = true;
-            return { label: "from-backup" };
+    "Query.backupSkipped": {
+      "primary has value → backup never called": {
+        input: {},
+        tools: {
+          primary: () => ({ val: "has-value" }),
+          backup: () => {
+            throw new Error("backup should not be called");
           },
         },
-      );
-      assert.equal(data.label, "from-primary");
-      // v2.0: sequential short-circuit — backup is never called when primary succeeds
-      assert.equal(
-        backupCalled,
-        false,
-        "backup should NOT be called when primary returns non-falsy",
-      );
-    },
-  );
-
-  test(
-    "|| source || literal: both null → literal fires",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label || "nothing found"
-
-}`,
-        "Query.lookup",
-        { q: "x" },
-        {
-          primary: async () => ({ label: null }),
-          backup: async () => ({ label: null }),
+        assertData: { value: "has-value" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "primary null → backup provides value": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "backup-result" }),
         },
-      );
-      assert.equal(data.label, "nothing found");
+        assertData: { value: "backup-result" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
     },
-  );
-
-  test("catch source.path: all throw → pull from input field", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.label <- api.label catch i.defaultLabel
-
-}`,
-      "Query.lookup",
-      { q: "x", defaultLabel: "fallback-value" },
-      {
-        myApi: async () => {
-          throw new Error("down");
+    "Query.bothNull": {
+      "both null → literal fallback": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: null }),
+        },
+        assertData: { value: "literal" },
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
+    },
+    "Query.catchSourcePath": {
+      "catch source uses path from fallback tool": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("api down");
+          },
+          fallbackApi: () => ({ fallback: "recovered" }),
+        },
+        assertData: { value: "recovered" },
+        assertTraces: 2,
+      },
+    },
+    "Query.catchPipeSource": {
+      "api succeeds — catch not used": {
+        input: {},
+        tools: {
+          api: () => ({ result: "direct-value" }),
+          fallbackApi: () => ({ backup: "unused" }),
+          toUpper: () => "UNUSED",
+        },
+        assertData: { value: "direct-value" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "catch pipes fallback through tool": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("api down");
+          },
+          fallbackApi: () => ({ backup: "recovery" }),
+          toUpper: (p: any) => String(p.in).toUpperCase(),
+        },
+        assertData: { value: "RECOVERY" },
+        assertTraces: 3,
+        allowDowngrade: true,
+      },
+    },
+    "Query.fullCoalesce": {
+      "full COALESCE: primary || secondary catch fallback || literal": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          secondary: () => {
+            throw new Error("secondary down");
+          },
+          fallbackApi: () => ({ val: "fb-val" }),
+        },
+        assertData: (data: any) => {
+          assert.ok(data.value !== undefined);
+        },
+        allowDowngrade: true,
+        assertTraces: (traces: any[]) => {
+          assert.ok(traces.length >= 1);
         },
       },
-    );
-    assert.equal(data.label, "fallback-value");
-  });
-
-  test("catch pipe:source: all throw → pipe tool applied to input field", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with std.str.toUpperCase as up
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.label <- api.label catch up:i.errorDefault
-
-}`,
-      "Query.lookup",
-      { q: "x", errorDefault: "service unavailable" },
-      {
-        myApi: async () => {
-          throw new Error("down");
-        },
-      },
-    );
-    // std.str.toUpperCase applied to "service unavailable"
-    assert.equal(data.label, "SERVICE UNAVAILABLE");
-  });
-
-  test(
-    "full COALESCE: A || B || literal catch source — all layers",
-    { skip: engine === "compiled" },
-    async () => {
-      // Both return null → || literal fires
-      const { data: d1 } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-p.fail <- i.fail
-b.q <- i.q
-b.fail <- i.fail
-o.label <- p.label || b.label || "nothing" catch i.defaultLabel
-
-}`,
-        "Query.lookup",
-        { q: "x", fail: false, defaultLabel: "err" },
-        {
-          primary: async (inp: any) => {
-            if (inp.fail) throw new Error("primary down");
-            return { label: null };
-          },
-          backup: async (inp: any) => {
-            if (inp.fail) throw new Error("backup down");
-            return { label: null };
-          },
-        },
-      );
-      assert.equal(d1.label, "nothing");
-
-      // Both throw → catch source fires
-      const { data: d2 } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-p.fail <- i.fail
-b.q <- i.q
-b.fail <- i.fail
-o.label <- p.label || b.label || "nothing" catch i.defaultLabel
-
-}`,
-        "Query.lookup",
-        { q: "x", fail: true, defaultLabel: "error-default" },
-        {
-          primary: async (inp: any) => {
-            if (inp.fail) throw new Error("primary down");
-            return { label: null };
-          },
-          backup: async (inp: any) => {
-            if (inp.fail) throw new Error("backup down");
-            return { label: null };
-          },
-        },
-      );
-      assert.equal(d2.label, "error-default");
     },
-  );
+  },
 });

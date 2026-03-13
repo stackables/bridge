@@ -1,260 +1,206 @@
-/**
- * Tool error location tests.
- *
- * When a tool throws an error (e.g. "Failed to fetch"), the resulting
- * BridgeRuntimeError must carry `bridgeLoc` pointing at the closest
- * wire that pulls FROM the errored tool — so the error can be
- * displayed with source context.
- */
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
 import { BridgeRuntimeError } from "@stackables/bridge-core";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** A tool that always throws. */
-async function failingTool(): Promise<never> {
-  throw new Error("Failed to fetch");
-}
-
-/** Mark as sync so the engine can use the fast path. */
-function failingSyncTool(): never {
-  throw new Error("Sync tool failed");
-}
-(failingSyncTool as any).bridge = { sync: true };
-
-/** A simple pass-through tool. */
-async function echo(input: Record<string, any>) {
-  return input;
-}
-
-/** A tool that takes longer than any reasonable timeout. */
-async function slowTool(): Promise<{ ok: true }> {
-  await new Promise((r) => setTimeout(r, 5000));
-  return { ok: true };
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
-// Tests
+// Tool error location
+//
+// When a tool throws, the resulting BridgeRuntimeError must carry `bridgeLoc`
+// pointing at the closest wire that pulls FROM the errored tool — so the error
+// can be displayed with source context.
+//
+// Uses test.multitool with `_error` in input to trigger failures.
 // ══════════════════════════════════════════════════════════════════════════════
 
-forEachEngine("tool error location", (run) => {
-  test("tool error carries bridgeLoc of the pulling wire", async () => {
-    // When httpCall throws, the error should point at `o.result <- api`
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-bridge Query.test {
-  with httpCall as api
+// ── Non-timeout tests ───────────────────────────────────────────────────────
+
+regressionTest("tool error location", {
+  bridge: `
+version 1.5
+
+bridge Query.basicError {
+  with test.multitool as api
   with input as i
   with output as o
 
-  api.url <- i.url
+  api <- i
   o.result <- api
-}`,
-          "Query.test",
-          { url: "https://example.com" },
-          { httpCall: failingTool },
-        ),
-      (err: unknown) => {
-        assert.ok(
-          err instanceof BridgeRuntimeError,
-          `Expected BridgeRuntimeError, got ${(err as Error)?.constructor?.name}: ${(err as Error)?.message}`,
-        );
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-        assert.match(err.message, /Failed to fetch/);
-        return true;
-      },
-    );
-  });
+}
 
-  test("tool error points at the output wire that pulls from it", async () => {
-    // The error should point at line 8: `o.result <- api.body`
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-bridge Query.test {
-  with httpCall as api
+bridge Query.outputWire {
+  with test.multitool as api
   with input as i
   with output as o
 
-  api.url <- i.url
+  api <- i
   o.result <- api.body
-}`,
-          "Query.test",
-          { url: "https://example.com" },
-          { httpCall: failingTool },
-        ),
-      (err: unknown) => {
-        assert.ok(err instanceof BridgeRuntimeError);
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-        // Line 8 is `o.result <- api.body`
-        assert.equal(err.bridgeLoc!.startLine, 8);
-        return true;
-      },
-    );
-  });
+}
 
-  test("tool error in chain points at the closest pulling wire", async () => {
-    // When httpCall throws, the closest wire pulling from it is
-    // `echo <- api` (line 9), not `o.result <- echo` (line 10)
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-bridge Query.test {
-  with httpCall as api
-  with echo as e
+bridge Query.chainError {
+  with test.multitool as api
+  with test.multitool as e
   with input as i
   with output as o
 
-  api.url <- i.url
+  api <- i
   e <- api
   o.result <- e
-}`,
-          "Query.test",
-          { url: "https://example.com" },
-          { httpCall: failingTool, echo },
-        ),
-      (err: unknown) => {
-        assert.ok(err instanceof BridgeRuntimeError);
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-        // Line 9 is `e <- api` — the closest wire that pulls from the errored tool
-        assert.equal(
-          err.bridgeLoc!.startLine,
-          9,
-          `Expected error on line 9 (e <- api), got line ${err.bridgeLoc!.startLine}`,
-        );
-        return true;
-      },
-    );
-  });
-
-  test("ToolDef-backed tool error carries bridgeLoc", async () => {
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-tool api from httpCall {
-  .baseUrl = "https://example.com"
 }
 
-bridge Query.test {
-  with api
+tool apiDef from test.multitool {
+  ._error = "Failed to fetch"
+}
+
+bridge Query.toolDefError {
+  with apiDef
   with input as i
   with output as o
 
-  api.path <- i.path
-  o.result <- api.body
-}`,
-          "Query.test",
-          { path: "/data" },
-          { httpCall: failingTool },
-        ),
-      (err: unknown) => {
-        assert.ok(err instanceof BridgeRuntimeError);
-        assert.ok(
-          err.bridgeLoc,
-          "Expected bridgeLoc on ToolDef-backed tool error",
-        );
-        assert.match(err.message, /Failed to fetch/);
-        return true;
-      },
-    );
-  });
+  apiDef.path <- i.path
+  o.result <- apiDef.body
+}
 
-  test("sync tool error carries bridgeLoc", async () => {
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-bridge Query.test {
-  with syncTool as s
+bridge Query.syncError {
+  with test.sync.multitool as s
   with input as i
   with output as o
 
-  s.x <- i.x
+  s <- i
   o.result <- s
-}`,
-          "Query.test",
-          { x: 42 },
-          { syncTool: failingSyncTool },
-        ),
-      (err: unknown) => {
-        assert.ok(err instanceof BridgeRuntimeError);
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on sync tool error");
-        assert.match(err.message, /Sync tool failed/);
-        return true;
+}
+`,
+  tools,
+  scenarios: {
+    "Query.basicError": {
+      "tool error carries bridgeLoc": {
+        input: { _error: "Failed to fetch" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
+          assert.match(err.message, /Failed to fetch/);
+        },
+        // Error scenarios: the tool always throws so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
       },
-    );
-  });
+    },
+    "Query.outputWire": {
+      "tool error points at the output wire that pulls from it": {
+        input: { _error: "Failed to fetch" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
+          // o.result <- api.body is the wire that pulls from the errored tool
+          assert.equal(err.bridgeLoc!.startLine, 19);
+        },
+        // Error scenarios: the tool always throws so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+    "Query.chainError": {
+      "tool error in chain points at the closest pulling wire": {
+        input: { _error: "Failed to fetch" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
+          // e <- api is the closest wire pulling from the errored tool (not o.result <- e)
+          assert.equal(
+            err.bridgeLoc!.startLine,
+            29,
+            `Expected error on line 29 (e <- api), got line ${err.bridgeLoc!.startLine}`,
+          );
+        },
+        // Error scenarios: the tool always throws so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+    "Query.toolDefError": {
+      "ToolDef-backed tool error carries bridgeLoc": {
+        input: { path: "/data" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(
+            err.bridgeLoc,
+            "Expected bridgeLoc on ToolDef-backed tool error",
+          );
+          assert.match(err.message, /Failed to fetch/);
+        },
+        // Error scenarios: the ToolDef always injects _error so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+    "Query.syncError": {
+      "sync tool error carries bridgeLoc": {
+        input: { _error: "Sync tool failed" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(err.bridgeLoc, "Expected bridgeLoc on sync tool error");
+          assert.match(err.message, /Sync tool failed/);
+        },
+        // Error scenarios: the tool always throws so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
 
-  test("timeout error carries bridgeLoc of the pulling wire", async () => {
-    // BridgeTimeoutError must be wrapped into BridgeRuntimeError with
-    // bridgeLoc — it's a tool error like any other.
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-bridge Query.test {
-  with httpCall as api
+// ── Timeout tests ───────────────────────────────────────────────────────────
+
+regressionTest("timeout error location", {
+  toolTimeoutMs: 200,
+  bridge: `
+version 1.5
+
+bridge Query.timeout {
+  with test.async.multitool as api
   with input as i
   with output as o
 
-  api.url <- i.url
+  api <- i
   o.result <- api.body
-}`,
-          "Query.test",
-          { url: "https://example.com" },
-          { httpCall: slowTool },
-          { toolTimeoutMs: 10 },
-        ),
-      (err: unknown) => {
-        assert.ok(
-          err instanceof BridgeRuntimeError,
-          `Expected BridgeRuntimeError, got ${(err as Error)?.constructor?.name}: ${(err as Error)?.message}`,
-        );
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on timeout error");
-        assert.match(err.message, /timed out/);
-        return true;
-      },
-    );
-  });
-
-  test("timeout error from ToolDef-backed tool carries bridgeLoc", async () => {
-    await assert.rejects(
-      () =>
-        run(
-          `version 1.5
-tool api from httpCall {
-  .baseUrl = "https://example.com"
 }
 
-bridge Query.test {
-  with api
+tool apiDef from test.async.multitool {
+  ._delay = 500
+}
+
+bridge Query.timeoutToolDef {
+  with apiDef
   with input as i
   with output as o
 
-  api.path <- i.path
-  o.result <- api.body
-}`,
-          "Query.test",
-          { path: "/data" },
-          { httpCall: slowTool },
-          { toolTimeoutMs: 10 },
-        ),
-      (err: unknown) => {
-        assert.ok(
-          err instanceof BridgeRuntimeError,
-          `Expected BridgeRuntimeError, got ${(err as Error)?.constructor?.name}: ${(err as Error)?.message}`,
-        );
-        assert.ok(err.bridgeLoc, "Expected bridgeLoc on ToolDef timeout error");
-        assert.match(err.message, /timed out/);
-        return true;
+  apiDef.path <- i.path
+  o.result <- apiDef.body
+}
+`,
+  tools,
+  scenarios: {
+    "Query.timeout": {
+      "timeout error carries bridgeLoc of the pulling wire": {
+        input: { _delay: 500 },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(err.bridgeLoc, "Expected bridgeLoc on timeout error");
+          assert.match(err.message, /timed out/);
+        },
+        // Error scenarios: the tool always times out so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
       },
-    );
-  });
+    },
+    "Query.timeoutToolDef": {
+      "ToolDef timeout error carries bridgeLoc": {
+        input: { path: "/data" },
+        assertError: (err: any) => {
+          assert.ok(err instanceof BridgeRuntimeError);
+          assert.ok(
+            err.bridgeLoc,
+            "Expected bridgeLoc on ToolDef timeout error",
+          );
+          assert.match(err.message, /timed out/);
+        },
+        // Error scenarios: the ToolDef always injects _delay so no traces are guaranteed
+        assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
 });

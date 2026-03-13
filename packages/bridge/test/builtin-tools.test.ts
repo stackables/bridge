@@ -140,7 +140,6 @@ describe("builtin tools", () => {
       "Query.admins": {
         "filters array by criteria": {
           input: {},
-          allowDowngrade: true,
           assertData: [
             { id: 1, name: "Alice" },
             { id: 3, name: "Charlie" },
@@ -149,7 +148,6 @@ describe("builtin tools", () => {
         },
         "empty when no matches": {
           input: {},
-          allowDowngrade: true,
           tools: {
             getUsers: async () => ({
               users: [{ id: 2, name: "Bob", role: "editor" }],
@@ -160,7 +158,6 @@ describe("builtin tools", () => {
         },
         "users source error propagates": {
           input: {},
-          allowDowngrade: true,
           tools: {
             getUsers: async () => {
               throw new Error("db.users error");
@@ -204,13 +201,11 @@ describe("builtin tools", () => {
       "Query.findUser": {
         "finds object in array": {
           input: { role: "editor" },
-          allowDowngrade: true,
           assertData: { id: 2, name: "Bob", role: "editor" },
           assertTraces: 1,
         },
         "users source error propagates": {
           input: { role: "editor" },
-          allowDowngrade: true,
           tools: {
             getUsers: async () => {
               throw new Error("db.users error");
@@ -221,7 +216,6 @@ describe("builtin tools", () => {
         },
         "find tool failure propagates to projected fields": {
           input: { role: "editor" },
-          allowDowngrade: true,
           tools: {
             std: {
               ...std,

@@ -806,13 +806,14 @@ class BridgeParser extends CstParser {
 
   /**
    * Spread line inside a path scope block:
-   *   ...sourceExpr
+   *   ... <- sourceExpr
    *
    * Wires all fields of the source to the current scope target path.
    * Equivalent to writing `target <- sourceExpr` at the outer level.
    */
   public scopeSpreadLine = this.RULE("scopeSpreadLine", () => {
     this.CONSUME(Spread);
+    this.CONSUME(Arrow);
     this.SUBRULE(this.sourceExpr, { LABEL: "spreadSource" });
   });
 
@@ -3693,6 +3694,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          element: true as const,
           ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });
@@ -3710,6 +3712,7 @@ function buildBridgeBody(
           handle,
           kind: "tool",
           name,
+          element: true as const,
           ...(memoize ? { memoize: true as const } : {}),
           ...(versionTag ? { version: versionTag } : {}),
         });

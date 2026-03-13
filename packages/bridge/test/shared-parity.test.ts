@@ -1,1746 +1,2062 @@
-/**
- * Shared data-driven test suite for bridge language behavior.
- *
- * Every test case is a pure data record: bridge source, tools, input, and
- * expected output.  The suite runs each case against **both** the runtime
- * interpreter and the AOT compiler via `forEachEngine`, then asserts
- * identical results.  This guarantees behavioral parity between the two
- * execution paths and gives us a single place to document "what the
- * language does."
- *
- * Cases that exercise language features the AOT compiler does not yet support
- * are tagged `aotSupported: false` — they still run against the runtime, but
- * the AOT leg is skipped (with a TODO in the test output).
- */
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
-
-// ── Test-case type ──────────────────────────────────────────────────────────
-
-interface SharedTestCase {
-  /** Human-readable test name */
-  name: string;
-  /** Bridge source text (with `version 1.5` prefix) */
-  bridgeText: string;
-  /** Operation to execute, e.g. "Query.search" */
-  operation: string;
-  /** Input arguments */
-  input?: Record<string, unknown>;
-  /** Tool implementations */
-  tools?: Record<string, (...args: any[]) => any>;
-  /** Context passed to the engine */
-  context?: Record<string, unknown>;
-  /** Expected output data (deep-equality check) — omitted when expectedError is set */
-  expected?: unknown;
-  /** Whether the AOT compiler supports this case (default: true) */
-  aotSupported?: boolean;
-  /** Whether to expect an error (message pattern) instead of a result */
-  expectedError?: RegExp;
-  /** Sparse fieldset filter — only resolve listed fields */
-  requestedFields?: string[];
-}
-
-// ── Shared test runner ──────────────────────────────────────────────────────
-
-function runSharedSuite(suiteName: string, cases: SharedTestCase[]) {
-  forEachEngine(suiteName, (run, { engine }) => {
-    for (const c of cases) {
-      if (c.aotSupported === false && engine === "compiled") {
-        test(`${c.name} (skipped: not yet supported)`, () => {});
-        continue;
-      }
-
-      if (c.expectedError) {
-        test(c.name, async () => {
-          const pattern = c.expectedError!;
-          await assert.rejects(
-            () =>
-              run(c.bridgeText, c.operation, c.input ?? {}, c.tools ?? {}, {
-                context: c.context,
-                requestedFields: c.requestedFields,
-              }),
-            pattern,
-          );
-        });
-      } else {
-        test(c.name, async () => {
-          const { data } = await run(
-            c.bridgeText,
-            c.operation,
-            c.input ?? {},
-            c.tools ?? {},
-            {
-              context: c.context,
-              requestedFields: c.requestedFields,
-            },
-          );
-          assert.deepEqual(data, c.expected);
-        });
-      }
-    }
-  });
-}
+import { regressionTest } from "./utils/regression.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST CASE DEFINITIONS
+// Shared engine parity — behavioural tests run against both runtime and
+// AOT compiler to guarantee identical output.
+//
+// Migrated from legacy/shared-parity.test.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── 1. Pull wires + constants ───────────────────────────────────────────────
 
-const pullAndConstantCases: SharedTestCase[] = [
-  {
-    name: "chained tool calls resolve all fields",
-    bridgeText: `version 1.5
-bridge Query.livingStandard {
-  with hereapi.geocode as gc
-  with companyX.getLivingStandard as cx
-  with input as i
-  with toInt as ti
-  with output as out
+regressionTest("parity: pull wires + constants", {
+  bridge: `
+    version 1.5
 
-  gc.q <- i.location
-  cx.x <- gc.lat
-  cx.y <- gc.lon
-  ti.value <- cx.lifeExpectancy
-  out.lifeExpectancy <- ti.result
-}`,
-    operation: "Query.livingStandard",
-    input: { location: "Berlin" },
-    tools: {
-      "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
-      "companyX.getLivingStandard": async () => ({ lifeExpectancy: "81.5" }),
-      toInt: (p: any) => ({ result: Math.round(parseFloat(p.value)) }),
-    },
-    expected: { lifeExpectancy: 82 },
-  },
-  {
-    name: "constant wires emit literal values",
-    bridgeText: `version 1.5
-bridge Query.info {
-  with api as a
-  with output as o
+    bridge Query.livingStandard {
+      with hereapi.geocode as gc
+      with companyX.getLivingStandard as cx
+      with toInt as ti
+      with input as i
+      with output as out
 
-  a.method = "GET"
-  a.timeout = 5000
-  a.enabled = true
-  o.result <- a.data
-}`,
-    operation: "Query.info",
-    tools: {
-      api: (p: any) => {
-        assert.equal(p.method, "GET");
-        assert.equal(p.timeout, 5000);
-        assert.equal(p.enabled, true);
-        return { data: "ok" };
+      gc.q <- i.location
+      cx.x <- gc.lat
+      cx.y <- gc.lon
+      ti.value <- cx.lifeExpectancy
+      out.lifeExpectancy <- ti.result
+    }
+
+    bridge Query.constWires {
+      with api as a
+      with output as o
+
+      a.method = "GET"
+      a.timeout = 5000
+      a.enabled = true
+      o.result <- a.data
+    }
+
+    bridge Query.constAndInput {
+      with input as i
+      with output as o
+
+      o.greeting = "hello"
+      o.name <- i.name
+    }
+
+    bridge Query.user {
+      with api as a
+      with input as i
+      with output as o
+
+      a.id <- i.userId
+      o <- a
+    }
+
+    bridge Query.getUser {
+      with userApi as api
+      with input as i
+      with output as o
+
+      api.id <- i.id
+      o <- api.user
+    }
+
+    bridge Query.secured {
+      with api as a
+      with context as ctx
+      with input as i
+      with output as o
+
+      a.token <- ctx.apiKey
+      a.query <- i.q
+      o.data <- a.result
+    }
+
+    bridge Query.chain {
+      with first as f
+      with second as s
+      with input as i
+      with output as o
+
+      f.x <- i.a
+      s.y <- f.result
+      o.final <- s.result
+    }
+  `,
+  scenarios: {
+    "Query.livingStandard": {
+      "chained tool calls resolve all fields": {
+        input: { location: "Berlin" },
+        tools: {
+          "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
+          "companyX.getLivingStandard": async () => ({
+            lifeExpectancy: "81.5",
+          }),
+          toInt: (p: any) => ({ result: Math.round(parseFloat(p.value)) }),
+        },
+        assertData: { lifeExpectancy: 82 },
+        assertTraces: 3,
       },
     },
-    expected: { result: "ok" },
-  },
-  {
-    name: "constant and input wires coexist",
-    bridgeText: `version 1.5
-bridge Query.info {
-  with input as i
-  with output as o
-
-  o.greeting = "hello"
-  o.name <- i.name
-}`,
-    operation: "Query.info",
-    input: { name: "World" },
-    expected: { greeting: "hello", name: "World" },
-  },
-  {
-    name: "root passthrough returns tool output directly",
-    bridgeText: `version 1.5
-bridge Query.user {
-  with api as a
-  with input as i
-  with output as o
-
-  a.id <- i.userId
-  o <- a
-}`,
-    operation: "Query.user",
-    input: { userId: 42 },
-    tools: {
-      api: (p: any) => ({ name: "Alice", id: p.id }),
+    "Query.constWires": {
+      "constant wires emit literal values": {
+        input: {},
+        tools: {
+          api: (p: any) => {
+            assert.equal(p.method, "GET");
+            assert.equal(p.timeout, 5000);
+            assert.equal(p.enabled, true);
+            return { data: "ok" };
+          },
+        },
+        assertData: { result: "ok" },
+        assertTraces: 1,
+      },
     },
-    expected: { name: "Alice", id: 42 },
-  },
-  {
-    name: "root passthrough with path",
-    bridgeText: `version 1.5
-bridge Query.getUser {
-  with userApi as api
-  with input as i
-  with output as o
-
-  api.id <- i.id
-  o <- api.user
-}`,
-    operation: "Query.getUser",
-    input: { id: "123" },
-    tools: {
-      userApi: async () => ({
-        user: { name: "Alice", age: 30, email: "alice@example.com" },
-      }),
+    "Query.constAndInput": {
+      "constant and input wires coexist": {
+        input: { name: "World" },
+        assertData: { greeting: "hello", name: "World" },
+        assertTraces: 0,
+      },
     },
-    expected: { name: "Alice", age: 30, email: "alice@example.com" },
-  },
-  {
-    name: "context references resolve correctly",
-    bridgeText: `version 1.5
-bridge Query.secured {
-  with api as a
-  with context as ctx
-  with input as i
-  with output as o
-
-  a.token <- ctx.apiKey
-  a.query <- i.q
-  o.data <- a.result
-}`,
-    operation: "Query.secured",
-    input: { q: "test" },
-    tools: { api: (p: any) => ({ result: `${p.query}:${p.token}` }) },
-    context: { apiKey: "secret123" },
-    expected: { data: "test:secret123" },
-  },
-  {
-    name: "empty output returns empty object",
-    bridgeText: `version 1.5
-bridge Query.empty {
-  with output as o
-}`,
-    operation: "Query.empty",
-    expectedError: /no output wires/,
-  },
-  {
-    name: "tools receive correct chained inputs",
-    bridgeText: `version 1.5
-bridge Query.chain {
-  with first as f
-  with second as s
-  with input as i
-  with output as o
-
-  f.x <- i.a
-  s.y <- f.result
-  o.final <- s.result
-}`,
-    operation: "Query.chain",
-    input: { a: 5 },
-    tools: {
-      first: (p: any) => ({ result: p.x * 2 }),
-      second: (p: any) => ({ result: p.y + 1 }),
+    "Query.user": {
+      "root passthrough returns tool output directly": {
+        input: { userId: 42 },
+        tools: {
+          api: (p: any) => ({ name: "Alice", id: p.id }),
+        },
+        assertData: { name: "Alice", id: 42 },
+        assertTraces: 1,
+      },
     },
-    expected: { final: 11 },
+    "Query.getUser": {
+      "root passthrough with path": {
+        input: { id: "123" },
+        tools: {
+          userApi: async () => ({
+            user: { name: "Alice", age: 30, email: "alice@example.com" },
+          }),
+        },
+        assertData: { name: "Alice", age: 30, email: "alice@example.com" },
+        assertTraces: 1,
+      },
+    },
+    "Query.secured": {
+      "context references resolve correctly": {
+        input: { q: "test" },
+        tools: { api: (p: any) => ({ result: `${p.query}:${p.token}` }) },
+        context: { apiKey: "secret123" },
+        assertData: { data: "test:secret123" },
+        assertTraces: 1,
+      },
+    },
+    "Query.chain": {
+      "tools receive correct chained inputs": {
+        input: { a: 5 },
+        tools: {
+          first: (p: any) => ({ result: p.x * 2 }),
+          second: (p: any) => ({ result: p.y + 1 }),
+        },
+        assertData: { final: 11 },
+        assertTraces: 2,
+      },
+    },
   },
-];
-
-runSharedSuite("Shared: pull wires + constants", pullAndConstantCases);
+});
 
 // ── 2. Fallback operators (??, ||) ──────────────────────────────────────────
 
-const fallbackCases: SharedTestCase[] = [
-  {
-    name: "?? nullish coalescing with constant fallback",
-    bridgeText: `version 1.5
-bridge Query.defaults {
-  with api as a
-  with input as i
-  with output as o
+regressionTest("parity: fallback operators", {
+  bridge: `
+    version 1.5
 
-  a.id <- i.id
-  o.name <- a.name ?? "unknown"
-}`,
-    operation: "Query.defaults",
-    input: { id: 1 },
-    tools: { api: () => ({ name: null }) },
-    expected: { name: "unknown" },
-  },
-  {
-    name: "?? does not trigger on falsy non-null values",
-    bridgeText: `version 1.5
-bridge Query.falsy {
-  with api as a
-  with output as o
+    bridge Query.nullishConst {
+      with api as a
+      with input as i
+      with output as o
 
-  o.count <- a.count ?? 42
-}`,
-    operation: "Query.falsy",
-    tools: { api: () => ({ count: 0 }) },
-    expected: { count: 0 },
-  },
-  {
-    name: "|| falsy fallback with constant",
-    bridgeText: `version 1.5
-bridge Query.fallback {
-  with api as a
-  with output as o
+      a.id <- i.id
+      o.name <- a.name ?? "unknown"
+    }
 
-  o.label <- a.label || "default"
-}`,
-    operation: "Query.fallback",
-    tools: { api: () => ({ label: "" }) },
-    expected: { label: "default" },
-  },
-  {
-    name: "|| falsy fallback with ref",
-    bridgeText: `version 1.5
-bridge Query.refFallback {
-  with primary as p
-  with backup as b
-  with output as o
+    bridge Query.nullishNoTrigger {
+      with api as a
+      with output as o
 
-  o.value <- p.val || b.val
-}`,
-    operation: "Query.refFallback",
-    tools: {
-      primary: () => ({ val: null }),
-      backup: () => ({ val: "from-backup" }),
+      o.count <- a.count ?? 42
+    }
+
+    bridge Query.falsyConst {
+      with api as a
+      with output as o
+
+      o.label <- a.label || "default"
+    }
+
+    bridge Query.falsyRef {
+      with primary as p
+      with backup as b
+      with output as o
+
+      o.value <- p.val || b.val
+    }
+
+    bridge Query.nullishScope {
+      with api as a
+      with output as o
+
+      o.summary {
+        .temp <- a.temp ?? 0
+        .wind <- a.wind ?? 0
+      }
+    }
+  `,
+  scenarios: {
+    "Query.nullishConst": {
+      "?? nullish coalescing with constant fallback": {
+        input: { id: 1 },
+        tools: { api: () => ({ name: null }) },
+        assertData: { name: "unknown" },
+        assertTraces: 1,
+      },
     },
-    expected: { value: "from-backup" },
+    "Query.nullishNoTrigger": {
+      "?? does not trigger on falsy non-null values": {
+        input: {},
+        tools: { api: () => ({ count: 0 }) },
+        assertData: { count: 0 },
+        assertTraces: 1,
+      },
+      "?? triggers fallback on null": {
+        input: {},
+        tools: { api: () => ({ count: null }) },
+        assertData: { count: 42 },
+        assertTraces: 1,
+      },
+    },
+    "Query.falsyConst": {
+      "|| falsy fallback with constant": {
+        input: {},
+        tools: { api: () => ({ label: "" }) },
+        assertData: { label: "default" },
+        assertTraces: 1,
+      },
+    },
+    "Query.falsyRef": {
+      "|| falsy fallback with ref": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "from-backup" }),
+        },
+        assertData: { value: "from-backup" },
+        allowDowngrade: true,
+        assertTraces: 2,
+      },
+    },
+    "Query.nullishScope": {
+      "?? with nested scope and null response": {
+        input: {},
+        tools: { api: async () => ({ temp: null, wind: null }) },
+        assertData: { summary: { temp: 0, wind: 0 } },
+        assertTraces: 1,
+      },
+    },
   },
-  {
-    name: "?? with nested scope and null response",
-    bridgeText: `version 1.5
-bridge Query.forecast {
-  with api as a
-  with output as o
-
-  o.summary {
-    .temp <- a.temp ?? 0
-    .wind <- a.wind ?? 0
-  }
-}`,
-    operation: "Query.forecast",
-    tools: { api: async () => ({ temp: null, wind: null }) },
-    expected: { summary: { temp: 0, wind: 0 } },
-  },
-];
-
-runSharedSuite("Shared: fallback operators", fallbackCases);
+});
 
 // ── 3. Array mapping ────────────────────────────────────────────────────────
 
-const arrayMappingCases: SharedTestCase[] = [
-  {
-    name: "array mapping renames fields",
-    bridgeText: `version 1.5
-bridge Query.catalog {
-  with api as src
-  with output as o
+regressionTest("parity: array mapping", {
+  bridge: `
+    version 1.5
 
-  o.title <- src.name
-  o.entries <- src.items[] as item {
-    .id <- item.item_id
-    .label <- item.item_name
-    .cost <- item.unit_price
-  }
-}`,
-    operation: "Query.catalog",
-    tools: {
-      api: async () => ({
-        name: "Catalog A",
-        items: [
-          { item_id: 1, item_name: "Widget", unit_price: 9.99 },
-          { item_id: 2, item_name: "Gadget", unit_price: 14.5 },
+    bridge Query.catalog {
+      with api as src
+      with output as o
+
+      o.title <- src.name
+      o.entries <- src.items[] as item {
+        .id <- item.item_id
+        .label <- item.item_name
+        .cost <- item.unit_price
+      }
+    }
+
+    bridge Query.arrayEmpty {
+      with api as src
+      with output as o
+
+      o.items <- src.list[] as item {
+        .name <- item.label
+      }
+    }
+
+    bridge Query.arrayNull {
+      with api as src
+      with output as o
+
+      o.items <- src.list[] as item {
+        .name <- item.label
+      }
+    }
+
+    bridge Query.geocode {
+      with hereapi.geocode as gc
+      with input as i
+      with output as o
+
+      gc.q <- i.search
+      o <- gc.items[] as item {
+        .name <- item.title
+        .lat  <- item.position.lat
+        .lon  <- item.position.lng
+      }
+    }
+  `,
+  scenarios: {
+    "Query.catalog": {
+      "array mapping renames fields": {
+        input: {},
+        tools: {
+          api: async () => ({
+            name: "Catalog A",
+            items: [
+              { item_id: 1, item_name: "Widget", unit_price: 9.99 },
+              { item_id: 2, item_name: "Gadget", unit_price: 14.5 },
+            ],
+          }),
+        },
+        assertData: {
+          title: "Catalog A",
+          entries: [
+            { id: 1, label: "Widget", cost: 9.99 },
+            { id: 2, label: "Gadget", cost: 14.5 },
+          ],
+        },
+        assertTraces: 1,
+      },
+      "empty catalog items": {
+        input: {},
+        tools: { api: async () => ({ name: "Empty", items: [] }) },
+        assertData: { title: "Empty", entries: [] },
+        assertTraces: 1,
+      },
+    },
+    "Query.arrayEmpty": {
+      "array mapping with empty array returns empty array": {
+        input: {},
+        tools: { api: () => ({ list: [] }) },
+        assertData: { items: [] },
+        assertTraces: 1,
+      },
+      "non-empty items map correctly": {
+        input: {},
+        tools: { api: () => ({ list: [{ label: "X" }] }) },
+        assertData: { items: [{ name: "X" }] },
+        assertTraces: 1,
+      },
+    },
+    "Query.arrayNull": {
+      "array mapping with null source returns null": {
+        input: {},
+        tools: { api: () => ({ list: null }) },
+        assertData: { items: null },
+        assertTraces: 1,
+      },
+      "non-empty items map correctly": {
+        input: {},
+        tools: { api: () => ({ list: [{ label: "Y" }] }) },
+        assertData: { items: [{ name: "Y" }] },
+        assertTraces: 1,
+      },
+      "empty items list": {
+        input: {},
+        tools: { api: () => ({ list: [] }) },
+        assertData: { items: [] },
+        assertTraces: 1,
+      },
+    },
+    "Query.geocode": {
+      "root array output": {
+        input: { search: "Ber" },
+        tools: {
+          "hereapi.geocode": async () => ({
+            items: [
+              { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
+              { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
+            ],
+          }),
+        },
+        assertData: [
+          { name: "Berlin", lat: 52.53, lon: 13.39 },
+          { name: "Bern", lat: 46.95, lon: 7.45 },
         ],
-      }),
+        assertTraces: 1,
+      },
+      "empty geocode results": {
+        input: { search: "zzz" },
+        tools: { "hereapi.geocode": async () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
     },
-    expected: {
-      title: "Catalog A",
-      entries: [
-        { id: 1, label: "Widget", cost: 9.99 },
-        { id: 2, label: "Gadget", cost: 14.5 },
-      ],
-    },
   },
-  {
-    name: "array mapping with empty array returns empty array",
-    bridgeText: `version 1.5
-bridge Query.empty {
-  with api as src
-  with output as o
-
-  o.items <- src.list[] as item {
-    .name <- item.label
-  }
-}`,
-    operation: "Query.empty",
-    tools: { api: () => ({ list: [] }) },
-    expected: { items: [] },
-  },
-  {
-    name: "array mapping with null source returns null",
-    bridgeText: `version 1.5
-bridge Query.nullable {
-  with api as src
-  with output as o
-
-  o.items <- src.list[] as item {
-    .name <- item.label
-  }
-}`,
-    operation: "Query.nullable",
-    tools: { api: () => ({ list: null }) },
-    expected: { items: null },
-  },
-  {
-    name: "root array output",
-    bridgeText: `version 1.5
-bridge Query.geocode {
-  with hereapi.geocode as gc
-  with input as i
-  with output as o
-
-  gc.q <- i.search
-  o <- gc.items[] as item {
-    .name <- item.title
-    .lat  <- item.position.lat
-    .lon  <- item.position.lng
-  }
-}`,
-    operation: "Query.geocode",
-    input: { search: "Ber" },
-    tools: {
-      "hereapi.geocode": async () => ({
-        items: [
-          { title: "Berlin", position: { lat: 52.53, lng: 13.39 } },
-          { title: "Bern", position: { lat: 46.95, lng: 7.45 } },
-        ],
-      }),
-    },
-    expected: [
-      { name: "Berlin", lat: 52.53, lon: 13.39 },
-      { name: "Bern", lat: 46.95, lon: 7.45 },
-    ],
-  },
-];
-
-runSharedSuite("Shared: array mapping", arrayMappingCases);
+});
 
 // ── 4. Ternary / conditional wires ──────────────────────────────────────────
 
-const ternaryCases: SharedTestCase[] = [
-  {
-    name: "ternary expression with input condition",
-    bridgeText: `version 1.5
-bridge Query.conditional {
-  with api as a
-  with input as i
-  with output as o
+regressionTest("parity: ternary / conditional wires", {
+  bridge: `
+    version 1.5
 
-  a.mode <- i.premium ? "full" : "basic"
-  o.result <- a.data
-}`,
-    operation: "Query.conditional",
-    input: { premium: true },
-    tools: { api: (p: any) => ({ data: p.mode }) },
-    expected: { result: "full" },
+    bridge Query.conditional {
+      with api as a
+      with input as i
+      with output as o
+
+      a.mode <- i.premium ? "full" : "basic"
+      o.result <- a.data
+    }
+
+    bridge Query.pricing {
+      with api as a
+      with input as i
+      with output as o
+
+      a.id <- i.id
+      o.price <- i.isPro ? a.proPrice : a.basicPrice
+    }
+
+    bridge Query.pricingOptional {
+      with api as a
+      with input as i
+      with output as o
+
+      o.price <- i.isPro ? a.user?.profile.name : "basic"
+    }
+  `,
+  scenarios: {
+    "Query.conditional": {
+      "ternary expression with input condition — true branch": {
+        input: { premium: true },
+        tools: { api: (p: any) => ({ data: p.mode }) },
+        assertData: { result: "full" },
+        assertTraces: 1,
+      },
+      "ternary expression with input condition — false branch": {
+        input: { premium: false },
+        tools: { api: (p: any) => ({ data: p.mode }) },
+        assertData: { result: "basic" },
+        assertTraces: 1,
+      },
+    },
+    "Query.pricing": {
+      "ternary with ref branches": {
+        input: { id: 1, isPro: true },
+        tools: { api: () => ({ proPrice: 99, basicPrice: 49 }) },
+        assertData: { price: 99 },
+        assertTraces: 1,
+      },
+      "ternary false branch returns basicPrice": {
+        input: { id: 1, isPro: false },
+        tools: { api: () => ({ proPrice: 99, basicPrice: 49 }) },
+        assertData: { price: 49 },
+        assertTraces: 1,
+      },
+    },
+    "Query.pricingOptional": {
+      "ternary branch preserves segment-local ?. semantics": {
+        input: { isPro: true },
+        tools: { api: () => ({ user: null }) },
+        assertError: /Cannot read properties of undefined \(reading 'name'\)/,
+        assertTraces: 1,
+      },
+      "ternary false branch returns constant": {
+        input: { isPro: false },
+        tools: { api: () => ({ user: { profile: { name: "X" } } }) },
+        assertData: { price: "basic" },
+        assertTraces: 0,
+      },
+    },
   },
-  {
-    name: "ternary false branch",
-    bridgeText: `version 1.5
-bridge Query.conditional {
-  with api as a
-  with input as i
-  with output as o
-
-  a.mode <- i.premium ? "full" : "basic"
-  o.result <- a.data
-}`,
-    operation: "Query.conditional",
-    input: { premium: false },
-    tools: { api: (p: any) => ({ data: p.mode }) },
-    expected: { result: "basic" },
-  },
-  {
-    name: "ternary with ref branches",
-    bridgeText: `version 1.5
-bridge Query.pricing {
-  with api as a
-  with input as i
-  with output as o
-
-  a.id <- i.id
-  o.price <- i.isPro ? a.proPrice : a.basicPrice
-}`,
-    operation: "Query.pricing",
-    input: { id: 1, isPro: true },
-    tools: { api: () => ({ proPrice: 99, basicPrice: 49 }) },
-    expected: { price: 99 },
-  },
-  {
-    name: "ternary branch preserves segment-local ?. semantics",
-    bridgeText: `version 1.5
-bridge Query.pricing {
-  with api as a
-  with input as i
-  with output as o
-
-  o.price <- i.isPro ? a.user?.profile.name : "basic"
-}`,
-    operation: "Query.pricing",
-    input: { isPro: true },
-    tools: { api: () => ({ user: null }) },
-    expectedError: /Cannot read properties of undefined \(reading 'name'\)/,
-  },
-];
-
-runSharedSuite("Shared: ternary / conditional wires", ternaryCases);
+});
 
 // ── 5. Catch fallbacks ──────────────────────────────────────────────────────
 
-const catchCases: SharedTestCase[] = [
-  {
-    name: "catch with constant fallback value",
-    bridgeText: `version 1.5
-bridge Query.safe {
-  with api as a
-  with output as o
+regressionTest("parity: catch fallbacks", {
+  bridge: `
+    version 1.5
 
-  o.data <- a.result catch "fallback"
-}`,
-    operation: "Query.safe",
-    tools: {
-      api: () => {
-        throw new Error("boom");
+    bridge Query.catchConst {
+      with api as a
+      with output as o
+
+      o.data <- a.result catch "fallback"
+    }
+
+    bridge Query.catchNoTrigger {
+      with api as a
+      with output as o
+
+      o.data <- a.result catch "fallback"
+    }
+
+    bridge Query.catchRef {
+      with primary as p
+      with backup as b
+      with output as o
+
+      o.data <- p.result catch b.fallback
+    }
+
+    bridge Query.catchMixed {
+      with api as a
+      with output as o
+
+      o.safe  <- a.result catch "fallback"
+      o.risky <- a.id
+    }
+  `,
+  scenarios: {
+    "Query.catchConst": {
+      "catch with constant fallback value": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: { data: "fallback" },
+        assertTraces: 1,
       },
     },
-    expected: { data: "fallback" },
-  },
-  {
-    name: "catch does not trigger on success",
-    bridgeText: `version 1.5
-bridge Query.noerr {
-  with api as a
-  with output as o
-
-  o.data <- a.result catch "fallback"
-}`,
-    operation: "Query.noerr",
-    tools: { api: () => ({ result: "success" }) },
-    expected: { data: "success" },
-  },
-  {
-    name: "catch with ref fallback",
-    bridgeText: `version 1.5
-bridge Query.refCatch {
-  with primary as p
-  with backup as b
-  with output as o
-
-  o.data <- p.result catch b.fallback
-}`,
-    operation: "Query.refCatch",
-    tools: {
-      primary: () => {
-        throw new Error("primary failed");
+    "Query.catchNoTrigger": {
+      "catch does not trigger on success": {
+        input: {},
+        tools: { api: () => ({ result: "success" }) },
+        assertData: { data: "success" },
+        assertTraces: 1,
       },
-      backup: () => ({ fallback: "from-backup" }),
-    },
-    expected: { data: "from-backup" },
-  },
-  {
-    // Regression: if Tool A is consumed by Wire 1 (has `catch`) AND Wire 2 (no `catch`),
-    // and Tool A throws, the AOT compiler must NOT silently return undefined for Wire 2.
-    // Wire 2 has no fallback — the failure must propagate and crash the bridge.
-    name: "unguarded wire referencing catch-guarded tool re-throws on error",
-    bridgeText: `version 1.5
-bridge Query.mixed {
-  with api as a
-  with output as o
-
-  o.safe  <- a.result catch "fallback"
-  o.risky <- a.id
-}`,
-    operation: "Query.mixed",
-    tools: {
-      api: () => {
-        throw new Error("api down");
+      "catch triggers on error": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: { data: "fallback" },
+        assertTraces: 1,
       },
     },
-    expectedError: /api down/,
+    "Query.catchRef": {
+      "catch with ref fallback": {
+        input: {},
+        tools: {
+          primary: () => {
+            throw new Error("primary failed");
+          },
+          backup: () => ({ fallback: "from-backup" }),
+        },
+        assertData: { data: "from-backup" },
+        assertTraces: 2,
+      },
+    },
+    "Query.catchMixed": {
+      "unguarded wire referencing catch-guarded tool re-throws on error": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("api down");
+          },
+        },
+        assertError: /api down/,
+        assertTraces: 1,
+      },
+      "unguarded wire referencing catch-guarded tool succeeds on no error": {
+        input: {},
+        tools: { api: () => ({ result: "ok", id: 42 }) },
+        assertData: { safe: "ok", risky: 42 },
+        assertTraces: 1,
+      },
+    },
   },
-  {
-    // Success path: when Tool A succeeds both wires return normally.
-    name: "unguarded wire referencing catch-guarded tool succeeds on no error",
-    bridgeText: `version 1.5
-bridge Query.mixed {
-  with api as a
-  with output as o
-
-  o.safe  <- a.result catch "fallback"
-  o.risky <- a.id
-}`,
-    operation: "Query.mixed",
-    tools: { api: () => ({ result: "ok", id: 42 }) },
-    expected: { safe: "ok", risky: 42 },
-  },
-];
-
-runSharedSuite("Shared: catch fallbacks", catchCases);
+});
 
 // ── 6. Force statements ─────────────────────────────────────────────────────
 
-const forceCases: SharedTestCase[] = [
-  {
-    name: "force tool runs even when output not queried",
-    bridgeText: `version 1.5
-bridge Query.search {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
+regressionTest("parity: force statements", {
+  bridge: `
+    version 1.5
 
-  m.q <- i.q
-  audit.action <- i.q
-  force audit
-  o.title <- m.title
-}`,
-    operation: "Query.search",
-    input: { q: "test" },
-    tools: {
-      mainApi: async () => ({ title: "Hello World" }),
-      "audit.log": async () => ({ ok: true }),
-    },
-    expected: { title: "Hello World" },
-  },
-  {
-    name: "fire-and-forget force does not break on error",
-    bridgeText: `version 1.5
-bridge Query.safe {
-  with mainApi as m
-  with analytics as ping
-  with input as i
-  with output as o
+    bridge Query.forceRuns {
+      with mainApi as m
+      with audit.log as audit
+      with input as i
+      with output as o
 
-  m.q <- i.q
-  ping.event <- i.q
-  force ping catch null
-  o.title <- m.title
-}`,
-    operation: "Query.safe",
-    input: { q: "test" },
-    tools: {
-      mainApi: async () => ({ title: "OK" }),
-      analytics: async () => {
-        throw new Error("analytics down");
+      m.q <- i.q
+      audit.action <- i.q
+      force audit
+      o.title <- m.title
+    }
+
+    bridge Query.forceFireAndForget {
+      with mainApi as m
+      with analytics as ping
+      with input as i
+      with output as o
+
+      m.q <- i.q
+      ping.event <- i.q
+      force ping catch null
+      o.title <- m.title
+    }
+
+    bridge Query.forceCritical {
+      with mainApi as m
+      with audit.log as audit
+      with input as i
+      with output as o
+
+      m.q <- i.q
+      audit.action <- i.q
+      force audit
+      o.title <- m.title
+    }
+  `,
+  scenarios: {
+    "Query.forceRuns": {
+      "force tool runs even when output not queried": {
+        input: { q: "test" },
+        tools: {
+          mainApi: async () => ({ title: "Hello World" }),
+          "audit.log": async () => ({ ok: true }),
+        },
+        assertData: { title: "Hello World" },
+        assertTraces: 2,
       },
     },
-    expected: { title: "OK" },
-  },
-  {
-    name: "critical force propagates errors",
-    bridgeText: `version 1.5
-bridge Query.critical {
-  with mainApi as m
-  with audit.log as audit
-  with input as i
-  with output as o
-
-  m.q <- i.q
-  audit.action <- i.q
-  force audit
-  o.title <- m.title
-}`,
-    operation: "Query.critical",
-    input: { q: "test" },
-    tools: {
-      mainApi: async () => ({ title: "OK" }),
-      "audit.log": async () => {
-        throw new Error("audit failed");
+    "Query.forceFireAndForget": {
+      "fire-and-forget force does not break on error": {
+        input: { q: "test" },
+        tools: {
+          mainApi: async () => ({ title: "OK" }),
+          analytics: async () => {
+            throw new Error("analytics down");
+          },
+        },
+        assertData: { title: "OK" },
+        assertTraces: 2,
       },
     },
-    expectedError: /audit failed/,
+    "Query.forceCritical": {
+      "critical force propagates errors": {
+        input: { q: "test" },
+        tools: {
+          mainApi: async () => ({ title: "OK" }),
+          "audit.log": async () => {
+            throw new Error("audit failed");
+          },
+        },
+        assertError: /audit failed/,
+        assertTraces: 2,
+      },
+    },
   },
-];
-
-runSharedSuite("Shared: force statements", forceCases);
+});
 
 // ── 7. ToolDef support ──────────────────────────────────────────────────────
 
-const toolDefCases: SharedTestCase[] = [
-  {
-    name: "ToolDef constant wires merged with bridge wires",
-    bridgeText: `version 1.5
-tool restApi from myHttp {
-  with context
-  .method = "GET"
-  .baseUrl = "https://api.example.com"
-  .headers.Authorization <- context.token
-}
+regressionTest("parity: ToolDef support", {
+  bridge: `
+    version 1.5
 
-bridge Query.data {
-  with restApi as api
-  with input as i
-  with output as o
+    tool restApi from myHttp {
+      with context
+      .method = "GET"
+      .baseUrl = "https://api.example.com"
+      .headers.Authorization <- context.token
+    }
 
-  api.path <- i.path
-  o.result <- api.body
-}`,
-    operation: "Query.data",
-    input: { path: "/users" },
-    tools: {
-      myHttp: async (_: any) => ({ body: { ok: true } }),
-    },
-    context: { token: "Bearer abc123" },
-    expected: { result: { ok: true } },
-  },
-  {
-    name: "bridge wires override ToolDef wires",
-    bridgeText: `version 1.5
-tool restApi from myHttp {
-  .method = "GET"
-  .timeout = 5000
-}
+    bridge Query.tooldefData {
+      with restApi as api
+      with input as i
+      with output as o
 
-bridge Query.custom {
-  with restApi as api
-  with output as o
+      api.path <- i.path
+      o.result <- api.body
+    }
 
-  api.method = "POST"
-  o.result <- api.data
-}`,
-    operation: "Query.custom",
-    tools: {
-      myHttp: async (input: any) => {
-        assert.equal(input.method, "POST");
-        assert.equal(input.timeout, 5000);
-        return { data: "ok" };
+    tool restApiOverride from myHttp {
+      .method = "GET"
+      .timeout = 5000
+    }
+
+    bridge Query.tooldefOverride {
+      with restApiOverride as api
+      with output as o
+
+      api.method = "POST"
+      o.result <- api.data
+    }
+
+    tool safeApi from myHttp {
+      on error = {"status":"error","message":"service unavailable"}
+    }
+
+    bridge Query.tooldefOnError {
+      with safeApi as api
+      with input as i
+      with output as o
+
+      api.url <- i.url
+      o <- api
+    }
+
+    tool baseApi from myHttp {
+      .method = "GET"
+      .baseUrl = "https://api.example.com"
+    }
+
+    tool userApi from baseApi {
+      .path = "/users"
+    }
+
+    bridge Query.tooldefExtends {
+      with userApi as api
+      with output as o
+
+      o <- api
+    }
+
+    tool strictApi from myHttp {
+      with context
+      .headers.Authorization <- context.auth.profile.token
+    }
+
+    bridge Query.tooldefStrictPath {
+      with strictApi as api
+      with output as o
+
+      o.result <- api.body
+    }
+  `,
+  scenarios: {
+    "Query.tooldefData": {
+      "ToolDef constant wires merged with bridge wires": {
+        input: { path: "/users" },
+        tools: {
+          myHttp: async (_: any) => ({ body: { ok: true } }),
+        },
+        context: { token: "Bearer abc123" },
+        assertData: { result: { ok: true } },
+        assertTraces: 1,
       },
     },
-    expected: { result: "ok" },
-  },
-  {
-    name: "ToolDef onError provides fallback on failure",
-    bridgeText: `version 1.5
-tool safeApi from myHttp {
-  on error = {"status":"error","message":"service unavailable"}
-}
-
-bridge Query.safe {
-  with safeApi as api
-  with input as i
-  with output as o
-
-  api.url <- i.url
-  o <- api
-}`,
-    operation: "Query.safe",
-    input: { url: "https://broken.api" },
-    tools: {
-      myHttp: async () => {
-        throw new Error("connection refused");
+    "Query.tooldefOverride": {
+      "bridge wires override ToolDef wires": {
+        input: {},
+        tools: {
+          myHttp: async (input: any) => {
+            assert.equal(input.method, "POST");
+            assert.equal(input.timeout, 5000);
+            return { data: "ok" };
+          },
+        },
+        assertData: { result: "ok" },
+        assertTraces: 1,
       },
     },
-    expected: { status: "error", message: "service unavailable" },
-  },
-  {
-    name: "ToolDef extends chain",
-    bridgeText: `version 1.5
-tool baseApi from myHttp {
-  .method = "GET"
-  .baseUrl = "https://api.example.com"
-}
-
-tool userApi from baseApi {
-  .path = "/users"
-}
-
-bridge Query.users {
-  with userApi as api
-  with output as o
-
-  o <- api
-}`,
-    operation: "Query.users",
-    tools: {
-      myHttp: async (input: any) => {
-        assert.equal(input.method, "GET");
-        assert.equal(input.baseUrl, "https://api.example.com");
-        assert.equal(input.path, "/users");
-        return { users: [] };
+    "Query.tooldefOnError": {
+      "ToolDef onError provides fallback on failure": {
+        input: { url: "https://broken.api" },
+        tools: {
+          myHttp: async () => {
+            throw new Error("connection refused");
+          },
+        },
+        assertData: { status: "error", message: "service unavailable" },
+        assertTraces: 1,
       },
     },
-    expected: { users: [] },
-  },
-  {
-    name: "ToolDef source paths stay strict after null intermediate",
-    bridgeText: `version 1.5
-tool restApi from myHttp {
-  with context
-  .headers.Authorization <- context.auth.profile.token
-}
-
-bridge Query.data {
-  with restApi as api
-  with output as o
-
-  o.result <- api.body
-}`,
-    operation: "Query.data",
-    tools: {
-      myHttp: async (_: any) => ({ body: { ok: true } }),
+    "Query.tooldefExtends": {
+      "ToolDef extends chain": {
+        input: {},
+        tools: {
+          myHttp: async (input: any) => {
+            assert.equal(input.method, "GET");
+            assert.equal(input.baseUrl, "https://api.example.com");
+            assert.equal(input.path, "/users");
+            return { users: [] };
+          },
+        },
+        assertData: { users: [] },
+        assertTraces: 1,
+      },
     },
-    context: { auth: { profile: null } },
-    expectedError: /Cannot read properties of null \(reading 'token'\)/,
+    "Query.tooldefStrictPath": {
+      "ToolDef strict path resolves normally": {
+        input: {},
+        tools: {
+          myHttp: async (_: any) => ({ body: { ok: true } }),
+        },
+        context: { auth: { profile: { token: "t1" } } },
+        assertData: { result: { ok: true } },
+        assertTraces: 1,
+      },
+      "ToolDef source paths stay strict after null intermediate": {
+        input: {},
+        tools: {
+          myHttp: async (_: any) => ({ body: { ok: true } }),
+        },
+        context: { auth: { profile: null } },
+        assertError: /Cannot read properties of null \(reading 'token'\)/,
+        assertTraces: 0,
+      },
+    },
   },
-];
-
-runSharedSuite("Shared: ToolDef support", toolDefCases);
+});
 
 // ── 8. Tool context injection ───────────────────────────────────────────────
 
-const toolContextCases: SharedTestCase[] = [
-  {
-    name: "tool function receives context as second argument",
-    bridgeText: `version 1.5
-bridge Query.ctx {
-  with api as a
-  with input as i
-  with output as o
+regressionTest("parity: tool context injection", {
+  bridge: `
+    version 1.5
 
-  a.q <- i.q
-  o.result <- a.data
-}`,
-    operation: "Query.ctx",
-    input: { q: "hello" },
-    tools: {
-      api: (input: any, ctx: any) => {
-        // Runtime passes ToolContext { logger, signal }; AOT passes the user
-        // context object.  Both engines must provide a defined second argument.
-        assert.ok(ctx != null, "context must be passed as second argument");
-        return { data: input.q };
+    bridge Query.ctx {
+      with api as a
+      with input as i
+      with output as o
+
+      a.q <- i.q
+      o.result <- a.data
+    }
+  `,
+  scenarios: {
+    "Query.ctx": {
+      "tool function receives context as second argument": {
+        input: { q: "hello" },
+        tools: {
+          api: (input: any, ctx: any) => {
+            assert.ok(ctx != null, "context must be passed as second argument");
+            return { data: input.q };
+          },
+        },
+        assertData: { result: "hello" },
+        assertTraces: 1,
       },
     },
-    expected: { result: "hello" },
   },
-];
-
-runSharedSuite("Shared: tool context injection", toolContextCases);
+});
 
 // ── 9. Const blocks ─────────────────────────────────────────────────────────
 
-const constCases: SharedTestCase[] = [
-  {
-    name: "const value used in fallback",
-    bridgeText: `version 1.5
-const fallbackGeo = { "lat": 0, "lon": 0 }
+regressionTest("parity: const blocks", {
+  bridge: `
+    version 1.5
 
-bridge Query.locate {
-  with geoApi as geo
-  with const as c
-  with input as i
-  with output as o
+    const fallbackGeo = { "lat": 0, "lon": 0 }
 
-  geo.q <- i.q
-  o.lat <- geo.lat ?? c.fallbackGeo.lat
-  o.lon <- geo.lon ?? c.fallbackGeo.lon
-}`,
-    operation: "Query.locate",
-    input: { q: "unknown" },
-    tools: { geoApi: () => ({ lat: null, lon: null }) },
-    expected: { lat: 0, lon: 0 },
+    bridge Query.locate {
+      with geoApi as geo
+      with const as c
+      with input as i
+      with output as o
+
+      geo.q <- i.q
+      o.lat <- geo.lat ?? c.fallbackGeo.lat
+      o.lon <- geo.lon ?? c.fallbackGeo.lon
+    }
+
+    const defaults = { "user": null }
+
+    bridge Query.constStrict {
+      with const as c
+      with output as o
+
+      o.name <- c.defaults.user.profile.name
+    }
+  `,
+  scenarios: {
+    "Query.locate": {
+      "const value used in fallback": {
+        input: { q: "unknown" },
+        tools: { geoApi: () => ({ lat: null, lon: null }) },
+        assertData: { lat: 0, lon: 0 },
+        assertTraces: 1,
+      },
+    },
+    "Query.constStrict": {
+      "const path traversal stays strict after null intermediate": {
+        input: {},
+        assertError: /Cannot read properties of null \(reading 'profile'\)/,
+        assertTraces: 0,
+      },
+    },
   },
-  {
-    name: "const path traversal stays strict after null intermediate",
-    bridgeText: `version 1.5
-const defaults = { "user": null }
-
-bridge Query.consts {
-  with const as c
-  with output as o
-
-  o.name <- c.defaults.user.profile.name
-}`,
-    operation: "Query.consts",
-    expectedError: /Cannot read properties of null \(reading 'profile'\)/,
-  },
-];
-
-runSharedSuite("Shared: const blocks", constCases);
+});
 
 // ── 10. String interpolation ────────────────────────────────────────────────
 
-const interpolationCases: SharedTestCase[] = [
-  {
-    name: "basic string interpolation",
-    bridgeText: `version 1.5
-bridge Query.greet {
-  with input as i
-  with output as o
+regressionTest("parity: string interpolation", {
+  bridge: `
+    version 1.5
 
-  o.message <- "Hello, {i.name}!"
-}`,
-    operation: "Query.greet",
-    input: { name: "World" },
-    expected: { message: "Hello, World!" },
+    bridge Query.greet {
+      with input as i
+      with output as o
+
+      o.message <- "Hello, {i.name}!"
+    }
+
+    bridge Query.url {
+      with api as a
+      with input as i
+      with output as o
+
+      a.path <- "/users/{i.id}/orders"
+      o.result <- a.data
+    }
+  `,
+  scenarios: {
+    "Query.greet": {
+      "basic string interpolation": {
+        input: { name: "World" },
+        assertData: { message: "Hello, World!" },
+        assertTraces: 0,
+      },
+    },
+    "Query.url": {
+      "URL construction with interpolation": {
+        input: { id: 42 },
+        tools: { api: (p: any) => ({ data: p.path }) },
+        assertData: { result: "/users/42/orders" },
+        assertTraces: 1,
+      },
+    },
   },
-  {
-    name: "URL construction with interpolation",
-    bridgeText: `version 1.5
-bridge Query.url {
-  with api as a
-  with input as i
-  with output as o
-
-  a.path <- "/users/{i.id}/orders"
-  o.result <- a.data
-}`,
-    operation: "Query.url",
-    input: { id: 42 },
-    tools: { api: (p: any) => ({ data: p.path }) },
-    expected: { result: "/users/42/orders" },
-  },
-];
-
-runSharedSuite("Shared: string interpolation", interpolationCases);
+});
 
 // ── 11. Expressions (math, comparison) ──────────────────────────────────────
 
-const expressionCases: SharedTestCase[] = [
-  {
-    name: "multiplication expression",
-    bridgeText: `version 1.5
-bridge Query.calc {
-  with input as i
-  with output as o
+regressionTest("parity: expressions", {
+  bridge: `
+    version 1.5
 
-  o.result <- i.price * i.qty
-}`,
-    operation: "Query.calc",
-    input: { price: 10, qty: 3 },
-    expected: { result: 30 },
+    bridge Query.calc {
+      with input as i
+      with output as o
+
+      o.result <- i.price * i.qty
+    }
+
+    bridge Query.check {
+      with input as i
+      with output as o
+
+      o.isAdult <- i.age >= 18
+    }
+  `,
+  scenarios: {
+    "Query.calc": {
+      "multiplication expression": {
+        input: { price: 10, qty: 3 },
+        assertData: { result: 30 },
+        assertTraces: 0,
+      },
+    },
+    "Query.check": {
+      "comparison expression (greater than or equal)": {
+        input: { age: 21 },
+        assertData: { isAdult: true },
+        assertTraces: 0,
+      },
+    },
   },
-  {
-    name: "comparison expression (greater than or equal)",
-    bridgeText: `version 1.5
-bridge Query.check {
-  with input as i
-  with output as o
-
-  o.isAdult <- i.age >= 18
-}`,
-    operation: "Query.check",
-    input: { age: 21 },
-    expected: { isAdult: true },
-  },
-];
-
-runSharedSuite("Shared: expressions", expressionCases);
+});
 
 // ── 12. Nested scope blocks ─────────────────────────────────────────────────
 
-const scopeCases: SharedTestCase[] = [
-  {
-    name: "nested object via scope block",
-    bridgeText: `version 1.5
-bridge Query.weather {
-  with weatherApi as w
-  with input as i
-  with output as o
+regressionTest("parity: nested scope blocks", {
+  bridge: `
+    version 1.5
 
-  w.city <- i.city
+    bridge Query.weather {
+      with weatherApi as w
+      with input as i
+      with output as o
 
-  o.why {
-    .temperature <- w.temperature ?? 0.0
-    .city <- i.city
-  }
-}`,
-    operation: "Query.weather",
-    input: { city: "Berlin" },
-    tools: {
-      weatherApi: async () => ({ temperature: 25, feelsLike: 23 }),
+      w.city <- i.city
+
+      o.why {
+        .temperature <- w.temperature ?? 0.0
+        .city <- i.city
+      }
+    }
+  `,
+  scenarios: {
+    "Query.weather": {
+      "nested object via scope block": {
+        input: { city: "Berlin" },
+        tools: {
+          weatherApi: async () => ({ temperature: 25, feelsLike: 23 }),
+        },
+        assertData: { why: { temperature: 25, city: "Berlin" } },
+        assertTraces: 1,
+      },
+      "fallback triggers on null temperature": {
+        input: { city: "Unknown" },
+        tools: {
+          weatherApi: async () => ({ temperature: null }),
+        },
+        assertData: { why: { temperature: 0, city: "Unknown" } },
+        assertTraces: 1,
+      },
     },
-    expected: { why: { temperature: 25, city: "Berlin" } },
   },
-];
-
-runSharedSuite("Shared: nested scope blocks", scopeCases);
+});
 
 // ── 13. Nested arrays ───────────────────────────────────────────────────────
 
-const nestedArrayCases: SharedTestCase[] = [
-  {
-    name: "nested array-in-array mapping",
-    bridgeText: `version 1.5
-bridge Query.searchTrains {
-  with transportApi as api
-  with input as i
-  with output as o
+regressionTest("parity: nested arrays", {
+  bridge: `
+    version 1.5
 
-  api.from <- i.from
-  api.to <- i.to
-  o <- api.connections[] as c {
-    .id <- c.id
-    .legs <- c.sections[] as s {
-      .trainName <- s.name
-      .origin.station <- s.departure.station
-      .destination.station <- s.arrival.station
+    bridge Query.searchTrains {
+      with transportApi as api
+      with input as i
+      with output as o
+
+      api.from <- i.from
+      api.to <- i.to
+      o <- api.connections[] as c {
+        .id <- c.id
+        .legs <- c.sections[] as s {
+          .trainName <- s.name
+          .origin.station <- s.departure.station
+          .destination.station <- s.arrival.station
+        }
+      }
     }
-  }
-}`,
-    operation: "Query.searchTrains",
-    input: { from: "Bern", to: "Aarau" },
-    tools: {
-      transportApi: async () => ({
-        connections: [
+  `,
+  scenarios: {
+    "Query.searchTrains": {
+      "nested array-in-array mapping": {
+        input: { from: "Bern", to: "Aarau" },
+        tools: {
+          transportApi: async () => ({
+            connections: [
+              {
+                id: "c1",
+                sections: [
+                  {
+                    name: "IC 8",
+                    departure: { station: "Bern" },
+                    arrival: { station: "Zürich" },
+                  },
+                  {
+                    name: "S3",
+                    departure: { station: "Zürich" },
+                    arrival: { station: "Aarau" },
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        assertData: [
           {
             id: "c1",
-            sections: [
+            legs: [
               {
-                name: "IC 8",
-                departure: { station: "Bern" },
-                arrival: { station: "Zürich" },
+                trainName: "IC 8",
+                origin: { station: "Bern" },
+                destination: { station: "Zürich" },
               },
               {
-                name: "S3",
-                departure: { station: "Zürich" },
-                arrival: { station: "Aarau" },
+                trainName: "S3",
+                origin: { station: "Zürich" },
+                destination: { station: "Aarau" },
               },
             ],
           },
         ],
-      }),
-    },
-    expected: [
-      {
-        id: "c1",
-        legs: [
-          {
-            trainName: "IC 8",
-            origin: { station: "Bern" },
-            destination: { station: "Zürich" },
-          },
-          {
-            trainName: "S3",
-            origin: { station: "Zürich" },
-            destination: { station: "Aarau" },
-          },
-        ],
+        assertTraces: 1,
       },
-    ],
+      "empty connections": {
+        input: { from: "X", to: "Y" },
+        tools: { transportApi: async () => ({ connections: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "A", to: "B" },
+        tools: {
+          transportApi: async () => ({
+            connections: [{ id: "c1", sections: [] }],
+          }),
+        },
+        assertData: [{ id: "c1", legs: [] }],
+        assertTraces: 1,
+      },
+    },
   },
-];
-
-runSharedSuite("Shared: nested arrays", nestedArrayCases);
+});
 
 // ── 14. Pipe operators ──────────────────────────────────────────────────────
 
-const pipeCases: SharedTestCase[] = [
-  {
-    name: "simple pipe shorthand",
-    bridgeText: `version 1.5
-bridge Query.shout {
-  with toUpperCase as tu
-  with input as i
-  with output as o
+regressionTest("parity: pipe operators", {
+  bridge: `
+    version 1.5
 
-  o.loud <- tu:i.text
-}`,
-    operation: "Query.shout",
-    input: { text: "hello" },
-    tools: {
-      toUpperCase: (p: any) => ({ out: p.in.toUpperCase() }),
+    bridge Query.shout {
+      with toUpperCase as tu
+      with input as i
+      with output as o
+
+      o.loud <- tu:i.text
+    }
+  `,
+  scenarios: {
+    "Query.shout": {
+      "simple pipe shorthand": {
+        input: { text: "hello" },
+        tools: {
+          toUpperCase: (p: any) => ({ out: p.in.toUpperCase() }),
+        },
+        assertData: { loud: { out: "HELLO" } },
+        assertTraces: 1,
+      },
     },
-    expected: { loud: { out: "HELLO" } },
   },
-];
-
-runSharedSuite("Shared: pipe operators", pipeCases);
+});
 
 // ── 15. Define blocks ───────────────────────────────────────────────────────
 
-const defineCases: SharedTestCase[] = [
-  {
-    name: "simple define block inlines tool call",
-    bridgeText: `version 1.5
+regressionTest("parity: define blocks", {
+  bridge: `
+    version 1.5
 
-define userProfile {
-  with userApi as api
-  with input as i
-  with output as o
-  api.id <- i.userId
-  o.name <- api.login
-}
+    define userProfile {
+      with userApi as api
+      with input as i
+      with output as o
+      api.id <- i.userId
+      o.name <- api.login
+    }
 
-bridge Query.user {
-  with userProfile as sp
-  with input as i
-  with output as o
-  sp.userId <- i.id
-  o.profile <- sp
-}`,
-    operation: "Query.user",
-    input: { id: 42 },
-    tools: {
-      userApi: async (input: any) => ({ login: "admin_" + input.id }),
+    bridge Query.defineSimple {
+      with userProfile as sp
+      with input as i
+      with output as o
+      sp.userId <- i.id
+      o.profile <- sp
+    }
+
+    define enrichedGeo {
+      with hereapi.geocode as gc
+      with input as i
+      with output as o
+      gc.q <- i.query
+      o.lat <- gc.lat
+      o.lon <- gc.lon
+    }
+
+    bridge Query.defineModuleTool {
+      with enrichedGeo as geo
+      with input as i
+      with output as o
+      geo.query <- i.location
+      o.coordinates <- geo
+    }
+
+    define weatherInfo {
+      with weatherApi as api
+      with input as i
+      with output as o
+      api.city <- i.cityName
+      o.temp <- api.temperature
+      o.humidity <- api.humidity
+      o.wind <- api.windSpeed
+    }
+
+    bridge Query.defineMultiOutput {
+      with weatherInfo as w
+      with input as i
+      with output as o
+      w.cityName <- i.city
+      o.forecast <- w
+    }
+  `,
+  scenarios: {
+    "Query.defineSimple": {
+      "simple define block inlines tool call": {
+        input: { id: 42 },
+        tools: {
+          userApi: async (input: any) => ({ login: "admin_" + input.id }),
+        },
+        assertData: { profile: { name: "admin_42" } },
+        assertTraces: 1,
+      },
     },
-    expected: { profile: { name: "admin_42" } },
-  },
-  {
-    name: "define with module-prefixed tool",
-    bridgeText: `version 1.5
-
-define enrichedGeo {
-  with hereapi.geocode as gc
-  with input as i
-  with output as o
-  gc.q <- i.query
-  o.lat <- gc.lat
-  o.lon <- gc.lon
-}
-
-bridge Query.search {
-  with enrichedGeo as geo
-  with input as i
-  with output as o
-  geo.query <- i.location
-  o.coordinates <- geo
-}`,
-    operation: "Query.search",
-    input: { location: "Berlin" },
-    tools: {
-      "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
+    "Query.defineModuleTool": {
+      "define with module-prefixed tool": {
+        input: { location: "Berlin" },
+        tools: {
+          "hereapi.geocode": async () => ({ lat: 52.53, lon: 13.38 }),
+        },
+        assertData: { coordinates: { lat: 52.53, lon: 13.38 } },
+        assertTraces: 1,
+      },
     },
-    expected: { coordinates: { lat: 52.53, lon: 13.38 } },
-  },
-  {
-    name: "define with multiple output fields",
-    bridgeText: `version 1.5
-
-define weatherInfo {
-  with weatherApi as api
-  with input as i
-  with output as o
-  api.city <- i.cityName
-  o.temp <- api.temperature
-  o.humidity <- api.humidity
-  o.wind <- api.windSpeed
-}
-
-bridge Query.weather {
-  with weatherInfo as w
-  with input as i
-  with output as o
-  w.cityName <- i.city
-  o.forecast <- w
-}`,
-    operation: "Query.weather",
-    input: { city: "Berlin" },
-    tools: {
-      weatherApi: async (_: any) => ({
-        temperature: 22,
-        humidity: 65,
-        windSpeed: 15,
-      }),
+    "Query.defineMultiOutput": {
+      "define with multiple output fields": {
+        input: { city: "Berlin" },
+        tools: {
+          weatherApi: async (_: any) => ({
+            temperature: 22,
+            humidity: 65,
+            windSpeed: 15,
+          }),
+        },
+        assertData: { forecast: { temp: 22, humidity: 65, wind: 15 } },
+        assertTraces: 1,
+      },
     },
-    expected: { forecast: { temp: 22, humidity: 65, wind: 15 } },
   },
-];
-
-runSharedSuite("Shared: define blocks", defineCases);
+});
 
 // ── 16. Alias declarations ──────────────────────────────────────────────────
 
-const aliasCases: SharedTestCase[] = [
-  {
-    name: "top-level alias — simple rename",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api
-  with output as o
-  alias api.result.data as d
-  o.value <- d.name
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({ result: { data: { name: "hello" } } }),
-    },
-    expected: { value: "hello" },
-  },
-  {
-    name: "top-level alias with pipe — caches result",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with myUC
-  with input as i
-  with output as o
+regressionTest("parity: alias declarations", {
+  bridge: `
+    version 1.5
 
-  alias myUC:i.name as upper
-  o.greeting <- upper.out
-}`,
-    operation: "Query.test",
-    input: { name: "hello" },
-    tools: {
-      myUC: (p: any) => ({ out: p.in.toUpperCase() }),
-    },
-    expected: { greeting: "HELLO" },
-  },
-];
+    bridge Query.aliasSimple {
+      with api
+      with output as o
+      alias api.result.data as d
+      o.value <- d.name
+    }
 
-runSharedSuite("Shared: alias declarations", aliasCases);
+    bridge Query.aliasPipe {
+      with myUC
+      with input as i
+      with output as o
+
+      alias myUC:i.name as upper
+      o.greeting <- upper.out
+    }
+  `,
+  scenarios: {
+    "Query.aliasSimple": {
+      "top-level alias — simple rename": {
+        input: {},
+        tools: {
+          api: async () => ({ result: { data: { name: "hello" } } }),
+        },
+        assertData: { value: "hello" },
+        allowDowngrade: true,
+        assertTraces: 1,
+      },
+    },
+    "Query.aliasPipe": {
+      "top-level alias with pipe — caches result": {
+        input: { name: "hello" },
+        tools: {
+          myUC: (p: any) => ({ out: p.in.toUpperCase() }),
+        },
+        assertData: { greeting: "HELLO" },
+        assertTraces: 1,
+      },
+    },
+  },
+});
 
 // ── 17. Overdefinition ──────────────────────────────────────────────────────
 
-const overdefinitionCases: SharedTestCase[] = [
-  {
-    name: "zero-cost input beats tool even when tool wire is first",
-    bridgeText: `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- api.label
-  o.label <- i.hint
-}`,
-    operation: "Query.lookup",
-    input: { q: "x", hint: "cheap" },
-    tools: {
-      expensiveApi: async () => ({ label: "from-api" }),
-    },
-    expected: { label: "cheap" },
-  },
-  {
-    name: "tool runs when zero-cost input is nullish",
-    bridgeText: `version 1.5
-bridge Query.lookup {
-  with api
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- api.label
-  o.label <- i.hint
-}`,
-    operation: "Query.lookup",
-    input: { q: "x", hint: "fallback" },
-    tools: {
-      api: async () => ({ label: null }),
-    },
-    expected: { label: "fallback" },
-  },
-  {
-    name: "zero-cost context beats tool even when tool wire is first",
-    bridgeText: `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with context as ctx
-  with input as i
-  with output as o
-  api.q <- i.q
-  o.label <- api.label
-  o.label <- ctx.defaultLabel
-}`,
-    operation: "Query.lookup",
-    input: { q: "x" },
-    context: { defaultLabel: "from-context" },
-    tools: {
-      expensiveApi: async () => ({ label: "from-api" }),
-    },
-    expected: { label: "from-context" },
-  },
-  {
-    name: "same-cost tool sources preserve authored order",
-    bridgeText: `version 1.5
-bridge Query.lookup {
-  with svcA as a
-  with svcB as b
-  with input as i
-  with output as o
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label
-  o.label <- b.label
-}`,
-    operation: "Query.lookup",
-    input: { q: "x" },
-    tools: {
-      svcA: async () => ({ label: "from-A" }),
-      svcB: async () => ({ label: "from-B" }),
-    },
-    expected: { label: "from-A" },
-  },
-];
+regressionTest("parity: overdefinition", {
+  bridge: `
+    version 1.5
 
-runSharedSuite("Shared: overdefinition", overdefinitionCases);
+    bridge Query.lookup {
+      with expensiveApi as api
+      with input as i
+      with output as o
+      api.q <- i.q
+      o.label <- api.label
+      o.label <- i.hint
+    }
+
+    bridge Query.lookupCtx {
+      with expensiveApi as api
+      with context as ctx
+      with input as i
+      with output as o
+      api.q <- i.q
+      o.label <- api.label
+      o.label <- ctx.defaultLabel
+    }
+
+    bridge Query.lookupSameCost {
+      with svcA as a
+      with svcB as b
+      with input as i
+      with output as o
+      a.q <- i.q
+      b.q <- i.q
+      o.label <- a.label
+      o.label <- b.label
+    }
+  `,
+  scenarios: {
+    "Query.lookup": {
+      "zero-cost input beats tool even when tool wire is first": {
+        input: { q: "x", hint: "cheap" },
+        tools: {
+          expensiveApi: async () => ({ label: "from-api" }),
+        },
+        assertData: { label: "cheap" },
+        assertTraces: 0,
+      },
+      "tool wire used when input is undefined": {
+        input: { q: "x" },
+        tools: {
+          expensiveApi: async () => ({ label: "from-api" }),
+        },
+        assertData: { label: "from-api" },
+        assertTraces: 1,
+      },
+    },
+    "Query.lookupCtx": {
+      "zero-cost context beats tool even when tool wire is first": {
+        input: { q: "x" },
+        context: { defaultLabel: "from-context" },
+        tools: {
+          expensiveApi: async () => ({ label: "from-api" }),
+        },
+        assertData: { label: "from-context" },
+        assertTraces: 0,
+      },
+      "tool wire used when context key is missing": {
+        input: { q: "x" },
+        context: {},
+        tools: {
+          expensiveApi: async () => ({ label: "from-api" }),
+        },
+        assertData: { label: "from-api" },
+        assertTraces: 1,
+      },
+    },
+    "Query.lookupSameCost": {
+      "same-cost tool sources preserve authored order": {
+        input: { q: "x" },
+        tools: {
+          svcA: async () => ({ label: "from-A" }),
+          svcB: async () => ({ label: "from-B" }),
+        },
+        assertData: { label: "from-A" },
+        allowDowngrade: true,
+        assertTraces: 1,
+      },
+      "second tool used when first returns undefined": {
+        input: { q: "x" },
+        tools: {
+          svcA: async () => ({}),
+          svcB: async () => ({ label: "from-B" }),
+        },
+        assertData: { label: "from-B" },
+        allowDowngrade: true,
+        assertTraces: 2,
+      },
+    },
+  },
+});
 
 // ── 18. Break/continue in array mapping ─────────────────────────────────────
 
-const breakContinueCases: SharedTestCase[] = [
-  {
-    name: "continue skips null elements",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o <- a.items[] as item {
-    .name <- item.name ?? continue
-  }
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({
-        items: [
-          { name: "Alice" },
-          { name: null },
-          { name: "Bob" },
-          { name: null },
-        ],
-      }),
-    },
-    expected: [{ name: "Alice" }, { name: "Bob" }],
-  },
-  {
-    name: "break halts array processing",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o <- a.items[] as item {
-    .name <- item.name ?? break
-  }
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({
-        items: [
-          { name: "Alice" },
-          { name: "Bob" },
-          { name: null },
-          { name: "Carol" },
-        ],
-      }),
-    },
-    expected: [{ name: "Alice" }, { name: "Bob" }],
-  },
-  {
-    name: "continue in non-root array field",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o.items <- a.list[] as item {
-    .name <- item.name ?? continue
-  }
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({
-        list: [{ name: "X" }, { name: null }, { name: "Y" }],
-      }),
-    },
-    expected: { items: [{ name: "X" }, { name: "Y" }] },
-  },
-  {
-    name: "continue in nested array",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o <- a.orders[] as order {
-    .id <- order.id
-    .items <- order.items[] as item {
-      .sku <- item.sku ?? continue
+regressionTest("parity: break/continue in array mapping", {
+  bridge: `
+    version 1.5
+
+    bridge Query.continueNull {
+      with api as a
+      with output as o
+      o <- a.items[] as item {
+        .name <- item.name ?? continue
+      }
     }
-  }
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({
-        orders: [
-          { id: 1, items: [{ sku: "A" }, { sku: null }, { sku: "B" }] },
-          { id: 2, items: [{ sku: null }, { sku: "C" }] },
-        ],
-      }),
-    },
-    expected: [
-      { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
-      { id: 2, items: [{ sku: "C" }] },
-    ],
-  },
-  {
-    name: "break in nested array",
-    bridgeText: `version 1.5
-bridge Query.test {
-  with api as a
-  with output as o
-  o <- a.orders[] as order {
-    .id <- order.id
-    .items <- order.items[] as item {
-      .sku <- item.sku ?? break
+
+    bridge Query.breakHalt {
+      with api as a
+      with output as o
+      o <- a.items[] as item {
+        .name <- item.name ?? break
+      }
     }
-  }
-}`,
-    operation: "Query.test",
-    tools: {
-      api: async () => ({
-        orders: [
-          {
-            id: 1,
-            items: [{ sku: "A" }, { sku: "B" }, { sku: null }, { sku: "D" }],
-          },
-          { id: 2, items: [{ sku: null }, { sku: "E" }] },
-        ],
-      }),
-    },
-    expected: [
-      { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
-      { id: 2, items: [] },
-    ],
-  },
-];
 
-runSharedSuite("Shared: break/continue", breakContinueCases);
-
-// ── Sparse Fieldsets (requestedFields) ──────────────────────────────────────
-
-const sparseFieldsetCases: SharedTestCase[] = [
-  // ── 1. Basic filtering — request only a subset of fields ──────────────
-  {
-    name: "only requested fields are returned, unrequested tool is not called",
-    bridgeText: `version 1.5
-bridge Query.data {
-  with input as i
-  with expensive as exp
-  with cheap as ch
-  with output as o
-
-  exp.x <- i.x
-  ch.y <- i.y
-
-  o.a <- exp.result
-  o.b <- ch.result
-}`,
-    operation: "Query.data",
-    input: { x: 1, y: 2 },
-    tools: {
-      expensive: () => {
-        throw new Error("expensive tool should not be called");
-      },
-      cheap: (p: any) => ({ result: p.y * 10 }),
-    },
-    requestedFields: ["b"],
-    expected: { b: 20 },
-  },
-
-  // ── 2. No filter — all fields returned (backward-compat) ─────────────
-  {
-    name: "no requestedFields returns all fields",
-    bridgeText: `version 1.5
-bridge Query.data {
-  with input as i
-  with toolA as a
-  with toolB as b
-  with output as o
-
-  a.x <- i.x
-  b.y <- i.y
-
-  o.first <- a.result
-  o.second <- b.result
-}`,
-    operation: "Query.data",
-    input: { x: 1, y: 2 },
-    tools: {
-      toolA: (p: any) => ({ result: p.x + 100 }),
-      toolB: (p: any) => ({ result: p.y + 200 }),
-    },
-    expected: { first: 101, second: 202 },
-  },
-
-  // ── 3. Wildcard matching — legs.* ────────────────────────────────────
-  {
-    name: "wildcard legs.* matches all immediate children",
-    bridgeText: `version 1.5
-bridge Query.trip {
-  with input as i
-  with api as a
-  with output as o
-
-  a.id <- i.id
-
-  o.id <- a.id
-  o.legs {
-    .duration <- a.duration
-    .distance <- a.distance
-  }
-  o.price <- a.price
-}`,
-    operation: "Query.trip",
-    input: { id: 42 },
-    tools: {
-      api: (p: any) => ({ id: p.id, duration: "2h", distance: 150, price: 99 }),
-    },
-    requestedFields: ["id", "legs.*"],
-    expected: { id: 42, legs: { duration: "2h", distance: 150 } },
-  },
-
-  // ── 4. Fallback chain (A || B → C) with requestedFields ──────────────
-  //
-  // Setup:
-  //   - toolA  feeds  o.fromA   (independently wired)
-  //   - toolB  feeds  o.fromB   (with falsy fallback to toolC)
-  //   - toolC  feeds  the fallback of o.fromB  AND  depends on toolB
-  //
-  // When we request only ["fromA"], toolB and toolC should NOT be called.
-  // When we request only ["fromB"], toolA should NOT be called.
-  {
-    name: "A||B→C: requesting only 'fromA' skips B and C",
-    bridgeText: `version 1.5
-bridge Query.chain {
-  with input as i
-  with toolA as a
-  with toolB as b
-  with toolC as c
-  with output as o
-
-  a.x <- i.x
-  b.y <- i.y
-  c.z <- b.partial
-
-  o.fromA <- a.result
-  o.fromB <- b.result || c.result
-}`,
-    operation: "Query.chain",
-    input: { x: 10, y: 20 },
-    tools: {
-      toolA: (p: any) => ({ result: p.x * 2 }),
-      toolB: () => {
-        throw new Error("toolB should not be called");
-      },
-      toolC: () => {
-        throw new Error("toolC should not be called");
-      },
-    },
-    requestedFields: ["fromA"],
-    expected: { fromA: 20 },
-  },
-  {
-    name: "A||B→C: requesting only 'fromB' skips A, calls B and fallback C",
-    bridgeText: `version 1.5
-bridge Query.chain {
-  with input as i
-  with toolA as a
-  with toolB as b
-  with toolC as c
-  with output as o
-
-  a.x <- i.x
-  b.y <- i.y
-  c.z <- b.partial
-
-  o.fromA <- a.result
-  o.fromB <- b.result || c.result
-}`,
-    operation: "Query.chain",
-    input: { x: 10, y: 20 },
-    tools: {
-      toolA: () => {
-        throw new Error("toolA should not be called");
-      },
-      toolB: (p: any) => ({ result: null, partial: p.y }),
-      toolC: (p: any) => ({ result: p.z + 5 }),
-    },
-    requestedFields: ["fromB"],
-    expected: { fromB: 25 },
-  },
-
-  // ── 5. Multiple fields requested ─────────────────────────────────────
-  {
-    name: "requesting multiple fields returns only those",
-    bridgeText: `version 1.5
-bridge Query.multi {
-  with input as i
-  with output as o
-
-  o.a <- i.a
-  o.b <- i.b
-  o.c <- i.c
-}`,
-    operation: "Query.multi",
-    input: { a: 1, b: 2, c: 3 },
-    requestedFields: ["a", "c"],
-    expected: { a: 1, c: 3 },
-  },
-
-  // ── 6. Nested field path request ─────────────────────────────────────
-  {
-    name: "requesting nested path includes parent and specified children",
-    bridgeText: `version 1.5
-bridge Query.nested {
-  with input as i
-  with api as a
-  with output as o
-
-  a.id <- i.id
-
-  o.id <- i.id
-  o.detail {
-    .name <- a.name
-    .age <- a.age
-  }
-}`,
-    operation: "Query.nested",
-    input: { id: 1 },
-    tools: {
-      api: (_p: any) => ({ name: "Alice", age: 30 }),
-    },
-    requestedFields: ["detail.name"],
-    expected: { detail: { name: "Alice" } },
-    // The AOT compiler emits a static object tree — individual nested
-    // fields inside a scope block can't be independently pruned in the
-    // current codegen.  Runtime handles this via resolveNestedField.
-    aotSupported: false,
-  },
-
-  // ── 7. Array-mapped output with requestedFields ──────────────────────
-  {
-    name: "array-mapped output filters top-level fields via requestedFields",
-    bridgeText: `version 1.5
-bridge Query.trips {
-  with input as i
-  with api as a
-  with output as o
-
-  a.from <- i.from
-  a.to <- i.to
-
-  o <- a.items[] as item {
-    .id <- item.id
-    .provider <- item.provider
-    .price <- item.price
-    .legs <- item.legs
-  }
-}`,
-    operation: "Query.trips",
-    input: { from: "A", to: "B" },
-    tools: {
-      api: () => ({
-        items: [
-          { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
-          { id: 2, provider: "Y", price: 80, legs: [{ name: "L2" }] },
-        ],
-      }),
-    },
-    requestedFields: ["id", "legs"],
-    expected: [
-      { id: 1, legs: [{ name: "L1" }] },
-      { id: 2, legs: [{ name: "L2" }] },
-    ],
-    // AOT doesn't support per-element sparse fieldsets yet.
-    aotSupported: false,
-  },
-
-  // ── 8. Array-mapped output: nested path filters within elements ──────
-  {
-    name: "array-mapped output with nested requestedFields path",
-    bridgeText: `version 1.5
-bridge Query.trains {
-  with input as i
-  with api as a
-  with output as o
-
-  a.from <- i.from
-  a.to <- i.to
-
-  o <- a.connections[] as c {
-    .id <- c.id
-    .provider = "SBB"
-    .departureTime <- c.departure
-
-    .legs <- c.sections[] as s {
-      .trainName <- s.name
-      .destination <- s.dest
+    bridge Query.continueNonRoot {
+      with api as a
+      with output as o
+      o.items <- a.list[] as item {
+        .name <- item.name ?? continue
+      }
     }
-  }
-}`,
-    operation: "Query.trains",
-    input: { from: "Bern", to: "Zürich" },
-    tools: {
-      api: () => ({
-        connections: [
-          {
-            id: 1,
-            departure: "08:00",
-            sections: [
-              { name: "IC1", dest: "Zürich" },
-              { name: "IC2", dest: "Basel" },
+
+    bridge Query.continueNested {
+      with api as a
+      with output as o
+      o <- a.orders[] as order {
+        .id <- order.id
+        .items <- order.items[] as item {
+          .sku <- item.sku ?? continue
+        }
+      }
+    }
+
+    bridge Query.breakNested {
+      with api as a
+      with output as o
+      o <- a.orders[] as order {
+        .id <- order.id
+        .items <- order.items[] as item {
+          .sku <- item.sku ?? break
+        }
+      }
+    }
+  `,
+  scenarios: {
+    "Query.continueNull": {
+      "continue skips null elements": {
+        input: {},
+        tools: {
+          api: async () => ({
+            items: [
+              { name: "Alice" },
+              { name: null },
+              { name: "Bob" },
+              { name: null },
             ],
+          }),
+        },
+        assertData: [{ name: "Alice" }, { name: "Bob" }],
+        assertTraces: 1,
+      },
+      "empty items returns empty array": {
+        input: {},
+        tools: { api: async () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+    },
+    "Query.breakHalt": {
+      "break halts array processing": {
+        input: {},
+        tools: {
+          api: async () => ({
+            items: [
+              { name: "Alice" },
+              { name: "Bob" },
+              { name: null },
+              { name: "Carol" },
+            ],
+          }),
+        },
+        assertData: [{ name: "Alice" }, { name: "Bob" }],
+        assertTraces: 1,
+      },
+      "empty items returns empty array": {
+        input: {},
+        tools: { api: async () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+    },
+    "Query.continueNonRoot": {
+      "continue in non-root array field": {
+        input: {},
+        tools: {
+          api: async () => ({
+            list: [{ name: "X" }, { name: null }, { name: "Y" }],
+          }),
+        },
+        assertData: { items: [{ name: "X" }, { name: "Y" }] },
+        assertTraces: 1,
+      },
+      "empty list returns empty items": {
+        input: {},
+        tools: { api: async () => ({ list: [] }) },
+        assertData: { items: [] },
+        assertTraces: 1,
+      },
+    },
+    "Query.continueNested": {
+      "continue in nested array": {
+        input: {},
+        tools: {
+          api: async () => ({
+            orders: [
+              {
+                id: 1,
+                items: [{ sku: "A" }, { sku: null }, { sku: "B" }],
+              },
+              { id: 2, items: [{ sku: null }, { sku: "C" }] },
+            ],
+          }),
+        },
+        assertData: [
+          { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
+          { id: 2, items: [{ sku: "C" }] },
+        ],
+        assertTraces: 1,
+      },
+      "empty orders returns empty array": {
+        input: {},
+        tools: { api: async () => ({ orders: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "order with empty items": {
+        input: {},
+        tools: {
+          api: async () => ({ orders: [{ id: 1, items: [] }] }),
+        },
+        assertData: [{ id: 1, items: [] }],
+        assertTraces: 1,
+      },
+    },
+    "Query.breakNested": {
+      "break in nested array": {
+        input: {},
+        tools: {
+          api: async () => ({
+            orders: [
+              {
+                id: 1,
+                items: [
+                  { sku: "A" },
+                  { sku: "B" },
+                  { sku: null },
+                  { sku: "D" },
+                ],
+              },
+              { id: 2, items: [{ sku: null }, { sku: "E" }] },
+            ],
+          }),
+        },
+        assertData: [
+          { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
+          { id: 2, items: [] },
+        ],
+        assertTraces: 1,
+      },
+      "empty orders returns empty array": {
+        input: {},
+        tools: { api: async () => ({ orders: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "order with empty items": {
+        input: {},
+        tools: {
+          api: async () => ({ orders: [{ id: 1, items: [] }] }),
+        },
+        assertData: [{ id: 1, items: [] }],
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── 19. Sparse fieldsets (requestedFields) ──────────────────────────────────
+
+regressionTest("parity: sparse fieldsets — basic", {
+  bridge: `
+    version 1.5
+
+    bridge Query.sparseBasic {
+      with input as i
+      with expensive as exp
+      with cheap as ch
+      with output as o
+
+      exp.x <- i.x
+      ch.y <- i.y
+
+      o.a <- exp.result
+      o.b <- ch.result
+    }
+
+    bridge Query.sparseAll {
+      with input as i
+      with toolA as a
+      with toolB as b
+      with output as o
+
+      a.x <- i.x
+      b.y <- i.y
+
+      o.first <- a.result
+      o.second <- b.result
+    }
+
+    bridge Query.sparseMulti {
+      with input as i
+      with output as o
+
+      o.a <- i.a
+      o.b <- i.b
+      o.c <- i.c
+    }
+  `,
+  scenarios: {
+    "Query.sparseBasic": {
+      "only requested fields are returned, unrequested tool is not called": {
+        input: { x: 1, y: 2 },
+        tools: {
+          expensive: () => {
+            throw new Error("expensive tool should not be called");
+          },
+          cheap: (p: any) => ({ result: p.y * 10 }),
+        },
+        fields: ["b"],
+        assertData: { b: 20 },
+        assertTraces: 1,
+      },
+      "requesting a calls expensive tool": {
+        input: { x: 5, y: 2 },
+        tools: {
+          expensive: (p: any) => ({ result: p.x + 1 }),
+          cheap: () => {
+            throw new Error("cheap tool should not be called");
+          },
+        },
+        fields: ["a"],
+        assertData: { a: 6 },
+        assertTraces: 1,
+      },
+    },
+    "Query.sparseAll": {
+      "no requestedFields returns all fields": {
+        input: { x: 1, y: 2 },
+        tools: {
+          toolA: (p: any) => ({ result: p.x + 100 }),
+          toolB: (p: any) => ({ result: p.y + 200 }),
+        },
+        assertData: { first: 101, second: 202 },
+        assertTraces: 2,
+      },
+    },
+    "Query.sparseMulti": {
+      "requesting multiple fields returns only those": {
+        input: { a: 1, b: 2, c: 3 },
+        fields: ["a", "c"],
+        assertData: { a: 1, c: 3 },
+        assertTraces: 0,
+      },
+      "requesting b returns b": {
+        input: { a: 1, b: 2, c: 3 },
+        fields: ["b"],
+        assertData: { b: 2 },
+        assertTraces: 0,
+      },
+    },
+  },
+});
+
+regressionTest("parity: sparse fieldsets — wildcard and chains", {
+  bridge: `
+    version 1.5
+
+    bridge Query.trip {
+      with input as i
+      with api as a
+      with output as o
+
+      a.id <- i.id
+
+      o.id <- a.id
+      o.legs {
+        .duration <- a.duration
+        .distance <- a.distance
+      }
+      o.price <- a.price
+    }
+
+    bridge Query.chainSparse {
+      with input as i
+      with toolA as a
+      with toolB as b
+      with toolC as c
+      with output as o
+
+      a.x <- i.x
+      b.y <- i.y
+      c.z <- b.partial
+
+      o.fromA <- a.result
+      o.fromB <- b.result || c.result
+    }
+  `,
+  scenarios: {
+    "Query.trip": {
+      "wildcard legs.* matches all immediate children": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            duration: "2h",
+            distance: 150,
+            price: 99,
+          }),
+        },
+        fields: ["id", "legs.*"],
+        assertData: { id: 42, legs: { duration: "2h", distance: 150 } },
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "requesting price returns price": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            duration: "2h",
+            distance: 150,
+            price: 99,
+          }),
+        },
+        fields: ["price"],
+        assertData: { price: 99 },
+        assertTraces: 1,
+      },
+    },
+    "Query.chainSparse": {
+      "A||B→C: requesting only fromA skips B and C": {
+        input: { x: 10, y: 20 },
+        tools: {
+          toolA: (p: any) => ({ result: p.x * 2 }),
+          toolB: () => {
+            throw new Error("toolB should not be called");
+          },
+          toolC: () => {
+            throw new Error("toolC should not be called");
+          },
+        },
+        fields: ["fromA"],
+        assertData: { fromA: 20 },
+        allowDowngrade: true,
+        assertTraces: 1,
+      },
+      "A||B→C: requesting only fromB skips A, calls B and fallback C": {
+        input: { x: 10, y: 20 },
+        tools: {
+          toolA: () => {
+            throw new Error("toolA should not be called");
+          },
+          toolB: (p: any) => ({ result: null, partial: p.y }),
+          toolC: (p: any) => ({ result: p.z + 5 }),
+        },
+        fields: ["fromB"],
+        assertData: { fromB: 25 },
+        allowDowngrade: true,
+        assertTraces: 2,
+      },
+    },
+  },
+});
+
+regressionTest("parity: sparse fieldsets — nested and array paths", {
+  bridge: `
+    version 1.5
+
+    bridge Query.sparseNested {
+      with input as i
+      with api as a
+      with output as o
+
+      a.id <- i.id
+
+      o.id <- i.id
+      o.detail {
+        .name <- a.name
+        .age <- a.age
+      }
+    }
+
+    bridge Query.sparseArray {
+      with input as i
+      with api as a
+      with output as o
+
+      a.from <- i.from
+      a.to <- i.to
+
+      o <- a.items[] as item {
+        .id <- item.id
+        .provider <- item.provider
+        .price <- item.price
+        .legs <- item.legs
+      }
+    }
+
+    bridge Query.sparseArrayNested {
+      with input as i
+      with api as a
+      with output as o
+
+      a.from <- i.from
+      a.to <- i.to
+
+      o <- a.connections[] as c {
+        .id <- c.id
+        .provider = "SBB"
+        .departureTime <- c.departure
+
+        .legs <- c.sections[] as s {
+          .trainName <- s.name
+          .destination <- s.dest
+        }
+      }
+    }
+
+    bridge Query.sparseArrayDeep {
+      with input as i
+      with api as a
+      with output as o
+
+      a.from <- i.from
+
+      o <- a.connections[] as c {
+        .id <- c.id
+        .provider = "SBB"
+
+        .legs <- c.sections[] as s {
+          .trainName <- s.name
+
+          .destination.station.name <- s.arrStation
+          .destination.plannedTime <- s.arrTime
+          .destination.actualTime <- s.arrActual
+          .destination.platform <- s.arrPlatform
+        }
+      }
+    }
+  `,
+  scenarios: {
+    "Query.sparseNested": {
+      "requesting nested path includes parent and specified children": {
+        input: { id: 1 },
+        tools: {
+          api: (_p: any) => ({ name: "Alice", age: 30 }),
+        },
+        fields: ["detail.name"],
+        assertData: { detail: { name: "Alice" } },
+        assertTraces: 1,
+      },
+      "all fields returns id and full detail": {
+        input: { id: 7 },
+        tools: {
+          api: (_p: any) => ({ name: "Bob", age: 25 }),
+        },
+        assertData: { id: 7, detail: { name: "Bob", age: 25 } },
+        assertTraces: 1,
+      },
+    },
+    "Query.sparseArray": {
+      "array-mapped output filters top-level fields via requestedFields": {
+        input: { from: "A", to: "B" },
+        tools: {
+          api: () => ({
+            items: [
+              { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+              { id: 2, provider: "Y", price: 80, legs: [{ name: "L2" }] },
+            ],
+          }),
+        },
+        fields: ["id", "legs"],
+        assertData: [
+          { id: 1, legs: [{ name: "L1" }] },
+          { id: 2, legs: [{ name: "L2" }] },
+        ],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { from: "A", to: "B" },
+        tools: {
+          api: () => ({
+            items: [
+              { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+            ],
+          }),
+        },
+        assertData: [
+          { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+        ],
+        assertTraces: 1,
+      },
+      "empty items returns empty array": {
+        input: { from: "A", to: "B" },
+        tools: { api: () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+    },
+    "Query.sparseArrayNested": {
+      "array-mapped output with nested requestedFields path": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: {
+          api: () => ({
+            connections: [
+              {
+                id: 1,
+                departure: "08:00",
+                sections: [
+                  { name: "IC1", dest: "Zürich" },
+                  { name: "IC2", dest: "Basel" },
+                ],
+              },
+            ],
+          }),
+        },
+        fields: ["legs.destination"],
+        assertData: [
+          {
+            legs: [{ destination: "Zürich" }, { destination: "Basel" }],
           },
         ],
-      }),
-    },
-    requestedFields: ["legs.destination"],
-    expected: [
-      {
-        legs: [{ destination: "Zürich" }, { destination: "Basel" }],
+        assertTraces: 1,
       },
-    ],
-    aotSupported: false,
-  },
-
-  // ── 9. Deeply nested path inside array-mapped output ─────────────────
-  {
-    name: "array-mapped output: deep nested path filters sub-fields",
-    bridgeText: `version 1.5
-bridge Query.trains {
-  with input as i
-  with api as a
-  with output as o
-
-  a.from <- i.from
-
-  o <- a.connections[] as c {
-    .id <- c.id
-    .provider = "SBB"
-
-    .legs <- c.sections[] as s {
-      .trainName <- s.name
-
-      .destination.station.name <- s.arrStation
-      .destination.plannedTime <- s.arrTime
-      .destination.actualTime <- s.arrActual
-      .destination.platform <- s.arrPlatform
-    }
-  }
-}`,
-    operation: "Query.trains",
-    input: { from: "Bern" },
-    tools: {
-      api: () => ({
-        connections: [
+      "all fields returned when no requestedFields": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: {
+          api: () => ({
+            connections: [
+              {
+                id: 1,
+                departure: "08:00",
+                sections: [{ name: "IC1", dest: "Zürich" }],
+              },
+            ],
+          }),
+        },
+        assertData: [
           {
             id: 1,
-            sections: [
+            provider: "SBB",
+            departureTime: "08:00",
+            legs: [{ trainName: "IC1", destination: "Zürich" }],
+          },
+        ],
+        assertTraces: 1,
+      },
+      "empty connections returns empty array": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: { api: () => ({ connections: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: {
+          api: () => ({
+            connections: [{ id: 1, departure: "09:00", sections: [] }],
+          }),
+        },
+        assertData: [
+          { id: 1, provider: "SBB", departureTime: "09:00", legs: [] },
+        ],
+        assertTraces: 1,
+      },
+    },
+    "Query.sparseArrayDeep": {
+      "array-mapped output: deep nested path filters sub-fields": {
+        input: { from: "Bern" },
+        tools: {
+          api: () => ({
+            connections: [
               {
-                name: "IC1",
-                arrStation: "Zürich",
-                arrTime: "08:30",
-                arrActual: "08:32",
-                arrPlatform: "3",
+                id: 1,
+                sections: [
+                  {
+                    name: "IC1",
+                    arrStation: "Zürich",
+                    arrTime: "08:30",
+                    arrActual: "08:32",
+                    arrPlatform: "3",
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        fields: ["legs.destination.actualTime"],
+        assertData: [
+          {
+            legs: [{ destination: { actualTime: "08:32" } }],
+          },
+        ],
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { from: "Bern" },
+        tools: {
+          api: () => ({
+            connections: [
+              {
+                id: 1,
+                sections: [
+                  {
+                    name: "IC1",
+                    arrStation: "Zürich",
+                    arrTime: "08:30",
+                    arrActual: "08:32",
+                    arrPlatform: "3",
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        assertData: [
+          {
+            id: 1,
+            provider: "SBB",
+            legs: [
+              {
+                trainName: "IC1",
+                destination: {
+                  station: { name: "Zürich" },
+                  plannedTime: "08:30",
+                  actualTime: "08:32",
+                  platform: "3",
+                },
               },
             ],
           },
         ],
-      }),
-    },
-    requestedFields: ["legs.destination.actualTime"],
-    expected: [
-      {
-        legs: [{ destination: { actualTime: "08:32" } }],
+        assertTraces: 1,
       },
-    ],
-    aotSupported: false,
+      "empty connections returns empty array": {
+        input: { from: "Bern" },
+        tools: { api: () => ({ connections: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "Bern" },
+        tools: {
+          api: () => ({
+            connections: [{ id: 1, sections: [] }],
+          }),
+        },
+        assertData: [{ id: 1, provider: "SBB", legs: [] }],
+        assertTraces: 1,
+      },
+    },
   },
-];
-
-runSharedSuite(
-  "Shared: sparse fieldsets (requestedFields)",
-  sparseFieldsetCases,
-);
+});

@@ -470,7 +470,7 @@ Use the focused profiling target instead:
 ```bash
 # Runs a single scenario in a tight loop — cleaner profiles
 BRIDGE_PROFILE_FILTER="flat array 1000" BRIDGE_PROFILE_ITERATIONS=10000 \
-  node --experimental-transform-types --conditions source \
+  node --experimental-transform-types \
   --cpu-prof --cpu-prof-dir profiles --cpu-prof-interval 50 \
   scripts/profile-target.mjs
 ```

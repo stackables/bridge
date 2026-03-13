@@ -18,6 +18,7 @@ import {
   resolveToolDefByName,
   resolveToolWires,
   resolveToolSource,
+  mergeToolDefConstants,
   type ToolLookupContext,
 } from "./toolLookup.ts";
 
@@ -391,7 +392,8 @@ export async function scheduleToolDef(
     const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
       ? trunkKey(target)
       : undefined;
-    return await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
+    const raw = await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
+    return mergeToolDefConstants(toolDef, raw);
   } catch (err) {
     if (!toolDef.onError) throw err;
     if ("value" in toolDef.onError) return JSON.parse(toolDef.onError.value);

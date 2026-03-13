@@ -1,16 +1,4 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "build",
-    "declaration": true,
-    "declarationMap": true,
-    "isolatedModules": true,
-    // Rewrite .ts → .js in compiled output so source can use .ts extensions
-    "rewriteRelativeImportExtensions": true,
-    // Enforce import type for type-only imports (required for Node native TS)
-    "verbatimModuleSyntax": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "build"]
+  "include": ["src", "test"]
 }

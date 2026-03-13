@@ -25,7 +25,7 @@ function buildAotFn(code: string) {
     bodyMatch[1]!,
   ) as (
     input: Record<string, unknown>,
-    tools: Record<string, (...args: any[]) => any>,
+    tools: Record<string, unknown>,
     context: Record<string, unknown>,
     opts?: Record<string, unknown>,
   ) => Promise<any>;
@@ -39,7 +39,7 @@ async function compileAndRun(
   bridgeText: string,
   operation: string,
   input: Record<string, unknown>,
-  tools: Record<string, (...args: any[]) => any> = {},
+  tools: Record<string, unknown> = {},
   context: Record<string, unknown> = {},
 ): Promise<any> {
   const document = parseBridgeFormat(bridgeText);
@@ -2177,6 +2177,204 @@ bridge Query.catalog {
     assert.ok(
       code.includes("bridge?.sync"),
       "array map should check tool sync flag",
+    );
+  });
+});
+
+// ── Deep-namespace tool name resolution ────────────────────────────────────
+
+describe("AOT codegen: deep-namespace tool names", () => {
+  test("two-segment module (a.b.tool) resolves nested tools", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.test {
+  with vendor.sub.api as svc
+  with input as i
+  with output as o
+
+  svc.q <- i.q
+  o.answer <- svc.result
+}`,
+      "Query.test",
+      { q: "hello" },
+      { vendor: { sub: { api: (p: any) => ({ result: `got:${p.q}` }) } } },
+    );
+    assert.deepEqual(result, { answer: "got:hello" });
+  });
+
+  test("two-segment module also resolves flat-key tools", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.testFlat {
+  with vendor.sub.api as svc
+  with input as i
+  with output as o
+
+  svc.q <- i.q
+  o.answer <- svc.result
+}`,
+      "Query.testFlat",
+      { q: "hello" },
+      { "vendor.sub.api": (p: any) => ({ result: `flat:${p.q}` }) },
+    );
+    assert.deepEqual(result, { answer: "flat:hello" });
+  });
+
+  test("three-segment module (a.b.c.tool) resolves correctly", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.deep {
+  with org.team.svc.process as proc
+  with input as i
+  with output as o
+
+  proc.x <- i.value
+  o.result <- proc.out
+}`,
+      "Query.deep",
+      { value: 42 },
+      { org: { team: { svc: { process: (p: any) => ({ out: p.x * 2 }) } } } },
+    );
+    assert.deepEqual(result, { result: 84 });
+  });
+
+  test("deep namespace in element-scoped (loop) context", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.items {
+  with input as i
+  with output as o
+
+  o <- i.list[] as item {
+    with vendor.sub.enrich as e
+
+    e.id <- item.id
+    .id <- item.id
+    .label <- e.name
+  }
+}`,
+      "Query.items",
+      { list: [{ id: "a" }, { id: "b" }] },
+      {
+        vendor: { sub: { enrich: (p: any) => ({ name: `enriched:${p.id}` }) } },
+      },
+    );
+    assert.deepEqual(result, [
+      { id: "a", label: "enriched:a" },
+      { id: "b", label: "enriched:b" },
+    ]);
+  });
+
+  test("multiple tools with shared deep namespace prefix", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.multi {
+  with cloud.ai.classify as cls
+  with cloud.ai.summarize as sum
+  with input as i
+  with output as o
+
+  cls.text <- i.text
+  sum.text <- i.text
+  o.category <- cls.label
+  o.summary <- sum.brief
+}`,
+      "Query.multi",
+      { text: "hello world" },
+      {
+        cloud: {
+          ai: {
+            classify: (_p: any) => ({ label: "greeting" }),
+            summarize: (_p: any) => ({ brief: "short" }),
+          },
+        },
+      },
+    );
+    assert.deepEqual(result, { category: "greeting", summary: "short" });
+  });
+
+  test("deep-namespace tool output with deep property access", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.nested {
+  with ext.data.fetch as f
+  with input as i
+  with output as o
+
+  f.id <- i.id
+  o.city <- f.address.city
+  o.zip <- f.address.zip
+}`,
+      "Query.nested",
+      { id: 1 },
+      {
+        ext: {
+          data: {
+            fetch: () => ({ address: { city: "Berlin", zip: "10115" } }),
+          },
+        },
+      },
+    );
+    assert.deepEqual(result, { city: "Berlin", zip: "10115" });
+  });
+
+  test("single-segment tool (no dots) still works", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.simple {
+  with myTool as t
+  with input as i
+  with output as o
+
+  t.x <- i.x
+  o.y <- t.y
+}`,
+      "Query.simple",
+      { x: 10 },
+      { myTool: (p: any) => ({ y: p.x + 1 }) },
+    );
+    assert.deepEqual(result, { y: 11 });
+  });
+
+  test("one-dot tool (a.tool) resolves nested", async () => {
+    const result = await compileAndRun(
+      `version 1.5
+bridge Query.oneDot {
+  with vendor.api as a
+  with input as i
+  with output as o
+
+  a.q <- i.q
+  o.r <- a.r
+}`,
+      "Query.oneDot",
+      { q: "hi" },
+      { vendor: { api: (p: any) => ({ r: p.q }) } },
+    );
+    assert.deepEqual(result, { r: "hi" });
+  });
+
+  test("compiled code resolves tools via nested chain with flat fallback", () => {
+    const code = compileOnly(
+      `version 1.5
+bridge Query.check {
+  with a.b.c.d as t
+  with input as i
+  with output as o
+
+  t.x <- i.x
+  o.y <- t.y
+}`,
+      "Query.check",
+    );
+    // The generated code should do nested traversal with flat fallback
+    assert.ok(
+      code.includes('tools?.["a"]?.["b"]?.["c"]?.["d"]'),
+      `Expected nested chain tools?.["a"]?.["b"]?.["c"]?.["d"] in compiled output but got:\n${code}`,
+    );
+    assert.ok(
+      code.includes('tools?.["a.b.c.d"]'),
+      `Expected flat fallback tools?.["a.b.c.d"] in compiled output but got:\n${code}`,
     );
   });
 });
