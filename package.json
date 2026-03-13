@@ -29,9 +29,9 @@
     "@stryker-mutator/core": "^9.6.0",
     "@stryker-mutator/typescript-checker": "^9.6.0",
     "@tsconfig/node24": "^24.0.4",
-    "eslint": "^10.0.2",
+    "eslint": "^10.0.3",
     "tinybench": "^6.0.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.57.0"
   }
 }

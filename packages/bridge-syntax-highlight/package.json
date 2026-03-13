@@ -2,11 +2,11 @@
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting, real-time diagnostics, and hover information for the Bridge declarative dataflow language",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "stackables",
   "icon": "logo128.png",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.110.0"
   },
   "categories": [
     "Programming Languages"
@@ -56,9 +56,9 @@
   },
   "devDependencies": {
     "@stackables/bridge": "workspace:*",
-    "@types/node": "^25.3.3",
-    "@types/vscode": "^1.109.0",
-    "esbuild": "^0.27.3",
+    "@types/node": "^25.5.0",
+    "@types/vscode": "^1.110.0",
+    "esbuild": "^0.27.4",
     "typescript": "^5.9.3",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",

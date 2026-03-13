@@ -10,25 +10,25 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^12.6.12",
-    "@astrojs/react": "^4.4.2",
-    "@astrojs/starlight": "^0.37.6",
+    "@astrojs/cloudflare": "^13.1.1",
+    "@astrojs/react": "^5.0.0",
+    "@astrojs/starlight": "^0.38.1",
     "@catppuccin/starlight": "^1.1.1",
     "@stackables/bridge-playground": "workspace:*",
     "@tailwindcss/vite": "4.2.1",
-    "astro": "^5.18.0",
+    "astro": "^6.0.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "sharp": "^0.34.5",
     "tailwindcss": "4.2.1"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.6",
-    "@types/node": "^25.3.3",
+    "@astrojs/check": "^0.9.7",
+    "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@yeskunall/astro-umami": "^0.0.7",
     "typescript": "^5.9.3",
-    "wrangler": "^4.70.0"
+    "wrangler": "^4.73.0"
   }
 }

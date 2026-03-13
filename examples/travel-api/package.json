@@ -8,9 +8,9 @@
   },
   "dependencies": {
     "@stackables/bridge": "workspace:*",
-    "graphql-yoga": "^5.18.0"
+    "graphql-yoga": "^5.18.1"
   },
   "devDependencies": {
-    "@types/node": "^25.3.3"
+    "@types/node": "^25.5.0"
   }
 }
