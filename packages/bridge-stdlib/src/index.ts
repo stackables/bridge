@@ -7,6 +7,7 @@
  *
  * Separated from core so it can be versioned independently.
  */
+import type { ToolCallFn } from "@stackables/bridge-types";
 import { audit } from "./tools/audit.ts";
 import { createHttpCall } from "./tools/http-call.ts";
 import * as arrays from "./tools/arrays.ts";
@@ -28,12 +29,17 @@ export const STD_VERSION = "1.5.0";
  */
 const httpCallFn = createHttpCall();
 
-export const std = {
+export const std: {
+  readonly str: typeof strings;
+  readonly arr: typeof arrays;
+  readonly audit: typeof audit;
+  readonly httpCall: ToolCallFn;
+} = {
   str: strings,
   arr: arrays,
   audit,
   httpCall: httpCallFn,
-} as const;
+};
 
 /**
  * All known built-in tool names as "namespace.tool" strings.
