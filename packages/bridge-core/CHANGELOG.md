@@ -1,5 +1,16 @@
 # @stackables/bridge-core
 
+## 1.6.2
+
+### Patch Changes
+
+- [#125](https://github.com/stackables/bridge/pull/125) [`8da19e8`](https://github.com/stackables/bridge/commit/8da19e878fefa67860666bef8ee8f93375ee35d7) Thanks [@aarne](https://github.com/aarne)! - Bugfixes and stability
+
+  - [#123](https://github.com/stackables/bridge/issues/123) Unify all Wire types
+  - Trace propagation with errors
+  - Tool errors enriched with sourcemaps
+  - Respect tracing settings for all tools
+
 ## 1.6.1
 
 ### Patch Changes
