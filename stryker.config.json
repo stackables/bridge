@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.schema.json",
+  "mutate": [
+    "packages/bridge-core/src/**/*.ts",
+    "packages/bridge-parser/src/**/*.ts",
+    "packages/bridge-stdlib/src/**/*.ts",
+    "packages/bridge-compiler/src/**/*.ts",
+    "!packages/*/src/index.ts"
+  ],
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --experimental-transform-types --test packages/bridge/test/*.test.ts packages/bridge/test/bugfixes/*.test.ts"
+  },
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.base.json",
+  "reporters": ["html", "clear-text", "progress"],
+  "tempDirName": ".stryker-tmp",
+  "concurrency": 4
+}

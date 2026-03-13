@@ -155,7 +155,7 @@ bridge Query.getUser {
 
   o.user {
     # Spreads all fields from the profile (name, email, age, etc.) into o.user
-    ...profile
+    ... <- profile
 
     # You can explicitly override specific fields after spreading
     .id <- profile.internalId
@@ -175,7 +175,7 @@ bridge Query.createPayload {
   with output as o
 
   audit.v2 {
-    ...i
+    ... <- i
     .last = "Overridden Last Name"
     .deep {
       .isTrue = false

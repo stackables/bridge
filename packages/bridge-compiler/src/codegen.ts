@@ -232,6 +232,32 @@ function emitCoerced(raw: string): string {
 }
 
 /**
+ * Build a nested JS object literal from entries where each entry is
+ * [remainingPathSegments, expression]. Groups entries by first path segment
+ * and recurses for deeper nesting.
+ */
+function emitNestedObjectLiteral(entries: [string[], string][]): string {
+  const byKey = new Map<string, [string[], string][]>();
+  for (const [path, expr] of entries) {
+    const key = path[0]!;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push([path.slice(1), expr]);
+  }
+  const parts: string[] = [];
+  for (const [key, subEntries] of byKey) {
+    if (subEntries.some(([p]) => p.length === 0)) {
+      const leaf = subEntries.find(([p]) => p.length === 0)!;
+      parts.push(`${JSON.stringify(key)}: ${leaf[1]}`);
+    } else {
+      parts.push(
+        `${JSON.stringify(key)}: ${emitNestedObjectLiteral(subEntries)}`,
+      );
+    }
+  }
+  return `{ ${parts.join(", ")} }`;
+}
+
+/**
  * Parse a const value at compile time and emit it as an inline JS literal.
  * Since const values are JSON, we can JSON.parse at compile time and
  * re-serialize as a JavaScript expression, avoiding runtime JSON.parse.
@@ -1490,15 +1516,30 @@ class CodegenContext {
       }
     }
 
+    // Accumulate nested ToolDef wire targets (path.length > 1)
+    // Maps top-level key -> [[remainingPath, expression]]
+    const nestedInputEntries = new Map<string, [string[], string][]>();
+    const addNestedEntry = (path: string[], expr: string) => {
+      const topKey = path[0]!;
+      if (!nestedInputEntries.has(topKey))
+        nestedInputEntries.set(topKey, []);
+      nestedInputEntries.get(topKey)!.push([path.slice(1), expr]);
+    };
+
     // ToolDef constant wires (skip fork-targeted wires)
     for (const tw of toolDef.wires) {
       if ("value" in tw && !("cond" in tw)) {
         if (forkKeys.has(refTrunkKey(tw.to))) continue;
-        const target = tw.to.path.join(".");
-        inputEntries.set(
-          target,
-          `    ${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
-        );
+        const path = tw.to.path;
+        const expr = emitCoerced((tw as Wire & { value: string }).value);
+        if (path.length > 1) {
+          addNestedEntry(path, expr);
+        } else {
+          inputEntries.set(
+            path[0]!,
+            `    ${JSON.stringify(path[0])}: ${expr}`,
+          );
+        }
       }
     }
 
@@ -1508,7 +1549,7 @@ class CodegenContext {
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
       // Skip wires with fallbacks — handled below
       if ("fallbacks" in tw && (tw as any).fallbacks?.length > 0) continue;
-      const target = tw.to.path.join(".");
+      const path = tw.to.path;
       const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
       let expr: string;
       if (forkExprs.has(fromKey)) {
@@ -1523,14 +1564,18 @@ class CodegenContext {
           toolDef,
         );
       }
-      inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
+      if (path.length > 1) {
+        addNestedEntry(path, expr);
+      } else {
+        inputEntries.set(path[0]!, `    ${JSON.stringify(path[0])}: ${expr}`);
+      }
     }
 
     // ToolDef ternary wires
     for (const tw of toolDef.wires) {
       if (!("cond" in tw)) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
-      const target = tw.to.path.join(".");
+      const path = tw.to.path;
       const condExpr = this.resolveToolDefRef(
         (tw as any).cond,
         toolDef,
@@ -1546,10 +1591,15 @@ class CodegenContext {
         : (tw as any).elseValue !== undefined
           ? emitCoerced((tw as any).elseValue)
           : "undefined";
-      inputEntries.set(
-        target,
-        `    ${JSON.stringify(target)}: (${condExpr} ? ${thenExpr} : ${elseExpr})`,
-      );
+      const expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
+      if (path.length > 1) {
+        addNestedEntry(path, expr);
+      } else {
+        inputEntries.set(
+          path[0]!,
+          `    ${JSON.stringify(path[0])}: ${expr}`,
+        );
+      }
     }
 
     // ToolDef fallback/coalesce wires (pull wires with fallbacks array)
@@ -1557,7 +1607,7 @@ class CodegenContext {
       if (!("from" in tw)) continue;
       if (!("fallbacks" in tw) || !(tw as any).fallbacks?.length) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
-      const target = tw.to.path.join(".");
+      const path = tw.to.path;
       const pullWire = tw as Wire & { from: NodeRef; fallbacks: any[] };
       let expr = this.resolveToolDefRef(pullWire.from, toolDef, forkExprs);
       for (const fb of pullWire.fallbacks) {
@@ -1569,7 +1619,21 @@ class CodegenContext {
           expr = `(${expr} ${op} ${refExpr})`;
         }
       }
-      inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
+      if (path.length > 1) {
+        addNestedEntry(path, expr);
+      } else {
+        inputEntries.set(path[0]!, `    ${JSON.stringify(path[0])}: ${expr}`);
+      }
+    }
+
+    // Emit nested ToolDef inputs as nested object literals
+    for (const [topKey, entries] of nestedInputEntries) {
+      if (!inputEntries.has(topKey)) {
+        inputEntries.set(
+          topKey,
+          `    ${JSON.stringify(topKey)}: ${emitNestedObjectLiteral(entries)}`,
+        );
+      }
     }
 
     // Bridge wires override ToolDef wires
@@ -1775,6 +1839,24 @@ class CodegenContext {
     for (const pd of pendingDeps) {
       const depToolDef = this.resolveToolDef(pd.toolName);
       if (depToolDef) {
+        // Check for patterns the compiler can't handle in tool deps
+        if (depToolDef.onError) {
+          throw new BridgeCompilerIncompatibleError(
+            `${this.bridge.type}.${this.bridge.field}`,
+            "ToolDef on-error fallback in tool dependencies is not yet supported by the compiler.",
+          );
+        }
+        for (const tw of depToolDef.wires) {
+          if (("value" in tw || "from" in tw) && !("cond" in tw)) {
+            if (tw.to.path.length > 1) {
+              throw new BridgeCompilerIncompatibleError(
+                `${this.bridge.type}.${this.bridge.field}`,
+                "Nested wire paths in tool dependencies are not yet supported by the compiler.",
+              );
+            }
+          }
+        }
+
         this.emitToolDeps(lines, depToolDef);
       }
     }
@@ -2017,7 +2099,30 @@ class CodegenContext {
     }
 
     if (restPath.length === 0) return baseExpr;
-    return baseExpr + restPath.map((p) => `[${JSON.stringify(p)}]`).join("");
+    let expr =
+      baseExpr + restPath.map((p) => `[${JSON.stringify(p)}]`).join("");
+
+    // If reading from a tool dep, check if the dep has a constant wire for
+    // this path — if so, add a ?? fallback so the constant is visible even
+    // though the tool function may not have returned it.
+    if (h.kind === "tool" && restPath.length > 0) {
+      const depToolDef = this.resolveToolDef(h.name);
+      if (depToolDef) {
+        const pathKey = restPath.join(".");
+        for (const tw of depToolDef.wires) {
+          if (
+            "value" in tw &&
+            !("cond" in tw) &&
+            tw.to.path.join(".") === pathKey
+          ) {
+            expr = `(${expr} ?? ${emitCoerced((tw as Wire & { value: string }).value)})`;
+            break;
+          }
+        }
+      }
+    }
+
+    return expr;
   }
 
   /** Find a tool info by tool name. */

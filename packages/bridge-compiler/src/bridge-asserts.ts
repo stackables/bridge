@@ -95,6 +95,44 @@ export function assertBridgeCompilerCompatible(
       );
     }
 
+    // Catch fallback that references a pipe handle — the compiler eagerly
+    // calls all tools in the catch branch even when the main wire succeeds.
+    if ("catchFallbackRef" in w && w.catchFallbackRef) {
+      const ref = w.catchFallbackRef as NodeRef;
+      if (ref.instance != null) {
+        const refKey = `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`;
+        if (
+          bridge.pipeHandles?.some((ph) => ph.key === refKey)
+        ) {
+          throw new BridgeCompilerIncompatibleError(
+            op,
+            "Catch fallback referencing a pipe expression is not yet supported by the compiler.",
+          );
+        }
+      }
+    }
+
+    // Catch fallback on wires whose source tool has tool-backed input
+    // dependencies — the compiler only catch-guards the direct source
+    // tool, not its transitive dependency chain.
+    if (
+      ("catchFallback" in w || "catchFallbackRef" in w || "catchControl" in w) &&
+      "from" in w &&
+      isToolRef(w.from, bridge)
+    ) {
+      const sourceTrunk = `${w.from.module}:${w.from.type}:${w.from.field}`;
+      for (const iw of bridge.wires) {
+        if (!("from" in iw)) continue;
+        const iwDest = `${iw.to.module}:${iw.to.type}:${iw.to.field}`;
+        if (iwDest === sourceTrunk && isToolRef(iw.from, bridge)) {
+          throw new BridgeCompilerIncompatibleError(
+            op,
+            "Catch fallback on wires with tool chain dependencies is not yet supported by the compiler.",
+          );
+        }
+      }
+    }
+
     // Fallback chains (|| / ??) with tool-backed refs — compiler eagerly
     // calls all tools via Promise.all, so short-circuit semantics are lost
     // and tool side effects fire unconditionally.
@@ -142,6 +180,39 @@ export function assertBridgeCompilerCompatible(
         op,
         `Tool-only overdefinition for output path "${outputPath}" is not yet supported by the compiler.`,
       );
+    }
+  }
+
+  // Pipe handles with extra bridge wires to the same tool — the compiler
+  // treats pipe forks as independent tool calls, so bridge wires that set
+  // fields on the main tool trunk are not merged into the fork's input.
+  if (bridge.pipeHandles && bridge.pipeHandles.length > 0) {
+    const pipeHandleKeys = new Set<string>();
+    const pipedToolNames = new Set<string>();
+    for (const ph of bridge.pipeHandles) {
+      pipeHandleKeys.add(ph.key);
+      pipedToolNames.add(
+        `${ph.baseTrunk.module}:${ph.baseTrunk.type}:${ph.baseTrunk.field}`,
+      );
+    }
+
+    for (const w of bridge.wires) {
+      if (!("from" in w) || w.to.path.length === 0) continue;
+      // Build the full key for this wire target
+      const fullKey =
+        w.to.instance != null
+          ? `${w.to.module}:${w.to.type}:${w.to.field}:${w.to.instance}`
+          : `${w.to.module}:${w.to.type}:${w.to.field}`;
+      // Skip wires that target the pipe handle itself (fork input)
+      if (pipeHandleKeys.has(fullKey)) continue;
+      // Check if this wire targets a tool that also has pipe calls
+      const toolName = `${w.to.module}:${w.to.type}:${w.to.field}`;
+      if (pipedToolNames.has(toolName)) {
+        throw new BridgeCompilerIncompatibleError(
+          op,
+          "Bridge wires that set fields on a tool with pipe calls are not yet supported by the compiler.",
+        );
+      }
     }
   }
 }

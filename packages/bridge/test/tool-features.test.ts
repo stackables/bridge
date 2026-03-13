@@ -77,12 +77,7 @@ regressionTest("tool features: extends chain", {
             timeout: p.timeout,
           }),
         },
-        assertData: (data: any) => {
-          // child overrides mode to "child", inherits timeout=5000
-          assert.equal(data.mode, "child");
-          assert.equal(data.timeout, 5000);
-        },
-        allowDowngrade: true,
+        assertData: { mode: "child", timeout: 5000 },
         assertTraces: 1,
       },
     },
@@ -95,11 +90,7 @@ regressionTest("tool features: extends chain", {
             timeout: p.timeout,
           }),
         },
-        assertData: (data: any) => {
-          assert.equal(data.mode, "bridge-override");
-          assert.equal(data.timeout, 5000);
-        },
-        allowDowngrade: true,
+        assertData: { mode: "bridge-override", timeout: 5000 },
         assertTraces: 1,
       },
     },
@@ -138,7 +129,6 @@ regressionTest("tool features: context pull", {
         },
         context: { token: "Bearer secret" },
         assertData: { result: "test" },
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -155,6 +145,7 @@ regressionTest("tool features: tool-to-tool dependency", {
     }
 
     tool mainApi from mainFn {
+      with authProvider
       .token <- authProvider.token
     }
 
@@ -172,6 +163,7 @@ regressionTest("tool features: tool-to-tool dependency", {
     }
 
     tool mainApiWithFallback from mainFn {
+      with authWithError
       .token <- authWithError.token
     }
 
@@ -195,7 +187,6 @@ regressionTest("tool features: tool-to-tool dependency", {
           }),
         },
         assertData: { status: "token=valid-token" },
-        allowDowngrade: true,
         // authProvider + mainApi = 2 tool calls
         assertTraces: 2,
       },
@@ -298,8 +289,8 @@ regressionTest("tool features: pipe with extra ToolDef params", {
           },
         },
         assertData: { priceAny: 5 },
-        allowDowngrade: true,
         assertTraces: 1,
+        allowDowngrade: true,
       },
     },
   },
@@ -361,8 +352,8 @@ regressionTest("tool features: named pipe input field", {
           divider: (input: any) => input.dividend / input.divisor,
         },
         assertData: { converted: 5 },
-        allowDowngrade: true,
         assertTraces: 1,
+        allowDowngrade: true,
       },
     },
   },

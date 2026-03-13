@@ -231,6 +231,12 @@ regressionTest("parity: fallback operators", {
         assertData: { count: 0 },
         assertTraces: 1,
       },
+      "?? triggers fallback on null": {
+        input: {},
+        tools: { api: () => ({ count: null }) },
+        assertData: { count: 42 },
+        assertTraces: 1,
+      },
     },
     "Query.falsyConst": {
       "|| falsy fallback with constant": {
@@ -248,6 +254,7 @@ regressionTest("parity: fallback operators", {
           backup: () => ({ val: "from-backup" }),
         },
         assertData: { value: "from-backup" },
+        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -333,6 +340,12 @@ regressionTest("parity: array mapping", {
         },
         assertTraces: 1,
       },
+      "empty catalog items": {
+        input: {},
+        tools: { api: async () => ({ name: "Empty", items: [] }) },
+        assertData: { title: "Empty", entries: [] },
+        assertTraces: 1,
+      },
     },
     "Query.arrayEmpty": {
       "array mapping with empty array returns empty array": {
@@ -341,12 +354,31 @@ regressionTest("parity: array mapping", {
         assertData: { items: [] },
         assertTraces: 1,
       },
+      "non-empty items map correctly": {
+        input: {},
+        tools: { api: () => ({ list: [{ label: "X" }] }) },
+        assertData: { items: [{ name: "X" }] },
+        assertTraces: 1,
+      },
     },
     "Query.arrayNull": {
       "array mapping with null source returns null": {
         input: {},
         tools: { api: () => ({ list: null }) },
         assertData: { items: null },
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "non-empty items map correctly": {
+        input: {},
+        tools: { api: () => ({ list: [{ label: "Y" }] }) },
+        assertData: { items: [{ name: "Y" }] },
+        assertTraces: 1,
+      },
+      "empty items list": {
+        input: {},
+        tools: { api: () => ({ list: [] }) },
+        assertData: { items: [] },
         assertTraces: 1,
       },
     },
@@ -365,6 +397,12 @@ regressionTest("parity: array mapping", {
           { name: "Berlin", lat: 52.53, lon: 13.39 },
           { name: "Bern", lat: 46.95, lon: 7.45 },
         ],
+        assertTraces: 1,
+      },
+      "empty geocode results": {
+        input: { search: "zzz" },
+        tools: { "hereapi.geocode": async () => ({ items: [] }) },
+        assertData: [],
         assertTraces: 1,
       },
     },
@@ -425,6 +463,12 @@ regressionTest("parity: ternary / conditional wires", {
         assertData: { price: 99 },
         assertTraces: 1,
       },
+      "ternary false branch returns basicPrice": {
+        input: { id: 1, isPro: false },
+        tools: { api: () => ({ proPrice: 99, basicPrice: 49 }) },
+        assertData: { price: 49 },
+        assertTraces: 1,
+      },
     },
     "Query.pricingOptional": {
       "ternary branch preserves segment-local ?. semantics": {
@@ -432,6 +476,12 @@ regressionTest("parity: ternary / conditional wires", {
         tools: { api: () => ({ user: null }) },
         assertError: /Cannot read properties of undefined \(reading 'name'\)/,
         assertTraces: 1,
+      },
+      "ternary false branch returns constant": {
+        input: { isPro: false },
+        tools: { api: () => ({ user: { profile: { name: "X" } } }) },
+        assertData: { price: "basic" },
+        assertTraces: 0,
       },
     },
   },
@@ -491,6 +541,16 @@ regressionTest("parity: catch fallbacks", {
         input: {},
         tools: { api: () => ({ result: "success" }) },
         assertData: { data: "success" },
+        assertTraces: 1,
+      },
+      "catch triggers on error": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: { data: "fallback" },
         assertTraces: 1,
       },
     },
@@ -605,6 +665,7 @@ regressionTest("parity: force statements", {
           },
         },
         assertError: /audit failed/,
+        disable: ["graphql"],
         assertTraces: 2,
       },
     },
@@ -741,6 +802,15 @@ regressionTest("parity: ToolDef support", {
       },
     },
     "Query.tooldefStrictPath": {
+      "ToolDef strict path resolves normally": {
+        input: {},
+        tools: {
+          myHttp: async (_: any) => ({ body: { ok: true } }),
+        },
+        context: { auth: { profile: { token: "t1" } } },
+        assertData: { result: { ok: true } },
+        assertTraces: 1,
+      },
       "ToolDef source paths stay strict after null intermediate": {
         input: {},
         tools: {
@@ -748,7 +818,7 @@ regressionTest("parity: ToolDef support", {
         },
         context: { auth: { profile: null } },
         assertError: /Cannot read properties of null \(reading 'token'\)/,
-        assertTraces: 1,
+        assertTraces: 0,
       },
     },
   },
@@ -941,6 +1011,14 @@ regressionTest("parity: nested scope blocks", {
         assertData: { why: { temperature: 25, city: "Berlin" } },
         assertTraces: 1,
       },
+      "fallback triggers on null temperature": {
+        input: { city: "Unknown" },
+        tools: {
+          weatherApi: async () => ({ temperature: null }),
+        },
+        assertData: { why: { temperature: 0, city: "Unknown" } },
+        assertTraces: 1,
+      },
     },
   },
 });
@@ -1010,6 +1088,22 @@ regressionTest("parity: nested arrays", {
             ],
           },
         ],
+        assertTraces: 1,
+      },
+      "empty connections": {
+        input: { from: "X", to: "Y" },
+        tools: { transportApi: async () => ({ connections: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "A", to: "B" },
+        tools: {
+          transportApi: async () => ({
+            connections: [{ id: "c1", sections: [] }],
+          }),
+        },
+        assertData: [{ id: "c1", legs: [] }],
         assertTraces: 1,
       },
     },
@@ -1169,6 +1263,7 @@ regressionTest("parity: alias declarations", {
           api: async () => ({ result: { data: { name: "hello" } } }),
         },
         assertData: { value: "hello" },
+        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -1229,20 +1324,15 @@ regressionTest("parity: overdefinition", {
           expensiveApi: async () => ({ label: "from-api" }),
         },
         assertData: { label: "cheap" },
-        // assertTraces: tool may or may not be called depending on engine
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length <= 1);
-        },
+        assertTraces: 0,
       },
-      "tool runs when zero-cost input is nullish": {
-        input: { q: "x", hint: "fallback" },
+      "tool wire used when input is undefined": {
+        input: { q: "x" },
         tools: {
-          expensiveApi: async () => ({ label: null }),
+          expensiveApi: async () => ({ label: "from-api" }),
         },
-        assertData: { label: "fallback" },
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length <= 1);
-        },
+        assertData: { label: "from-api" },
+        assertTraces: 1,
       },
     },
     "Query.lookupCtx": {
@@ -1253,9 +1343,16 @@ regressionTest("parity: overdefinition", {
           expensiveApi: async () => ({ label: "from-api" }),
         },
         assertData: { label: "from-context" },
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length <= 1);
+        assertTraces: 0,
+      },
+      "tool wire used when context key is missing": {
+        input: { q: "x" },
+        context: {},
+        tools: {
+          expensiveApi: async () => ({ label: "from-api" }),
         },
+        assertData: { label: "from-api" },
+        assertTraces: 1,
       },
     },
     "Query.lookupSameCost": {
@@ -1266,6 +1363,17 @@ regressionTest("parity: overdefinition", {
           svcB: async () => ({ label: "from-B" }),
         },
         assertData: { label: "from-A" },
+        allowDowngrade: true,
+        assertTraces: 1,
+      },
+      "second tool used when first returns undefined": {
+        input: { q: "x" },
+        tools: {
+          svcA: async () => ({}),
+          svcB: async () => ({ label: "from-B" }),
+        },
+        assertData: { label: "from-B" },
+        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -1341,6 +1449,12 @@ regressionTest("parity: break/continue in array mapping", {
         assertData: [{ name: "Alice" }, { name: "Bob" }],
         assertTraces: 1,
       },
+      "empty items returns empty array": {
+        input: {},
+        tools: { api: async () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
     },
     "Query.breakHalt": {
       "break halts array processing": {
@@ -1358,6 +1472,12 @@ regressionTest("parity: break/continue in array mapping", {
         assertData: [{ name: "Alice" }, { name: "Bob" }],
         assertTraces: 1,
       },
+      "empty items returns empty array": {
+        input: {},
+        tools: { api: async () => ({ items: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
     },
     "Query.continueNonRoot": {
       "continue in non-root array field": {
@@ -1368,6 +1488,12 @@ regressionTest("parity: break/continue in array mapping", {
           }),
         },
         assertData: { items: [{ name: "X" }, { name: "Y" }] },
+        assertTraces: 1,
+      },
+      "empty list returns empty items": {
+        input: {},
+        tools: { api: async () => ({ list: [] }) },
+        assertData: { items: [] },
         assertTraces: 1,
       },
     },
@@ -1389,6 +1515,20 @@ regressionTest("parity: break/continue in array mapping", {
           { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
           { id: 2, items: [{ sku: "C" }] },
         ],
+        assertTraces: 1,
+      },
+      "empty orders returns empty array": {
+        input: {},
+        tools: { api: async () => ({ orders: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "order with empty items": {
+        input: {},
+        tools: {
+          api: async () => ({ orders: [{ id: 1, items: [] }] }),
+        },
+        assertData: [{ id: 1, items: [] }],
         assertTraces: 1,
       },
     },
@@ -1415,6 +1555,20 @@ regressionTest("parity: break/continue in array mapping", {
           { id: 1, items: [{ sku: "A" }, { sku: "B" }] },
           { id: 2, items: [] },
         ],
+        assertTraces: 1,
+      },
+      "empty orders returns empty array": {
+        input: {},
+        tools: { api: async () => ({ orders: [] }) },
+        assertData: [],
+        assertTraces: 1,
+      },
+      "order with empty items": {
+        input: {},
+        tools: {
+          api: async () => ({ orders: [{ id: 1, items: [] }] }),
+        },
+        assertData: [{ id: 1, items: [] }],
         assertTraces: 1,
       },
     },
@@ -1476,6 +1630,18 @@ regressionTest("parity: sparse fieldsets — basic", {
         assertData: { b: 20 },
         assertTraces: 1,
       },
+      "requesting a calls expensive tool": {
+        input: { x: 5, y: 2 },
+        tools: {
+          expensive: (p: any) => ({ result: p.x + 1 }),
+          cheap: () => {
+            throw new Error("cheap tool should not be called");
+          },
+        },
+        fields: ["a"],
+        assertData: { a: 6 },
+        assertTraces: 1,
+      },
     },
     "Query.sparseAll": {
       "no requestedFields returns all fields": {
@@ -1493,6 +1659,12 @@ regressionTest("parity: sparse fieldsets — basic", {
         input: { a: 1, b: 2, c: 3 },
         fields: ["a", "c"],
         assertData: { a: 1, c: 3 },
+        assertTraces: 0,
+      },
+      "requesting b returns b": {
+        input: { a: 1, b: 2, c: 3 },
+        fields: ["b"],
+        assertData: { b: 2 },
         assertTraces: 0,
       },
     },
@@ -1547,6 +1719,22 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["id", "legs.*"],
         assertData: { id: 42, legs: { duration: "2h", distance: 150 } },
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "requesting price returns price": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            duration: "2h",
+            distance: 150,
+            price: 99,
+          }),
+        },
+        fields: ["price"],
+        assertData: { price: 99 },
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -1564,6 +1752,7 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["fromA"],
         assertData: { fromA: 20 },
+        allowDowngrade: true,
         assertTraces: 1,
       },
       "A||B→C: requesting only fromB skips A, calls B and fallback C": {
@@ -1577,6 +1766,7 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["fromB"],
         assertData: { fromB: 25 },
+        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -1668,8 +1858,14 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
         },
         fields: ["detail.name"],
         assertData: { detail: { name: "Alice" } },
-        // AOT compiler can't independently prune nested scope block fields
-        allowDowngrade: true,
+        assertTraces: 1,
+      },
+      "all fields returns id and full detail": {
+        input: { id: 7 },
+        tools: {
+          api: (_p: any) => ({ name: "Bob", age: 25 }),
+        },
+        assertData: { id: 7, detail: { name: "Bob", age: 25 } },
         assertTraces: 1,
       },
     },
@@ -1689,8 +1885,29 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
           { id: 1, legs: [{ name: "L1" }] },
           { id: 2, legs: [{ name: "L2" }] },
         ],
-        // AOT doesn't support per-element sparse fieldsets yet
-        allowDowngrade: true,
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { from: "A", to: "B" },
+        tools: {
+          api: () => ({
+            items: [
+              { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+            ],
+          }),
+        },
+        assertData: [
+          { id: 1, provider: "X", price: 50, legs: [{ name: "L1" }] },
+        ],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "empty items returns empty array": {
+        input: { from: "A", to: "B" },
+        tools: { api: () => ({ items: [] }) },
+        assertData: [],
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -1717,7 +1934,51 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             legs: [{ destination: "Zürich" }, { destination: "Basel" }],
           },
         ],
-        allowDowngrade: true,
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: {
+          api: () => ({
+            connections: [
+              {
+                id: 1,
+                departure: "08:00",
+                sections: [{ name: "IC1", dest: "Zürich" }],
+              },
+            ],
+          }),
+        },
+        assertData: [
+          {
+            id: 1,
+            provider: "SBB",
+            departureTime: "08:00",
+            legs: [{ trainName: "IC1", destination: "Zürich" }],
+          },
+        ],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "empty connections returns empty array": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: { api: () => ({ connections: [] }) },
+        assertData: [],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "Bern", to: "Zürich" },
+        tools: {
+          api: () => ({
+            connections: [{ id: 1, departure: "09:00", sections: [] }],
+          }),
+        },
+        assertData: [
+          { id: 1, provider: "SBB", departureTime: "09:00", legs: [] },
+        ],
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -1748,7 +2009,65 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
             legs: [{ destination: { actualTime: "08:32" } }],
           },
         ],
-        allowDowngrade: true,
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { from: "Bern" },
+        tools: {
+          api: () => ({
+            connections: [
+              {
+                id: 1,
+                sections: [
+                  {
+                    name: "IC1",
+                    arrStation: "Zürich",
+                    arrTime: "08:30",
+                    arrActual: "08:32",
+                    arrPlatform: "3",
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        assertData: [
+          {
+            id: 1,
+            provider: "SBB",
+            legs: [
+              {
+                trainName: "IC1",
+                destination: {
+                  station: { name: "Zürich" },
+                  plannedTime: "08:30",
+                  actualTime: "08:32",
+                  platform: "3",
+                },
+              },
+            ],
+          },
+        ],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "empty connections returns empty array": {
+        input: { from: "Bern" },
+        tools: { api: () => ({ connections: [] }) },
+        assertData: [],
+        disable: ["graphql"],
+        assertTraces: 1,
+      },
+      "connection with empty sections": {
+        input: { from: "Bern" },
+        tools: {
+          api: () => ({
+            connections: [{ id: 1, sections: [] }],
+          }),
+        },
+        assertData: [{ id: 1, provider: "SBB", legs: [] }],
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },

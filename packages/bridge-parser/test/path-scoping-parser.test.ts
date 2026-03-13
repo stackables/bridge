@@ -590,7 +590,7 @@ bridge Query.test {
   with output as o
 
   t {
-    ...i
+    ... <- i
   }
 
   o.result <- t
@@ -615,7 +615,7 @@ bridge Query.test {
   with output as o
 
   t {
-    ...i
+    ... <- i
     .extra = "added"
   }
 
@@ -649,7 +649,7 @@ bridge Query.test {
   with output as o
 
   t {
-    ...i.profile
+    ... <- i.profile
   }
 
   o.result <- t
@@ -673,7 +673,7 @@ bridge Query.test {
   with output as o
 
   o.wrapper {
-    ...i
+    ... <- i
     .flag = "true"
   }
 }`);
@@ -698,7 +698,7 @@ bridge Query.test {
   with output as o
 
   t.nested {
-    ...i
+    ... <- i
   }
 
   o.result <- t

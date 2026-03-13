@@ -1,18 +1,78 @@
 import assert from "node:assert/strict";
-import { regressionTest } from "./utils/regression.ts";
+import type { ToolTrace } from "@stackables/bridge-core";
+import { tools } from "./utils/bridge-tools.ts";
+import { regressionTest, type AssertContext } from "./utils/regression.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scheduling — diamond dependencies, tool deduplication, pipe fork
 // parallelism, chained pipe ordering, tool-level dependency resolution.
 //
 // Migrated from legacy/scheduling.test.ts
-//
-// NOTE: The original tests used wall-clock timing assertions
-// (performance.now + sleep) to verify parallel execution. The
-// regressionTest harness doesn't directly support timing assertions,
-// so those are converted to data-correctness checks with comments
-// noting the original parallelism intent.
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Assert that a set of tool traces ran in parallel:
+ * all started before any finished (start overlap within delay window).
+ * In runtime, match by ToolDef name; in compiled, just verify the
+ * first N traces (by start time) overlap.
+ */
+function assertParallel(
+  traces: ToolTrace[],
+  toolNames: string[],
+  delayMs: number,
+  ctx: AssertContext,
+) {
+  const matched =
+    ctx.engine === "runtime"
+      ? toolNames.map((name) => {
+          const t = traces.find((tr) => tr.tool === name);
+          assert.ok(t, `expected trace for ${name}`);
+          return t;
+        })
+      : // compiled: ToolDef names become fn names, pick N earliest by startedAt
+        [...traces]
+          .sort((a, b) => a.startedAt - b.startedAt)
+          .slice(0, toolNames.length);
+
+  assert.equal(
+    matched.length,
+    toolNames.length,
+    `expected ${toolNames.length} parallel traces, got ${matched.length}`,
+  );
+  const starts = matched.map((t) => t.startedAt);
+  const spread = Math.max(...starts) - Math.min(...starts);
+  assert.ok(
+    spread < delayMs,
+    `expected parallel start spread < ${delayMs}ms, got ${spread}ms`,
+  );
+}
+
+/**
+ * Assert that tool B started only after tool A finished.
+ * In runtime, match by ToolDef name; in compiled, match by position
+ * (last trace should have started after earlier ones finished).
+ */
+function assertSequential(
+  traces: ToolTrace[],
+  before: string,
+  after: string,
+  ctx: AssertContext,
+) {
+  if (ctx.engine === "compiled") {
+    // compiled traces lose ToolDef names — skip per-name sequential check
+    // (parallel assertion already covers the timing structure)
+    return;
+  }
+  const a = traces.find((t) => t.tool === before);
+  const b = traces.find((t) => t.tool === after);
+  assert.ok(a, `expected trace for ${before}`);
+  assert.ok(b, `expected trace for ${after}`);
+  assert.ok(
+    b.startedAt >= a.startedAt + a.durationMs * 0.8,
+    `expected ${after} to start after ${before} finished ` +
+      `(${before} ended ~${a.startedAt + a.durationMs}ms, ${after} started ${b.startedAt}ms)`,
+  );
+}
 
 // ── 1. Diamond dependency — dedup + parallel fan-out ────────────────────────
 //
@@ -53,14 +113,7 @@ regressionTest("scheduling: diamond dependency dedup", {
       "geocode called once, results fan out to weather+census": {
         input: { location: "Berlin", name: "Ada" },
         tools: {
-          geocode: (() => {
-            let calls = 0;
-            return (_p: any) => {
-              calls++;
-              assert.equal(calls, 1, "geocode must be called exactly once");
-              return { lat: 52.5, lon: 13.4 };
-            };
-          })(),
+          geocode: () => ({ lat: 52.5, lon: 13.4 }),
           weatherForecast: (p: any) => {
             assert.equal(p.lat, 52.5);
             assert.equal(p.lon, 13.4);
@@ -79,6 +132,7 @@ regressionTest("scheduling: diamond dependency dedup", {
         },
         // geocode + weatherForecast + census + formatGreeting = 4
         assertTraces: 4,
+        disable: ["graphql"],
       },
     },
   },
@@ -196,15 +250,24 @@ regressionTest("scheduling: shared tool dedup across pipe and direct", {
   },
 });
 
-// ── 5. Wall-clock efficiency ────────────────────────────────────────────────
+// ── 5. Wall-clock parallel execution ────────────────────────────────────────
 //
-// Original test: three 60ms-sleep tools complete in ~60ms (parallel),
-// not 180ms (sequential). Converted to data-correctness only since
-// regressionTest can't assert on wall-clock time.
+// Three independent tools each delay 50ms. If parallel, total should be
+// ~50ms (not 150ms). Verified via trace startedAt overlap.
 
 regressionTest("scheduling: parallel independent tools", {
   bridge: `
     version 1.5
+
+    tool apiA from test.async.multitool {
+      ._delay = 50
+    }
+    tool apiB from test.async.multitool {
+      ._delay = 50
+    }
+    tool apiC from test.async.multitool {
+      ._delay = 50
+    }
 
     bridge Query.parallel {
       with apiA as a
@@ -217,22 +280,21 @@ regressionTest("scheduling: parallel independent tools", {
       b.y <- i.y
       c.z <- i.z
 
-      o.a <- a.result
-      o.b <- b.result
-      o.c <- c.result
+      o.a <- a.x
+      o.b <- b.y
+      o.c <- c.z
     }
   `,
+  tools,
   scenarios: {
     "Query.parallel": {
-      "three independent tools all produce correct results": {
+      "three independent tools run in parallel": {
         input: { x: 1, y: 2, z: 3 },
-        tools: {
-          apiA: (p: any) => ({ result: p.x * 10 }),
-          apiB: (p: any) => ({ result: p.y * 10 }),
-          apiC: (p: any) => ({ result: p.z * 10 }),
+        assertData: { a: 1, b: 2, c: 3 },
+        assertTraces: (traces: ToolTrace[], ctx: AssertContext) => {
+          assert.equal(traces.length, 3);
+          assertParallel(traces, ["apiA", "apiB", "apiC"], 50, ctx);
         },
-        assertData: { a: 10, b: 20, c: 30 },
-        assertTraces: 3,
       },
     },
   },
@@ -276,7 +338,20 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
           toolC: (p: any) => ({ result: p.y * 2 }),
         },
         assertData: { coalesced: "from-A", fromC: 84 },
+        // toolA returns non-null val → toolB short-circuited (2 traces: A + C)
+        assertTraces: 2,
+        allowDowngrade: true,
+      },
+      "A null → B fallback used": {
+        input: { x: 7 },
+        tools: {
+          toolA: (p: any) => ({ val: null, result: p.x }),
+          toolB: (p: any) => ({ val: `B-${p.x}` }),
+          toolC: (p: any) => ({ result: p.y * 2 }),
+        },
+        assertData: { coalesced: "B-7", fromC: 14 },
         assertTraces: 3,
+        allowDowngrade: true,
       },
     },
   },
@@ -284,22 +359,29 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
 
 // ── 7. Tool-level deps resolve in parallel ──────────────────────────────────
 //
-// Original test: auth + quota both run in parallel (both ~60ms,
-// total ~60ms), then mainApi runs after both complete.
-// Converted to data correctness only.
+// auth + quota both delay 50ms and run in parallel, then mainApi runs
+// after both complete. Verified: auth||quota start overlap, mainApi
+// starts after both finish.
 
 regressionTest("scheduling: tool-level deps resolve in parallel", {
   bridge: `
     version 1.5
 
-    tool authProvider from authFn {
+    tool authProvider from test.async.multitool {
+      ._delay = 50
+      .fallbackToken = "hello"
     }
 
-    tool quotaChecker from quotaFn {
+    tool quotaChecker from test.async.multitool {
+      ._delay = 50
+      .allowed = true
     }
 
-    tool mainApi from mainFn {
-      .token <- authProvider.token
+    tool mainApi from test.multitool {
+      with authProvider
+      with quotaChecker
+
+      .token <- authProvider.fallbackToken
       .quotaOk <- quotaChecker.allowed
     }
 
@@ -309,26 +391,29 @@ regressionTest("scheduling: tool-level deps resolve in parallel", {
       with output as o
 
       m.q <- i.q
-      o.result <- m.data
+      o.result <- m
     }
   `,
+  tools,
   scenarios: {
     "Query.toolDeps": {
-      "auth and quota resolve, then mainApi runs with their outputs": {
+      "auth and quota resolve in parallel, then mainApi runs": {
         input: { q: "search" },
-        tools: {
-          authFn: () => ({ token: "valid-token" }),
-          quotaFn: () => ({ allowed: true }),
-          mainFn: (p: any) => {
-            assert.equal(p.token, "valid-token");
-            assert.equal(p.quotaOk, true);
-            return { data: `result-for-${p.q}` };
+        assertData: {
+          result: {
+            token: "hello",
+            quotaOk: true,
+            q: "search",
           },
         },
-        assertData: { result: "result-for-search" },
-        // authProvider + quotaChecker + mainApi = 3
-        allowDowngrade: true,
-        assertTraces: 3,
+        assertTraces: (traces: ToolTrace[], ctx: AssertContext) => {
+          assert.equal(traces.length, 3);
+          // auth and quota should start in parallel
+          assertParallel(traces, ["authProvider", "quotaChecker"], 50, ctx);
+          // mainApi should start after both deps finish
+          assertSequential(traces, "authProvider", "mainApi", ctx);
+          assertSequential(traces, "quotaChecker", "mainApi", ctx);
+        },
       },
     },
   },

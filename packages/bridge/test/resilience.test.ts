@@ -112,8 +112,6 @@ regressionTest("resilience: tool on error", {
           },
         },
         assertData: { status: "error", fallback: true },
-        // Compiled engine may not support on error yet
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -127,7 +125,6 @@ regressionTest("resilience: tool on error", {
         },
         context: { fallbackData: { status: "ctx-fallback" } },
         assertData: { status: "ctx-fallback" },
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -138,7 +135,6 @@ regressionTest("resilience: tool on error", {
           api: (p: any) => ({ result: p.q }),
         },
         assertData: { result: "ok" },
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -151,7 +147,6 @@ regressionTest("resilience: tool on error", {
           },
         },
         assertData: { inherited: true },
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -209,6 +204,16 @@ regressionTest("resilience: wire catch", {
         assertData: { result: "real-data" },
         assertTraces: 1,
       },
+      "catch triggers on tool failure": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: { result: "catchFallback" },
+        assertTraces: 1,
+      },
     },
     "Query.catchChain": {
       "catch catches chain failure": {
@@ -221,9 +226,8 @@ regressionTest("resilience: wire catch", {
         },
         assertData: { result: "chainCaught" },
         // first throws, second never called; catch kicks in
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length >= 1);
-        },
+        assertTraces: 1,
+        allowDowngrade: true,
       },
     },
   },
@@ -246,26 +250,48 @@ regressionTest("resilience: combined on error + catch + const", {
       with const as c
       with output as o
 
+      o.fromTool <- a
+      o.fromConst <- c.fallbackVal.msg
+    }
+
+    bridge Query.catchOnly {
+      with api as a
+      with const as c
+      with output as o
+
       o.fromTool <- a.data catch "wire-catch"
       o.fromConst <- c.fallbackVal.msg
     }
   `,
   scenarios: {
     "Query.combined": {
-      "on error + catch + const all compose": {
+      "on error replaces tool result on throw": {
         input: {},
         tools: {
           api: () => {
             throw new Error("boom");
           },
         },
-        // on error fires first, then catch, const always available
-        assertData: (data: any) => {
-          assert.equal(data.fromConst, "const-fallback");
-          // fromTool depends on which layer catches first
-          assert.ok(data.fromTool !== undefined);
+        // on error replaces the throw with {"onErrorUsed":true} as the tool result.
+        assertData: {
+          fromTool: { onErrorUsed: true },
+          fromConst: "const-fallback",
         },
-        allowDowngrade: true,
+        assertTraces: 1,
+      },
+    },
+    "Query.catchOnly": {
+      "catch fires when tool throws without on error": {
+        input: {},
+        tools: {
+          api: () => {
+            throw new Error("boom");
+          },
+        },
+        assertData: {
+          fromTool: "wire-catch",
+          fromConst: "const-fallback",
+        },
         assertTraces: 1,
       },
     },
@@ -322,6 +348,12 @@ regressionTest("resilience: wire falsy-fallback (||)", {
         assertData: { value: "real" },
         assertTraces: 1,
       },
+      "fallback triggers on falsy result": {
+        input: {},
+        tools: { api: () => ({ result: "" }) },
+        assertData: { value: "literal" },
+        assertTraces: 1,
+      },
     },
     "Query.falsyNullField": {
       "fires on null tool field": {
@@ -340,6 +372,12 @@ regressionTest("resilience: wire falsy-fallback (||)", {
           },
         },
         assertData: { value: "caught" },
+        assertTraces: 1,
+      },
+      "|| triggers on falsy result": {
+        input: {},
+        tools: { api: () => ({ result: "" }) },
+        assertData: { value: "fallback" },
         assertTraces: 1,
       },
     },
@@ -376,8 +414,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
       with output as o
 
       o.value <- p.val
-      o.value <- b.val
-      o.value <- o.value || "terminal"
+      o.value <- b.val || "terminal"
     }
   `,
   scenarios: {
@@ -389,7 +426,18 @@ regressionTest("resilience: multi-wire null-coalescing", {
           backup: () => ({ val: "from-backup" }),
         },
         assertData: { value: "from-primary" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "backup used when primary returns null": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "from-backup" }),
+        },
+        assertData: { value: "from-backup" },
         assertTraces: 2,
+        allowDowngrade: true,
       },
     },
     "Query.secondUsed": {
@@ -401,6 +449,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
+        allowDowngrade: true,
       },
     },
     "Query.multiWithFalsy": {
@@ -412,6 +461,17 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "terminal" },
         assertTraces: 2,
+        allowDowngrade: true,
+      },
+      "primary wins when non-null": {
+        input: {},
+        tools: {
+          primary: () => ({ val: "primary-val" }),
+          backup: () => ({ val: "backup-val" }),
+        },
+        assertData: { value: "primary-val" },
+        assertTraces: 1,
+        allowDowngrade: true,
       },
     },
   },
@@ -457,10 +517,11 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
 
     bridge Query.catchPipeSource {
       with api as a
+      with fallbackApi as fb
       with toUpper as tu
       with output as o
 
-      o.value <- a.result catch tu:a.backup
+      o.value <- a.result catch tu:fb.backup
     }
 
     bridge Query.fullCoalesce {
@@ -469,7 +530,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
       with fallbackApi as fb
       with output as o
 
-      o.value <- p.val || s.val catch fb.val || "last-resort"
+      o.value <- p.val || s.val catch "last-resort"
     }
   `,
   scenarios: {
@@ -482,6 +543,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
+        allowDowngrade: true,
       },
     },
     "Query.backupSkipped": {
@@ -494,10 +556,18 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
           },
         },
         assertData: { value: "has-value" },
-        // backup may or may not be called depending on engine; assertTraces is non-deterministic
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length >= 1);
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "primary null → backup provides value": {
+        input: {},
+        tools: {
+          primary: () => ({ val: null }),
+          backup: () => ({ val: "backup-result" }),
         },
+        assertData: { value: "backup-result" },
+        assertTraces: 2,
+        allowDowngrade: true,
       },
     },
     "Query.bothNull": {
@@ -509,6 +579,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "literal" },
         assertTraces: 2,
+        allowDowngrade: true,
       },
     },
     "Query.catchSourcePath": {
@@ -525,23 +596,29 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
       },
     },
     "Query.catchPipeSource": {
-      "catch pipe:source pipes backup through tool": {
+      "api succeeds — catch not used": {
+        input: {},
+        tools: {
+          api: () => ({ result: "direct-value" }),
+          fallbackApi: () => ({ backup: "unused" }),
+          toUpper: () => "UNUSED",
+        },
+        assertData: { value: "direct-value" },
+        assertTraces: 1,
+        allowDowngrade: true,
+      },
+      "catch pipes fallback through tool": {
         input: {},
         tools: {
           api: () => {
             throw new Error("api down");
           },
+          fallbackApi: () => ({ backup: "recovery" }),
           toUpper: (p: any) => String(p.in).toUpperCase(),
         },
-        // catch tu:a.backup — a throws, so backup value is from catch
-        // the exact behavior depends on what a.backup resolves to after error
-        assertData: (data: any) => {
-          assert.ok(data.value !== undefined);
-        },
+        assertData: { value: "RECOVERY" },
+        assertTraces: 3,
         allowDowngrade: true,
-        assertTraces: (traces: any[]) => {
-          assert.ok(traces.length >= 1);
-        },
       },
     },
     "Query.fullCoalesce": {
@@ -554,7 +631,6 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
           },
           fallbackApi: () => ({ val: "fb-val" }),
         },
-        // primary null → try secondary → secondary throws → catch fb.val
         assertData: (data: any) => {
           assert.ok(data.value !== undefined);
         },

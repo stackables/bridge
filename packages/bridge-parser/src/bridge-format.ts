@@ -710,6 +710,17 @@ function serializeBridgeBlock(bridge: Bridge): string {
           if (h2 === h) break;
         }
         defineInlinedTrunkKeys.add(`${mod}:${bridge.type}:${fld}:${inst}`);
+      } else {
+        // Tool name without module prefix (e.g. "userApi")
+        let inst = 0;
+        for (const h2 of bridge.handles) {
+          if (h2.kind !== "tool") continue;
+          if (h2.name.lastIndexOf(".") === -1 && h2.name === h.name) inst++;
+          if (h2 === h) break;
+        }
+        defineInlinedTrunkKeys.add(
+          `${SELF_MODULE}:Tools:${h.name}:${inst}`,
+        );
       }
     }
   }
@@ -1174,6 +1185,24 @@ function serializeBridgeBlock(bridge: Bridge): string {
     return defineInlinedTrunkKeys.has(tk);
   };
 
+  // ── Helper: is a module a define-boundary internal? ────────────────
+  const isDefineBoundaryModule = (mod: string): boolean =>
+    mod.startsWith("__define_in_") || mod.startsWith("__define_out_");
+
+  // ── Helper: is a wire fully internal to define expansion? ──────────
+  // User-authored wires have one define-boundary endpoint + one regular endpoint.
+  // Internal expansion wires have both endpoints in define-boundary/inlined-tool space.
+  const isDefineInternalWire = (w: Wire): boolean => {
+    const toIsDefine =
+      isDefineBoundaryModule(w.to.module) || isDefineInlinedRef(w.to);
+    if (!toIsDefine) return false;
+    if (!("from" in w)) return false;
+    const fromRef = (w as any).from as NodeRef;
+    return (
+      isDefineBoundaryModule(fromRef.module) || isDefineInlinedRef(fromRef)
+    );
+  };
+
   // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, __local, define-internal, and element-scoped ternary wires from main loop
   const regularWires = bridge.wires.filter(
     (w) =>
@@ -1188,7 +1217,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
       (!("cond" in w) || !isUnderArrayScope(w.to)) &&
       (!("from" in w) || !isDefineInlinedRef((w as any).from)) &&
       !isDefineInlinedRef(w.to) &&
-      !isDefineOutElementWire(w),
+      !isDefineOutElementWire(w) &&
+      !isDefineInternalWire(w),
   );
 
   // ── Collect __local binding wires for array-scoped `with` declarations ──
@@ -2028,7 +2058,128 @@ function serializeBridgeBlock(bridge: Bridge): string {
     return sRef(ref, true);
   }
 
+  // ── Identify spread wires and their sibling wires ───────────────────
+  // Spread wires must be emitted inside path scope blocks: `target { ...source; .field <- ... }`
+  // Group each spread wire with sibling wires whose to.path extends the spread's to.path.
+  type SpreadGroup = {
+    spreadWires: Extract<Wire, { from: NodeRef }>[];
+    siblingWires: Wire[];
+    scopePath: string[];
+  };
+  const spreadGroups: SpreadGroup[] = [];
+  const spreadConsumedWires = new Set<Wire>();
+
+  {
+    const spreadWiresInRegular = regularWires.filter(
+      (w): w is Extract<Wire, { from: NodeRef }> =>
+        "from" in w && !!w.spread,
+    );
+    // Group by to.path (scope path)
+    const groupMap = new Map<string, SpreadGroup>();
+    for (const sw of spreadWiresInRegular) {
+      const key = sw.to.path.join(".");
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          spreadWires: [],
+          siblingWires: [],
+          scopePath: sw.to.path,
+        });
+      }
+      groupMap.get(key)!.spreadWires.push(sw);
+      spreadConsumedWires.add(sw);
+    }
+    // Find sibling wires: non-spread wires whose to.path starts with the scope path
+    if (groupMap.size > 0) {
+      for (const w of regularWires) {
+        if (spreadConsumedWires.has(w)) continue;
+        for (const [key, group] of groupMap) {
+          const wPath = w.to.path.join(".");
+          const prefix = key === "" ? "" : key + ".";
+          if (key === "" ? wPath.length > 0 : wPath.startsWith(prefix)) {
+            group.siblingWires.push(w);
+            spreadConsumedWires.add(w);
+            break;
+          }
+        }
+      }
+      for (const g of groupMap.values()) {
+        spreadGroups.push(g);
+      }
+    }
+  }
+
+  // ── Emit spread scope blocks ───────────────────────────────────────
+  for (const group of spreadGroups) {
+    const scopePrefix =
+      group.scopePath.length > 0
+        ? sRef(
+            {
+              module: SELF_MODULE,
+              type: bridge.type,
+              field: bridge.field,
+              path: group.scopePath,
+            },
+            false,
+          )
+        : outputHandle ?? "o";
+    lines.push(`${scopePrefix} {`);
+    // Emit spread lines
+    for (const sw of group.spreadWires) {
+      let fromStr = sRef(sw.from, true);
+      if (sw.safe) {
+        const ref = sw.from;
+        if (!ref.rootSafe && !ref.pathSafe?.some((s) => s)) {
+          if (fromStr.includes(".")) {
+            fromStr = fromStr.replace(".", "?.");
+          }
+        }
+      }
+      lines.push(`  ... <- ${fromStr}`);
+    }
+    // Emit sibling wires with paths relative to the scope
+    const scopeLen = group.scopePath.length;
+    for (const w of group.siblingWires) {
+      const relPath = w.to.path.slice(scopeLen);
+      if ("value" in w) {
+        lines.push(`  .${relPath.join(".")} = ${formatBareValue(w.value)}`);
+      } else if ("from" in w) {
+        let fromStr = sRef(w.from, true);
+        if (w.safe) {
+          const ref = w.from;
+          if (!ref.rootSafe && !ref.pathSafe?.some((s) => s)) {
+            if (fromStr.includes(".")) {
+              fromStr = fromStr.replace(".", "?.");
+            }
+          }
+        }
+        const fallbackStr = (w.fallbacks ?? [])
+          .map((f) => {
+            const op = f.type === "falsy" ? "||" : "??";
+            if (f.control) return ` ${op} ${serializeControl(f.control)}`;
+            if (f.ref) return ` ${op} ${sPipeOrRef(f.ref)}`;
+            return ` ${op} ${f.value}`;
+          })
+          .join("");
+        const errf =
+          "catchControl" in w && w.catchControl
+            ? ` catch ${serializeControl(w.catchControl)}`
+            : w.catchFallbackRef
+              ? ` catch ${sPipeOrRef(w.catchFallbackRef)}`
+              : w.catchFallback
+                ? ` catch ${w.catchFallback}`
+                : "";
+        lines.push(
+          `  .${relPath.join(".")} <- ${fromStr}${fallbackStr}${errf}`,
+        );
+      }
+    }
+    lines.push(`}`);
+  }
+
   for (const w of regularWires) {
+    // Skip wires already emitted in spread scope blocks
+    if (spreadConsumedWires.has(w)) continue;
+
     // Conditional (ternary) wire
     if ("cond" in w) {
       const toStr = sRef(w.to, false);
@@ -2607,6 +2758,16 @@ function serializeRef(
             serPath(ref.path, ref.rootSafe, ref.pathSafe),
           )
         : inputHandle;
+    }
+    if (isFrom && !inputHandle && outputHandle) {
+      // From side reading the output itself (self-referencing bridge trunk)
+      return ref.path.length > 0
+        ? joinHandlePath(
+            outputHandle,
+            firstSep,
+            serPath(ref.path, ref.rootSafe, ref.pathSafe),
+          )
+        : outputHandle;
     }
     if (!isFrom && outputHandle) {
       // To side: use output handle

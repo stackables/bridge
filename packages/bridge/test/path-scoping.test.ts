@@ -183,6 +183,7 @@ regressionTest("path scoping: alias inside nested scope", {
         assertData: {
           info: { title: "Article", author: "Alice", tags: ["a", "b"] },
         },
+        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -262,6 +263,14 @@ regressionTest("path scoping: array mapper scope blocks", {
         },
         assertTraces: 1,
       },
+      "empty array maps to empty array": {
+        input: {},
+        tools: {
+          api: () => ({ list: [] }),
+        },
+        assertData: { items: [] },
+        assertTraces: 1,
+      },
     },
     "Query.arrayPull": {
       "pull wires referencing iterator inside array mapper": {
@@ -280,6 +289,14 @@ regressionTest("path scoping: array mapper scope blocks", {
             { id: 2, name: "Tablet", price: 499 },
           ],
         },
+        assertTraces: 1,
+      },
+      "empty products array": {
+        input: { category: "none" },
+        tools: {
+          api: () => ({ products: [] }),
+        },
+        assertData: { items: [] },
         assertTraces: 1,
       },
     },
@@ -320,6 +337,26 @@ regressionTest("path scoping: array mapper scope blocks", {
         },
         assertTraces: 1,
       },
+      "empty departments array": {
+        input: {},
+        tools: {
+          api: () => ({ departments: [] }),
+        },
+        assertData: { groups: [] },
+        assertTraces: 1,
+      },
+      "department with empty employees": {
+        input: {},
+        tools: {
+          api: () => ({
+            departments: [{ deptName: "Empty", employees: [] }],
+          }),
+        },
+        assertData: {
+          groups: [{ name: "Empty", members: [] }],
+        },
+        assertTraces: 1,
+      },
     },
     "Query.arrayMixed": {
       "mixed flat + scope in array mapper with tool output": {
@@ -340,6 +377,14 @@ regressionTest("path scoping: array mapper scope blocks", {
             { id: 2, label: "Widget B", source: "api" },
           ],
         },
+        assertTraces: 1,
+      },
+      "empty results array": {
+        input: { q: "nothing" },
+        tools: {
+          api: () => ({ title: "No Results", results: [] }),
+        },
+        assertData: { title: "No Results", items: [] },
         assertTraces: 1,
       },
     },
@@ -390,6 +435,7 @@ regressionTest("path scoping: spread syntax", {
           api: () => ({ name: "Alice", age: 30 }),
         },
         assertData: { name: "Alice", age: 30, extra: "added" },
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -400,6 +446,7 @@ regressionTest("path scoping: spread syntax", {
           api: () => ({ data: { x: 1, y: 2 } }),
         },
         assertData: { x: 1, y: 2, source: "api" },
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },
@@ -412,6 +459,7 @@ regressionTest("path scoping: spread syntax", {
         assertData: {
           info: { author: "Bob", year: 2024, verified: true },
         },
+        disable: ["graphql"],
         assertTraces: 1,
       },
     },

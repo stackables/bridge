@@ -19,12 +19,15 @@
     "profile:heap": "node scripts/profile-heap.mjs",
     "profile:deopt": "node scripts/profile-deopt.mjs",
     "profile:flamegraph": "node scripts/flamegraph.mjs",
-    "bench:compare": "node scripts/bench-compare.mjs"
+    "bench:compare": "node scripts/bench-compare.mjs",
+    "mutants": "npx stryker run"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
     "@eslint/js": "^10.0.1",
+    "@stryker-mutator/core": "^9.6.0",
+    "@stryker-mutator/typescript-checker": "^9.6.0",
     "@tsconfig/node24": "^24.0.4",
     "eslint": "^10.0.2",
     "tinybench": "^6.0.0",

@@ -591,6 +591,17 @@ function synthesizeSelectedGraphQLData(
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+/**
+ * Context passed as the second argument to callback-form assert functions.
+ * Lets assertions branch on engine or inspect wall-clock timing.
+ */
+export type AssertContext = {
+  /** Which engine is running: "runtime" | "compiled". */
+  engine: "runtime" | "compiled";
+  /** High-resolution timestamp (ms) captured just before execution started. */
+  startMs: number;
+};
+
 export type Scenario = {
   input: Record<string, any>;
   fields?: string[];
@@ -607,13 +618,18 @@ export type Scenario = {
    *   actually happened (by checking for the warning log).
    */
   allowDowngrade?: boolean;
-  assertData?: unknown | ((data: any) => void);
-  assertError?: RegExp | ((error: any) => void);
+  assertData?: unknown | ((data: any, ctx: AssertContext) => void);
+  assertError?: RegExp | ((error: any, ctx: AssertContext) => void);
   assertGraphql?:
     | Record<string, unknown>
     | ((data: any, errors: any[] | undefined) => void);
-  assertLogs?: RegExp | ((logs: LogEntry[]) => void);
-  assertTraces: number | ((traces: ToolTrace[]) => void);
+  assertLogs?: RegExp | ((logs: LogEntry[], ctx: AssertContext) => void);
+  assertTraces: number | ((traces: ToolTrace[], ctx: AssertContext) => void);
+  /**
+   * Temporarily disable specific test aspects for this scenario.
+   * The test is still defined (not removed) but will be skipped.
+   */
+  disable?: ("runtime" | "compiled" | "graphql")[];
 };
 
 export type RegressionTest = {
@@ -635,13 +651,14 @@ const engines = [
 function assertDataExpectation(
   expectation: Scenario["assertData"],
   data: unknown,
+  ctx?: AssertContext,
 ): void {
   if (expectation === undefined) {
     return;
   }
 
   if (typeof expectation === "function") {
-    expectation(data);
+    expectation(data, ctx!);
     return;
   }
 
@@ -658,13 +675,14 @@ function assertDataExpectation(
 function assertErrorExpectation(
   expectation: Scenario["assertError"],
   error: unknown,
+  ctx?: AssertContext,
 ): void {
   if (expectation === undefined) {
     return;
   }
 
   if (typeof expectation === "function") {
-    expectation(error);
+    expectation(error, ctx!);
     return;
   }
 
@@ -690,13 +708,14 @@ function assertErrorExpectation(
 function assertLogsExpectation(
   expectation: Scenario["assertLogs"],
   logs: LogEntry[],
+  ctx?: AssertContext,
 ): void {
   if (expectation === undefined) {
     return;
   }
 
   if (typeof expectation === "function") {
-    expectation(logs);
+    expectation(logs, ctx!);
     return;
   }
 
@@ -709,13 +728,14 @@ function assertLogsExpectation(
 function assertTraceExpectation(
   expectation: Scenario["assertTraces"],
   traces: ToolTrace[],
+  ctx?: AssertContext,
 ): void {
   if (expectation === undefined) {
     return;
   }
 
   if (typeof expectation === "function") {
-    expectation(traces);
+    expectation(traces, ctx!);
     return;
   }
 
@@ -871,11 +891,16 @@ export function regressionTest(name: string, data: RegressionTest) {
           scenarioName: string;
           output: unknown;
         }> = [];
-        let pendingRuntimeTests = scenarioNames.length;
+        let pendingRuntimeTests = scenarioNames.filter(
+          (name) => !scenarios[name]!.disable?.includes("runtime"),
+        ).length;
         let resolveRuntimeCollection!: () => void;
 
         const runtimeCollectionDone = new Promise<void>((resolve) => {
           resolveRuntimeCollection = resolve;
+          if (pendingRuntimeTests === 0) {
+            resolve();
+          }
         });
 
         afterEach((t) => {
@@ -896,6 +921,11 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             for (const { name: engineName, execute } of engines) {
               test(engineName, async (t) => {
+                if (scenario.disable?.includes(engineName)) {
+                  t.skip("disabled");
+                  return;
+                }
+
                 const { logs, logger } = createCapturingLogger();
 
                 const timeout = new AbortController();
@@ -924,6 +954,9 @@ export function regressionTest(name: string, data: RegressionTest) {
                   trace: "full" as const,
                 };
 
+                const startMs = performance.now();
+                const assertCtx: AssertContext = { engine: engineName, startMs };
+
                 try {
                   const {
                     data: resultData,
@@ -950,8 +983,8 @@ export function regressionTest(name: string, data: RegressionTest) {
                     );
                   }
 
-                  assertDataExpectation(scenario.assertData, resultData);
-                  assertTraceExpectation(scenario.assertTraces, traces);
+                  assertDataExpectation(scenario.assertData, resultData, assertCtx);
+                  assertTraceExpectation(scenario.assertTraces, traces, assertCtx);
                 } catch (e: any) {
                   if (engineName === "runtime" && scenario.assertError) {
                     observedRuntimeSamples.push({
@@ -961,10 +994,11 @@ export function regressionTest(name: string, data: RegressionTest) {
                   }
 
                   if (scenario.assertError) {
-                    assertErrorExpectation(scenario.assertError, e);
+                    assertErrorExpectation(scenario.assertError, e, assertCtx);
                     assertTraceExpectation(
                       scenario.assertTraces,
                       e.traces ?? [],
+                      assertCtx,
                     );
                     // Accumulate trace from errors too
                     if (
@@ -1011,7 +1045,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                   }
                 }
 
-                assertLogsExpectation(scenario.assertLogs, logs);
+                assertLogsExpectation(scenario.assertLogs, logs, assertCtx);
               });
             }
           });
@@ -1021,6 +1055,10 @@ export function regressionTest(name: string, data: RegressionTest) {
           (name) => !scenarios[name]!.assertError,
         );
 
+        const allGraphqlDisabled = scenarioNames.every((name) =>
+          scenarios[name]!.disable?.includes("graphql"),
+        );
+
         if (scenarioNames.length > 0) {
           describe("graphql replay", () => {
             let rawSchema!: GraphQLSchema;
@@ -1028,6 +1066,11 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             before(async () => {
               await runtimeCollectionDone;
+
+              if (allGraphqlDisabled) {
+                // All scenarios have graphql disabled — no schema needed.
+                return;
+              }
 
               if (!hasSuccessScenario) {
                 // Error-only operations have no output to infer a schema from.
@@ -1096,12 +1139,17 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             for (const scenarioName of scenarioNames) {
               test(scenarioName, async (t) => {
+                const scenario = scenarios[scenarioName]!;
+                if (scenario.disable?.includes("graphql")) {
+                  t.skip("disabled");
+                  return;
+                }
+
                 const observedRuntimeData = observedRuntimeSamples.find(
                   (sample) => sample.scenarioName === scenarioName,
                 )?.output;
                 const replayExpectedData =
                   observedRuntimeData ?? replayExemplar;
-                const scenario = scenarios[scenarioName]!;
                 const tools = { ...data.tools, ...scenario.tools };
                 const context: Record<string, unknown> = {
                   ...data.context,
@@ -1202,7 +1250,15 @@ export function regressionTest(name: string, data: RegressionTest) {
         }
 
         // After all scenarios for this operation, verify traversal coverage
-        test("traversal coverage", () => {
+        test("traversal coverage", (t) => {
+          const allRuntimeDisabled = scenarioNames.every((name) =>
+            scenarios[name]!.disable?.includes("runtime"),
+          );
+          if (allRuntimeDisabled) {
+            t.skip("all scenarios have runtime disabled");
+            return;
+          }
+
           const [type, field] = operation.split(".") as [string, string];
           const bridge = document.instructions.find(
             (i): i is Bridge =>
