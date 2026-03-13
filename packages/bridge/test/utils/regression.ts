@@ -217,6 +217,50 @@ function buildSelectionTreeForValue(
   return tree;
 }
 
+/**
+ * Expand wildcard (`*`) entries and bare leaf selections on object-typed
+ * fields by looking up sub-fields from the GraphQL schema type.
+ *
+ * - `{ legs: { "*": {} } }` → `{ legs: { duration: {}, distance: {} } }`
+ * - `{ legs: {} }` where `legs` is an object type → `{ legs: { name: {} } }`
+ */
+function resolveSelectionsAgainstSchema(
+  tree: SelectionTree,
+  type: GraphQLOutputType,
+): SelectionTree {
+  const named = getNamedType(type);
+  if (!isObjectType(named)) return tree;
+
+  const result: SelectionTree = {};
+  for (const [key, child] of Object.entries(tree)) {
+    const fieldDef = named.getFields()[key];
+    if (!fieldDef) {
+      result[key] = child;
+      continue;
+    }
+
+    if ("*" in child) {
+      // Expand wildcard to all immediate sub-fields from the schema type
+      const expanded = buildSelectionTreeFromType(fieldDef.type);
+      result[key] = expanded ?? {};
+    } else if (Object.keys(child).length === 0) {
+      // Bare leaf — if the field's type has sub-fields, expand them so
+      // the resulting GraphQL query is valid.
+      const fieldNamedType = getNamedType(fieldDef.type);
+      if (isObjectType(fieldNamedType)) {
+        const expanded = buildSelectionTreeFromType(fieldDef.type);
+        result[key] = expanded ?? {};
+      } else {
+        result[key] = child;
+      }
+    } else {
+      result[key] = resolveSelectionsAgainstSchema(child, fieldDef.type);
+    }
+  }
+
+  return result;
+}
+
 function renderSelectionTree(tree: SelectionTree | null): string {
   if (!tree || Object.keys(tree).length === 0) {
     return "";
@@ -372,6 +416,17 @@ function mergeObservedSelection(
 
   for (const selectedPath of selectedPaths) {
     const path = selectedPath.split(".").filter(Boolean);
+
+    // Handle wildcard: "legs.*" means "select all children of legs"
+    if (path.length > 1 && path[path.length - 1] === "*") {
+      const parentPath = path.slice(0, -1);
+      const parentValue = getObservationPath(value, parentPath);
+      if (parentValue !== undefined) {
+        setObservationPath(merged, parentPath, parentValue);
+      }
+      continue;
+    }
+
     const selectedValue = getObservationPath(value, path);
     if (selectedValue !== undefined) {
       setObservationPath(merged, path, selectedValue);
@@ -428,12 +483,21 @@ function buildGraphQLOperationSource(
     ? `(${field.args.map((arg) => `${arg.name}: $${arg.name}`).join(", ")})`
     : "";
 
-  const selectionTree = orderSelectionTree(
+  let selectionTree = orderSelectionTree(
     requestedFields?.length
       ? buildSelectionTreeFromPaths(requestedFields)
       : buildSelectionTreeForValue(expectedData, field.type),
     preferredFieldOrder,
   );
+
+  // When explicit requestedFields are provided, resolve wildcards
+  // (e.g. "legs.*") and bare leaf selections on object-typed fields
+  // (e.g. "legs" where legs has sub-fields) against the schema type so
+  // the resulting GraphQL query includes the required sub-field selections.
+  if (selectionTree && requestedFields?.length) {
+    selectionTree = resolveSelectionsAgainstSchema(selectionTree, field.type);
+  }
+
   const selection = renderSelectionTree(selectionTree);
   const operationKeyword = rootTypeName === "Mutation" ? "mutation" : "query";
 

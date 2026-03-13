@@ -1718,7 +1718,6 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["id", "legs.*"],
         assertData: { id: 42, legs: { duration: "2h", distance: 150 } },
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "requesting price returns price": {
@@ -1883,7 +1882,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
           { id: 1, legs: [{ name: "L1" }] },
           { id: 2, legs: [{ name: "L2" }] },
         ],
-        disable: ["graphql"],
         assertTraces: 1,
       },
       "all fields returned when no requestedFields": {
