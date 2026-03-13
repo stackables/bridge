@@ -2,7 +2,7 @@
   "name": "bridge-syntax-highlight",
   "displayName": "The Bridge Language",
   "description": "Syntax highlighting, real-time diagnostics, and hover information for the Bridge declarative dataflow language",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "stackables",
   "icon": "logo128.png",
   "engines": {
@@ -38,6 +38,19 @@
         "language": "bridge",
         "scopeName": "source.bridge",
         "path": "./syntaxes/bridge.tmLanguage.json"
+      },
+      {
+        "scopeName": "inline.bridge",
+        "injectTo": [
+          "source.ts",
+          "source.tsx",
+          "source.js",
+          "source.jsx"
+        ],
+        "path": "./syntaxes/bridge.inline.json",
+        "embeddedLanguages": {
+          "source.bridge": "bridge"
+        }
       }
     ],
     "configurationDefaults": {

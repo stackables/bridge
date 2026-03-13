@@ -1,0 +1,23 @@
+{
+  "scopeName": "inline.bridge",
+  "injectionSelector": "L:source.ts -comment -string, L:source.tsx -comment -string, L:source.js -comment -string, L:source.jsx -comment -string",
+  "patterns": [
+    {
+      "name": "meta.embedded.block.bridge",
+      "begin": "(?x) \\bbridge\\b \\s* (`)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.string.template.begin.bridge" }
+      },
+      "end": "(`)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.string.template.end.bridge" }
+      },
+      "contentName": "source.bridge",
+      "patterns": [
+        {
+          "include": "source.bridge"
+        }
+      ]
+    }
+  ]
+}

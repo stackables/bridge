@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { describe } from "node:test";
 import { std } from "@stackables/bridge-stdlib";
 import { regressionTest } from "./utils/regression.ts";
+import { bridge } from "@stackables/bridge";
 
 // ── String builtins ─────────────────────────────────────────────────────────
 // Single bridge exercises toUpperCase, toLowerCase, trim, length all at once.
 
 describe("builtin tools", () => {
   regressionTest("string builtins", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.format {
         with std.str.toUpperCase as up
@@ -83,7 +84,7 @@ describe("builtin tools", () => {
   // ── Custom tools alongside std ──────────────────────────────────────────
 
   regressionTest("custom tools alongside std", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.process {
         with std.str.toUpperCase as up
@@ -112,7 +113,7 @@ describe("builtin tools", () => {
   // ── Array filter ────────────────────────────────────────────────────────
 
   regressionTest("array filter", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.admins {
         with getUsers as db
@@ -173,7 +174,7 @@ describe("builtin tools", () => {
   // ── Array find ──────────────────────────────────────────────────────────
 
   regressionTest("array find", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.findUser {
         with getUsers as db
@@ -237,7 +238,7 @@ describe("builtin tools", () => {
   // ── Array first ─────────────────────────────────────────────────────────
 
   regressionTest("array first", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.first {
         with std.arr.first as pf
@@ -277,7 +278,7 @@ describe("builtin tools", () => {
   // ── Array first strict mode ─────────────────────────────────────────────
 
   regressionTest("array first strict mode", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       tool pf from std.arr.first {
         .strict = true
@@ -310,7 +311,7 @@ describe("builtin tools", () => {
   // ── toArray ─────────────────────────────────────────────────────────────
 
   regressionTest("toArray", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.normalize {
         with std.arr.toArray as ta
@@ -367,7 +368,7 @@ describe("builtin tools", () => {
   // ── Audit with force ──────────────────────────────────────────────────────
 
   regressionTest("audit with force", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.search {
         with searchApi as api
@@ -424,7 +425,7 @@ describe("builtin tools", () => {
   // ── Audit fire-and-forget ─────────────────────────────────────────────────
 
   regressionTest("audit fire-and-forget", {
-    bridge: `
+    bridge: bridge`
       version 1.5
       bridge Query.search {
         with searchApi as api

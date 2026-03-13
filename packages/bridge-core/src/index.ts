@@ -7,6 +7,10 @@
  * GraphQL dependencies.
  */
 
+// ── Tagged template literal ──────────────────────────────────────────────────
+
+export { bridge } from "./tag.ts";
+
 // ── Runtime engine ──────────────────────────────────────────────────────────
 
 export { executeBridge } from "./execute-bridge.ts";
