@@ -1,851 +1,457 @@
-import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import {
-  parseBridgeFormat as parseBridge,
-  serializeBridge,
-} from "@stackables/bridge-parser";
-import type { Wire } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
+import { tools } from "./utils/bridge-tools.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// v2.0 Execution Semantics:
+// Coalesce & cost-based resolution
+//
 //   • || chains evaluate sequentially (left to right) with short-circuit
-//   • Overdefinition uses cost-based ordering (zero-cost/already-resolved → expensive)
-//   • Backup tools are NEVER called when a earlier source returns a truthy value
+//   • ?? chains use nullish coalescing (only null/undefined trigger next)
+//   • Overdefinition uses cost-based ordering
+//   • ?. modifier converts tool errors to undefined
+//
+// All tools are passthrough: output mirrors input. Wire `err` to throw.
+// Scenarios exercise different traversal paths by varying the input.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── Short-circuit: || chains ──────────────────────────────────────────────
+// ── || short-circuit evaluation ────────────────────────────────────────────
 
-forEachEngine("|| sequential short-circuit", (run, { engine }) => {
-  test(
-    "primary succeeds → backup is never called",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
+regressionTest("|| fallback chains", {
+  bridge: `
+    version 1.5
 
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
+    bridge Fallback.lookup {
+      with test.multitool as a
+      with test.multitool as b
+      with test.multitool as c
+      with input as i
+      with output as o
 
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        primary: async () => {
-          callLog.push("primary");
-          return { label: "P" };
+      a <- i.a
+      b <- i.b
+      c <- i.c
+
+      o.twoSource <- a.label || b.label
+      o.threeSource <- a.label || b.label || c.label
+      o.withLiteral <- a.label || b.label || "default"
+      o.withCatch <- a.label || b.label || "null-default" catch "error-default"
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Fallback.lookup": {
+      "a truthy → short-circuits all chains": {
+        input: { a: { label: "A" } },
+        allowDowngrade: true,
+        assertData: {
+          twoSource: "A",
+          threeSource: "A",
+          withLiteral: "A",
+          withCatch: "A",
         },
-        backup: async () => {
-          callLog.push("backup");
-          return { label: "B" };
-        },
-      };
-
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "P");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["primary"],
-        "backup should never be called",
-      );
-    },
-  );
-
-  test("primary returns null → backup is called", async () => {
-    const bridgeText = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
-
-}`;
-    const callLog: string[] = [];
-    const tools = {
-      primary: async () => {
-        callLog.push("primary");
-        return { label: null };
+        assertTraces: 1,
       },
-      backup: async () => {
-        callLog.push("backup");
-        return { label: "B" };
+      "a null, b truthy → b wins": {
+        input: { b: { label: "B" } },
+        allowDowngrade: true,
+        assertData: {
+          twoSource: "B",
+          threeSource: "B",
+          withLiteral: "B",
+          withCatch: "B",
+        },
+        assertTraces: 2,
       },
-    };
-
-    const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-    assert.equal(data.label, "B");
-    assertDeepStrictEqualIgnoringLoc(
-      callLog,
-      ["primary", "backup"],
-      "backup called after primary returned null",
-    );
-  });
-
-  test(
-    "3-source chain: first truthy wins, later sources skipped",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with svcA as a
-  with svcB as b
-  with svcC as c
-  with input as i
-  with output as o
-
-a.q <- i.q
-b.q <- i.q
-c.q <- i.q
-o.label <- a.label || b.label || c.label
-
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        svcA: async () => {
-          callLog.push("A");
-          return { label: null };
+      "all null → literal / third source fire": {
+        input: { c: { label: "C" } },
+        allowDowngrade: true,
+        assertData: {
+          threeSource: "C",
+          withLiteral: "default",
+          withCatch: "null-default",
         },
-        svcB: async () => {
-          callLog.push("B");
-          return { label: "from-B" };
-        },
-        svcC: async () => {
-          callLog.push("C");
-          return { label: "from-C" };
-        },
-      };
-
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "from-B");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["A", "B"],
-        "C should never be called",
-      );
-    },
-  );
-
-  test("|| with literal fallback: both null → literal, no extra calls", async () => {
-    const bridgeText = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label || "default"
-
-}`;
-    const callLog: string[] = [];
-    const tools = {
-      primary: async () => {
-        callLog.push("primary");
-        return { label: null };
+        assertTraces: 3,
       },
-      backup: async () => {
-        callLog.push("backup");
-        return { label: null };
+      "a throws → error propagates on twoSource, catch fires on withCatch": {
+        input: { a: { _error: "boom" } },
+        allowDowngrade: true,
+        fields: ["withCatch"],
+        assertData: { withCatch: "error-default" },
+        assertTraces: 1,
       },
-    };
-
-    const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-    assert.equal(data.label, "default");
-    assertDeepStrictEqualIgnoringLoc(
-      callLog,
-      ["primary", "backup"],
-      "both called, then literal fires",
-    );
-  });
-
-  test(
-    "strict throw exits || chain — backup not called (no catch)",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label
-
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        primary: async () => {
-          callLog.push("primary");
-          throw new Error("boom");
+      "a throws → uncaught wires fail": {
+        input: { a: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 1,
+        assertGraphql: {
+          twoSource: /boom/i,
+          threeSource: /boom/i,
+          withLiteral: /boom/i,
+          withCatch: "error-default",
         },
-        backup: async () => {
-          callLog.push("backup");
-          return { label: "B" };
+      },
+      "b throws → fallback error propagates": {
+        input: { b: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 2,
+        assertGraphql: {
+          twoSource: /boom/i,
+          threeSource: /boom/i,
+          withLiteral: /boom/i,
+          withCatch: "error-default",
         },
-      };
-
-      await assert.rejects(
-        () => run(bridgeText, "Query.lookup", { q: "x" }, tools),
-        { message: /boom/ },
-      );
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["primary"],
-        "backup never called — strict throw exits chain",
-      );
+      },
+      "c throws → third-position fallback error": {
+        input: { c: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 3,
+        assertGraphql: {
+          twoSource: null,
+          threeSource: /boom/i,
+          withLiteral: "default",
+          withCatch: "null-default",
+        },
+      },
     },
-  );
-
-  test(
-    "|| + catch combined: strict throw → catch fires",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-p.q <- i.q
-b.q <- i.q
-o.label <- p.label || b.label || "null-default" catch "error-default"
-
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        primary: async () => {
-          callLog.push("primary");
-          throw new Error("down");
-        },
-        backup: async () => {
-          callLog.push("backup");
-          throw new Error("also down");
-        },
-      };
-
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "error-default");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["primary"],
-        "strict throw exits || — catch fires immediately",
-      );
-    },
-  );
+  },
 });
 
 // ── Cost-based resolution: overdefinition ────────────────────────────────
 
-forEachEngine(
-  "overdefinition: cost-based prioritization",
-  (run, { engine }) => {
-    test("input beats tool even when tool wire is authored first", async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with input as i
-  with output as o
+regressionTest("overdefinition: cost-based prioritization", {
+  bridge: `
+    version 1.5
 
-api.q <- i.q
-o.label <- api.label
-o.label <- i.hint
+    bridge Overdef.lookup {
+      with test.multitool as api
+      with test.multitool as a
+      with test.multitool as b
+      with context as ctx
+      with input as i
+      with output as o
 
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        expensiveApi: async () => {
-          callLog.push("expensiveApi");
-          return { label: "expensive" };
-        },
-      };
+      api <- i.api
+      a <- i.a
+      b <- i.b
 
-      const { data } = await run(
-        bridgeText,
-        "Query.lookup",
-        { q: "x", hint: "cheap" },
-        tools,
-      );
-      assert.equal(data.label, "cheap");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        [],
-        "zero-cost input should short-circuit before the API is called",
-      );
-    });
+      o.inputBeats <- api.label
+      o.inputBeats <- i.hint
 
-    test("input is null → falls through to tool call", async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with input as i
-  with output as o
+      o.contextBeats <- api.label
+      o.contextBeats <- ctx.defaultLabel
 
-api.q <- i.q
-o.label <- api.label
-o.label <- i.hint
+      o.sameCost <- a.label
+      o.sameCost <- b.label
+    }
 
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        expensiveApi: async () => {
-          callLog.push("expensiveApi");
-          return { label: "from-api" };
-        },
-      };
+    bridge AliasOverdef.lookup {
+      with test.multitool as api
+      with input as i
+      with output as o
 
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "from-api");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["expensiveApi"],
-        "API should run only when zero-cost sources are nullish",
-      );
-    });
+      alias i.hint as cached
+      api <- i.api
 
-    test("context beats tool even when tool wire is authored first", async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with context as ctx
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.label <- api.label
-o.label <- ctx.defaultLabel
-
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        expensiveApi: async () => {
-          callLog.push("expensiveApi");
-          return { label: "expensive" };
-        },
-      };
-
-      const { data } = await run(
-        bridgeText,
-        "Query.lookup",
-        { q: "x" },
-        tools,
-        { context: { defaultLabel: "from-context" } },
-      );
-      assert.equal(data.label, "from-context");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        [],
-        "zero-cost context should short-circuit before the API is called",
-      );
-    });
-
-    test(
-      "resolved alias beats tool even when tool wire is authored first",
-      { skip: engine === "compiled" },
-      async () => {
-        const bridgeText = `version 1.5
-bridge Query.lookup {
-  with expensiveApi as api
-  with input as i
-  with output as o
-
-alias i.hint as cached
-api.q <- i.q
-o.label <- api.label
-o.label <- cached
-
-}`;
-        const callLog: string[] = [];
-        const tools = {
-          expensiveApi: async () => {
-            callLog.push("api");
-            return { label: "expensive" };
-          },
-        };
-
-        const { data } = await run(
-          bridgeText,
-          "Query.lookup",
-          { q: "x", hint: "cached" },
-          tools,
-        );
-        assert.equal(data.label, "cached");
-        assertDeepStrictEqualIgnoringLoc(
-          callLog,
-          [],
-          "resolved aliases should be treated like zero-cost values",
-        );
+      o.label <- api.label
+      o.label <- cached
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Overdef.lookup": {
+      "input beats tool — zero-cost short-circuit": {
+        input: { api: { label: "expensive" }, hint: "cheap" },
+        fields: ["inputBeats"],
+        assertData: { inputBeats: "cheap" },
+        assertTraces: 0,
       },
-    );
-
-    test("two tool sources with same cost preserve authored order as tie-break", async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with svcA as a
-  with svcB as b
-  with input as i
-  with output as o
-
-a.q <- i.q
-b.q <- i.q
-o.label <- a.label
-o.label <- b.label
-
-}`;
-      const callLog: string[] = [];
-      const tools = {
-        svcA: async () => {
-          callLog.push("A");
-          return { label: "from-A" };
+      "input null → tool fires": {
+        input: {
+          api: { label: "from-api" },
+          a: { label: "A" },
+          b: { label: "B" },
         },
-        svcB: async () => {
-          callLog.push("B");
-          return { label: "from-B" };
+        fields: ["inputBeats"],
+        assertData: { inputBeats: "from-api" },
+        assertTraces: 1,
+      },
+      "context beats tool": {
+        input: { api: { label: "expensive" } },
+        fields: ["contextBeats"],
+        context: { defaultLabel: "from-context" },
+        assertData: { contextBeats: "from-context" },
+        assertTraces: 0,
+      },
+      "context null → tool fires": {
+        input: { api: { label: "from-api" } },
+        fields: ["contextBeats"],
+        assertData: { contextBeats: "from-api" },
+        assertTraces: 1,
+      },
+      "same-cost tools use authored order": {
+        input: { a: { label: "from-A" }, b: { label: "from-B" } },
+        allowDowngrade: true,
+        fields: ["sameCost"],
+        assertData: { sameCost: "from-A" },
+        assertTraces: 1,
+      },
+      "first same-cost null → second fires": {
+        input: { b: { label: "from-B" } },
+        allowDowngrade: true,
+        fields: ["sameCost"],
+        assertData: { sameCost: "from-B" },
+        assertTraces: 2,
+      },
+      "api throws → error when no cheaper override": {
+        input: { api: { _error: "boom" } },
+        fields: ["inputBeats"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 1,
+        assertGraphql: () => {},
+      },
+      "api throws → contextBeats error": {
+        input: { api: { _error: "boom" } },
+        fields: ["contextBeats"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 1,
+        assertGraphql: () => {},
+      },
+      "a throws → sameCost error": {
+        input: { a: { _error: "boom" } },
+        allowDowngrade: true,
+        fields: ["sameCost"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 2,
+        assertGraphql: {
+          sameCost: /boom/i,
         },
-      };
-
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "from-A");
-      assertDeepStrictEqualIgnoringLoc(
-        callLog,
-        ["A"],
-        "same-cost tool sources should still use authored order as a tie-break",
-      );
-    });
+      },
+      "a null, b throws → sameCost fails": {
+        input: { b: { _error: "boom" } },
+        allowDowngrade: true,
+        fields: ["sameCost"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 2,
+        assertGraphql: {
+          sameCost: /boom/i,
+        },
+      },
+    },
+    "AliasOverdef.lookup": {
+      "alias treated as zero-cost": {
+        input: { api: { label: "expensive" }, hint: "cached" },
+        allowDowngrade: true,
+        assertData: { label: "cached" },
+        assertTraces: 0,
+      },
+      "alias null → tool fires": {
+        input: { api: { label: "from-api" } },
+        allowDowngrade: true,
+        assertData: { label: "from-api" },
+        assertTraces: 1,
+      },
+      "api throws → error when alias null": {
+        input: { api: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 1,
+        assertGraphql: {
+          label: /boom/i,
+        },
+      },
+    },
   },
-);
-
-// ── Edge cases ───────────────────────────────────────────────────────────
-
-forEachEngine("coalesce edge cases", (run, { engine }) => {
-  test("single source: no sorting or short-circuit needed", async () => {
-    const bridgeText = `version 1.5
-bridge Query.lookup {
-  with myApi as api
-  with input as i
-  with output as o
-
-api.q <- i.q
-o.label <- api.label
-
-}`;
-    const tools = {
-      myApi: async () => ({ label: "hello" }),
-    };
-
-    const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-    assert.equal(data.label, "hello");
-  });
-
-  test(
-    "?. with || fallback: error → undefined, null → falls through to literal",
-    { skip: engine === "compiled" },
-    async () => {
-      const bridgeText = `version 1.5
-bridge Query.lookup {
-  with svcA as a
-  with svcB as b
-  with input as i
-  with output as o
-
-a.q <- i.q
-b.q <- i.q
-o.label <- a?.label || b.label || "last-resort"
-
-}`;
-      const tools = {
-        svcA: async () => {
-          throw new Error("A down");
-        },
-        svcB: async () => ({ label: null }),
-      };
-
-      const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-      assert.equal(data.label, "last-resort");
-    },
-  );
-
-  test("independent targets still resolve concurrently", async () => {
-    const bridgeText = `version 1.5
-bridge Query.lookup {
-  with svcA as a
-  with svcB as b
-  with input as i
-  with output as o
-
-a.q <- i.q
-b.q <- i.q
-o.label <- a.label
-o.score <- b.score
-
-}`;
-    const timeline: { tool: string; event: string; time: number }[] = [];
-    const start = Date.now();
-    const tools = {
-      svcA: async () => {
-        timeline.push({ tool: "A", event: "start", time: Date.now() - start });
-        await new Promise((r) => setTimeout(r, 50));
-        timeline.push({ tool: "A", event: "end", time: Date.now() - start });
-        return { label: "A" };
-      },
-      svcB: async () => {
-        timeline.push({ tool: "B", event: "start", time: Date.now() - start });
-        await new Promise((r) => setTimeout(r, 50));
-        timeline.push({ tool: "B", event: "end", time: Date.now() - start });
-        return { score: 42 };
-      },
-    };
-
-    const { data } = await run(bridgeText, "Query.lookup", { q: "x" }, tools);
-    assert.equal(data.label, "A");
-    assert.equal(data.score, 42);
-
-    const startEvents = timeline.filter((e) => e.event === "start");
-    assert.equal(startEvents.length, 2);
-    const gap = Math.abs(startEvents[0].time - startEvents[1].time);
-    assert.ok(gap < 30, `tools should start concurrently (gap: ${gap}ms)`);
-  });
 });
 
-// ── ?. Safe execution modifier ────────────────────────────────────────────
+// ── ?. safe execution modifier ────────────────────────────────────────────
 
-describe("?. safe execution modifier (parser)", () => {
-  test("parser detects ?. and sets safe flag on wire", () => {
-    const doc = parseBridge(`version 1.5
-bridge Query.lookup {
-  with api.fetch as api
-  with input as i
-  with output as o
+regressionTest("?. safe execution modifier", {
+  bridge: `
+    version 1.5
 
-  api.q <- i.q
-  o.label <- api?.label
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const safePull = bridge.wires.find(
-      (w) => "from" in w && "safe" in w && w.safe,
-    );
-    assert.ok(safePull, "has a wire with safe: true");
-  });
+    const lorem = {
+      "ipsum": "dolor sit amet",
+      "consetetur": 8.9
+    }
 
-  test("safe execution round-trips through serializer", () => {
-    const src = `version 1.5
+    bridge Safe.lookup {
+      with test.multitool as a
+      with test.multitool as b
+      with const
+      with input as i
+      with output as o
 
-bridge Query.lookup {
-  with api.fetch as api
-  with input as i
-  with output as o
+      a <- i.a
+      b <- i.b
 
-  api.q <- i.q
-  o.label <- api?.label catch "default"
-
-}`;
-    const doc = parseBridge(src);
-    const serialized = serializeBridge(doc);
-    assert.ok(serialized.includes("?."), "serialized contains ?.");
-    assert.ok(serialized.includes("catch"), "serialized contains catch");
-    const reparsed = parseBridge(serialized);
-    const bridge = reparsed.instructions.find((i) => i.kind === "bridge")!;
-    const safePull = bridge.wires.find(
-      (w) => "from" in w && "safe" in w && w.safe,
-    );
-    assert.ok(safePull, "round-tripped wire has safe: true");
-  });
-});
-
-forEachEngine("?. safe execution modifier", (run, { engine }) => {
-  test(
-    "?. swallows tool error and returns undefined",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with failing.api as api
-  with input as i
-  with output as o
-
-  api.q <- i.q
-  o.label <- api?.label
-}`,
-        "Query.lookup",
-        { q: "test" },
-        {
-          "failing.api": async () => {
-            throw new Error("HTTP 500");
-          },
+      o.bare <- a?.label
+      o.withLiteral <- a?.label || "fallback"
+      o.withToolFallback <- a?.label || b.label || "last-resort"
+      o.constChained <- const.lorem.ipsums?.kala || "A" || "B"
+      o.constMixed <- const.lorem.kala || const.lorem.ipsums?.mees ?? "C"
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Safe.lookup": {
+      "tool throws → ?. swallows, fallbacks fire": {
+        input: { a: { _error: "HTTP 500" } },
+        allowDowngrade: true,
+        fields: ["bare", "withLiteral", "withToolFallback"],
+        assertData: {
+          withLiteral: "fallback",
+          withToolFallback: "last-resort",
         },
-      );
-      assert.equal(data.label, undefined);
-    },
-  );
-
-  test(
-    "?. with || fallback: error returns undefined then || kicks in",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-bridge Query.lookup {
-  with failing.api as api
-  with input as i
-  with output as o
-
-  api.q <- i.q
-  o.label <- api?.label || "fallback"
-}`,
-        "Query.lookup",
-        { q: "test" },
-        {
-          "failing.api": async () => {
-            throw new Error("HTTP 500");
-          },
-        },
-      );
-      assert.equal(data.label, "fallback");
-    },
-  );
-
-  test(
-    "?. with chained || literals short-circuits at first truthy literal",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-const lorem = {
-  "ipsum":"dolor sit amet",
-  "consetetur":8.9
-}
-
-bridge Query.lookup {
-  with const
-  with output as o
-
-  o.label <- const.lorem.ipsums?.kala || "A" || "B"
-}`,
-        "Query.lookup",
-        {},
-        {},
-      );
-      assert.equal(data.label, "A");
-    },
-  );
-
-  test(
-    "mixed || and ?? remains left-to-right with first truthy || winner",
-    { skip: engine === "compiled" },
-    async () => {
-      const { data } = await run(
-        `version 1.5
-const lorem = {
-  "ipsum": "dolor sit amet",
-  "consetetur": 8.9
-}
-
-bridge Query.lookup {
-  with const
-  with output as o
-
-  o.label <- const.lorem.kala || const.lorem.ipsums?.mees || "B" ?? "C"
-}`,
-        "Query.lookup",
-        {},
-        {},
-      );
-      assert.equal(data.label, "B");
-    },
-  );
-
-  test("?. passes through value when tool succeeds", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with good.api as api
-  with input as i
-  with output as o
-
-  api.q <- i.q
-  o.label <- api?.label
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        "good.api": async () => ({ label: "Hello" }),
+        assertTraces: 2,
       },
-    );
-    assert.equal(data.label, "Hello");
-  });
+      "tool succeeds → value passes through": {
+        input: { a: { label: "OK" } },
+        allowDowngrade: true,
+        fields: ["bare", "withLiteral", "withToolFallback"],
+        assertData: {
+          bare: "OK",
+          withLiteral: "OK",
+          withToolFallback: "OK",
+        },
+        assertTraces: 1,
+      },
+      "?. on non-existent const paths": {
+        input: {},
+        allowDowngrade: true,
+        fields: ["constChained", "constMixed"],
+        assertData: {
+          constChained: "A",
+          constMixed: "C",
+        },
+        assertTraces: 0,
+      },
+      "b throws in fallback position → error propagates": {
+        input: { a: { _error: "any" }, b: { _error: "boom" } },
+        allowDowngrade: true,
+        fields: ["withToolFallback"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 2,
+        assertGraphql: {
+          withToolFallback: /boom/i,
+        },
+      },
+    },
+  },
 });
 
 // ── Mixed || and ?? chains ──────────────────────────────────────────────────
 
-describe("mixed || and ?? chains (parser)", () => {
-  test("mixed chain round-trips through serializer", () => {
-    const src = `version 1.5
+regressionTest("mixed || and ?? chains", {
+  bridge: `
+    version 1.5
 
-bridge Query.lookup {
-  with a as a
-  with b as b
-  with input as i
-  with output as o
+    bridge Mixed.lookup {
+      with test.multitool as a
+      with test.multitool as b
+      with test.multitool as c
+      with input as i
+      with output as o
 
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label ?? b.label || "fallback"
+      a <- i.a
+      b <- i.b
+      c <- i.c
 
-}`;
-    const doc = parseBridge(src);
-    const serialized = serializeBridge(doc);
-    const reparsed = parseBridge(serialized);
-    assertDeepStrictEqualIgnoringLoc(reparsed, doc);
-  });
-
-  test("?? then || with literals round-trips", () => {
-    const src = `version 1.5
-
-bridge Query.lookup {
-  with input as i
-  with output as o
-
-  o.label <- i.label ?? "nullish-default" || "falsy-default"
-
-}`;
-    const doc = parseBridge(src);
-    const serialized = serializeBridge(doc);
-    const reparsed = parseBridge(serialized);
-    assertDeepStrictEqualIgnoringLoc(reparsed, doc);
-  });
-
-  test("parser produces correct fallbacks array for mixed chain", () => {
-    const doc = parseBridge(`version 1.5
-
-bridge Query.lookup {
-  with a as a
-  with b as b
-  with input as i
-  with output as o
-
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label ?? b.label || "default"
-}`);
-    const bridge = doc.instructions.find((i) => i.kind === "bridge")!;
-    const wire = bridge.wires.find(
-      (w) => "from" in w && (w as any).to.path[0] === "label" && !("pipe" in w),
-    ) as Extract<Wire, { from: any }>;
-    assert.ok(wire.fallbacks, "wire should have fallbacks");
-    assert.equal(wire.fallbacks!.length, 2);
-    assert.equal(wire.fallbacks![0].type, "nullish");
-    assert.ok(wire.fallbacks![0].ref, "first fallback should be a ref");
-    assert.equal(wire.fallbacks![1].type, "falsy");
-    assert.equal(wire.fallbacks![1].value, '"default"');
-  });
-});
-
-forEachEngine("mixed || and ?? chains", (run) => {
-  test("A ?? B || C — nullish gate then falsy gate", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-  p.q <- i.q
-  b.q <- i.q
-  o.label <- p.label ?? b.label || "fallback"
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        primary: async () => ({ label: null }),
-        backup: async () => ({ label: "" }),
+      o.nullishThenFalsy <- a.label ?? b.label || "fallback"
+      o.falsyThenNullish <- a.label || b.label ?? "default"
+      o.fourItem <- a.label ?? b.label || c.label ?? "last"
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Mixed.lookup": {
+      "a truthy → all chains short-circuit": {
+        input: { a: { label: "A" } },
+        allowDowngrade: true,
+        assertData: {
+          nullishThenFalsy: "A",
+          falsyThenNullish: "A",
+          fourItem: "A",
+        },
+        assertTraces: 1,
       },
-    );
-    assert.equal(data.label, "fallback");
-  });
-
-  test("A || B ?? C — falsy gate then nullish gate", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with primary as p
-  with backup as b
-  with input as i
-  with output as o
-
-  p.q <- i.q
-  b.q <- i.q
-  o.label <- p.label || b.label ?? "default"
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        primary: async () => ({ label: "" }),
-        backup: async () => ({ label: null }),
+      "a null, b truthy → b wins nullish/falsy gates": {
+        input: { b: { label: "B" } },
+        allowDowngrade: true,
+        fields: ["nullishThenFalsy", "falsyThenNullish"],
+        assertData: {
+          nullishThenFalsy: "B",
+          falsyThenNullish: "B",
+        },
+        assertTraces: 2,
       },
-    );
-    assert.equal(data.label, "default");
-  });
-
-  test("A ?? B || C ?? D — four-item mixed chain", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with a as a
-  with b as b
-  with c as c
-  with input as i
-  with output as o
-
-  a.q <- i.q
-  b.q <- i.q
-  c.q <- i.q
-  o.label <- a.label ?? b.label || c.label ?? "last"
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        a: async () => ({ label: null }),
-        b: async () => ({ label: 0 }),
-        c: async () => ({ label: null }),
+      "a null, b falsy → both chains fall through ?? but diverge at ||": {
+        input: { b: { label: "" } },
+        allowDowngrade: true,
+        fields: ["nullishThenFalsy", "falsyThenNullish"],
+        assertData: {
+          nullishThenFalsy: "fallback", // ?? passes b="", then || drops it
+          falsyThenNullish: "", // || picks b="", then ?? keeps it (not null)
+        },
+        assertTraces: 2,
       },
-    );
-    assert.equal(data.label, "last");
-  });
-
-  test("mixed chain short-circuits when value becomes truthy", async () => {
-    const { data } = await run(
-      `version 1.5
-bridge Query.lookup {
-  with a as a
-  with b as b
-  with input as i
-  with output as o
-
-  a.q <- i.q
-  b.q <- i.q
-  o.label <- a.label ?? b.label || "unused"
-}`,
-      "Query.lookup",
-      { q: "test" },
-      {
-        a: async () => ({ label: null }),
-        b: async () => ({ label: "found" }),
+      'a="", b null → ?? keeps a but || still drops it': {
+        input: { a: { label: "" } },
+        allowDowngrade: true,
+        fields: ["nullishThenFalsy", "falsyThenNullish"],
+        assertData: {
+          nullishThenFalsy: "fallback", // ?? keeps "", but || drops it
+          falsyThenNullish: "default", // || drops "", b=null, ?? drops null
+        },
+        assertTraces: 2,
       },
-    );
-    assert.equal(data.label, "found");
-  });
+      "four-item: all fall through → literal": {
+        input: { b: { label: 0 } },
+        allowDowngrade: true,
+        fields: ["fourItem"],
+        assertData: { fourItem: "last" },
+        assertTraces: 3,
+      },
+      "four-item: c truthy → stops at c": {
+        input: { b: { label: 0 }, c: { label: "C" } },
+        allowDowngrade: true,
+        fields: ["fourItem"],
+        assertData: { fourItem: "C" },
+        assertTraces: 3,
+      },
+      "a throws → error on all wires": {
+        input: { a: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 1,
+        assertGraphql: {
+          nullishThenFalsy: /boom/i,
+          falsyThenNullish: /boom/i,
+          fourItem: /boom/i,
+        },
+      },
+      "b throws → fallback error": {
+        input: { b: { _error: "boom" } },
+        allowDowngrade: true,
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 2,
+        assertGraphql: {
+          nullishThenFalsy: /boom/i,
+          falsyThenNullish: /boom/i,
+          fourItem: /boom/i,
+        },
+      },
+      "c throws → fallback:1 error on fourItem": {
+        input: { c: { _error: "boom" } },
+        allowDowngrade: true,
+        fields: ["fourItem"],
+        assertError: /BridgeRuntimeError/,
+        assertTraces: 3,
+        assertGraphql: {
+          fourItem: /boom/i,
+        },
+      },
+    },
+  },
 });

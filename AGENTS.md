@@ -63,7 +63,7 @@ playground/            Browser playground (Vite + React)
 
 **Run a single test file:**
 ```bash
-node --experimental-transform-types --conditions source --test test/<filename>.test.ts
+node --experimental-transform-types --test test/<filename>.test.ts
 ```
 
 Tests are **co-located with each package**. The main test suites:
@@ -77,7 +77,7 @@ Tests are **co-located with each package**. The main test suites:
 
 - **ESM** (`"type": "module"`) with `.ts` import extensions (handled by `rewriteRelativeImportExtensions`)
 - **Strict mode** — `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-- **Dev running:** `--experimental-transform-types --conditions source`
+- **Dev running:** `--experimental-transform-types`
 - **Path mappings:** `tsconfig.base.json` maps `@stackables/*` for cross-package imports
 
 ## Deep-dive docs

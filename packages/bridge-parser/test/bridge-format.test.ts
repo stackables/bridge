@@ -1412,6 +1412,31 @@ describe("parser diagnostics and serializer edge cases", () => {
     );
   });
 
+  test("define handles cannot be memoized at the invocation site", () => {
+    assert.throws(
+      () =>
+        parseBridge(`version 1.5
+
+define formatProfile {
+  with output as o
+
+  o.data = null
+}
+
+bridge Query.processCatalog {
+  with context as ctx
+  with output as o
+
+  o <- ctx.catalog[] as cat {
+    with formatProfile as profile memoize
+
+    .item <- profile.data
+  }
+}`),
+      /memoize|tool/i,
+    );
+  });
+
   test("serializeBridge uses compact default handle bindings", () => {
     const src = `version 1.5
 bridge Query.defaults {

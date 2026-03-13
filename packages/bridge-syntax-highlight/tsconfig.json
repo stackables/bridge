@@ -3,18 +3,26 @@
     "module": "commonjs",
     "target": "ES2022",
     "lib": ["ES2022"],
-    "outDir": "build",
-    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
-    "sourceMap": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@stackables/bridge-types": ["./packages/bridge-types/src/index.ts"],
+      "@stackables/bridge-core": ["./packages/bridge-core/src/index.ts"],
+      "@stackables/bridge-stdlib": ["./packages/bridge-stdlib/src/index.ts"],
+      "@stackables/bridge-parser": ["./packages/bridge-parser/src/index.ts"],
+      "@stackables/bridge-compiler": ["./packages/bridge-compiler/src/index.ts"],
+      "@stackables/bridge-graphql": ["./packages/bridge-graphql/src/index.ts"],
+      "@stackables/bridge": ["./packages/bridge/src/index.ts"]
+    }
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "out"]
+  "include": ["src"]
 }

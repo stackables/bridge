@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import { forEachEngine } from "./utils/dual-run.ts";
+import { regressionTest } from "./utils/regression.ts";
 
-const bridgeFile = readFileSync(
-  new URL("./property-search.bridge", import.meta.url),
-  "utf-8",
-);
+// ═══════════════════════════════════════════════════════════════════════════
+// Property search — chained tools, array mapping, pipe syntax
+//
+// Migrated from legacy/property-search.test.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
 const propertyTools: Record<string, any> = {
-  "hereapi.geocode": async (_params: any) => ({
+  "hereapi.geocode": async () => ({
     items: [
       {
         title: "Berlin",
@@ -17,7 +16,7 @@ const propertyTools: Record<string, any> = {
       },
     ],
   }),
-  "zillow.search": async (_params: any) => ({
+  "zillow.search": async () => ({
     properties: [
       {
         streetAddress: "123 Main St",
@@ -33,7 +32,7 @@ const propertyTools: Record<string, any> = {
       },
     ],
   }),
-  "reviews.getByLocation": async (_params: any) => ({
+  "reviews.getByLocation": async () => ({
     comments: [
       { text: "Great neighborhood", rating: 5 },
       { text: "Quiet area", rating: 4 },
@@ -43,75 +42,103 @@ const propertyTools: Record<string, any> = {
   pluckText: (params: { in: any[] }) => params.in.map((item: any) => item.text),
 };
 
-forEachEngine("property search (.bridge file)", (run) => {
-  test("passthrough: location echoed", async () => {
-    const { data } = await run(
-      bridgeFile,
-      "Query.propertySearch",
-      { location: "Berlin" },
-      propertyTools,
-    );
-    assert.equal(data.location, "Berlin");
-  });
+regressionTest("property search (.bridge file)", {
+  bridge: `
+    version 1.5
 
-  test("topPick: chained geocode → zillow → tool", async () => {
-    const { data } = await run(
-      bridgeFile,
-      "Query.propertySearch",
-      { location: "Berlin" },
-      propertyTools,
-    );
-    const topPick = data.topPick;
-    assert.equal(topPick.address, "123 Main St");
-    assert.equal(topPick.price, 350000); // 35000000 / 100
-    assert.equal(topPick.bedrooms, 3);
-    assert.equal(topPick.city, "Berlin");
-  });
+    bridge Query.propertySearch {
+      with hereapi.geocode as gc
+      with zillow.search as z
+      with input as i
+      with centsToUsd as usd
+      with output as o
 
-  test("listings: array mapping with per-element rename", async () => {
-    const { data } = await run(
-      bridgeFile,
-      "Query.propertySearch",
-      { location: "Berlin" },
-      propertyTools,
-    );
-    const listings = data.listings;
-    assert.equal(listings.length, 2);
-    assert.equal(listings[0].address, "123 Main St");
-    assert.equal(listings[0].price, 35000000); // raw value, no tool on listings
-    assert.equal(listings[1].address, "456 Oak Ave");
-    assert.equal(listings[1].bedrooms, 4);
-    assert.equal(listings[1].city, "Berlin");
-  });
+      o.location <- i.location
+      gc.q <- i.location
+      z.latitude <- gc.items[0].position.lat
+      z.longitude <- gc.items[0].position.lng
+      z.maxPrice <- i.budget
 
-  test("propertyComments: chained tools + pluckText tool", async () => {
-    const { data } = await run(
-      bridgeFile,
-      "Query.propertyComments",
-      { location: "Berlin" },
-      propertyTools,
-    );
-    assert.deepStrictEqual(data.propertyComments, [
-      "Great neighborhood",
-      "Quiet area",
-    ]);
-  });
+      o.topPick.address <- z.properties[0].streetAddress
+      o.topPick.bedrooms <- z.properties[0].beds
+      o.topPick.city <- z.properties[0].location.city
 
-  test("zillow receives chained geocode coordinates", async () => {
-    let zillowParams: Record<string, any> = {};
-    const spy = async (params: any) => {
-      zillowParams = params;
-      return propertyTools["zillow.search"](params);
-    };
+      usd.cents <- z.properties[0].priceInCents
+      o.topPick.price <- usd.dollars
 
-    await run(
-      bridgeFile,
-      "Query.propertySearch",
-      { location: "Berlin" },
-      { ...propertyTools, "zillow.search": spy },
-    );
+      o.listings <- z.properties[] as prop {
+        .address <- prop.streetAddress
+        .price <- prop.priceInCents
+        .bedrooms <- prop.beds
+        .city <- prop.location.city
+      }
+    }
 
-    assert.equal(zillowParams.latitude, 52.53);
-    assert.equal(zillowParams.longitude, 13.38);
-  });
+    bridge Query.propertyComments {
+      with hereapi.geocode as gc
+      with reviews.getByLocation as rv
+      with input as i
+      with pluckText as pt
+      with output as o
+
+      gc.q <- i.location
+      rv.lat <- gc.items[0].position.lat
+      rv.lng <- gc.items[0].position.lng
+      o.propertyComments <- pt:rv.comments
+    }
+  `,
+  tools: propertyTools,
+  scenarios: {
+    "Query.propertySearch": {
+      "passthrough: location echoed": {
+        input: { location: "Berlin" },
+        assertData: { location: "Berlin" },
+        assertTraces: 3,
+      },
+      "topPick: chained geocode → zillow → centsToUsd": {
+        input: { location: "Berlin" },
+        assertData: {
+          topPick: {
+            address: "123 Main St",
+            price: 350000,
+            bedrooms: 3,
+            city: "Berlin",
+          },
+        },
+        assertTraces: 3,
+      },
+      "listings: array mapping with per-element rename": {
+        input: { location: "Berlin" },
+        assertData: (data: any) => {
+          const listings = data.listings;
+          assert.equal(listings.length, 2);
+          assert.equal(listings[0].address, "123 Main St");
+          assert.equal(listings[0].price, 35000000);
+          assert.equal(listings[1].address, "456 Oak Ave");
+          assert.equal(listings[1].bedrooms, 4);
+          assert.equal(listings[1].city, "Berlin");
+        },
+        assertTraces: 3,
+      },
+      "empty listings: array source returns empty": {
+        input: { location: "Berlin" },
+        fields: ["listings"],
+        tools: {
+          ...propertyTools,
+          "zillow.search": async () => ({ properties: [] }),
+        },
+        assertData: { listings: [] },
+        assertTraces: 2,
+      },
+    },
+    "Query.propertyComments": {
+      "chained tools + pluckText pipe": {
+        input: { location: "Berlin" },
+        assertData: {
+          propertyComments: ["Great neighborhood", "Quiet area"],
+        },
+        assertTraces: 3,
+      },
+    },
+  },
 });

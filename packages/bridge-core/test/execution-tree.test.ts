@@ -5,6 +5,7 @@ import {
   BridgePanicError,
   BridgeRuntimeError,
   ExecutionTree,
+  MAX_EXECUTION_DEPTH,
   type BridgeDocument,
   type NodeRef,
 } from "../src/index.ts";
@@ -22,6 +23,21 @@ describe("ExecutionTree edge cases", () => {
     assert.throws(
       () => new ExecutionTree(TRUNK, DOC, {}, undefined, parent),
       BridgePanicError,
+    );
+  });
+
+  test("shadow() beyond MAX_EXECUTION_DEPTH throws BridgePanicError", () => {
+    let tree = new ExecutionTree(TRUNK, DOC);
+    for (let i = 0; i < MAX_EXECUTION_DEPTH; i++) {
+      tree = tree.shadow();
+    }
+    assert.throws(
+      () => tree.shadow(),
+      (err: any) => {
+        assert.ok(err instanceof BridgePanicError);
+        assert.match(err.message, /Maximum execution depth exceeded/);
+        return true;
+      },
     );
   });
 
@@ -62,5 +78,32 @@ describe("ExecutionTree edge cases", () => {
     assert.equal((tree as any).applyPath([{ x: 1 }], ref(["x"])), undefined);
     assert.equal((tree as any).applyPath([{ x: 1 }], ref(["0", "x"])), 1);
     assert.match(warning, /Accessing "\.x" on an array/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Error class identity
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("BridgePanicError / BridgeAbortError", () => {
+  test("BridgePanicError extends Error", () => {
+    const err = new BridgePanicError("test");
+    assert.ok(err instanceof Error);
+    assert.ok(err instanceof BridgePanicError);
+    assert.equal(err.name, "BridgePanicError");
+    assert.equal(err.message, "test");
+  });
+
+  test("BridgeAbortError extends Error with default message", () => {
+    const err = new BridgeAbortError();
+    assert.ok(err instanceof Error);
+    assert.ok(err instanceof BridgeAbortError);
+    assert.equal(err.name, "BridgeAbortError");
+    assert.equal(err.message, "Execution aborted by external signal");
+  });
+
+  test("BridgeAbortError accepts custom message", () => {
+    const err = new BridgeAbortError("custom");
+    assert.equal(err.message, "custom");
   });
 });

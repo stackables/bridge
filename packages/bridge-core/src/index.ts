@@ -49,6 +49,7 @@ export {
   BridgeRuntimeError,
   BridgeTimeoutError,
   MAX_EXECUTION_DEPTH,
+  isLoopControlSignal,
 } from "./tree-types.ts";
 export type { Logger } from "./tree-types.ts";
 
@@ -87,6 +88,7 @@ export {
   buildTraversalManifest,
   decodeExecutionTrace,
   buildTraceBitsMap,
+  buildEmptyArrayBitsMap,
 } from "./enumerate-traversals.ts";
 export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";
 

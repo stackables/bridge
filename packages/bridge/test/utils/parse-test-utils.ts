@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-function omitLoc(value: unknown): unknown {
+export function omitLoc(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => omitLoc(entry));
   }

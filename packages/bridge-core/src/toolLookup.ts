@@ -64,7 +64,13 @@ export function lookupToolFn(
 ): ToolCallFn | ((...args: any[]) => any) | undefined {
   const toolFns = ctx.toolFns;
   if (name.includes(".")) {
-    // Try namespace traversal first
+    // Check flat key first — explicit overrides (e.g. "std.httpCall" as a
+    // literal property) take precedence over namespace traversal so that
+    // users can override built-in tools without replacing the whole namespace.
+    const flat = (toolFns as any)?.[name];
+    if (typeof flat === "function") return flat;
+
+    // Namespace traversal (e.g. toolFns.std.httpCall)
     const parts = name.split(".");
     let current: any = toolFns;
     for (const part of parts) {
@@ -76,9 +82,6 @@ export function lookupToolFn(
       current = current[part];
     }
     if (typeof current === "function") return current;
-    // Fall back to flat key (e.g. "hereapi.geocode" as a literal property name)
-    const flat = (toolFns as any)?.[name];
-    if (typeof flat === "function") return flat;
 
     // Try versioned namespace keys (e.g. "std.str@999.1" → { toLowerCase })
     // For "std.str.toLowerCase@999.1", check:
@@ -550,6 +553,41 @@ export async function resolveToolSource(
   return value;
 }
 
+// ── Constant wire merging ───────────────────────────────────────────────────
+
+/**
+ * Merge constant self-wires from a ToolDef into the tool's return value,
+ * so that dependents can read constant fields (e.g. `.token = "x"`) as
+ * if the tool produced them.  Tool-returned fields take precedence.
+ */
+export function mergeToolDefConstants(toolDef: ToolDef, result: any): any {
+  if (result == null || typeof result !== "object" || Array.isArray(result))
+    return result;
+
+  // Build fork keys to skip fork-targeted constants
+  const forkKeys = new Set<string>();
+  if (toolDef.pipeHandles) {
+    for (const ph of toolDef.pipeHandles) {
+      forkKeys.add(ph.key);
+    }
+  }
+
+  for (const wire of toolDef.wires) {
+    if (!("value" in wire) || "cond" in wire || !("to" in wire)) continue;
+    if (forkKeys.size > 0 && forkKeys.has(trunkKey(wire.to))) continue;
+
+    const path = wire.to.path;
+    if (path.length === 0) continue;
+
+    // Only fill in fields the tool didn't already produce
+    if (!(path[0] in result)) {
+      setNested(result, path, coerceConstant(wire.value));
+    }
+  }
+
+  return result;
+}
+
 // ── Tool dependency execution ───────────────────────────────────────────────
 
 /**
@@ -577,7 +615,8 @@ export function resolveToolDep(
 
     // on error: wrap the tool call with fallback
     try {
-      return await ctx.callTool(toolName, toolDef.fn!, fn, input);
+      const raw = await ctx.callTool(toolName, toolDef.fn!, fn, input);
+      return mergeToolDefConstants(toolDef, raw);
     } catch (err) {
       if (!toolDef.onError) throw err;
       if ("value" in toolDef.onError) return JSON.parse(toolDef.onError.value);

@@ -119,3 +119,11 @@ const schema = bridgeTransform(createSchema({ typeDefs }), instructions, {
 ```
 
 **[Read the Tools & Extensions Guide](https://bridge.sdk42.com/advanced/custom-tools/)**
+
+## Testing Prompt
+
+The reason we write tests is to catch bugs so we can fix them — not to document broken behavior and ship it.
+
+We never hide problems or avoid broken scenarios to make tests pass.
+
+It is always better to not ship and have broken tests than to break our users trust.

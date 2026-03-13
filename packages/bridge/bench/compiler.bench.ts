@@ -7,7 +7,7 @@
  * Both paths execute the same bridge documents with the same tools and input,
  * measuring throughput after compile-once / parse-once setup.
  *
- * Run:   node --experimental-transform-types --conditions source bench/compiler.bench.ts
+ * Run:   node --experimental-transform-types bench/compiler.bench.ts
  */
 import { Bench } from "tinybench";
 import {

@@ -33,16 +33,30 @@ export class BridgeGraphQLIncompatibleError extends Error {
  *
  * **Currently detected incompatibilities:**
  *
- * - **Nested multilevel `break N` / `continue N`** — GraphQL resolves array
- *   elements field-by-field through independent resolver callbacks. A
- *   multilevel `LoopControlSignal` emitted deep inside an inner array element
- *   cannot propagate back out to the already-committed outer shadow array.
+ * - **`break` / `continue` inside array element sub-fields** — GraphQL
+ *   resolves array elements field-by-field through independent resolver
+ *   callbacks.  A control-flow signal emitted from a sub-field resolver
+ *   cannot remove or skip the already-committed parent array element.
+ *   Standalone mode uses `materializeShadows` which handles these correctly.
  */
 export function assertBridgeGraphQLCompatible(bridge: Bridge): void {
   const op = `${bridge.type}.${bridge.field}`;
+  const arrayPaths = new Set(Object.keys(bridge.arrayIterators ?? {}));
 
   for (const wire of bridge.wires) {
-    if (wire.to.path.length <= 1) continue;
+    // Check if this wire targets a sub-field inside an array element.
+    // Array iterators map output-path prefixes (e.g. "list" for o.list,
+    // "" for root o) to their iterator variable.  A wire whose to.path
+    // starts with one of those prefixes + at least one more segment is
+    // an element sub-field wire.
+    const toPath = wire.to.path;
+    const isElementSubfield =
+      (arrayPaths.has("") && toPath.length >= 1) ||
+      toPath.some(
+        (_, i) => i > 0 && arrayPaths.has(toPath.slice(0, i).join(".")),
+      );
+
+    if (!isElementSubfield) continue;
 
     const fallbacks =
       "from" in wire
@@ -66,23 +80,20 @@ export function assertBridgeGraphQLCompatible(bridge: Bridge): void {
               ? wire.catchControl
               : undefined;
 
-    const isMultilevel = (
+    const isBreakOrContinue = (
       ctrl: { kind: string; levels?: number } | undefined,
-    ) =>
-      ctrl &&
-      (ctrl.kind === "break" || ctrl.kind === "continue") &&
-      (ctrl.levels ?? 1) > 1;
+    ) => ctrl && (ctrl.kind === "break" || ctrl.kind === "continue");
 
     if (
-      fallbacks?.some((fb) => isMultilevel(fb.control)) ||
-      isMultilevel(catchControl)
+      fallbacks?.some((fb) => isBreakOrContinue(fb.control)) ||
+      isBreakOrContinue(catchControl)
     ) {
       const path = wire.to.path.join(".");
       throw new BridgeGraphQLIncompatibleError(
         op,
-        `[bridge] ${op}: 'break N' / 'continue N' with N > 1 inside a nested ` +
-          `array element (path: ${path}) is not supported in ` +
-          `field-by-field GraphQL execution.`,
+        `[bridge] ${op}: 'break' / 'continue' inside an array element ` +
+          `sub-field (path: ${path}) is not supported in field-by-field ` +
+          `GraphQL execution.`,
       );
     }
   }

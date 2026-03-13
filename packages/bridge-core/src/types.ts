@@ -182,6 +182,8 @@ export type HandleBinding =
       name: string;
       version?: string;
       memoize?: true;
+      /** True when this tool is declared inside an array-mapping block. */
+      element?: true;
     }
   | { handle: string; kind: "input" }
   | { handle: string; kind: "output" }

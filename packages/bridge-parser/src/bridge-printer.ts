@@ -113,7 +113,6 @@ const NO_SPACE_AFTER = new Set([
   "LSquare",
   "LCurly",
   "Colon",
-  "Spread",
   "SafeNav",
 ]);
 

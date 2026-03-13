@@ -17,6 +17,7 @@ import {
   formatBridgeError,
   resolveStd,
   checkHandleVersions,
+  isLoopControlSignal,
   type Logger,
   type ToolTrace,
   type TraceLevel,
@@ -117,6 +118,18 @@ export type BridgeOptions = {
    * Default: 30. Increase for deeply nested array mappings.
    */
   maxDepth?: number;
+  /**
+   * Extract a per-request `AbortSignal` from the GraphQL context.
+   * When the signal is aborted, in-flight tool calls throw `BridgeAbortError`.
+   *
+   * Typical usage with GraphQL Yoga:
+   * ```ts
+   * bridgeTransform(schema, doc, {
+   *   signalMapper: (context) => context.request?.signal,
+   * })
+   * ```
+   */
+  signalMapper?: (context: any) => AbortSignal | undefined;
   /**
    * Override the standalone execution function.
    *
@@ -251,6 +264,7 @@ export function bridgeTransform(
         info: GraphQLResolveInfo,
       ): Promise<unknown> {
         const requestedFields = collectRequestedFields(info);
+        const signal = options?.signalMapper?.(context);
         try {
           const { data, traces } = await executeBridgeFn({
             document: activeDoc,
@@ -260,6 +274,7 @@ export function bridgeTransform(
             tools: userTools,
             ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
             logger,
+            ...(signal ? { signal } : {}),
             ...(options?.toolTimeoutMs !== undefined
               ? { toolTimeoutMs: options.toolTimeoutMs }
               : {}),
@@ -377,6 +392,11 @@ export function bridgeTransform(
               source.maxDepth = Math.floor(options.maxDepth);
             }
 
+            const signal = options?.signalMapper?.(context);
+            if (signal) {
+              source.signal = signal;
+            }
+
             if (traceLevel !== "off") {
               source.tracer = new TraceCollector(traceLevel);
               // Stash tracer on GQL context so the tracing plugin can read it
@@ -410,7 +430,7 @@ export function bridgeTransform(
           if (source instanceof ExecutionTree) {
             let result;
             try {
-              result = await source.response(info.path, array);
+              result = await source.response(info.path, array, scalar);
             } catch (err) {
               throw new Error(
                 formatBridgeError(err, {
@@ -421,13 +441,26 @@ export function bridgeTransform(
               );
             }
 
+            // Safety net: loop control signals (break/continue) must never
+            // reach GraphQL resolvers.  Normally, bridges that use
+            // break/continue inside array element sub-fields fall back to
+            // standalone mode (via assertBridgeGraphQLCompatible), but if
+            // a signal leaks through, coerce it to null rather than
+            // crashing GraphQL serialisation with a Symbol value.
+            if (isLoopControlSignal(result)) {
+              result = null;
+            }
+
             // Scalar return types (JSON, JSONObject, etc.) won't trigger
             // sub-field resolvers, so if response() deferred resolution by
             // returning the tree itself, eagerly materialise the output.
             if (scalar) {
               if (result instanceof ExecutionTree) {
                 try {
-                  return result.collectOutput();
+                  const data = result.collectOutput();
+                  const forced = result.getForcedExecution();
+                  if (forced) await forced;
+                  return data;
                 } catch (err) {
                   throw new Error(
                     formatBridgeError(err, {
@@ -440,11 +473,15 @@ export function bridgeTransform(
               }
               if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
                 try {
-                  return await Promise.all(
+                  const firstTree = result[0] as ExecutionTree;
+                  const forced = firstTree.getForcedExecution();
+                  const collected = await Promise.all(
                     result.map((shadow: ExecutionTree) =>
                       shadow.collectOutput(),
                     ),
                   );
+                  if (forced) await forced;
+                  return collected;
                 } catch (err) {
                   throw new Error(
                     formatBridgeError(err, {
