@@ -1405,9 +1405,6 @@ export function regressionTest(name: string, data: RegressionTest) {
                 // object-typed field as a bare leaf (e.g. fields: ["legs"]),
                 // build a modified schema where that field is typed as
                 // JSONObject so the query doesn't need sub-field selection.
-                // This also forces standalone execution mode so the bridge
-                // engine materialises the full output (JSONObject scalars
-                // can't be resolved field-by-field by GraphQL).
                 const scenarioScenarios: Record<string, Scenario> = {
                   [scenarioName]: scenario,
                 };
@@ -1417,9 +1414,8 @@ export function regressionTest(name: string, data: RegressionTest) {
                   scenarioScenarios,
                   [scenarioName],
                 );
-                const needsJSONObject = fieldsToReplace.size > 0;
                 let querySchema = rawSchema;
-                if (needsJSONObject) {
+                if (fieldsToReplace.size > 0) {
                   const modifiedSDL = replaceFieldTypesWithJSONObject(
                     inferredSDL,
                     fieldsToReplace,
@@ -1432,9 +1428,6 @@ export function regressionTest(name: string, data: RegressionTest) {
                   signalMapper: (ctx) => ctx.__bridgeSignal,
                   toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                   trace: "full",
-                  ...(needsJSONObject
-                    ? { executeBridge: executeRuntime }
-                    : {}),
                 });
                 const source = buildGraphQLOperationSource(
                   querySchema,

@@ -2059,3 +2059,105 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
     },
   },
 });
+
+regressionTest("parity: sparse fieldsets — non-array object selection", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.sparseObjPassthrough {
+      with input as i
+      with api as a
+      with output as o
+
+      a.id <- i.id
+
+      o.id <- a.id
+      o.legs <- a.legs
+      o.price <- a.price
+    }
+
+    bridge Query.sparseObjStructured {
+      with input as i
+      with api as a
+      with output as o
+
+      a.id <- i.id
+
+      o.id <- a.id
+      o.legs {
+        .duration <- a.duration
+        .distance <- a.distance
+      }
+      o.price <- a.price
+    }
+  `,
+  scenarios: {
+    "Query.sparseObjPassthrough": {
+      "bare legs selector passes through object via JSONObject": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            legs: { duration: "2h", distance: 150 },
+            price: 99,
+          }),
+        },
+        fields: ["id", "legs"],
+        assertData: { id: 42, legs: { duration: "2h", distance: 150 } },
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            legs: { duration: "2h", distance: 150 },
+            price: 99,
+          }),
+        },
+        assertData: {
+          id: 42,
+          legs: { duration: "2h", distance: 150 },
+          price: 99,
+        },
+        assertTraces: 1,
+      },
+    },
+    "Query.sparseObjStructured": {
+      "bare legs selector on structured output via JSONObject": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            duration: "2h",
+            distance: 150,
+            price: 99,
+          }),
+        },
+        fields: ["id", "legs"],
+        assertData: {
+          id: 42,
+          legs: { duration: "2h", distance: 150 },
+        },
+        assertTraces: 1,
+      },
+      "all fields returned when no requestedFields": {
+        input: { id: 42 },
+        tools: {
+          api: (p: any) => ({
+            id: p.id,
+            duration: "2h",
+            distance: 150,
+            price: 99,
+          }),
+        },
+        assertData: {
+          id: 42,
+          legs: { duration: "2h", distance: 150 },
+          price: 99,
+        },
+        assertTraces: 1,
+      },
+    },
+  },
+});
