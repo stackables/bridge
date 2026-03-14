@@ -14,7 +14,7 @@ import type { MaybePromise, TreeContext } from "./tree-types.ts";
 import { isFatalError, BridgeAbortError } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
-import { resolveSourceEntries } from "./resolveWiresV2.ts";
+import { resolveSourceEntries } from "./resolveWiresSources.ts";
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ import { resolveSourceEntries } from "./resolveWiresV2.ts";
  *  **Overdefinition** (across wires): multiple wires target the same path
  *    → nullish check — only null/undefined falls through to the next wire.
  *
- * Resolution is handled by `resolveSourceEntries()` from resolveWiresV2.ts,
+ * Resolution is handled by `resolveSourceEntries()` from resolveWiresSources.ts,
  * which evaluates source entries in order with their gates and catch handler.
  *
  * ---

@@ -92,9 +92,9 @@ export type {
 export {
   evaluateExpression,
   resolveSourceEntries,
-  applyFallbackGatesV2,
-  applyCatchV2,
-} from "./resolveWiresV2.ts";
+  applyFallbackGates as applyFallbackGatesV2,
+  applyCatch as applyCatchV2,
+} from "./resolveWiresSources.ts";
 
 // ── Traversal enumeration ───────────────────────────────────────────────────
 

@@ -82,6 +82,16 @@ regressionTest("throw control flow", {
         },
         assertTraces: 1,
       },
+      "tool throws but name present → only catch fires": {
+        input: { name: "ok", a: { _error: "network error" } },
+        assertError: /api call failed/,
+        assertTraces: 1,
+        assertGraphql: {
+          falsyThrow: "ok",
+          nullishThrow: "ok",
+          catchThrow: /api call failed/i,
+        },
+      },
     },
   },
 });

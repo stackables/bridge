@@ -276,8 +276,8 @@ export interface WireSourceEntry {
 }
 
 /**
- * Unified catch handler — replaces the legacy triple of catchFallback /
- * catchFallbackRef / catchControl.
+ * Catch handler for a wire — provides error recovery via a ref, literal, or
+ * control flow instruction.
  */
 export type WireCatch =
   | { ref: NodeRef; loc?: SourceLocation }

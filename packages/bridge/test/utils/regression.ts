@@ -320,14 +320,18 @@ function replaceNamedTypeNode(typeNode: TypeNode, newName: string): TypeNode {
     case "NonNullType":
       return {
         ...typeNode,
-        type: replaceNamedTypeNode(typeNode.type, newName) as
-          typeof typeNode.type,
+        type: replaceNamedTypeNode(
+          typeNode.type,
+          newName,
+        ) as typeof typeNode.type,
       };
     case "ListType":
       return {
         ...typeNode,
-        type: replaceNamedTypeNode(typeNode.type, newName) as
-          typeof typeNode.type,
+        type: replaceNamedTypeNode(
+          typeNode.type,
+          newName,
+        ) as typeof typeNode.type,
       };
     default:
       return typeNode;
@@ -435,10 +439,7 @@ function replaceFieldTypesWithJSONObject(
   });
 
   let result = printGraphQL(modifiedAst);
-  if (
-    fieldsToReplace.size > 0 &&
-    !result.includes("scalar JSONObject")
-  ) {
+  if (fieldsToReplace.size > 0 && !result.includes("scalar JSONObject")) {
     result = `scalar JSONObject\n\n${result}`;
   }
   return result;
@@ -1185,7 +1186,10 @@ export function regressionTest(name: string, data: RegressionTest) {
                 };
 
                 const startMs = performance.now();
-                const assertCtx: AssertContext = { engine: engineName, startMs };
+                const assertCtx: AssertContext = {
+                  engine: engineName,
+                  startMs,
+                };
 
                 try {
                   const {
@@ -1213,8 +1217,16 @@ export function regressionTest(name: string, data: RegressionTest) {
                     );
                   }
 
-                  assertDataExpectation(scenario.assertData, resultData, assertCtx);
-                  assertTraceExpectation(scenario.assertTraces, traces, assertCtx);
+                  assertDataExpectation(
+                    scenario.assertData,
+                    resultData,
+                    assertCtx,
+                  );
+                  assertTraceExpectation(
+                    scenario.assertTraces,
+                    traces,
+                    assertCtx,
+                  );
                 } catch (e: any) {
                   if (engineName === "runtime" && scenario.assertError) {
                     observedRuntimeSamples.push({
@@ -1423,12 +1435,16 @@ export function regressionTest(name: string, data: RegressionTest) {
                   querySchema = buildGraphQLSchema(modifiedSDL);
                 }
 
-                const transformedSchema = bridgeTransform(querySchema, document, {
-                  tools,
-                  signalMapper: (ctx) => ctx.__bridgeSignal,
-                  toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
-                  trace: "full",
-                });
+                const transformedSchema = bridgeTransform(
+                  querySchema,
+                  document,
+                  {
+                    tools,
+                    signalMapper: (ctx) => ctx.__bridgeSignal,
+                    toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
+                    trace: "full",
+                  },
+                );
                 const source = buildGraphQLOperationSource(
                   querySchema,
                   operation,
@@ -1484,7 +1500,11 @@ export function regressionTest(name: string, data: RegressionTest) {
                     graphQLData,
                     graphQLErrors,
                   );
-                  assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
+                  assertTraceExpectation(
+                    scenario.assertTraces,
+                    graphqlTraces,
+                    assertCtx,
+                  );
                   return;
                 }
 
@@ -1493,7 +1513,11 @@ export function regressionTest(name: string, data: RegressionTest) {
                     (graphQLErrors?.length ?? 0) > 0,
                     `GraphQL replay expected errors for ${operation}.${scenarioName}`,
                   );
-                  assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
+                  assertTraceExpectation(
+                    scenario.assertTraces,
+                    graphqlTraces,
+                    assertCtx,
+                  );
                   return;
                 }
 
@@ -1503,15 +1527,23 @@ export function regressionTest(name: string, data: RegressionTest) {
                   `GraphQL execution failed for ${operation}.${scenarioName}: ${JSON.stringify(result.errors)}`,
                 );
 
-                assertDataExpectation(scenario.assertData, graphQLData, assertCtx);
-                assertTraceExpectation(scenario.assertTraces, graphqlTraces, assertCtx);
+                assertDataExpectation(
+                  scenario.assertData,
+                  graphQLData,
+                  assertCtx,
+                );
+                assertTraceExpectation(
+                  scenario.assertTraces,
+                  graphqlTraces,
+                  assertCtx,
+                );
               });
             }
           });
         }
 
         // After all scenarios for this operation, verify traversal coverage
-        test("traversal coverage", (t) => {
+        test("traversal coverage", async (t) => {
           const allRuntimeDisabled = scenarioNames.every((name) =>
             scenarios[name]!.disable?.includes("runtime"),
           );
@@ -1519,6 +1551,9 @@ export function regressionTest(name: string, data: RegressionTest) {
             t.skip("all scenarios have runtime disabled");
             return;
           }
+
+          // Wait for all runtime scenario tests to finish populating traceMasks
+          await runtimeCollectionDone;
 
           const [type, field] = operation.split(".") as [string, string];
           const bridge = document.instructions.find(

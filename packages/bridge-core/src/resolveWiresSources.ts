@@ -36,9 +36,8 @@ import type { SourceLocation } from "@stackables/bridge-types";
 /**
  * Evaluate a recursive Expression tree to a single value.
  *
- * This is the core of the V2 model: any expression that can appear in a
- * source entry (ref, literal, ternary, and/or, control) is recursively
- * resolved here.
+ * Any expression that can appear in a source entry (ref, literal, ternary,
+ * and/or, control) is recursively resolved here.
  */
 export function evaluateExpression(
   ctx: TreeContext,
@@ -77,8 +76,6 @@ export function evaluateExpression(
  * handler recovers.
  *
  * @param bits — Optional pre-resolved trace bits for this wire.
- *   Passed explicitly (instead of looked up from `ctx.traceBits`) to
- *   decouple from the legacy Wire-keyed map during staged migration.
  */
 export async function resolveSourceEntries(
   ctx: TreeContext,
@@ -135,7 +132,7 @@ export async function resolveSourceEntries(
 
     // Try catch handler
     if (w.catch) {
-      const recovered = await applyCatch(ctx, w.catch, pullChain, bits);
+      const recovered = await applyCatchHandler(ctx, w.catch, pullChain, bits);
       if (recovered !== undefined) return recovered;
     }
 
@@ -144,13 +141,12 @@ export async function resolveSourceEntries(
 }
 
 /**
- * Apply the V2 fallback gates to a pre-evaluated value.
+ * Apply fallback gates to a pre-evaluated value.
  *
- * This is the V2 equivalent of the legacy `applyFallbackGates` — exported
- * so existing tests can be migrated incrementally. Takes the source entries
- * (typically `w.sources.slice(1)`) and applies gate checks.
+ * Iterates over `w.sources[1..]`, applying gate checks (falsy `||` or
+ * nullish `??`). Falls through to the next source entry when the gate opens.
  */
-export async function applyFallbackGatesV2(
+export async function applyFallbackGates(
   ctx: TreeContext,
   w: Wire,
   value: unknown,
@@ -204,24 +200,24 @@ export async function applyFallbackGatesV2(
 }
 
 /**
- * Apply the V2 catch handler.
+ * Apply the wire's catch handler.
  *
  * Returns the recovered value, or `undefined` if no catch handler is
  * configured (indicating the error should propagate).
  */
-export async function applyCatchV2(
+export async function applyCatch(
   ctx: TreeContext,
   w: Wire,
   pullChain?: Set<string>,
   bits?: TraceWireBits,
 ): Promise<unknown> {
   if (!w.catch) return undefined;
-  return applyCatch(ctx, w.catch, pullChain, bits);
+  return applyCatchHandler(ctx, w.catch, pullChain, bits);
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
-async function applyCatch(
+async function applyCatchHandler(
   ctx: TreeContext,
   c: WireCatch,
   pullChain?: Set<string>,
@@ -400,11 +396,11 @@ function pullSafe(
   });
 }
 
-// ── Trace recording helpers (V2) ────────────────────────────────────────────
+// ── Trace recording helpers ─────────────────────────────────────────────────
 //
-// These operate on TraceWireBits directly (passed by caller) instead of
-// looking up from the Wire-keyed map. This decouples V2 from the
-// legacy Wire identity during staged migration.
+// Operate on TraceWireBits passed directly by the caller. Minimal overhead:
+// when `bits` is undefined (tracing disabled), the functions return after
+// a single falsy check.
 
 function recordSourceBit(
   ctx: TreeContext,
