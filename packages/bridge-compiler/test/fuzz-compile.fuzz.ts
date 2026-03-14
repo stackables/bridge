@@ -6,10 +6,9 @@ import type {
   Bridge,
   BridgeDocument,
   NodeRef,
-  WireLegacy,
-  WireFallback,
+  Wire,
+  WireSourceEntry,
 } from "@stackables/bridge-core";
-import { legacyToV2 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import {
   BridgeCompilerIncompatibleError,
@@ -73,90 +72,145 @@ function outputRef(type: string, field: string, path: string[]): NodeRef {
   };
 }
 
-const wireArb = (type: string, field: string): fc.Arbitrary<WireLegacy> => {
+const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
   const toArb = pathArb.map((path) => outputRef(type, field, path));
   const fromArb = pathArb.map((path) => inputRef(type, field, path));
 
+  const fallbackSourceArb: fc.Arbitrary<WireSourceEntry> = fc.oneof(
+    fc.record<WireSourceEntry>({
+      gate: fc.constant<"falsy">("falsy"),
+      expr: constantValueArb.map((v) => ({
+        type: "literal" as const,
+        value: v,
+      })),
+    }),
+    fc.record<WireSourceEntry>({
+      gate: fc.constant<"nullish">("nullish"),
+      expr: constantValueArb.map((v) => ({
+        type: "literal" as const,
+        value: v,
+      })),
+    }),
+  );
+
   return fc.oneof(
     // 1. Constant Wires
-    fc.record({
-      value: constantValueArb,
-      to: toArb,
-    }),
+    fc.tuple(toArb, constantValueArb).map(
+      ([to, value]): Wire => ({
+        to,
+        sources: [{ expr: { type: "literal", value } }],
+      }),
+    ),
 
     // 2. Complex Pull Wires (Randomly injecting fallbacks)
-    fc.record(
-      {
-        from: fromArb,
-        to: toArb,
-        fallbacks: fc.array(
-          fc.oneof(
-            fc.record({
-              type: fc.constant<"falsy">("falsy"),
-              value: constantValueArb,
-            }),
-            fc.record({
-              type: fc.constant<"nullish">("nullish"),
-              value: constantValueArb,
-            }),
-          ) as fc.Arbitrary<WireFallback>,
-          { minLength: 0, maxLength: 2 },
-        ),
-        catchFallback: constantValueArb,
-      },
-      { requiredKeys: ["from", "to"] }, // Fallbacks are randomly omitted
-    ),
+    fc
+      .tuple(
+        fromArb,
+        toArb,
+        fc.array(fallbackSourceArb, { minLength: 0, maxLength: 2 }),
+        fc.option(constantValueArb, { nil: undefined }),
+      )
+      .map(([from, to, fallbacks, catchVal]): Wire => {
+        const sources: WireSourceEntry[] = [
+          { expr: { type: "ref", ref: from } },
+          ...fallbacks,
+        ];
+        const wire: Wire = { to, sources };
+        if (catchVal !== undefined) wire.catch = { value: catchVal };
+        return wire;
+      }),
 
     // 3. Ternary Conditional Wires
-    fc.record(
-      {
-        cond: fromArb,
-        to: toArb,
-        thenValue: constantValueArb,
-        elseValue: constantValueArb,
-      },
-      { requiredKeys: ["cond", "to"] }, // then/else are randomly omitted
-    ),
+    fc
+      .tuple(
+        fromArb,
+        toArb,
+        fc.option(constantValueArb, { nil: undefined }),
+        fc.option(constantValueArb, { nil: undefined }),
+      )
+      .map(
+        ([cond, to, thenVal, elseVal]): Wire => ({
+          to,
+          sources: [
+            {
+              expr: {
+                type: "ternary",
+                cond: { type: "ref", ref: cond },
+                then:
+                  thenVal !== undefined
+                    ? { type: "literal", value: thenVal }
+                    : { type: "literal", value: "null" },
+                else:
+                  elseVal !== undefined
+                    ? { type: "literal", value: elseVal }
+                    : { type: "literal", value: "null" },
+              },
+            },
+          ],
+        }),
+      ),
 
     // 4. Logical AND
-    fc.record({
-      condAnd: fc.record(
-        {
-          leftRef: fromArb,
-          rightValue: constantValueArb,
-        },
-        { requiredKeys: ["leftRef"] },
+    fc
+      .tuple(fromArb, toArb, fc.option(constantValueArb, { nil: undefined }))
+      .map(
+        ([left, to, rightVal]): Wire => ({
+          to,
+          sources: [
+            {
+              expr: {
+                type: "and",
+                left: { type: "ref", ref: left },
+                right:
+                  rightVal !== undefined
+                    ? { type: "literal", value: rightVal }
+                    : { type: "literal", value: "null" },
+              },
+            },
+          ],
+        }),
       ),
-      to: toArb,
-    }),
 
     // 5. Logical OR
-    fc.record({
-      condOr: fc.record(
-        {
-          leftRef: fromArb,
-          rightValue: constantValueArb,
-        },
-        { requiredKeys: ["leftRef"] },
+    fc
+      .tuple(fromArb, toArb, fc.option(constantValueArb, { nil: undefined }))
+      .map(
+        ([left, to, rightVal]): Wire => ({
+          to,
+          sources: [
+            {
+              expr: {
+                type: "or",
+                left: { type: "ref", ref: left },
+                right:
+                  rightVal !== undefined
+                    ? { type: "literal", value: rightVal }
+                    : { type: "literal", value: "null" },
+              },
+            },
+          ],
+        }),
       ),
-      to: toArb,
-    }),
   );
 };
 
-const flatWireArb = (type: string, field: string): fc.Arbitrary<WireLegacy> => {
+const flatWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
   const toArb = flatPathArb.map((path) => outputRef(type, field, path));
   const fromArb = flatPathArb.map((path) => inputRef(type, field, path));
 
   return fc.oneof(
-    fc.record({
-      value: constantValueArb,
-      to: toArb,
-    }),
-    fc.record({
-      from: fromArb,
-      to: toArb,
-    }),
+    fc.tuple(toArb, constantValueArb).map(
+      ([to, value]): Wire => ({
+        to,
+        sources: [{ expr: { type: "literal", value } }],
+      }),
+    ),
+    fc.tuple(fromArb, toArb).map(
+      ([from, to]): Wire => ({
+        to,
+        sources: [{ expr: { type: "ref", ref: from } }],
+      }),
+    ),
   );
 };
 
@@ -174,9 +228,7 @@ const bridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc
-        .array(wireArb(type, field), { minLength: 1, maxLength: 20 })
-        .map((ws) => ws.map(legacyToV2)),
+      wires: fc.array(wireArb(type, field), { minLength: 1, maxLength: 20 }),
     }),
   );
 
@@ -194,13 +246,11 @@ const flatBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc
-        .uniqueArray(flatWireArb(type, field), {
-          minLength: 1,
-          maxLength: 20,
-          selector: (wire) => wire.to.path.join("."),
-        })
-        .map((ws) => ws.map(legacyToV2)),
+      wires: fc.uniqueArray(flatWireArb(type, field), {
+        minLength: 1,
+        maxLength: 20,
+        selector: (wire) => wire.to.path.join("."),
+      }),
     }),
   );
 
@@ -367,33 +417,45 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc
-        .uniqueArray(
-          fc.record({
-            from: flatPathArb.map((path) => inputRef(type, field, path)),
-            to: flatPathArb.map((path) => outputRef(type, field, path)),
-            fallbacks: fc.array(
+      wires: fc.uniqueArray(
+        fc
+          .tuple(
+            flatPathArb.map((path) => inputRef(type, field, path)),
+            flatPathArb.map((path) => outputRef(type, field, path)),
+            fc.array(
               fc.oneof(
-                fc.record({
-                  type: fc.constant<"falsy">("falsy"),
-                  value: constantValueArb,
+                fc.record<WireSourceEntry>({
+                  gate: fc.constant<"falsy">("falsy"),
+                  expr: constantValueArb.map((v) => ({
+                    type: "literal" as const,
+                    value: v,
+                  })),
                 }),
-                fc.record({
-                  type: fc.constant<"nullish">("nullish"),
-                  value: constantValueArb,
+                fc.record<WireSourceEntry>({
+                  gate: fc.constant<"nullish">("nullish"),
+                  expr: constantValueArb.map((v) => ({
+                    type: "literal" as const,
+                    value: v,
+                  })),
                 }),
-              ) as fc.Arbitrary<WireFallback>,
+              ),
               { minLength: 0, maxLength: 2 },
             ),
-            catchFallback: constantValueArb,
-          }),
-          {
-            minLength: 1,
-            maxLength: 20,
-            selector: (wire) => wire.to.path.join("."),
-          },
-        )
-        .map((ws) => ws.map(legacyToV2)),
+            constantValueArb,
+          )
+          .map(
+            ([from, to, fallbacks, catchVal]): Wire => ({
+              to,
+              sources: [{ expr: { type: "ref", ref: from } }, ...fallbacks],
+              catch: { value: catchVal },
+            }),
+          ),
+        {
+          minLength: 1,
+          maxLength: 20,
+          selector: (wire) => wire.to.path.join("."),
+        },
+      ),
     }),
   );
 
@@ -414,46 +476,92 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc
-        .uniqueArray(
-          fc.oneof(
-            fc.record(
-              {
-                cond: fromArb,
-                to: toArb,
-                thenValue: constantValueArb,
-                elseValue: constantValueArb,
-              },
-              { requiredKeys: ["cond", "to"] },
+      wires: fc.uniqueArray(
+        fc.oneof(
+          // Ternary
+          fc
+            .tuple(
+              fromArb,
+              toArb,
+              fc.option(constantValueArb, { nil: undefined }),
+              fc.option(constantValueArb, { nil: undefined }),
+            )
+            .map(
+              ([cond, to, thenVal, elseVal]): Wire => ({
+                to,
+                sources: [
+                  {
+                    expr: {
+                      type: "ternary",
+                      cond: { type: "ref", ref: cond },
+                      then:
+                        thenVal !== undefined
+                          ? { type: "literal", value: thenVal }
+                          : { type: "literal", value: "null" },
+                      else:
+                        elseVal !== undefined
+                          ? { type: "literal", value: elseVal }
+                          : { type: "literal", value: "null" },
+                    },
+                  },
+                ],
+              }),
             ),
-            fc.record({
-              condAnd: fc.record(
-                {
-                  leftRef: fromArb,
-                  rightValue: constantValueArb,
-                },
-                { requiredKeys: ["leftRef"] },
-              ),
-              to: toArb,
-            }),
-            fc.record({
-              condOr: fc.record(
-                {
-                  leftRef: fromArb,
-                  rightValue: constantValueArb,
-                },
-                { requiredKeys: ["leftRef"] },
-              ),
-              to: toArb,
-            }),
-          ),
-          {
-            minLength: 1,
-            maxLength: 20,
-            selector: (wire) => wire.to.path.join("."),
-          },
-        )
-        .map((ws) => ws.map(legacyToV2)),
+          // Logical AND
+          fc
+            .tuple(
+              fromArb,
+              toArb,
+              fc.option(constantValueArb, { nil: undefined }),
+            )
+            .map(
+              ([left, to, rightVal]): Wire => ({
+                to,
+                sources: [
+                  {
+                    expr: {
+                      type: "and",
+                      left: { type: "ref", ref: left },
+                      right:
+                        rightVal !== undefined
+                          ? { type: "literal", value: rightVal }
+                          : { type: "literal", value: "null" },
+                    },
+                  },
+                ],
+              }),
+            ),
+          // Logical OR
+          fc
+            .tuple(
+              fromArb,
+              toArb,
+              fc.option(constantValueArb, { nil: undefined }),
+            )
+            .map(
+              ([left, to, rightVal]): Wire => ({
+                to,
+                sources: [
+                  {
+                    expr: {
+                      type: "or",
+                      left: { type: "ref", ref: left },
+                      right:
+                        rightVal !== undefined
+                          ? { type: "literal", value: rightVal }
+                          : { type: "literal", value: "null" },
+                    },
+                  },
+                ],
+              }),
+            ),
+        ),
+        {
+          minLength: 1,
+          maxLength: 20,
+          selector: (wire) => wire.to.path.join("."),
+        },
+      ),
     });
   });
 
