@@ -261,6 +261,124 @@ export type ControlFlowInstruction =
   | { kind: "continue"; levels?: number }
   | { kind: "break"; levels?: number };
 
+// ── Unified Wire Model (V2) ────────────────────────────────────────────────
+//
+// Replaces the discriminated-union Wire type with a single shape where every
+// wire is an ordered list of source entries + an optional catch handler.
+//
+// Migration bridge: both old (`Wire`) and new (`WireV2`) types coexist.
+// Conversion utilities in `wire-compat.ts` translate between them.
+
+/**
+ * A recursive expression tree that evaluates to a single value within one
+ * source entry.
+ *
+ * This captures everything that can appear as the "value-producing"
+ * component of a wire: refs, literals, ternaries, boolean short-circuit
+ * operators, and control flow instructions.
+ *
+ * Note: Bridge `||` and `??` are wire-level fallback gates (sequential
+ * "try this source, if the gate opens try the next one"). They are NOT
+ * expression operators. They live on `WireSourceEntry.gate`.
+ */
+export type Expression =
+  | {
+      /** Pull a data source reference */
+      type: "ref";
+      ref: NodeRef;
+      safe?: true;
+      refLoc?: SourceLocation;
+      loc?: SourceLocation;
+    }
+  | {
+      /** JSON-encoded constant: "\"hello\"", "42", "true", "null" */
+      type: "literal";
+      value: string;
+      loc?: SourceLocation;
+    }
+  | {
+      /** Ternary: `cond ? then : else` */
+      type: "ternary";
+      cond: Expression;
+      then: Expression;
+      else: Expression;
+      condLoc?: SourceLocation;
+      thenLoc?: SourceLocation;
+      elseLoc?: SourceLocation;
+      loc?: SourceLocation;
+    }
+  | {
+      /** Short-circuit logical AND: `left && right` → boolean */
+      type: "and";
+      left: Expression;
+      right: Expression;
+      leftSafe?: true;
+      rightSafe?: true;
+      loc?: SourceLocation;
+    }
+  | {
+      /** Short-circuit logical OR: `left || right` → boolean */
+      type: "or";
+      left: Expression;
+      right: Expression;
+      leftSafe?: true;
+      rightSafe?: true;
+      loc?: SourceLocation;
+    }
+  | {
+      /** Loop/error control: throw, panic, continue, break */
+      type: "control";
+      control: ControlFlowInstruction;
+      loc?: SourceLocation;
+    };
+
+/**
+ * One entry in the wire's ordered fallback chain.
+ *
+ * The first entry has no gate (always evaluated); subsequent entries have a
+ * gate that opens when the running value meets the condition.
+ *
+ * `gate` corresponds to `||` (falsy) and `??` (nullish) in bridge source.
+ * These are wire-level sequencing, not expression-level operators.
+ */
+export interface WireSourceEntry {
+  /** The expression to evaluate for this source */
+  expr: Expression;
+  /**
+   * When to try this entry:
+   * - absent  → always (first entry — the primary source)
+   * - "falsy" → previous value was falsy (0, "", false, null, undefined)
+   * - "nullish" → previous value was null or undefined
+   */
+  gate?: "falsy" | "nullish";
+  loc?: SourceLocation;
+}
+
+/**
+ * Unified catch handler — replaces the legacy triple of catchFallback /
+ * catchFallbackRef / catchControl.
+ */
+export type WireCatch =
+  | { ref: NodeRef; loc?: SourceLocation }
+  | { value: string; loc?: SourceLocation }
+  | { control: ControlFlowInstruction; loc?: SourceLocation };
+
+/**
+ * Unified wire (V2) — every wire has the same shape.
+ *
+ * No longer a discriminated union. The primary expression is always
+ * `sources[0]` (with no gate), and fallback entries are `sources[1..]`
+ * each carrying a gate.
+ */
+export type WireV2 = {
+  to: NodeRef;
+  sources: WireSourceEntry[];
+  catch?: WireCatch;
+  pipe?: true;
+  spread?: true;
+  loc?: SourceLocation;
+};
+
 /**
  * Named constant definition — a reusable value defined in the bridge file.
  *
