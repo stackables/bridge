@@ -44,9 +44,11 @@ import {
   parse as parseGraphQL,
   print as printGraphQL,
   visit,
+  type FieldDefinitionNode,
   type GraphQLObjectType,
   type GraphQLOutputType,
   type GraphQLSchema,
+  type TypeNode,
 } from "graphql";
 import type { Bridge } from "@stackables/bridge-core";
 import { omitLoc } from "./parse-test-utils.ts";
@@ -311,14 +313,22 @@ function renderSelectionTree(tree: SelectionTree | null): string {
  * Walk a GraphQL AST type node and replace its innermost NamedType name.
  * Preserves NonNull and List wrappers.
  */
-function replaceNamedTypeNode(typeNode: any, newName: string): any {
+function replaceNamedTypeNode(typeNode: TypeNode, newName: string): TypeNode {
   switch (typeNode.kind) {
     case "NamedType":
       return { ...typeNode, name: { ...typeNode.name, value: newName } };
     case "NonNullType":
-      return { ...typeNode, type: replaceNamedTypeNode(typeNode.type, newName) };
+      return {
+        ...typeNode,
+        type: replaceNamedTypeNode(typeNode.type, newName) as
+          typeof typeNode.type,
+      };
     case "ListType":
-      return { ...typeNode, type: replaceNamedTypeNode(typeNode.type, newName) };
+      return {
+        ...typeNode,
+        type: replaceNamedTypeNode(typeNode.type, newName) as
+          typeof typeNode.type,
+      };
     default:
       return typeNode;
   }
@@ -407,14 +417,14 @@ function replaceFieldTypesWithJSONObject(
 
   const modifiedAst = visit(ast, {
     ObjectTypeDefinition: {
-      enter(node: any) {
+      enter(node) {
         currentTypeName = node.name.value;
       },
       leave() {
         currentTypeName = "";
       },
     },
-    FieldDefinition(node: any) {
+    FieldDefinition(node): FieldDefinitionNode | undefined {
       const fields = fieldsToReplace.get(currentTypeName);
       if (!fields?.has(node.name.value)) return undefined;
       return {
