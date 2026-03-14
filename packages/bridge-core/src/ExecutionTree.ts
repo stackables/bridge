@@ -1751,7 +1751,30 @@ export class ExecutionTree implements TreeContext {
         return response;
       }
 
-      // Array: create shadow trees for per-element resolution
+      // Array: create shadow trees for per-element resolution.
+      // However, when the field is a scalar type (e.g. [JSONObject]) and
+      // the array is a pure passthrough (no element-level field mappings),
+      // GraphQL won't call sub-field resolvers so shadow trees are
+      // unnecessary — return the plain resolved array directly.
+      if (scalar) {
+        const { type, field } = this.trunk;
+        const hasElementWires = this.bridge?.wires.some(
+          (w) =>
+            "from" in w &&
+            ((w.from as NodeRef).element === true ||
+              this.isElementScopedTrunk(w.from as NodeRef) ||
+              w.to.element === true) &&
+            w.to.module === SELF_MODULE &&
+            w.to.type === type &&
+            w.to.field === field &&
+            w.to.path.length > cleanPath.length &&
+            cleanPath.every((seg, i) => w.to.path[i] === seg),
+        );
+        if (!hasElementWires) {
+          return response;
+        }
+      }
+
       const resolved = await response;
       if (resolved == null || !Array.isArray(resolved)) return resolved;
       const arrayPathKey = cleanPath.join(".");
@@ -1820,6 +1843,12 @@ export class ExecutionTree implements TreeContext {
         if (fieldName !== undefined && fieldName in elementData) {
           const value = (elementData as Record<string, any>)[fieldName];
           if (array && Array.isArray(value)) {
+            // Nested array: when the field is a scalar type (e.g. [JSONObject])
+            // GraphQL won't call sub-field resolvers, so return the plain
+            // data directly instead of wrapping in shadow trees.
+            if (scalar) {
+              return value;
+            }
             // Nested array: wrap items in shadow trees so they can
             // resolve their own fields via this same fallback path.
             return value.map((item: any) => {
@@ -1831,6 +1860,13 @@ export class ExecutionTree implements TreeContext {
           return value;
         }
       }
+    }
+
+    // Scalar sub-field fallback: when the GraphQL schema declares this
+    // field as a scalar type (e.g. JSONObject), sub-field resolvers won't
+    // fire, so we must eagerly materialise the sub-field from deeper wires.
+    if (scalar && cleanPath.length > 0) {
+      return this.resolveNestedField(cleanPath);
     }
 
     // Return self to trigger downstream resolvers

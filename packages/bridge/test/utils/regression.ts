@@ -40,11 +40,15 @@ import {
   execute as executeGraphQL,
   getNamedType,
   isObjectType,
+  isScalarType,
   parse as parseGraphQL,
   print as printGraphQL,
   visit,
+  type FieldDefinitionNode,
+  type GraphQLObjectType,
   type GraphQLOutputType,
   type GraphQLSchema,
+  type TypeNode,
 } from "graphql";
 import type { Bridge } from "@stackables/bridge-core";
 import { omitLoc } from "./parse-test-utils.ts";
@@ -172,6 +176,35 @@ function buildSelectionTreeFromType(
   return tree;
 }
 
+/**
+ * Like `buildSelectionTreeFromType` but only includes immediate scalar
+ * fields — object-typed children are skipped.  Used for wildcard (`*`)
+ * expansion where `field.*` means "select only scalar sub-fields".
+ */
+function buildScalarOnlySelectionTreeFromType(
+  type: GraphQLOutputType,
+): SelectionTree | null {
+  const unwrapped = unwrapOutputType(type);
+  if (unwrapped instanceof GraphQLList) {
+    return buildScalarOnlySelectionTreeFromType(unwrapped.ofType);
+  }
+
+  const named = getNamedType(unwrapped);
+  if (!isObjectType(named)) {
+    return null;
+  }
+
+  const tree: SelectionTree = {};
+  for (const [fieldName, fieldDef] of Object.entries(named.getFields())) {
+    const fieldNamedType = getNamedType(fieldDef.type);
+    if (isScalarType(fieldNamedType)) {
+      tree[fieldName] = {};
+    }
+  }
+
+  return Object.keys(tree).length > 0 ? tree : null;
+}
+
 function buildSelectionTreeForValue(
   value: unknown,
   type: GraphQLOutputType,
@@ -217,6 +250,46 @@ function buildSelectionTreeForValue(
   return tree;
 }
 
+/**
+ * Expand wildcard (`*`) entries in a selection tree by looking up
+ * **scalar-only** sub-fields from the GraphQL schema type.
+ * Bare leaf selections on object-typed fields are left unchanged
+ * because they require JSONObject schema replacement instead.
+ *
+ * - `{ legs: { "*": {} } }` → `{ legs: { a: {}, b: {} } }` (scalars only)
+ * - `{ legs: {} }` where `legs` is an object type → left as `{ legs: {} }`
+ */
+function resolveSelectionsAgainstSchema(
+  tree: SelectionTree,
+  type: GraphQLOutputType,
+): SelectionTree {
+  const named = getNamedType(type);
+  if (!isObjectType(named)) return tree;
+
+  const result: SelectionTree = {};
+  for (const [key, child] of Object.entries(tree)) {
+    const fieldDef = named.getFields()[key];
+    if (!fieldDef) {
+      result[key] = child;
+      continue;
+    }
+
+    if ("*" in child) {
+      // Expand wildcard to scalar-only immediate sub-fields
+      const expanded = buildScalarOnlySelectionTreeFromType(fieldDef.type);
+      result[key] = expanded ?? {};
+    } else if (Object.keys(child).length > 0) {
+      result[key] = resolveSelectionsAgainstSchema(child, fieldDef.type);
+    } else {
+      // Bare leaf — keep as-is; JSONObject schema replacement handles
+      // object-typed fields selected without sub-field paths.
+      result[key] = child;
+    }
+  }
+
+  return result;
+}
+
 function renderSelectionTree(tree: SelectionTree | null): string {
   if (!tree || Object.keys(tree).length === 0) {
     return "";
@@ -232,6 +305,143 @@ function renderSelectionTree(tree: SelectionTree | null): string {
     .join(" ");
 
   return `{ ${body} }`;
+}
+
+// ── JSONObject replacement for bare-leaf object field selections ────────────
+
+/**
+ * Walk a GraphQL AST type node and replace its innermost NamedType name.
+ * Preserves NonNull and List wrappers.
+ */
+function replaceNamedTypeNode(typeNode: TypeNode, newName: string): TypeNode {
+  switch (typeNode.kind) {
+    case "NamedType":
+      return { ...typeNode, name: { ...typeNode.name, value: newName } };
+    case "NonNullType":
+      return {
+        ...typeNode,
+        type: replaceNamedTypeNode(typeNode.type, newName) as
+          typeof typeNode.type,
+      };
+    case "ListType":
+      return {
+        ...typeNode,
+        type: replaceNamedTypeNode(typeNode.type, newName) as
+          typeof typeNode.type,
+      };
+    default:
+      return typeNode;
+  }
+}
+
+/**
+ * Scan scenarios for leaf field-paths that correspond to object-typed fields
+ * in the schema (not wildcards). Returns a map of `typeName → Set<fieldName>`
+ * identifying fields whose types should be replaced with `JSONObject`.
+ *
+ * A bare path like `"legs"` is a *full selector* — it cascades to the entire
+ * sub-object.  The only way to represent this in GraphQL is to make the
+ * field's return type a `JSONObject` scalar so no sub-field selection is
+ * required in the query.
+ */
+function collectFieldsRequiringJSONObject(
+  schema: GraphQLSchema,
+  operation: string,
+  scenarios: Record<string, Scenario>,
+  scenarioNames: string[],
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+
+  // Collect all non-wildcard leaf paths from scenarios with explicit fields
+  const allPaths = new Set<string>();
+  for (const name of scenarioNames) {
+    const scenario = scenarios[name]!;
+    if (scenario.disable?.includes("graphql") || !scenario.fields) continue;
+    for (const field of scenario.fields) {
+      if (!field.endsWith(".*")) {
+        allPaths.add(field);
+      }
+    }
+  }
+
+  // A path is a leaf if no other path drills into it
+  const leafPaths = [...allPaths].filter(
+    (path) => ![...allPaths].some((other) => other.startsWith(path + ".")),
+  );
+
+  if (leafPaths.length === 0) return result;
+
+  const { field: rootFieldDef } = getOperationField(schema, operation);
+
+  for (const leafPath of leafPaths) {
+    const segments = leafPath.split(".");
+    let currentType: GraphQLObjectType = getNamedType(
+      rootFieldDef.type,
+    ) as GraphQLObjectType;
+    if (!isObjectType(currentType)) continue;
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]!;
+      const fieldDef = currentType.getFields()[seg];
+      if (!fieldDef) break;
+
+      if (i === segments.length - 1) {
+        // This is the leaf segment — check if it has an object type
+        const fieldNamedType = getNamedType(fieldDef.type);
+        if (isObjectType(fieldNamedType)) {
+          const typeFields = result.get(currentType.name) ?? new Set();
+          typeFields.add(seg);
+          result.set(currentType.name, typeFields);
+        }
+      } else {
+        const nextType = getNamedType(fieldDef.type);
+        if (!isObjectType(nextType)) break;
+        currentType = nextType;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Rewrite an SDL string so that the listed fields are typed as `JSONObject`
+ * instead of their original complex type.
+ */
+function replaceFieldTypesWithJSONObject(
+  typeDefs: string,
+  fieldsToReplace: Map<string, Set<string>>,
+): string {
+  const ast = parseGraphQL(typeDefs);
+  let currentTypeName = "";
+
+  const modifiedAst = visit(ast, {
+    ObjectTypeDefinition: {
+      enter(node) {
+        currentTypeName = node.name.value;
+      },
+      leave() {
+        currentTypeName = "";
+      },
+    },
+    FieldDefinition(node): FieldDefinitionNode | undefined {
+      const fields = fieldsToReplace.get(currentTypeName);
+      if (!fields?.has(node.name.value)) return undefined;
+      return {
+        ...node,
+        type: replaceNamedTypeNode(node.type, "JSONObject"),
+      };
+    },
+  });
+
+  let result = printGraphQL(modifiedAst);
+  if (
+    fieldsToReplace.size > 0 &&
+    !result.includes("scalar JSONObject")
+  ) {
+    result = `scalar JSONObject\n\n${result}`;
+  }
+  return result;
 }
 
 function ensureExecutableSDL(typeDefs: string): string {
@@ -372,6 +582,17 @@ function mergeObservedSelection(
 
   for (const selectedPath of selectedPaths) {
     const path = selectedPath.split(".").filter(Boolean);
+
+    // Handle wildcard: "legs.*" means "select all children of legs"
+    if (path.length > 1 && path[path.length - 1] === "*") {
+      const parentPath = path.slice(0, -1);
+      const parentValue = getObservationPath(value, parentPath);
+      if (parentValue !== undefined) {
+        setObservationPath(merged, parentPath, parentValue);
+      }
+      continue;
+    }
+
     const selectedValue = getObservationPath(value, path);
     if (selectedValue !== undefined) {
       setObservationPath(merged, path, selectedValue);
@@ -428,12 +649,21 @@ function buildGraphQLOperationSource(
     ? `(${field.args.map((arg) => `${arg.name}: $${arg.name}`).join(", ")})`
     : "";
 
-  const selectionTree = orderSelectionTree(
+  let selectionTree = orderSelectionTree(
     requestedFields?.length
       ? buildSelectionTreeFromPaths(requestedFields)
       : buildSelectionTreeForValue(expectedData, field.type),
     preferredFieldOrder,
   );
+
+  // When explicit requestedFields are provided, resolve wildcards
+  // (e.g. "legs.*") and bare leaf selections on object-typed fields
+  // (e.g. "legs" where legs has sub-fields) against the schema type so
+  // the resulting GraphQL query includes the required sub-field selections.
+  if (selectionTree && requestedFields?.length) {
+    selectionTree = resolveSelectionsAgainstSchema(selectionTree, field.type);
+  }
+
   const selection = renderSelectionTree(selectionTree);
   const operationKeyword = rootTypeName === "Mutation" ? "mutation" : "query";
 
@@ -1063,6 +1293,7 @@ export function regressionTest(name: string, data: RegressionTest) {
           describe("graphql replay", () => {
             let rawSchema!: GraphQLSchema;
             let replayExemplar: Record<string, unknown> = {};
+            let inferredSDL = "";
 
             before(async () => {
               await runtimeCollectionDone;
@@ -1130,11 +1361,11 @@ export function regressionTest(name: string, data: RegressionTest) {
                 `Cannot infer GraphQL schema for ${operation} without at least one successful scenario`,
               );
 
-              const replaySDL = relaxInputNullabilityInSDL(
+              inferredSDL = relaxInputNullabilityInSDL(
                 ensureExecutableSDLForOperation(observer.toSDL(), operation),
               );
 
-              rawSchema = buildGraphQLSchema(replaySDL);
+              rawSchema = buildGraphQLSchema(inferredSDL);
             });
 
             for (const scenarioName of scenarioNames) {
@@ -1170,14 +1401,36 @@ export function regressionTest(name: string, data: RegressionTest) {
                 }
                 context.__bridgeSignal = ac.signal;
 
-                const transformedSchema = bridgeTransform(rawSchema, document, {
+                // Per-scenario schema: when a scenario selects an
+                // object-typed field as a bare leaf (e.g. fields: ["legs"]),
+                // build a modified schema where that field is typed as
+                // JSONObject so the query doesn't need sub-field selection.
+                const scenarioScenarios: Record<string, Scenario> = {
+                  [scenarioName]: scenario,
+                };
+                const fieldsToReplace = collectFieldsRequiringJSONObject(
+                  rawSchema,
+                  operation,
+                  scenarioScenarios,
+                  [scenarioName],
+                );
+                let querySchema = rawSchema;
+                if (fieldsToReplace.size > 0) {
+                  const modifiedSDL = replaceFieldTypesWithJSONObject(
+                    inferredSDL,
+                    fieldsToReplace,
+                  );
+                  querySchema = buildGraphQLSchema(modifiedSDL);
+                }
+
+                const transformedSchema = bridgeTransform(querySchema, document, {
                   tools,
                   signalMapper: (ctx) => ctx.__bridgeSignal,
                   toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                   trace: "full",
                 });
                 const source = buildGraphQLOperationSource(
-                  rawSchema,
+                  querySchema,
                   operation,
                   replayExpectedData,
                   scenario.fields,
@@ -1187,7 +1440,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                   schema: transformedSchema,
                   document: parseGraphQL(source),
                   variableValues: pickDeclaredVariables(
-                    rawSchema,
+                    querySchema,
                     operation,
                     scenario.input,
                   ),
@@ -1303,3 +1556,13 @@ export function regressionTest(name: string, data: RegressionTest) {
     }
   });
 }
+
+// ── Exported helpers for harness unit tests ─────────────────────────────────
+
+export {
+  buildSelectionTreeFromPaths,
+  buildGraphQLOperationSource,
+  buildGraphQLSchema,
+  collectFieldsRequiringJSONObject,
+  replaceFieldTypesWithJSONObject,
+};
