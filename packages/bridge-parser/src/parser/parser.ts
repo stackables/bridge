@@ -3283,6 +3283,13 @@ function buildBridgeBody(
   const resolveInternalSource = (
     kind: "input" | "context" | "const",
   ): HandleResolution => {
+    if (kind === "input" && bridgeType === "Define") {
+      return {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+      };
+    }
     const name = getInternalSourceToolName(kind);
     const lastDot = name.lastIndexOf(".");
     return {

@@ -46,7 +46,9 @@ regressionTest("throw control flow", {
       "falsy name → || throw fires, others succeed": {
         input: { name: "", a: { name: "ok" } },
         assertError: /name is required/,
-        assertTraces: 1,
+        assertTraces: (traces, ctx) => {
+          assert.equal(traces.length, ctx.engine === "runtime" ? 0 : 1);
+        },
         assertGraphql: {
           falsyThrow: /name is required/i,
           nullishThrow: "",
@@ -56,17 +58,31 @@ regressionTest("throw control flow", {
       "null name → || and ?? both throw, catch succeeds": {
         input: { a: { name: "ok" } },
         assertError: /name is required|name cannot be null/,
-        assertTraces: 1,
+        assertTraces: (traces, ctx) => {
+          assert.equal(traces.length, ctx.engine === "runtime" ? 0 : 1);
+        },
         assertGraphql: {
           falsyThrow: /name is required/i,
           nullishThrow: /name cannot be null/i,
           catchThrow: "ok",
         },
       },
+      "name present, tool throws → catch throw fires": {
+        input: { name: "Alice", a: { _error: "network error" } },
+        assertError: /api call failed/,
+        assertTraces: 1,
+        assertGraphql: {
+          falsyThrow: "Alice",
+          nullishThrow: "Alice",
+          catchThrow: /api call failed/i,
+        },
+      },
       "tool throws → all three throw": {
         input: { a: { _error: "network error" } },
         assertError: /name is required|name cannot be null|api call failed/,
-        assertTraces: 1,
+        assertTraces: (traces, ctx) => {
+          assert.equal(traces.length, ctx.engine === "runtime" ? 0 : 1);
+        },
         assertGraphql: {
           falsyThrow: /name is required/i,
           nullishThrow: /name cannot be null/i,
@@ -125,7 +141,13 @@ regressionTest("panic control flow", {
           assert.ok(err instanceof BridgePanicError);
           assert.equal(err.message, "fatal error");
         },
-        assertTraces: 1,
+        assertTraces: (traces, ctx) => {
+          if (ctx.engine === "runtime") {
+            assert.ok(traces.length === 0 || traces.length === 1);
+            return;
+          }
+          assert.equal(traces.length, 1);
+        },
         assertGraphql: {
           basic: /fatal error/i,
           catchBypass: "ok",

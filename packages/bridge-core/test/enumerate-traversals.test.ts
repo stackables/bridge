@@ -160,7 +160,7 @@ describe("enumerateTraversalIds", () => {
 
   // ── Problem statement example: || + catch ─────────────────────────────────
 
-  test("o <- i.a || i.b catch i.c — 3 traversals", () => {
+  test("o <- i.a || i.b catch i.c — catch source also gets an error traversal", () => {
     const instr = getBridge(bridge`
       version 1.5
       bridge Query.demo {
@@ -177,10 +177,12 @@ describe("enumerateTraversalIds", () => {
     const resultEntries = entries.filter(
       (e) => e.target.includes("result") && e.target.length === 1,
     );
-    assert.equal(resultEntries.length, 3);
+    assert.equal(resultEntries.length, 4);
     assert.equal(resultEntries[0].kind, "primary");
     assert.equal(resultEntries[1].kind, "fallback");
     assert.equal(resultEntries[2].kind, "catch");
+    assert.equal(resultEntries[3].kind, "catch");
+    assert.ok(resultEntries[3].error);
   });
 
   // ── Error traversal entries ───────────────────────────────────────────────
@@ -319,7 +321,7 @@ describe("enumerateTraversalIds", () => {
     assert.ok(resultEntries[1].error);
   });
 
-  test("input ref wire — no error entry (inputs cannot throw)", () => {
+  test("input ref wire — input source now contributes an error traversal", () => {
     const instr = getBridge(bridge`
       version 1.5
       bridge Query.demo {
@@ -334,10 +336,12 @@ describe("enumerateTraversalIds", () => {
     const qEntries = entries.filter(
       (e) => e.target.includes("q") && e.target.length === 1,
     );
-    // i.q is an input ref — no error entry
-    assert.equal(qEntries.length, 1);
+    // i.q is routed through an internal source tool, so it has primary + error entries
+    assert.equal(qEntries.length, 2);
     assert.equal(qEntries[0].kind, "primary");
     assert.ok(!qEntries[0].error);
+    assert.equal(qEntries[1].kind, "primary");
+    assert.ok(qEntries[1].error);
   });
 
   test("safe (?.) wire — no primary/error entry", () => {

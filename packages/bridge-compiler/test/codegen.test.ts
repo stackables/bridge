@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge, formatBridgeError } from "@stackables/bridge-core";
 import type { BridgeDocument } from "@stackables/bridge-core";
+import type { ToolMetadata } from "@stackables/bridge-types";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -11,6 +12,37 @@ import { bridge } from "@stackables/bridge-core";
 const AsyncFunction = Object.getPrototypeOf(async function () {})
   .constructor as typeof Function;
 
+const sourceTool = {
+  sync: true,
+  trace: false,
+  log: false,
+} satisfies ToolMetadata;
+
+function withSourceTools(
+  input: Record<string, unknown>,
+  tools: Record<string, unknown>,
+  context: Record<string, unknown>,
+): Record<string, unknown> {
+  const inputTool = () => input;
+  inputTool.bridge = sourceTool;
+
+  const contextTool = () => context;
+  contextTool.bridge = sourceTool;
+
+  const constsTool = () => ({});
+  constsTool.bridge = sourceTool;
+
+  return {
+    ...tools,
+    internal: {
+      ...((tools as any).internal ?? {}),
+      input: inputTool,
+      context: contextTool,
+      consts: constsTool,
+    },
+  };
+}
+
 /** Build an async function from AOT-generated code. */
 function buildAotFn(code: string) {
   const bodyMatch = code.match(
@@ -18,7 +50,7 @@ function buildAotFn(code: string) {
   );
   if (!bodyMatch)
     throw new Error(`Cannot extract function body from:\n${code}`);
-  return new AsyncFunction(
+  const raw = new AsyncFunction(
     "input",
     "tools",
     "context",
@@ -30,6 +62,12 @@ function buildAotFn(code: string) {
     context: Record<string, unknown>,
     opts?: Record<string, unknown>,
   ) => Promise<any>;
+  return (
+    input: Record<string, unknown>,
+    tools: Record<string, unknown>,
+    context: Record<string, unknown>,
+    opts?: Record<string, unknown>,
+  ) => raw(input, withSourceTools(input, tools, context), context, opts);
 }
 
 /**

@@ -426,10 +426,10 @@ class CodegenContext {
         }
       }
 
-      for (const fallback of wire.fallbacks ?? []) {
+      for (const fallback of ("fallbacks" in wire ? wire.fallbacks : []) ?? []) {
         if (fallback.ref) this.ensureInternalSourceRef(fallback.ref);
       }
-      if (wire.catchFallbackRef) {
+      if ("catchFallbackRef" in wire && wire.catchFallbackRef) {
         this.ensureInternalSourceRef(wire.catchFallbackRef);
       }
     }
@@ -673,6 +673,39 @@ class CodegenContext {
       if (!toolWires.has(tk) && this.tools.has(tk)) {
         toolWires.set(tk, []);
       }
+    }
+
+    const ensureSourceTool = (ref?: NodeRef) => {
+      if (!ref) return;
+      const tk = refTrunkKey(ref);
+      if (!toolWires.has(tk) && this.tools.has(tk)) {
+        toolWires.set(tk, []);
+      }
+    };
+    for (const wire of this.bridge.wires) {
+      if ("from" in wire) {
+        ensureSourceTool(wire.from);
+        for (const fallback of wire.fallbacks ?? []) {
+          ensureSourceTool(fallback.ref);
+        }
+        ensureSourceTool(wire.catchFallbackRef);
+        continue;
+      }
+      if ("cond" in wire) {
+        ensureSourceTool(wire.cond);
+        ensureSourceTool(wire.thenRef);
+        ensureSourceTool(wire.elseRef);
+      } else if ("condAnd" in wire) {
+        ensureSourceTool(wire.condAnd.leftRef);
+        ensureSourceTool(wire.condAnd.rightRef);
+      } else if ("condOr" in wire) {
+        ensureSourceTool(wire.condOr.leftRef);
+        ensureSourceTool(wire.condOr.rightRef);
+      }
+      for (const fallback of ("fallbacks" in wire ? wire.fallbacks : []) ?? []) {
+        ensureSourceTool(fallback.ref);
+      }
+      ensureSourceTool("catchFallbackRef" in wire ? wire.catchFallbackRef : undefined);
     }
 
     // Detect tools whose output is only referenced by catch-guarded wires.
@@ -1893,33 +1926,33 @@ class CodegenContext {
       [];
     for (const pd of toEmit) {
       const depToolDef = this.resolveToolDef(pd.toolName);
-      if (!depToolDef) continue;
-
-      const fnName = depToolDef.fn ?? pd.toolName;
       const varName = `_td${++this.toolCounter}`;
+      const fnName = depToolDef?.fn ?? pd.toolName;
 
       // Build input from the dep's ToolDef wires
       const inputParts: string[] = [];
 
       // Constant wires
-      for (const tw of depToolDef.wires) {
-        if ("value" in tw && !("cond" in tw)) {
-          inputParts.push(
-            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
-          );
+      if (depToolDef) {
+        for (const tw of depToolDef.wires) {
+          if ("value" in tw && !("cond" in tw)) {
+            inputParts.push(
+              `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+            );
+          }
         }
-      }
 
-      // Pull wires — resolved from the dep's own handles
-      for (const tw of depToolDef.wires) {
-        if ("from" in tw) {
-          const source = this.resolveToolWireSource(
-            tw as Wire & { from: NodeRef },
-            depToolDef,
-          );
-          inputParts.push(
-            `      ${JSON.stringify(tw.to.path.join("."))}: ${source}`,
-          );
+        // Pull wires — resolved from the dep's own handles
+        for (const tw of depToolDef.wires) {
+          if ("from" in tw) {
+            const source = this.resolveToolWireSource(
+              tw as Wire & { from: NodeRef },
+              depToolDef,
+            );
+            inputParts.push(
+              `      ${JSON.stringify(tw.to.path.join("."))}: ${source}`,
+            );
+          }
         }
       }
 
@@ -4739,10 +4772,19 @@ class CodegenContext {
     }
 
     // Kahn's algorithm
+    const isInternalTool = (key: string): boolean =>
+      this.tools.get(key)?.toolName.startsWith("internal.") === true;
+    const compareReady = (left: string, right: string): number => {
+      const leftInternal = isInternalTool(left) ? 0 : 1;
+      const rightInternal = isInternalTool(right) ? 0 : 1;
+      if (leftInternal !== rightInternal) return leftInternal - rightInternal;
+      return 0;
+    };
     const queue: string[] = [];
     for (const [key, deg] of inDegree) {
       if (deg === 0) queue.push(key);
     }
+    queue.sort(compareReady);
 
     const sorted: string[] = [];
     while (queue.length > 0) {
@@ -4751,7 +4793,10 @@ class CodegenContext {
       for (const neighbor of adj.get(node) ?? []) {
         const newDeg = (inDegree.get(neighbor) ?? 1) - 1;
         inDegree.set(neighbor, newDeg);
-        if (newDeg === 0) queue.push(neighbor);
+        if (newDeg === 0) {
+          queue.push(neighbor);
+          queue.sort(compareReady);
+        }
       }
     }
 

@@ -12,7 +12,14 @@ function collectConstValues(document: BridgeDocument): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const instruction of document.instructions) {
     if (instruction.kind === "const") {
-      values[instruction.name] = JSON.parse(instruction.value);
+      try {
+        values[instruction.name] = JSON.parse(instruction.value);
+      } catch (error) {
+        throw new Error(
+          `Invalid const "${instruction.name}" value: ${instruction.value}`,
+          { cause: error },
+        );
+      }
     }
   }
   return values;

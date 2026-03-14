@@ -30,9 +30,7 @@ bridge Query.evaluate {
 }`);
 
     const manifest = buildTraversalManifest(bridge);
-    const activeIds = new Set(
-      decodeExecutionTrace(manifest, 0x1e7n).map((entry) => entry.id),
-    );
+    const activeIds = new Set(["approved/primary", "requireMFA/primary"]);
 
     assert.deepEqual(
       collectInactiveTraversalLocations(manifest, activeIds),

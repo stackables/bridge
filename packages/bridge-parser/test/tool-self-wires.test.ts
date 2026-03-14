@@ -33,7 +33,7 @@ function constRef(path: string[]): {
   field: string;
   path: string[];
 } {
-  return { module: SELF_MODULE, type: "Const", field: "const", path };
+  return { module: "internal", type: "Tools", field: "consts", path };
 }
 
 function contextRef(path: string[]): {
@@ -42,7 +42,7 @@ function contextRef(path: string[]): {
   field: string;
   path: string[];
 } {
-  return { module: SELF_MODULE, type: "Context", field: "context", path };
+  return { module: "internal", type: "Tools", field: "context", path };
 }
 
 function parseTool(text: string): ToolDef {
