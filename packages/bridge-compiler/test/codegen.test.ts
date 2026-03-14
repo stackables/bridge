@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { executeBridge, formatBridgeError } from "@stackables/bridge-core";
-import type { BridgeDocument } from "@stackables/bridge-core";
+import { legacyToV2 } from "@stackables/bridge-core";
+import type { BridgeDocument, WireLegacy } from "@stackables/bridge-core";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -332,23 +333,25 @@ describe("AOT codegen: fallback operators", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
-            {
-              from: {
-                module: "_",
-                type: "Query",
-                field: "nullishProbe",
-                path: ["m"],
+          wires: (
+            [
+              {
+                from: {
+                  module: "_",
+                  type: "Query",
+                  field: "nullishProbe",
+                  path: ["m"],
+                },
+                to: {
+                  module: "_",
+                  type: "Query",
+                  field: "nullishProbe",
+                  path: ["k"],
+                },
+                fallbacks: [{ type: "nullish", value: "null" }],
               },
-              to: {
-                module: "_",
-                type: "Query",
-                field: "nullishProbe",
-                path: ["k"],
-              },
-              fallbacks: [{ type: "nullish", value: "null" }],
-            },
-          ],
+            ] as WireLegacy[]
+          ).map(legacyToV2),
         },
       ],
     };
@@ -600,25 +603,27 @@ describe("AOT codegen: conditional wires", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
-            {
-              condAnd: {
-                leftRef: {
+          wires: (
+            [
+              {
+                condAnd: {
+                  leftRef: {
+                    module: "_",
+                    type: "Query",
+                    field: "probe",
+                    path: ["m"],
+                  },
+                  rightValue: "null",
+                },
+                to: {
                   module: "_",
                   type: "Query",
                   field: "probe",
-                  path: ["m"],
+                  path: ["k"],
                 },
-                rightValue: "null",
               },
-              to: {
-                module: "_",
-                type: "Query",
-                field: "probe",
-                path: ["k"],
-              },
-            },
-          ],
+            ] as WireLegacy[]
+          ).map(legacyToV2),
         },
       ],
     };
@@ -651,25 +656,27 @@ describe("AOT codegen: conditional wires", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
-            {
-              condOr: {
-                leftRef: {
+          wires: (
+            [
+              {
+                condOr: {
+                  leftRef: {
+                    module: "_",
+                    type: "Query",
+                    field: "probeOr",
+                    path: ["m"],
+                  },
+                  rightValue: "null",
+                },
+                to: {
                   module: "_",
                   type: "Query",
                   field: "probeOr",
-                  path: ["m"],
+                  path: ["k"],
                 },
-                rightValue: "null",
               },
-              to: {
-                module: "_",
-                type: "Query",
-                field: "probeOr",
-                path: ["k"],
-              },
-            },
-          ],
+            ] as WireLegacy[]
+          ).map(legacyToV2),
         },
       ],
     };
@@ -1639,26 +1646,28 @@ bridge Query.test {
           type: "Query",
           field: "constantOverdef",
           handles: [{ kind: "output", handle: "o" }],
-          wires: [
-            {
-              value: "null",
-              to: {
-                module: "_",
-                type: "Query",
-                field: "constantOverdef",
-                path: ["k"],
+          wires: (
+            [
+              {
+                value: "null",
+                to: {
+                  module: "_",
+                  type: "Query",
+                  field: "constantOverdef",
+                  path: ["k"],
+                },
               },
-            },
-            {
-              value: "false",
-              to: {
-                module: "_",
-                type: "Query",
-                field: "constantOverdef",
-                path: ["k"],
+              {
+                value: "false",
+                to: {
+                  module: "_",
+                  type: "Query",
+                  field: "constantOverdef",
+                  path: ["k"],
+                },
               },
-            },
-          ],
+            ] as WireLegacy[]
+          ).map(legacyToV2),
         },
       ],
     };

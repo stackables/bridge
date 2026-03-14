@@ -10,14 +10,15 @@ import type {
   HandleBinding,
   Instruction,
   ToolDef,
-  Wire,
+  WireLegacy,
 } from "@stackables/bridge-core";
+import { v2ToLegacy, legacyToV2 } from "@stackables/bridge-core";
 import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
-/** Pull wire — the Wire variant that has a `from` field */
-type PullWire = Extract<Wire, { from: unknown }>;
+/** Pull wire — the WireLegacy variant that has a `from` field */
+type PullWire = Extract<WireLegacy, { from: unknown }>;
 
 // ── parsePath ───────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ describe("parseBridge", () => {
     });
     assert.equal(instr.wires.length, 2);
 
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[0], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -108,7 +109,7 @@ describe("parseBridge", () => {
         path: ["search"],
       },
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[1], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -145,7 +146,7 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.handles.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[0], {
       from: {
         module: "api",
         type: "Query",
@@ -161,7 +162,7 @@ describe("parseBridge", () => {
         path: ["value"],
       },
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[1], {
       from: {
         module: SELF_MODULE,
         type: "Tools",
@@ -194,26 +195,27 @@ describe("parseBridge", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assertDeepStrictEqualIgnoringLoc((instr.wires[0] as PullWire).from, {
-      module: "zillow",
-      type: "Query",
-      field: "find",
-      instance: 1,
-      path: ["properties", "0", "streetAddress"],
-    });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0].to, {
+    assertDeepStrictEqualIgnoringLoc(
+      (instr.wires.map(v2ToLegacy)[0] as PullWire).from,
+      {
+        module: "zillow",
+        type: "Query",
+        field: "find",
+        instance: 1,
+        path: ["properties", "0", "streetAddress"],
+      },
+    );
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[0].to, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
       path: ["topPick", "address"],
     });
-    assertDeepStrictEqualIgnoringLoc((instr.wires[1] as PullWire).from.path, [
-      "properties",
-      "0",
-      "location",
-      "city",
-    ]);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1].to.path, [
+    assertDeepStrictEqualIgnoringLoc(
+      (instr.wires.map(v2ToLegacy)[1] as PullWire).from.path,
+      ["properties", "0", "location", "city"],
+    );
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[1].to.path, [
       "topPick",
       "city",
     ]);
@@ -238,7 +240,7 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.wires.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[0], {
       from: {
         module: "provider",
         type: "Query",
@@ -253,7 +255,7 @@ describe("parseBridge", () => {
         path: ["results"],
       },
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[1], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -268,7 +270,7 @@ describe("parseBridge", () => {
         path: ["results", "name"],
       },
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[2], {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[2], {
       from: {
         module: SELF_MODULE,
         type: "Query",
@@ -303,17 +305,17 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.type, "Mutation");
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0].to, {
+    assertDeepStrictEqualIgnoringLoc(instr.wires.map(v2ToLegacy)[0].to, {
       module: "sendgrid",
       type: "Mutation",
       field: "send",
       instance: 1,
       path: ["content"],
     });
-    assertDeepStrictEqualIgnoringLoc((instr.wires[1] as PullWire).from.path, [
-      "headers",
-      "x-message-id",
-    ]);
+    assertDeepStrictEqualIgnoringLoc(
+      (instr.wires.map(v2ToLegacy)[1] as PullWire).from.path,
+      ["headers", "x-message-id"],
+    );
   });
 
   test("multiple bridges separated by ---", () => {
@@ -366,12 +368,15 @@ describe("parseBridge", () => {
       handle: "c",
       kind: "context",
     });
-    assertDeepStrictEqualIgnoringLoc((instr.wires[0] as PullWire).from, {
-      module: SELF_MODULE,
-      type: "Context",
-      field: "context",
-      path: ["maxBudget"],
-    });
+    assertDeepStrictEqualIgnoringLoc(
+      (instr.wires.map(v2ToLegacy)[0] as PullWire).from,
+      {
+        module: SELF_MODULE,
+        type: "Context",
+        field: "context",
+        path: ["maxBudget"],
+      },
+    );
   });
 });
 
@@ -532,7 +537,7 @@ describe("serializeBridge", () => {
           { handle: "o", kind: "output" },
         ],
         wires: [
-          {
+          legacyToV2({
             from: {
               module: SELF_MODULE,
               type: "Mutation",
@@ -546,8 +551,8 @@ describe("serializeBridge", () => {
               instance: 1,
               path: ["content"],
             },
-          },
-          {
+          } as WireLegacy),
+          legacyToV2({
             from: {
               module: "sendgrid",
               type: "Mutation",
@@ -561,7 +566,7 @@ describe("serializeBridge", () => {
               field: "sendEmail",
               path: ["messageId"],
             },
-          },
+          } as WireLegacy),
         ],
       },
     ];
@@ -698,7 +703,7 @@ describe("parseBridge: tool blocks", () => {
     assertDeepStrictEqualIgnoringLoc(root.handles, [
       { kind: "context", handle: "context" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(root.wires.map(v2ToLegacy), [
       {
         value: "https://geocode.search.hereapi.com/v1",
         to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
@@ -722,7 +727,7 @@ describe("parseBridge: tool blocks", () => {
     const child = tools.find((t) => t.name === "hereapi.geocode")!;
     assert.equal(child.fn, undefined);
     assert.equal(child.extends, "hereapi");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(child.wires.map(v2ToLegacy), [
       {
         value: "GET",
         to: {
@@ -771,7 +776,7 @@ describe("parseBridge: tool blocks", () => {
     const root = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(root.wires.map(v2ToLegacy), [
       {
         value: "https://api.sendgrid.com/v3",
         to: {
@@ -810,7 +815,7 @@ describe("parseBridge: tool blocks", () => {
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
     )!;
     assert.equal(child.extends, "sendgrid");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(child.wires.map(v2ToLegacy), [
       {
         value: "POST",
         to: {
@@ -866,7 +871,7 @@ describe("parseBridge: tool blocks", () => {
       { kind: "context", handle: "context" },
       { kind: "tool", handle: "auth", name: "authService" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(serviceB.wires.map(v2ToLegacy)[1], {
       from: {
         module: "_",
         type: "Tools",
@@ -1152,7 +1157,8 @@ describe("parser robustness", () => {
       "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
     ).instructions.find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
-      instr.wires.filter((w) => "from" in w && w.from.element).length,
+      instr.wires.map(v2ToLegacy).filter((w) => "from" in w && w.from.element)
+        .length,
       2,
     );
   });
@@ -1168,9 +1174,9 @@ describe("parser robustness", () => {
         o.name <- i.username # copy the name across
       }
     `).instructions.find((inst) => inst.kind === "bridge") as Bridge;
-    const wire = instr.wires.find(
-      (w) => "from" in w && !("value" in w),
-    ) as PullWire;
+    const wire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && !("value" in w)) as PullWire;
     assert.equal(wire.to.path.join("."), "name");
     assert.equal(wire.from.path.join("."), "username");
   });
@@ -1183,9 +1189,9 @@ describe("parser robustness", () => {
         .url = "https://example.com/things#anchor"
       }
     `).instructions.find((inst) => inst.kind === "tool") as ToolDef;
-    const urlWire = tool.wires.find(
-      (w) => "value" in w && w.to.path.join(".") === "url",
-    );
+    const urlWire = tool.wires
+      .map(v2ToLegacy)
+      .find((w) => "value" in w && w.to.path.join(".") === "url");
     assert.ok(urlWire);
     assert.equal(
       (urlWire as { value: string }).value,

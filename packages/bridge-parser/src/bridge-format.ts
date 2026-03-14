@@ -6,9 +6,9 @@ import type {
   DefineDef,
   NodeRef,
   ToolDef,
-  Wire,
+  WireLegacy,
 } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
+import { SELF_MODULE, v2ToLegacy } from "@stackables/bridge-core";
 import {
   parseBridgeChevrotain,
   type ParseBridgeOptions,
@@ -143,9 +143,10 @@ function formatExprValue(v: string): string {
 }
 
 function serializeToolBlock(tool: ToolDef): string {
+  const toolWires: WireLegacy[] = tool.wires.map(v2ToLegacy);
   const lines: string[] = [];
   const hasBody =
-    tool.handles.length > 0 || tool.wires.length > 0 || !!tool.onError;
+    tool.handles.length > 0 || toolWires.length > 0 || !!tool.onError;
 
   // Declaration line — use `tool <name> from <source>` format
   const source = tool.extends ?? tool.fn;
@@ -206,18 +207,18 @@ function serializeToolBlock(tool: ToolDef): string {
   // Expression fork info
   type ToolExprForkInfo = {
     op: string;
-    aWire: Extract<Wire, { from: NodeRef }> | undefined;
-    bWire: Wire | undefined;
+    aWire: Extract<WireLegacy, { from: NodeRef }> | undefined;
+    bWire: WireLegacy | undefined;
   };
   const exprForks = new Map<string, ToolExprForkInfo>();
-  const exprInternalWires = new Set<Wire>();
+  const exprInternalWires = new Set<WireLegacy>();
 
   // Concat fork info
   type ToolConcatForkInfo = {
     parts: ({ kind: "text"; value: string } | { kind: "ref"; ref: NodeRef })[];
   };
   const concatForks = new Map<string, ToolConcatForkInfo>();
-  const concatInternalWires = new Set<Wire>();
+  const concatInternalWires = new Set<WireLegacy>();
 
   // Pipe handle keys for detecting pipe wires
   const pipeHandleTrunkKeys = new Set<string>();
@@ -229,13 +230,13 @@ function serializeToolBlock(tool: ToolDef): string {
     if (ph.handle.startsWith("__expr_")) {
       const op = TOOL_FN_TO_OP[ph.baseTrunk.field];
       if (!op) continue;
-      let aWire: Extract<Wire, { from: NodeRef }> | undefined;
-      let bWire: Wire | undefined;
-      for (const w of tool.wires) {
+      let aWire: Extract<WireLegacy, { from: NodeRef }> | undefined;
+      let bWire: WireLegacy | undefined;
+      for (const w of toolWires) {
         const wTo = w.to;
         if (refTk(wTo) !== ph.key || wTo.path.length !== 1) continue;
         if (wTo.path[0] === "a" && "from" in w)
-          aWire = w as Extract<Wire, { from: NodeRef }>;
+          aWire = w as Extract<WireLegacy, { from: NodeRef }>;
         else if (wTo.path[0] === "b") bWire = w;
       }
       exprForks.set(ph.key, { op, aWire, bWire });
@@ -249,7 +250,7 @@ function serializeToolBlock(tool: ToolDef): string {
         number,
         { kind: "text"; value: string } | { kind: "ref"; ref: NodeRef }
       >();
-      for (const w of tool.wires) {
+      for (const w of toolWires) {
         const wTo = w.to;
         if (refTk(wTo) !== ph.key) continue;
         if (wTo.path.length !== 2 || wTo.path[0] !== "parts") continue;
@@ -260,7 +261,7 @@ function serializeToolBlock(tool: ToolDef): string {
         } else if ("from" in w) {
           partsMap.set(idx, {
             kind: "ref",
-            ref: (w as Extract<Wire, { from: NodeRef }>).from,
+            ref: (w as Extract<WireLegacy, { from: NodeRef }>).from,
           });
         }
         concatInternalWires.add(w);
@@ -276,7 +277,7 @@ function serializeToolBlock(tool: ToolDef): string {
   }
 
   // Mark output wires from expression/concat forks as internal
-  for (const w of tool.wires) {
+  for (const w of toolWires) {
     if (!("from" in w)) continue;
     const fromTk = refTk(w.from);
     if (
@@ -323,7 +324,7 @@ function serializeToolBlock(tool: ToolDef): string {
     if (info.bWire) {
       if ("from" in info.bWire) {
         const bFromTk = refTk(
-          (info.bWire as Extract<Wire, { from: NodeRef }>).from,
+          (info.bWire as Extract<WireLegacy, { from: NodeRef }>).from,
         );
         if (exprForks.has(bFromTk)) {
           right = reconstructExpr(
@@ -332,7 +333,7 @@ function serializeToolBlock(tool: ToolDef): string {
           );
         } else {
           right = serToolRef(
-            (info.bWire as Extract<Wire, { from: NodeRef }>).from,
+            (info.bWire as Extract<WireLegacy, { from: NodeRef }>).from,
           );
         }
       } else if ("value" in info.bWire) {
@@ -381,7 +382,7 @@ function serializeToolBlock(tool: ToolDef): string {
 
   // Wires — self-wires (targeting the tool's own trunk) get `.` prefix;
   // handle-targeted wires (targeting declared handles) use bare target names
-  for (const wire of tool.wires) {
+  for (const wire of toolWires) {
     // Skip internal expression/concat wires
     if (exprInternalWires.has(wire) || concatInternalWires.has(wire)) continue;
 
@@ -602,7 +603,7 @@ function serializeToolWireSource(ref: NodeRef, tool: ToolDef): string {
 function serializePipeOrRef(
   ref: NodeRef,
   pipeHandleTrunkKeys: Set<string>,
-  toInMap: Map<string, Extract<Wire, { from: NodeRef }>>,
+  toInMap: Map<string, Extract<WireLegacy, { from: NodeRef }>>,
   handleMap: Map<string, string>,
   bridge: Bridge,
   inputHandle: string | undefined,
@@ -678,6 +679,8 @@ function serializeDefineBlock(def: DefineDef): string {
 }
 
 function serializeBridgeBlock(bridge: Bridge): string {
+  const bridgeWires: WireLegacy[] = bridge.wires.map(v2ToLegacy);
+
   // ── Passthrough shorthand ───────────────────────────────────────────
   if (bridge.passthrough) {
     return `bridge ${bridge.type}.${bridge.field} with ${bridge.passthrough}`;
@@ -718,9 +721,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
           if (h2.name.lastIndexOf(".") === -1 && h2.name === h.name) inst++;
           if (h2 === h) break;
         }
-        defineInlinedTrunkKeys.add(
-          `${SELF_MODULE}:Tools:${h.name}:${inst}`,
-        );
+        defineInlinedTrunkKeys.add(`${SELF_MODULE}:Tools:${h.name}:${inst}`);
       }
     }
   }
@@ -728,7 +729,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // Detect element-scoped define handles: defines whose __define_in_ wires
   // originate from element scope (i.e., the define is used inside an array block)
   const elementScopedDefines = new Set<string>();
-  for (const w of bridge.wires) {
+  for (const w of bridgeWires) {
     if (
       "from" in w &&
       w.from.element &&
@@ -839,12 +840,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
       ? `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`
       : `${ref.module}:${ref.type}:${ref.field}`;
 
-  type FW = Extract<Wire, { from: NodeRef }>;
+  type FW = Extract<WireLegacy, { from: NodeRef }>;
   const toInMap = new Map<string, FW>();
   const fromOutMap = new Map<string, FW>();
-  const pipeWireSet = new Set<Wire>();
+  const pipeWireSet = new Set<WireLegacy>();
 
-  for (const w of bridge.wires) {
+  for (const w of bridgeWires) {
     if (!("from" in w) || !(w as any).pipe) continue;
     const fw = w as FW;
     pipeWireSet.add(w);
@@ -902,15 +903,15 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // Collect expression fork metadata: forkTk → { op, bWire, aWire }
   type ExprForkInfo = {
     op: string;
-    bWire: Wire | undefined;
+    bWire: WireLegacy | undefined;
     aWire: FW | undefined;
     /** For condAnd/condOr wires: the logic wire itself */
     logicWire?:
-      | Extract<Wire, { condAnd: any }>
-      | Extract<Wire, { condOr: any }>;
+      | Extract<WireLegacy, { condAnd: any }>
+      | Extract<WireLegacy, { condOr: any }>;
   };
   const exprForks = new Map<string, ExprForkInfo>();
-  const exprPipeWireSet = new Set<Wire>(); // wires that belong to expression forks
+  const exprPipeWireSet = new Set<WireLegacy>(); // wires that belong to expression forks
 
   for (const ph of bridge.pipeHandles ?? []) {
     if (!ph.handle.startsWith("__expr_")) continue;
@@ -919,12 +920,12 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // For condAnd/condOr wires (field === "__and" or "__or")
     if (ph.baseTrunk.field === "__and" || ph.baseTrunk.field === "__or") {
-      const logicWire = bridge.wires.find((w) => {
+      const logicWire = bridgeWires.find((w) => {
         const prop = ph.baseTrunk.field === "__and" ? "condAnd" : "condOr";
         return prop in w && refTrunkKey(w.to) === ph.key;
       }) as
-        | Extract<Wire, { condAnd: any }>
-        | Extract<Wire, { condOr: any }>
+        | Extract<WireLegacy, { condAnd: any }>
+        | Extract<WireLegacy, { condOr: any }>
         | undefined;
 
       if (logicWire) {
@@ -941,8 +942,8 @@ function serializeBridgeBlock(bridge: Bridge): string {
 
     // Find the .a and .b wires for this fork
     let aWire: FW | undefined;
-    let bWire: Wire | undefined;
-    for (const w of bridge.wires) {
+    let bWire: WireLegacy | undefined;
+    for (const w of bridgeWires) {
       const wTo = (w as any).to as NodeRef;
       if (!wTo || refTrunkKey(wTo) !== ph.key || wTo.path.length !== 1)
         continue;
@@ -961,7 +962,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     parts: ({ kind: "text"; value: string } | { kind: "ref"; ref: NodeRef })[];
   };
   const concatForks = new Map<string, ConcatForkInfo>();
-  const concatPipeWireSet = new Set<Wire>(); // wires that belong to concat forks
+  const concatPipeWireSet = new Set<WireLegacy>(); // wires that belong to concat forks
 
   for (const ph of bridge.pipeHandles ?? []) {
     if (!ph.handle.startsWith("__concat_")) continue;
@@ -972,7 +973,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       number,
       { kind: "text"; value: string } | { kind: "ref"; ref: NodeRef }
     >();
-    for (const w of bridge.wires) {
+    for (const w of bridgeWires) {
       const wTo = (w as any).to as NodeRef;
       if (!wTo || refTrunkKey(wTo) !== ph.key) continue;
       if (wTo.path.length !== 2 || wTo.path[0] !== "parts") continue;
@@ -1022,13 +1023,13 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Group element wires by array-destination field ──────────────────
   // Pull wires: from.element=true OR involving element-scoped tools
   // OR define-output wires targeting an array-scoped bridge path
-  const isElementToolWire = (w: Wire): boolean => {
+  const isElementToolWire = (w: WireLegacy): boolean => {
     if (!("from" in w)) return false;
     if (elementToolTrunkKeys.has(refTrunkKey(w.from))) return true;
     if (elementToolTrunkKeys.has(refTrunkKey(w.to))) return true;
     return false;
   };
-  const isDefineOutElementWire = (w: Wire): boolean => {
+  const isDefineOutElementWire = (w: WireLegacy): boolean => {
     if (!("from" in w)) return false;
     if (!w.from.module.startsWith("__define_out_")) return false;
     // Check if target is a bridge trunk path under any array iterator
@@ -1046,14 +1047,14 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
     return false;
   };
-  const elementPullWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { from: NodeRef }> =>
+  const elementPullWires = bridgeWires.filter(
+    (w): w is Extract<WireLegacy, { from: NodeRef }> =>
       "from" in w &&
       (!!w.from.element || isElementToolWire(w) || isDefineOutElementWire(w)),
   );
   // Constant wires: "value" in w && to.element=true
-  const elementConstWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { value: string }> =>
+  const elementConstWires = bridgeWires.filter(
+    (w): w is Extract<WireLegacy, { value: string }> =>
       "value" in w && !!w.to.element,
   );
 
@@ -1145,7 +1146,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     );
 
     // For each element tool, find its output wire to determine scope
-    for (const w of bridge.wires) {
+    for (const w of bridgeWires) {
       if (!("from" in w)) continue;
       const fromTk = refTrunkKey(w.from);
       if (!elementToolTrunkKeys.has(fromTk)) continue;
@@ -1192,7 +1193,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Helper: is a wire fully internal to define expansion? ──────────
   // User-authored wires have one define-boundary endpoint + one regular endpoint.
   // Internal expansion wires have both endpoints in define-boundary/inlined-tool space.
-  const isDefineInternalWire = (w: Wire): boolean => {
+  const isDefineInternalWire = (w: WireLegacy): boolean => {
     const toIsDefine =
       isDefineBoundaryModule(w.to.module) || isDefineInlinedRef(w.to);
     if (!toIsDefine) return false;
@@ -1204,7 +1205,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   };
 
   // ── Exclude pipe, element-pull, element-const, expression-internal, concat-internal, __local, define-internal, and element-scoped ternary wires from main loop
-  const regularWires = bridge.wires.filter(
+  const regularWires = bridgeWires.filter(
     (w) =>
       !pipeWireSet.has(w) &&
       !exprPipeWireSet.has(w) &&
@@ -1224,32 +1225,32 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // ── Collect __local binding wires for array-scoped `with` declarations ──
   type LocalBindingInfo = {
     alias: string;
-    sourceWire?: Extract<Wire, { from: NodeRef }>;
-    ternaryWire?: Extract<Wire, { cond: NodeRef }>;
+    sourceWire?: Extract<WireLegacy, { from: NodeRef }>;
+    ternaryWire?: Extract<WireLegacy, { cond: NodeRef }>;
   };
   const localBindingsByAlias = new Map<string, LocalBindingInfo>();
-  const localReadWires: Extract<Wire, { from: NodeRef }>[] = [];
-  for (const w of bridge.wires) {
+  const localReadWires: Extract<WireLegacy, { from: NodeRef }>[] = [];
+  for (const w of bridgeWires) {
     if (w.to.module === "__local" && "from" in w) {
       localBindingsByAlias.set(w.to.field, {
         alias: w.to.field,
-        sourceWire: w as Extract<Wire, { from: NodeRef }>,
+        sourceWire: w as Extract<WireLegacy, { from: NodeRef }>,
       });
     }
     if (w.to.module === "__local" && "cond" in w) {
       localBindingsByAlias.set(w.to.field, {
         alias: w.to.field,
-        ternaryWire: w as Extract<Wire, { cond: NodeRef }>,
+        ternaryWire: w as Extract<WireLegacy, { cond: NodeRef }>,
       });
     }
     if ("from" in w && (w.from as NodeRef).module === "__local") {
-      localReadWires.push(w as Extract<Wire, { from: NodeRef }>);
+      localReadWires.push(w as Extract<WireLegacy, { from: NodeRef }>);
     }
   }
 
   // ── Collect element-scoped ternary wires ────────────────────────────
-  const elementTernaryWires = bridge.wires.filter(
-    (w): w is Extract<Wire, { cond: NodeRef }> =>
+  const elementTernaryWires = bridgeWires.filter(
+    (w): w is Extract<WireLegacy, { cond: NodeRef }> =>
       "cond" in w && isUnderArrayScope(w.to),
   );
 
@@ -2062,16 +2063,16 @@ function serializeBridgeBlock(bridge: Bridge): string {
   // Spread wires must be emitted inside path scope blocks: `target { ...source; .field <- ... }`
   // Group each spread wire with sibling wires whose to.path extends the spread's to.path.
   type SpreadGroup = {
-    spreadWires: Extract<Wire, { from: NodeRef }>[];
-    siblingWires: Wire[];
+    spreadWires: Extract<WireLegacy, { from: NodeRef }>[];
+    siblingWires: WireLegacy[];
     scopePath: string[];
   };
   const spreadGroups: SpreadGroup[] = [];
-  const spreadConsumedWires = new Set<Wire>();
+  const spreadConsumedWires = new Set<WireLegacy>();
 
   {
     const spreadWiresInRegular = regularWires.filter(
-      (w): w is Extract<Wire, { from: NodeRef }> =>
+      (w): w is Extract<WireLegacy, { from: NodeRef }> =>
         "from" in w && !!w.spread,
     );
     // Group by to.path (scope path)
@@ -2121,7 +2122,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
             },
             false,
           )
-        : outputHandle ?? "o";
+        : (outputHandle ?? "o");
     lines.push(`${scopePrefix} {`);
     // Emit spread lines
     for (const sw of group.spreadWires) {

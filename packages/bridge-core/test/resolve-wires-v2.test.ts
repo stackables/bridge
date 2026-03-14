@@ -12,7 +12,7 @@ import {
   isLoopControlSignal,
 } from "../src/tree-types.ts";
 import type { TreeContext } from "../src/tree-types.ts";
-import type { Expression, NodeRef, Wire, WireV2 } from "../src/types.ts";
+import type { Expression, NodeRef, WireLegacy, WireV2 } from "../src/types.ts";
 import {
   evaluateExpression,
   applyFallbackGatesV2,
@@ -409,7 +409,7 @@ describe("applyCatchV2", () => {
 
 describe("legacyToV2", () => {
   test("converts constant wire", () => {
-    const legacy: Wire = { value: "42", to: REF };
+    const legacy: WireLegacy = { value: "42", to: REF };
     const v2 = legacyToV2(legacy);
     assert.equal(v2.sources.length, 1);
     assert.equal(v2.sources[0]!.expr.type, "literal");
@@ -418,7 +418,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with no modifiers", () => {
-    const legacy: Wire = { from: ref("x"), to: REF };
+    const legacy: WireLegacy = { from: ref("x"), to: REF };
     const v2 = legacyToV2(legacy);
     assert.equal(v2.sources.length, 1);
     const expr = v2.sources[0]!.expr;
@@ -428,7 +428,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with safe flag", () => {
-    const legacy: Wire = { from: ref("x"), to: REF, safe: true };
+    const legacy: WireLegacy = { from: ref("x"), to: REF, safe: true };
     const v2 = legacyToV2(legacy);
     const expr = v2.sources[0]!.expr;
     assert.equal(expr.type, "ref");
@@ -436,7 +436,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with fallbacks", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       from: ref("x"),
       to: REF,
       fallbacks: [
@@ -454,7 +454,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with catch constant", () => {
-    const legacy: Wire = { from: ref("x"), to: REF, catchFallback: "err" };
+    const legacy: WireLegacy = { from: ref("x"), to: REF, catchFallback: "err" };
     const v2 = legacyToV2(legacy);
     assert.ok(v2.catch);
     assert.equal("value" in v2.catch, true);
@@ -462,7 +462,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with catch ref", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       from: ref("x"),
       to: REF,
       catchFallbackRef: ref("backup"),
@@ -474,7 +474,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts pull wire with catch control", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       from: ref("x"),
       to: REF,
       catchControl: { kind: "throw", message: "boom" },
@@ -486,7 +486,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts ternary wire", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       cond: ref("flag"),
       thenRef: ref("a"),
       elseValue: "fallback",
@@ -503,7 +503,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts condAnd wire", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       condAnd: {
         leftRef: ref("a"),
         rightRef: ref("b"),
@@ -521,7 +521,7 @@ describe("legacyToV2", () => {
   });
 
   test("converts condOr wire", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       condOr: { leftRef: ref("a"), rightValue: "42" },
       to: REF,
     };
@@ -534,7 +534,7 @@ describe("legacyToV2", () => {
   });
 
   test("preserves pipe and spread flags", () => {
-    const legacy: Wire = {
+    const legacy: WireLegacy = {
       from: ref("x"),
       to: REF,
       pipe: true,
@@ -550,7 +550,7 @@ describe("legacyToV2", () => {
 
 describe("v2ToLegacy", () => {
   test("round-trips a constant wire", () => {
-    const original: Wire = { value: "42", to: REF };
+    const original: WireLegacy = { value: "42", to: REF };
     const v2 = legacyToV2(original);
     const back = v2ToLegacy(v2);
     assert.equal("value" in back, true);
@@ -558,7 +558,7 @@ describe("v2ToLegacy", () => {
   });
 
   test("round-trips a pull wire with fallbacks + catch", () => {
-    const original: Wire = {
+    const original: WireLegacy = {
       from: ref("x"),
       to: REF,
       safe: true,
@@ -580,7 +580,7 @@ describe("v2ToLegacy", () => {
   });
 
   test("round-trips a ternary wire", () => {
-    const original: Wire = {
+    const original: WireLegacy = {
       cond: ref("flag"),
       thenRef: ref("a"),
       elseValue: "fallback",
@@ -595,7 +595,7 @@ describe("v2ToLegacy", () => {
   });
 
   test("round-trips a condAnd wire", () => {
-    const original: Wire = {
+    const original: WireLegacy = {
       condAnd: { leftRef: ref("a"), rightRef: ref("b"), safe: true },
       to: REF,
     };
@@ -613,7 +613,7 @@ describe("v2ToLegacy", () => {
 describe("V2 gates match legacy behavior", () => {
   test("falsy gate: converted wire produces same results", async () => {
     const ctx = makeCtx({ "m.a": null, "m.b": "found" });
-    const legacyWire: Wire = {
+    const legacyWire: WireLegacy = {
       from: ref("x"),
       to: REF,
       fallbacks: [
@@ -627,7 +627,7 @@ describe("V2 gates match legacy behavior", () => {
 
   test("nullish gate: converted wire produces same results", async () => {
     const ctx = makeCtx({ "m.fallback": "resolved" });
-    const legacyWire: Wire = {
+    const legacyWire: WireLegacy = {
       from: ref("x"),
       to: REF,
       fallbacks: [{ type: "nullish", ref: ref("fallback") }],
@@ -641,7 +641,7 @@ describe("V2 gates match legacy behavior", () => {
 
   test("mixed chain: converted wire matches legacy behavior", async () => {
     const ctx = makeCtx({ "m.b": 0, "m.c": "found" });
-    const legacyWire: Wire = {
+    const legacyWire: WireLegacy = {
       from: ref("x"),
       to: REF,
       fallbacks: [

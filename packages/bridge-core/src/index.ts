@@ -85,6 +85,7 @@ export type {
   Wire,
   WireCatch,
   WireFallback,
+  WireLegacy,
   WireSourceEntry,
   WireV2,
 } from "./types.ts";

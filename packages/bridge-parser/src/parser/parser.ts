@@ -79,10 +79,10 @@ import type {
   NodeRef,
   SourceLocation,
   ToolDef,
-  Wire,
+  WireLegacy,
   WireFallback,
 } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
+import { SELF_MODULE, legacyToV2, v2ToLegacy } from "@stackables/bridge-core";
 
 // ── Reserved-word guards (mirroring the regex parser) ──────────────────────
 
@@ -1643,7 +1643,10 @@ function locFromNodeRange(
   );
 }
 
-function withLoc<T extends Wire>(wire: T, loc: SourceLocation | undefined): T {
+function withLoc<T extends WireLegacy>(
+  wire: T,
+  loc: SourceLocation | undefined,
+): T {
   if (!loc) return wire;
   return { ...wire, loc } as T;
 }
@@ -1787,7 +1790,7 @@ function processElementLines(
   iterScope: string | string[],
   bridgeType: string,
   bridgeField: string,
-  wires: Wire[],
+  wires: WireLegacy[],
   arrayIterators: Record<string, string>,
   buildSourceExpr: (
     node: CstNode,
@@ -1944,7 +1947,7 @@ function processElementLines(
 
         // Process coalesce modifiers
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(elemLine, "elemCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -1961,7 +1964,7 @@ function processElementLines(
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchLoc: SourceLocation | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(elemLine, "elemCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -2229,7 +2232,7 @@ function processElementLines(
 
         // Process coalesce alternatives.
         const elemFallbacks: WireFallback[] = [];
-        const elemFallbackInternalWires: Wire[] = [];
+        const elemFallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(elemLine, "elemCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -2251,7 +2254,7 @@ function processElementLines(
         let elemCatchFallback: string | undefined;
         let elemCatchControl: ControlFlowInstruction | undefined;
         let elemCatchFallbackRef: NodeRef | undefined;
-        let elemCatchFallbackInternalWires: Wire[] = [];
+        let elemCatchFallbackInternalWires: WireLegacy[] = [];
         const elemCatchAlt = sub(elemLine, "elemCatchAlt");
         if (elemCatchAlt) {
           const preLen = wires.length;
@@ -2304,7 +2307,7 @@ function processElementLines(
 
       // Coalesce alternatives (|| and ??)
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(elemLine, "elemCoalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -2323,7 +2326,7 @@ function processElementLines(
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchLoc: SourceLocation | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(elemLine, "elemCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -2420,7 +2423,7 @@ function processElementScopeLines(
   iterScope: string | string[],
   bridgeType: string,
   bridgeField: string,
-  wires: Wire[],
+  wires: WireLegacy[],
   buildSourceExpr: (
     node: CstNode,
     lineNum: number,
@@ -2625,7 +2628,7 @@ function processElementScopeLines(
         const segs = parseTemplateString(raw);
 
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(scopeLine, "scopeCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -2642,7 +2645,7 @@ function processElementScopeLines(
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchLoc: SourceLocation | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -2801,7 +2804,7 @@ function processElementScopeLines(
         );
 
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(scopeLine, "scopeCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -2818,7 +2821,7 @@ function processElementScopeLines(
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
         let catchLoc: SourceLocation | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -2865,7 +2868,7 @@ function processElementScopeLines(
 
       // Coalesce alternatives (|| and ??)
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(scopeLine, "scopeCoalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -2883,7 +2886,7 @@ function processElementScopeLines(
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchLoc: SourceLocation | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(scopeLine, "scopeCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -3111,7 +3114,7 @@ function buildToolDef(
     fn: isKnownTool ? undefined : source,
     extends: isKnownTool ? source : undefined,
     handles,
-    wires,
+    wires: wires.map(legacyToV2),
     ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
     ...(onError ? { onError } : {}),
   };
@@ -3132,7 +3135,7 @@ function buildDefineDef(node: CstNode): DefineDef {
     kind: "define",
     name,
     handles,
-    wires,
+    wires: wires.map(legacyToV2),
     ...(Object.keys(arrayIterators).length > 0 ? { arrayIterators } : {}),
     ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
     ...(forces.length > 0 ? { forces } : {}),
@@ -3240,7 +3243,7 @@ function buildBridge(
     type: typeName,
     field: fieldName,
     handles,
-    wires,
+    wires: wires.map(legacyToV2),
     arrayIterators:
       Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
     pipeHandles: pipeHandles.length > 0 ? pipeHandles : undefined,
@@ -3267,7 +3270,7 @@ function buildBridgeBody(
   },
 ): {
   handles: HandleBinding[];
-  wires: Wire[];
+  wires: WireLegacy[];
   arrayIterators: Record<string, string>;
   pipeHandles: NonNullable<Bridge["pipeHandles"]>;
   forces: NonNullable<Bridge["forces"]>;
@@ -3276,7 +3279,7 @@ function buildBridgeBody(
   const handleRes = new Map<string, HandleResolution>();
   const handleBindings: HandleBinding[] = [];
   const instanceCounters = new Map<string, number>();
-  const wires: Wire[] = [];
+  const wires: WireLegacy[] = [];
   const arrayIterators: Record<string, string> = {};
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
@@ -3772,7 +3775,7 @@ function buildBridgeBody(
         const segs = parseTemplateString(raw);
 
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(wireNode, "coalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -3792,7 +3795,7 @@ function buildBridgeBody(
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(wireNode, "catchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -3909,7 +3912,7 @@ function buildBridgeBody(
         const elseBranch = extractTernaryBranch(elseNode, lineNum, iterNames);
 
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(wireNode, "coalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -3930,7 +3933,7 @@ function buildBridgeBody(
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(wireNode, "catchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -3973,7 +3976,7 @@ function buildBridgeBody(
       }
 
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       let hasTruthyLiteralFallback = false;
       for (const item of subs(wireNode, "coalesceItem")) {
         const type = tok(item, "falsyOp")
@@ -3999,7 +4002,7 @@ function buildBridgeBody(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(wireNode, "catchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -4712,7 +4715,7 @@ function buildBridgeBody(
         path: [slot],
       });
 
-      // Wire left → fork.a (propagate safe flag from operand)
+      // WireLegacy left → fork.a (propagate safe flag from operand)
       if (left.kind === "literal") {
         wires.push(withLoc({ value: left.value, to: makeTarget("a") }, loc));
       } else {
@@ -4730,7 +4733,7 @@ function buildBridgeBody(
         );
       }
 
-      // Wire right → fork.b (propagate safe flag from operand)
+      // WireLegacy right → fork.b (propagate safe flag from operand)
       if (right.kind === "literal") {
         wires.push(withLoc({ value: right.value, to: makeTarget("b") }, loc));
       } else {
@@ -4956,7 +4959,7 @@ function buildBridgeBody(
           const segs = parseTemplateString(raw);
 
           const fallbacks: WireFallback[] = [];
-          const fallbackInternalWires: Wire[] = [];
+          const fallbackInternalWires: WireLegacy[] = [];
           for (const item of subs(scopeLine, "scopeCoalesceItem")) {
             const type = tok(item, "falsyOp")
               ? ("falsy" as const)
@@ -4976,7 +4979,7 @@ function buildBridgeBody(
           let catchFallback: string | undefined;
           let catchControl: ControlFlowInstruction | undefined;
           let catchFallbackRef: NodeRef | undefined;
-          let catchFallbackInternalWires: Wire[] = [];
+          let catchFallbackInternalWires: WireLegacy[] = [];
           const catchAlt = sub(scopeLine, "scopeCatchAlt");
           if (catchAlt) {
             const preLen = wires.length;
@@ -5107,7 +5110,7 @@ function buildBridgeBody(
           const thenBranch = extractTernaryBranch(thenNode, scopeLineNum);
           const elseBranch = extractTernaryBranch(elseNode, scopeLineNum);
           const fallbacks: WireFallback[] = [];
-          const fallbackInternalWires: Wire[] = [];
+          const fallbackInternalWires: WireLegacy[] = [];
           for (const item of subs(scopeLine, "scopeCoalesceItem")) {
             const type = tok(item, "falsyOp")
               ? ("falsy" as const)
@@ -5127,7 +5130,7 @@ function buildBridgeBody(
           let catchFallback: string | undefined;
           let catchControl: ControlFlowInstruction | undefined;
           let catchFallbackRef: NodeRef | undefined;
-          let catchFallbackInternalWires: Wire[] = [];
+          let catchFallbackInternalWires: WireLegacy[] = [];
           const catchAlt = sub(scopeLine, "scopeCatchAlt");
           if (catchAlt) {
             const preLen = wires.length;
@@ -5170,7 +5173,7 @@ function buildBridgeBody(
 
         // Coalesce alternatives (|| and ??)
         const fallbacks: WireFallback[] = [];
-        const fallbackInternalWires: Wire[] = [];
+        const fallbackInternalWires: WireLegacy[] = [];
         for (const item of subs(scopeLine, "scopeCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -5191,7 +5194,7 @@ function buildBridgeBody(
         let catchFallback: string | undefined;
         let catchControl: ControlFlowInstruction | undefined;
         let catchFallbackRef: NodeRef | undefined;
-        let catchFallbackInternalWires: Wire[] = [];
+        let catchFallbackInternalWires: WireLegacy[] = [];
         const catchAlt = sub(scopeLine, "scopeCatchAlt");
         if (catchAlt) {
           const preLen = wires.length;
@@ -5242,7 +5245,7 @@ function buildBridgeBody(
 
       // ── Extract coalesce modifiers FIRST (shared by ternary + pull paths) ──
       const aliasFallbacks: WireFallback[] = [];
-      const aliasFallbackInternalWires: Wire[] = [];
+      const aliasFallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(nodeAliasNode, "aliasCoalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -5259,7 +5262,7 @@ function buildBridgeBody(
       let aliasCatchFallback: string | undefined;
       let aliasCatchControl: ControlFlowInstruction | undefined;
       let aliasCatchFallbackRef: NodeRef | undefined;
-      let aliasCatchFallbackInternalWires: Wire[] = [];
+      let aliasCatchFallbackInternalWires: WireLegacy[] = [];
       const aliasCatchAlt = sub(nodeAliasNode, "aliasCatchAlt");
       if (aliasCatchAlt) {
         const preLen = wires.length;
@@ -5610,7 +5613,7 @@ function buildBridgeBody(
 
       // Process coalesce modifiers
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(wireNode, "coalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -5627,7 +5630,7 @@ function buildBridgeBody(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(wireNode, "catchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -5690,7 +5693,7 @@ function buildBridgeBody(
 
       // Process coalesce modifiers on the array wire (same as plain pull wires)
       const arrayFallbacks: WireFallback[] = [];
-      const arrayFallbackInternalWires: Wire[] = [];
+      const arrayFallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(wireNode, "coalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -5707,7 +5710,7 @@ function buildBridgeBody(
       let arrayCatchFallback: string | undefined;
       let arrayCatchControl: ControlFlowInstruction | undefined;
       let arrayCatchFallbackRef: NodeRef | undefined;
-      let arrayCatchFallbackInternalWires: Wire[] = [];
+      let arrayCatchFallbackInternalWires: WireLegacy[] = [];
       const arrayCatchAlt = sub(wireNode, "catchAlt");
       if (arrayCatchAlt) {
         const preLen = wires.length;
@@ -5855,7 +5858,7 @@ function buildBridgeBody(
 
       // Process coalesce alternatives.
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(wireNode, "coalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -5874,7 +5877,7 @@ function buildBridgeBody(
       let catchFallback: string | undefined;
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(wireNode, "catchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -5920,7 +5923,7 @@ function buildBridgeBody(
     sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
 
     const fallbacks: WireFallback[] = [];
-    const fallbackInternalWires: Wire[] = [];
+    const fallbackInternalWires: WireLegacy[] = [];
     let hasTruthyLiteralFallback = false;
     for (const item of subs(wireNode, "coalesceItem")) {
       const type = tok(item, "falsyOp")
@@ -5947,7 +5950,7 @@ function buildBridgeBody(
     let catchFallback: string | undefined;
     let catchControl: ControlFlowInstruction | undefined;
     let catchFallbackRef: NodeRef | undefined;
-    let catchFallbackInternalWires: Wire[] = [];
+    let catchFallbackInternalWires: WireLegacy[] = [];
     const catchAlt = sub(wireNode, "catchAlt");
     if (catchAlt) {
       const preLen = wires.length;
@@ -6147,7 +6150,7 @@ function buildBridgeBody(
 
         // Coalesce
         const ternFallbacks: WireFallback[] = [];
-        const ternFallbackWires: Wire[] = [];
+        const ternFallbackWires: WireLegacy[] = [];
         for (const item of subs(elemLine, "elemCoalesceItem")) {
           const type = tok(item, "falsyOp")
             ? ("falsy" as const)
@@ -6166,7 +6169,7 @@ function buildBridgeBody(
         let ternCatchControl: ControlFlowInstruction | undefined;
         let ternCatchFallbackRef: NodeRef | undefined;
         let ternCatchLoc: SourceLocation | undefined;
-        let ternCatchWires: Wire[] = [];
+        let ternCatchWires: WireLegacy[] = [];
         const ternCatchAlt = sub(elemLine, "elemCatchAlt");
         if (ternCatchAlt) {
           const preLen = wires.length;
@@ -6215,7 +6218,7 @@ function buildBridgeBody(
 
       // ── Coalesce chains ──
       const fallbacks: WireFallback[] = [];
-      const fallbackInternalWires: Wire[] = [];
+      const fallbackInternalWires: WireLegacy[] = [];
       for (const item of subs(elemLine, "elemCoalesceItem")) {
         const type = tok(item, "falsyOp")
           ? ("falsy" as const)
@@ -6234,7 +6237,7 @@ function buildBridgeBody(
       let catchControl: ControlFlowInstruction | undefined;
       let catchFallbackRef: NodeRef | undefined;
       let catchLoc: SourceLocation | undefined;
-      let catchFallbackInternalWires: Wire[] = [];
+      let catchFallbackInternalWires: WireLegacy[] = [];
       const catchAlt = sub(elemLine, "elemCatchAlt");
       if (catchAlt) {
         const preLen = wires.length;
@@ -6285,7 +6288,7 @@ function inlineDefine(
   defineDef: DefineDef,
   bridgeType: string,
   bridgeField: string,
-  wires: Wire[],
+  wires: WireLegacy[],
   pipeHandleEntries: NonNullable<Bridge["pipeHandles"]>,
   handleBindings: HandleBinding[],
   instanceCounters: Map<string, number>,
@@ -6414,7 +6417,7 @@ function inlineDefine(
   }
 
   for (const wire of defineDef.wires) {
-    const cloned: Wire = JSON.parse(JSON.stringify(wire));
+    const cloned: WireLegacy = JSON.parse(JSON.stringify(v2ToLegacy(wire)));
     if ("from" in cloned) {
       cloned.from = remapRef(cloned.from, "from");
       cloned.to = remapRef(cloned.to, "to");

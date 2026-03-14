@@ -6,9 +6,10 @@ import type {
   Bridge,
   BridgeDocument,
   NodeRef,
-  Wire,
+  WireLegacy,
   WireFallback,
 } from "@stackables/bridge-core";
+import { legacyToV2 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import {
   BridgeCompilerIncompatibleError,
@@ -72,7 +73,7 @@ function outputRef(type: string, field: string, path: string[]): NodeRef {
   };
 }
 
-const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
+const wireArb = (type: string, field: string): fc.Arbitrary<WireLegacy> => {
   const toArb = pathArb.map((path) => outputRef(type, field, path));
   const fromArb = pathArb.map((path) => inputRef(type, field, path));
 
@@ -143,7 +144,7 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
   );
 };
 
-const flatWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
+const flatWireArb = (type: string, field: string): fc.Arbitrary<WireLegacy> => {
   const toArb = flatPathArb.map((path) => outputRef(type, field, path));
   const fromArb = flatPathArb.map((path) => inputRef(type, field, path));
 
@@ -173,7 +174,9 @@ const bridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.array(wireArb(type, field), { minLength: 1, maxLength: 20 }),
+      wires: fc
+        .array(wireArb(type, field), { minLength: 1, maxLength: 20 })
+        .map((ws) => ws.map(legacyToV2)),
     }),
   );
 
@@ -191,11 +194,13 @@ const flatBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(flatWireArb(type, field), {
-        minLength: 1,
-        maxLength: 20,
-        selector: (wire) => wire.to.path.join("."),
-      }),
+      wires: fc
+        .uniqueArray(flatWireArb(type, field), {
+          minLength: 1,
+          maxLength: 20,
+          selector: (wire) => wire.to.path.join("."),
+        })
+        .map((ws) => ws.map(legacyToV2)),
     }),
   );
 
@@ -362,31 +367,33 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(
-        fc.record({
-          from: flatPathArb.map((path) => inputRef(type, field, path)),
-          to: flatPathArb.map((path) => outputRef(type, field, path)),
-          fallbacks: fc.array(
-            fc.oneof(
-              fc.record({
-                type: fc.constant<"falsy">("falsy"),
-                value: constantValueArb,
-              }),
-              fc.record({
-                type: fc.constant<"nullish">("nullish"),
-                value: constantValueArb,
-              }),
-            ) as fc.Arbitrary<WireFallback>,
-            { minLength: 0, maxLength: 2 },
-          ),
-          catchFallback: constantValueArb,
-        }),
-        {
-          minLength: 1,
-          maxLength: 20,
-          selector: (wire) => wire.to.path.join("."),
-        },
-      ),
+      wires: fc
+        .uniqueArray(
+          fc.record({
+            from: flatPathArb.map((path) => inputRef(type, field, path)),
+            to: flatPathArb.map((path) => outputRef(type, field, path)),
+            fallbacks: fc.array(
+              fc.oneof(
+                fc.record({
+                  type: fc.constant<"falsy">("falsy"),
+                  value: constantValueArb,
+                }),
+                fc.record({
+                  type: fc.constant<"nullish">("nullish"),
+                  value: constantValueArb,
+                }),
+              ) as fc.Arbitrary<WireFallback>,
+              { minLength: 0, maxLength: 2 },
+            ),
+            catchFallback: constantValueArb,
+          }),
+          {
+            minLength: 1,
+            maxLength: 20,
+            selector: (wire) => wire.to.path.join("."),
+          },
+        )
+        .map((ws) => ws.map(legacyToV2)),
     }),
   );
 
@@ -407,44 +414,46 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(
-        fc.oneof(
-          fc.record(
-            {
-              cond: fromArb,
+      wires: fc
+        .uniqueArray(
+          fc.oneof(
+            fc.record(
+              {
+                cond: fromArb,
+                to: toArb,
+                thenValue: constantValueArb,
+                elseValue: constantValueArb,
+              },
+              { requiredKeys: ["cond", "to"] },
+            ),
+            fc.record({
+              condAnd: fc.record(
+                {
+                  leftRef: fromArb,
+                  rightValue: constantValueArb,
+                },
+                { requiredKeys: ["leftRef"] },
+              ),
               to: toArb,
-              thenValue: constantValueArb,
-              elseValue: constantValueArb,
-            },
-            { requiredKeys: ["cond", "to"] },
+            }),
+            fc.record({
+              condOr: fc.record(
+                {
+                  leftRef: fromArb,
+                  rightValue: constantValueArb,
+                },
+                { requiredKeys: ["leftRef"] },
+              ),
+              to: toArb,
+            }),
           ),
-          fc.record({
-            condAnd: fc.record(
-              {
-                leftRef: fromArb,
-                rightValue: constantValueArb,
-              },
-              { requiredKeys: ["leftRef"] },
-            ),
-            to: toArb,
-          }),
-          fc.record({
-            condOr: fc.record(
-              {
-                leftRef: fromArb,
-                rightValue: constantValueArb,
-              },
-              { requiredKeys: ["leftRef"] },
-            ),
-            to: toArb,
-          }),
-        ),
-        {
-          minLength: 1,
-          maxLength: 20,
-          selector: (wire) => wire.to.path.join("."),
-        },
-      ),
+          {
+            minLength: 1,
+            maxLength: 20,
+            selector: (wire) => wire.to.path.join("."),
+          },
+        )
+        .map((ws) => ws.map(legacyToV2)),
     });
   });
 

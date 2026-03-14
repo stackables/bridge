@@ -58,36 +58,21 @@ export function assertBridgeGraphQLCompatible(bridge: Bridge): void {
 
     if (!isElementSubfield) continue;
 
-    const fallbacks =
-      "from" in wire
-        ? wire.fallbacks
-        : "cond" in wire
-          ? wire.fallbacks
-          : "condAnd" in wire
-            ? wire.fallbacks
-            : "condOr" in wire
-              ? wire.fallbacks
-              : undefined;
+    // Check sources for break/continue control flow in fallback gates
+    const hasControlFlowInSources = wire.sources.some(
+      (s) =>
+        s.expr.type === "control" &&
+        (s.expr.control.kind === "break" || s.expr.control.kind === "continue"),
+    );
 
-    const catchControl =
-      "from" in wire
-        ? wire.catchControl
-        : "cond" in wire
-          ? wire.catchControl
-          : "condAnd" in wire
-            ? wire.catchControl
-            : "condOr" in wire
-              ? wire.catchControl
-              : undefined;
+    // Check catch handler for break/continue control flow
+    const catchHasControlFlow =
+      wire.catch &&
+      "control" in wire.catch &&
+      (wire.catch.control.kind === "break" ||
+        wire.catch.control.kind === "continue");
 
-    const isBreakOrContinue = (
-      ctrl: { kind: string; levels?: number } | undefined,
-    ) => ctrl && (ctrl.kind === "break" || ctrl.kind === "continue");
-
-    if (
-      fallbacks?.some((fb) => isBreakOrContinue(fb.control)) ||
-      isBreakOrContinue(catchControl)
-    ) {
+    if (hasControlFlowInSources || catchHasControlFlow) {
       const path = wire.to.path.join(".");
       throw new BridgeGraphQLIncompatibleError(
         op,

@@ -102,16 +102,33 @@ export async function resolveSourceEntries(
         if (!gateOpen) continue;
       }
 
-      // Record which source was evaluated
-      recordSourceBit(ctx, bits, i);
+      // Evaluate the expression — ternary at primary position needs
+      // branch-specific trace recording (then → primary, else → else)
+      if (i === 0 && entry.expr.type === "ternary" && bits?.else != null) {
+        try {
+          value = await evaluateTernaryWithTrace(
+            ctx,
+            entry.expr,
+            pullChain,
+            bits,
+          );
+        } catch (err: unknown) {
+          if (isFatalError(err)) throw err;
+          // Error bit was already recorded by evaluateTernaryWithTrace
+          throw err;
+        }
+      } else {
+        // Record which source was evaluated
+        recordSourceBit(ctx, bits, i);
 
-      // Evaluate the expression
-      try {
-        value = await evaluateExpression(ctx, entry.expr, pullChain);
-      } catch (err: unknown) {
-        if (isFatalError(err)) throw err;
-        recordSourceErrorBit(ctx, bits, i);
-        throw err;
+        // Evaluate the expression
+        try {
+          value = await evaluateExpression(ctx, entry.expr, pullChain);
+        } catch (err: unknown) {
+          if (isFatalError(err)) throw err;
+          recordSourceErrorBit(ctx, bits, i);
+          throw err;
+        }
       }
     }
 
@@ -238,6 +255,40 @@ async function evaluateTernary(
     return evaluateExpression(ctx, expr.then, pullChain);
   }
   return evaluateExpression(ctx, expr.else, pullChain);
+}
+
+/**
+ * Evaluate a ternary expression with branch-specific trace recording.
+ *
+ * Used by `resolveSourceEntries` when the primary source is a ternary and
+ * the trace bits distinguish then/else branches.
+ */
+async function evaluateTernaryWithTrace(
+  ctx: TreeContext,
+  expr: Extract<Expression, { type: "ternary" }>,
+  pullChain: Set<string> | undefined,
+  bits: TraceWireBits,
+): Promise<any> {
+  const condValue = await evaluateExpression(ctx, expr.cond, pullChain);
+  if (condValue) {
+    recordSourceBit(ctx, bits, 0); // "then" → primary bit
+    try {
+      return await evaluateExpression(ctx, expr.then, pullChain);
+    } catch (err: unknown) {
+      if (isFatalError(err)) throw err;
+      recordSourceErrorBit(ctx, bits, 0);
+      throw err;
+    }
+  } else {
+    recordElseBit(ctx, bits);
+    try {
+      return await evaluateExpression(ctx, expr.else, pullChain);
+    } catch (err: unknown) {
+      if (isFatalError(err)) throw err;
+      recordElseErrorBit(ctx, bits);
+      throw err;
+    }
+  }
 }
 
 async function evaluateAnd(
@@ -428,4 +479,20 @@ function recordCatchErrorBit(
   if (!bits || !ctx.traceMask) return;
   if (bits.catchError != null)
     ctx.traceMask[0] |= 1n << BigInt(bits.catchError);
+}
+
+function recordElseBit(
+  ctx: TreeContext,
+  bits: TraceWireBits | undefined,
+): void {
+  if (!bits || !ctx.traceMask) return;
+  if (bits.else != null) ctx.traceMask[0] |= 1n << BigInt(bits.else);
+}
+
+function recordElseErrorBit(
+  ctx: TreeContext,
+  bits: TraceWireBits | undefined,
+): void {
+  if (!bits || !ctx.traceMask) return;
+  if (bits.elseError != null) ctx.traceMask[0] |= 1n << BigInt(bits.elseError);
 }

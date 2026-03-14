@@ -9,17 +9,18 @@ import type {
   ControlFlowInstruction,
   Expression,
   NodeRef,
-  Wire,
   WireCatch,
   WireFallback,
+  WireLegacy,
   WireSourceEntry,
   WireV2,
 } from "./types.ts";
+import type { SourceLocation } from "./types.ts";
 
 // ── Legacy → V2 ─────────────────────────────────────────────────────────────
 
 /** Convert a legacy Wire to the unified WireV2 representation. */
-export function legacyToV2(w: Wire): WireV2 {
+export function legacyToV2(w: WireLegacy): WireV2 {
   // Constant wire
   if ("value" in w) {
     return {
@@ -31,7 +32,7 @@ export function legacyToV2(w: Wire): WireV2 {
 
   // Build the primary expression from the wire variant
   let primaryExpr: Expression;
-  let primaryLoc = w.loc;
+  const primaryLoc = w.loc;
 
   if ("from" in w) {
     primaryExpr = {
@@ -130,7 +131,7 @@ export function legacyToV2(w: Wire): WireV2 {
 function condBranchToExpr(
   ref: NodeRef | undefined,
   value: string | undefined,
-  loc: Wire["loc"],
+  loc: SourceLocation | undefined,
 ): Expression {
   if (ref !== undefined) return { type: "ref", ref, loc };
   if (value !== undefined) return { type: "literal", value, loc };
@@ -142,7 +143,7 @@ function condOperandToExpr(
   ref: NodeRef | undefined,
   value: string | undefined,
   safe: true | undefined,
-  loc: Wire["loc"],
+  loc: SourceLocation | undefined,
 ): Expression {
   if (ref !== undefined)
     return { type: "ref", ref, ...(safe ? { safe: true } : {}), loc };
@@ -171,7 +172,7 @@ function fallbackToSourceEntry(fb: WireFallback): WireSourceEntry {
 // ── V2 → Legacy ─────────────────────────────────────────────────────────────
 
 /** Convert a unified WireV2 back to the legacy Wire discriminated union. */
-export function v2ToLegacy(w: WireV2): Wire {
+export function v2ToLegacy(w: WireV2): WireLegacy {
   const primary = w.sources[0]!;
   const fallbackEntries = w.sources.slice(1);
   const fallbacks: WireFallback[] = fallbackEntries.map(sourceEntryToFallback);
@@ -180,7 +181,7 @@ export function v2ToLegacy(w: WireV2): Wire {
   let catchFallback: string | undefined;
   let catchFallbackRef: NodeRef | undefined;
   let catchControl: ControlFlowInstruction | undefined;
-  let catchLoc = w.catch?.loc;
+  const catchLoc = w.catch?.loc;
   if (w.catch) {
     if ("control" in w.catch) catchControl = w.catch.control;
     else if ("ref" in w.catch) catchFallbackRef = w.catch.ref;

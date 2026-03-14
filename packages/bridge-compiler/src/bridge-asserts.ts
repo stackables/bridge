@@ -2,6 +2,8 @@ import {
   SELF_MODULE,
   type Bridge,
   type NodeRef,
+  type WireLegacy,
+  v2ToLegacy,
 } from "@stackables/bridge-core";
 
 export class BridgeCompilerIncompatibleError extends Error {
@@ -56,11 +58,13 @@ export function assertBridgeCompilerCompatible(
 ): void {
   const op = `${bridge.type}.${bridge.field}`;
 
+  const legacyWires: WireLegacy[] = bridge.wires.map(v2ToLegacy);
+
   // Pipe-handle trunk keys — block-scoped aliases inside array maps
   // reference these; the compiler handles them correctly.
   const pipeTrunkKeys = new Set((bridge.pipeHandles ?? []).map((ph) => ph.key));
 
-  for (const w of bridge.wires) {
+  for (const w of legacyWires) {
     // User-level alias (Shadow) wires: compiler has TDZ ordering bugs.
     // Block-scoped aliases inside array maps wire FROM a pipe-handle tool
     // instance (key is in pipeTrunkKeys) and are handled correctly.
@@ -101,9 +105,7 @@ export function assertBridgeCompilerCompatible(
       const ref = w.catchFallbackRef as NodeRef;
       if (ref.instance != null) {
         const refKey = `${ref.module}:${ref.type}:${ref.field}:${ref.instance}`;
-        if (
-          bridge.pipeHandles?.some((ph) => ph.key === refKey)
-        ) {
+        if (bridge.pipeHandles?.some((ph) => ph.key === refKey)) {
           throw new BridgeCompilerIncompatibleError(
             op,
             "Catch fallback referencing a pipe expression is not yet supported by the compiler.",
@@ -116,12 +118,14 @@ export function assertBridgeCompilerCompatible(
     // dependencies — the compiler only catch-guards the direct source
     // tool, not its transitive dependency chain.
     if (
-      ("catchFallback" in w || "catchFallbackRef" in w || "catchControl" in w) &&
+      ("catchFallback" in w ||
+        "catchFallbackRef" in w ||
+        "catchControl" in w) &&
       "from" in w &&
       isToolRef(w.from, bridge)
     ) {
       const sourceTrunk = `${w.from.module}:${w.from.type}:${w.from.field}`;
-      for (const iw of bridge.wires) {
+      for (const iw of legacyWires) {
         if (!("from" in iw)) continue;
         const iwDest = `${iw.to.module}:${iw.to.type}:${iw.to.field}`;
         if (iwDest === sourceTrunk && isToolRef(iw.from, bridge)) {
@@ -151,7 +155,7 @@ export function assertBridgeCompilerCompatible(
   // Same-cost overdefinition sourced only from tools can diverge from runtime
   // tracing/error behavior in current AOT codegen; compile must downgrade.
   const toolOnlyOverdefs = new Map<string, number>();
-  for (const w of bridge.wires) {
+  for (const w of legacyWires) {
     if (
       w.to.module !== SELF_MODULE ||
       w.to.type !== bridge.type ||
@@ -196,7 +200,7 @@ export function assertBridgeCompilerCompatible(
       );
     }
 
-    for (const w of bridge.wires) {
+    for (const w of legacyWires) {
       if (!("from" in w) || w.to.path.length === 0) continue;
       // Build the full key for this wire target
       const fullKey =

@@ -74,13 +74,7 @@ describe("parseBridge: force <handle>", () => {
     assert.equal(instr.forces!.length, 1);
     assert.equal(instr.forces![0].handle, "audit");
     for (const w of instr.wires) {
-      if ("from" in w) {
-        assert.equal(
-          (w as any).force,
-          undefined,
-          "wires should not have force",
-        );
-      }
+      assert.equal((w as any).force, undefined, "wires should not have force");
     }
   });
 
@@ -167,11 +161,7 @@ describe("parseBridge: force <handle>", () => {
 
     assert.ok(instr.forces);
     assert.equal(instr.forces![0].handle, "se");
-    assert.equal(
-      instr.forces![0].catchError,
-      undefined,
-      "default is critical",
-    );
+    assert.equal(instr.forces![0].catchError, undefined, "default is critical");
   });
 
   test("force catch null sets catchError flag", () => {

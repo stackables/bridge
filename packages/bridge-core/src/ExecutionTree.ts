@@ -42,6 +42,8 @@ import {
 } from "./tree-types.ts";
 import {
   pathEquals,
+  getPrimaryRef,
+  isPullWire,
   roundMs,
   sameTrunk,
   TRUNK_KEY_CACHE,
@@ -51,6 +53,7 @@ import {
 import type {
   Bridge,
   BridgeDocument,
+  Expression,
   Instruction,
   NodeRef,
   ToolContext,
@@ -1099,116 +1102,44 @@ export class ExecutionTree implements TreeContext {
     wire: Wire,
     visited = new Set<string>(),
   ): boolean {
-    if ("value" in wire) return true;
-
-    if ("from" in wire) {
-      if (!this.canResolveRefWithoutScheduling(wire.from, visited)) {
+    // Check all source expressions
+    for (const source of wire.sources) {
+      if (!this.canResolveExprWithoutScheduling(source.expr, visited)) {
         return false;
       }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (
-          fallback.ref &&
-          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
-        ) {
-          return false;
-        }
-      }
-      if (
-        wire.catchFallbackRef &&
-        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
-      ) {
-        return false;
-      }
-      return true;
     }
-
-    if ("cond" in wire) {
-      if (!this.canResolveRefWithoutScheduling(wire.cond, visited))
-        return false;
-      if (
-        wire.thenRef &&
-        !this.canResolveRefWithoutScheduling(wire.thenRef, visited)
-      ) {
+    // Check catch handler ref
+    if (wire.catch && "ref" in wire.catch) {
+      if (!this.canResolveRefWithoutScheduling(wire.catch.ref, visited)) {
         return false;
       }
-      if (
-        wire.elseRef &&
-        !this.canResolveRefWithoutScheduling(wire.elseRef, visited)
-      ) {
-        return false;
-      }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (
-          fallback.ref &&
-          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
-        ) {
-          return false;
-        }
-      }
-      if (
-        wire.catchFallbackRef &&
-        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
-      ) {
-        return false;
-      }
-      return true;
     }
+    return true;
+  }
 
-    if ("condAnd" in wire) {
-      if (!this.canResolveRefWithoutScheduling(wire.condAnd.leftRef, visited)) {
-        return false;
-      }
-      if (
-        wire.condAnd.rightRef &&
-        !this.canResolveRefWithoutScheduling(wire.condAnd.rightRef, visited)
-      ) {
-        return false;
-      }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (
-          fallback.ref &&
-          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
-        ) {
-          return false;
-        }
-      }
-      if (
-        wire.catchFallbackRef &&
-        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
-      ) {
-        return false;
-      }
-      return true;
+  private canResolveExprWithoutScheduling(
+    expr: Expression,
+    visited: Set<string>,
+  ): boolean {
+    switch (expr.type) {
+      case "literal":
+      case "control":
+        return true;
+      case "ref":
+        return this.canResolveRefWithoutScheduling(expr.ref, visited);
+      case "ternary":
+        return (
+          this.canResolveExprWithoutScheduling(expr.cond, visited) &&
+          this.canResolveExprWithoutScheduling(expr.then, visited) &&
+          this.canResolveExprWithoutScheduling(expr.else, visited)
+        );
+      case "and":
+      case "or":
+        return (
+          this.canResolveExprWithoutScheduling(expr.left, visited) &&
+          this.canResolveExprWithoutScheduling(expr.right, visited)
+        );
     }
-
-    if ("condOr" in wire) {
-      if (!this.canResolveRefWithoutScheduling(wire.condOr.leftRef, visited)) {
-        return false;
-      }
-      if (
-        wire.condOr.rightRef &&
-        !this.canResolveRefWithoutScheduling(wire.condOr.rightRef, visited)
-      ) {
-        return false;
-      }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (
-          fallback.ref &&
-          !this.canResolveRefWithoutScheduling(fallback.ref, visited)
-        ) {
-          return false;
-        }
-      }
-      if (
-        wire.catchFallbackRef &&
-        !this.canResolveRefWithoutScheduling(wire.catchFallbackRef, visited)
-      ) {
-        return false;
-      }
-      return true;
-    }
-
-    return false;
   }
 
   private canResolveRefWithoutScheduling(
@@ -1329,30 +1260,28 @@ export class ExecutionTree implements TreeContext {
     );
 
     // Separate spread wires from regular wires
-    const spreadWires = exactWires.filter(
-      (w) => "from" in w && "spread" in w && w.spread,
-    );
-    const regularWires = exactWires.filter(
-      (w) => !("from" in w && "spread" in w && w.spread),
-    );
+    const spreadWires = exactWires.filter((w) => isPullWire(w) && w.spread);
+    const regularWires = exactWires.filter((w) => !(isPullWire(w) && w.spread));
 
     if (regularWires.length > 0) {
       // Check for array mapping: exact wires (the array source) PLUS
       // element-level wires deeper than prefix (the field mappings).
       // E.g. `o.entries <- src[] as x { .id <- x.item_id }` produces
       // an exact wire at ["entries"] and element wires at ["entries","id"].
-      const hasElementWires = bridge.wires.some(
-        (w) =>
-          "from" in w &&
-          ((w.from as NodeRef).element === true ||
-            this.isElementScopedTrunk(w.from as NodeRef) ||
+      const hasElementWires = bridge.wires.some((w) => {
+        const ref = getPrimaryRef(w);
+        return (
+          ref != null &&
+          (ref.element === true ||
+            this.isElementScopedTrunk(ref) ||
             w.to.element === true) &&
           w.to.module === SELF_MODULE &&
           w.to.type === type &&
           w.to.field === field &&
           w.to.path.length > prefix.length &&
-          prefix.every((seg, i) => w.to.path[i] === seg),
-      );
+          prefix.every((seg, i) => w.to.path[i] === seg)
+        );
+      });
 
       if (hasElementWires) {
         // Array mapping on a sub-field: resolve the array source,
@@ -1487,7 +1416,7 @@ export class ExecutionTree implements TreeContext {
     // Root wire (`o <- src`) — whole-object passthrough
     const hasRootWire = bridge.wires.some(
       (w) =>
-        "from" in w &&
+        isPullWire(w) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
         w.to.field === field &&
@@ -1555,7 +1484,7 @@ export class ExecutionTree implements TreeContext {
     // Separate root-level wires into passthrough vs spread
     const rootWires = bridge.wires.filter(
       (w) =>
-        "from" in w &&
+        isPullWire(w) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
         w.to.field === field &&
@@ -1564,13 +1493,11 @@ export class ExecutionTree implements TreeContext {
 
     // Passthrough wire: root wire without spread flag
     const hasPassthroughWire = rootWires.some(
-      (w) => "from" in w && !("spread" in w && w.spread),
+      (w) => isPullWire(w) && !w.spread,
     );
 
     // Spread wires: root wires with spread flag
-    const spreadWires = rootWires.filter(
-      (w) => "from" in w && "spread" in w && w.spread,
-    );
+    const spreadWires = rootWires.filter((w) => isPullWire(w) && !!w.spread);
 
     const hasRootWire = rootWires.length > 0;
 
@@ -1579,16 +1506,18 @@ export class ExecutionTree implements TreeContext {
     // (`o <- api.user`) only has the root wire.
     // Pipe fork output wires in element context (e.g. concat template strings)
     // may have to.element === true instead.
-    const hasElementWires = bridge.wires.some(
-      (w) =>
-        "from" in w &&
-        ((w.from as NodeRef).element === true ||
-          this.isElementScopedTrunk(w.from as NodeRef) ||
+    const hasElementWires = bridge.wires.some((w) => {
+      const ref = getPrimaryRef(w);
+      return (
+        ref != null &&
+        (ref.element === true ||
+          this.isElementScopedTrunk(ref) ||
           w.to.element === true) &&
         w.to.module === SELF_MODULE &&
         w.to.type === type &&
-        w.to.field === field,
-    );
+        w.to.field === field
+      );
+    });
 
     if (hasRootWire && hasElementWires) {
       const [shadows] = await Promise.all([
@@ -1714,9 +1643,10 @@ export class ExecutionTree implements TreeContext {
         !array &&
         matches.every(
           (w): boolean =>
-            "from" in w &&
-            w.from.module.startsWith("__define_out_") &&
-            w.from.path.length === 0,
+            w.sources.length === 1 &&
+            w.sources[0]!.expr.type === "ref" &&
+            w.sources[0]!.expr.ref.module.startsWith("__define_out_") &&
+            w.sources[0]!.expr.ref.path.length === 0,
         )
       ) {
         return this;
@@ -1728,16 +1658,17 @@ export class ExecutionTree implements TreeContext {
       // can pick up both spread properties and explicit wires.
       if (
         !array &&
-        matches.every(
-          (w): boolean => "from" in w && "spread" in w && !!w.spread,
-        )
+        matches.every((w): boolean => isPullWire(w) && !!w.spread)
       ) {
         const spreadData = await this.resolveWires(matches);
         if (spreadData != null && typeof spreadData === "object") {
           const prefix = cleanPath.join(".");
           this.spreadCache ??= {};
           if (prefix === "") {
-            Object.assign(this.spreadCache, spreadData as Record<string, unknown>);
+            Object.assign(
+              this.spreadCache,
+              spreadData as Record<string, unknown>,
+            );
           } else {
             (this.spreadCache as Record<string, unknown>)[prefix] = spreadData;
           }
@@ -1758,18 +1689,20 @@ export class ExecutionTree implements TreeContext {
       // unnecessary — return the plain resolved array directly.
       if (scalar) {
         const { type, field } = this.trunk;
-        const hasElementWires = this.bridge?.wires.some(
-          (w) =>
-            "from" in w &&
-            ((w.from as NodeRef).element === true ||
-              this.isElementScopedTrunk(w.from as NodeRef) ||
+        const hasElementWires = this.bridge?.wires.some((w) => {
+          const ref = getPrimaryRef(w);
+          return (
+            ref != null &&
+            (ref.element === true ||
+              this.isElementScopedTrunk(ref) ||
               w.to.element === true) &&
             w.to.module === SELF_MODULE &&
             w.to.type === type &&
             w.to.field === field &&
             w.to.path.length > cleanPath.length &&
-            cleanPath.every((seg, i) => w.to.path[i] === seg),
-        );
+            cleanPath.every((seg, i) => w.to.path[i] === seg)
+          );
+        });
         if (!hasElementWires) {
           return response;
         }
@@ -1818,7 +1751,9 @@ export class ExecutionTree implements TreeContext {
       const parentSpread =
         parentPrefix === ""
           ? this.spreadCache
-          : (this.spreadCache[parentPrefix] as Record<string, unknown> | undefined);
+          : (this.spreadCache[parentPrefix] as
+              | Record<string, unknown>
+              | undefined);
       if (
         parentSpread != null &&
         typeof parentSpread === "object" &&
@@ -1883,19 +1818,22 @@ export class ExecutionTree implements TreeContext {
   private findDefineFieldWires(cleanPath: string[]): Wire[] {
     const forwards =
       this.bridge?.wires.filter(
-        (w): w is Extract<Wire, { from: NodeRef }> =>
-          "from" in w &&
+        (w): boolean =>
+          w.sources.length === 1 &&
+          w.sources[0]!.expr.type === "ref" &&
           sameTrunk(w.to, this.trunk) &&
           w.to.path.length === 0 &&
-          w.from.module.startsWith("__define_out_") &&
-          w.from.path.length === 0,
+          w.sources[0]!.expr.ref.module.startsWith("__define_out_") &&
+          w.sources[0]!.expr.ref.path.length === 0,
       ) ?? [];
 
     if (forwards.length === 0) return [];
 
     const result: Wire[] = [];
     for (const fw of forwards) {
-      const defOutTrunk = fw.from;
+      const defOutTrunk = (
+        fw.sources[0]!.expr as Extract<Expression, { type: "ref" }>
+      ).ref;
       const fieldWires =
         this.bridge?.wires.filter(
           (w) =>

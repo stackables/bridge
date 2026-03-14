@@ -8,7 +8,7 @@
  * keeping the dependency surface explicit.
  */
 
-import type { Bridge, NodeRef, ToolDef, Wire } from "./types.ts";
+import type { Bridge, Expression, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { isPromise, wrapBridgeRuntimeError } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
@@ -72,47 +72,34 @@ function getToolName(target: Trunk): string {
 
 function refsInWire(wire: Wire): NodeRef[] {
   const refs: NodeRef[] = [];
-
-  if ("from" in wire) {
-    refs.push(wire.from);
-    for (const fallback of wire.fallbacks ?? []) {
-      if (fallback.ref) refs.push(fallback.ref);
-    }
-    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
-    return refs;
+  // Collect refs from all source expressions
+  for (const source of wire.sources) {
+    collectExprRefs(source.expr, refs);
   }
-
-  if ("cond" in wire) {
-    refs.push(wire.cond);
-    if (wire.thenRef) refs.push(wire.thenRef);
-    if (wire.elseRef) refs.push(wire.elseRef);
-    for (const fallback of wire.fallbacks ?? []) {
-      if (fallback.ref) refs.push(fallback.ref);
-    }
-    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
-    return refs;
+  // Collect ref from catch handler
+  if (wire.catch && "ref" in wire.catch) {
+    refs.push(wire.catch.ref);
   }
-
-  if ("condAnd" in wire) {
-    refs.push(wire.condAnd.leftRef);
-    if (wire.condAnd.rightRef) refs.push(wire.condAnd.rightRef);
-    for (const fallback of wire.fallbacks ?? []) {
-      if (fallback.ref) refs.push(fallback.ref);
-    }
-    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
-    return refs;
-  }
-
-  if ("condOr" in wire) {
-    refs.push(wire.condOr.leftRef);
-    if (wire.condOr.rightRef) refs.push(wire.condOr.rightRef);
-    for (const fallback of wire.fallbacks ?? []) {
-      if (fallback.ref) refs.push(fallback.ref);
-    }
-    if (wire.catchFallbackRef) refs.push(wire.catchFallbackRef);
-  }
-
   return refs;
+}
+
+function collectExprRefs(expr: Expression, refs: NodeRef[]): void {
+  switch (expr.type) {
+    case "ref":
+      refs.push(expr.ref);
+      break;
+    case "ternary":
+      collectExprRefs(expr.cond, refs);
+      collectExprRefs(expr.then, refs);
+      collectExprRefs(expr.else, refs);
+      break;
+    case "and":
+    case "or":
+      collectExprRefs(expr.left, refs);
+      collectExprRefs(expr.right, refs);
+      break;
+    // literal, control — no refs
+  }
 }
 
 export function trunkDependsOnElement(
@@ -392,7 +379,13 @@ export async function scheduleToolDef(
     const memoizeKey = ctx.memoizedToolKeys.has(trunkKey(target))
       ? trunkKey(target)
       : undefined;
-    const raw = await ctx.callTool(toolName, toolDef.fn!, fn, input, memoizeKey);
+    const raw = await ctx.callTool(
+      toolName,
+      toolDef.fn!,
+      fn,
+      input,
+      memoizeKey,
+    );
     return mergeToolDefConstants(toolDef, raw);
   } catch (err) {
     if (!toolDef.onError) throw err;

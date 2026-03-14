@@ -4,7 +4,7 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "@stackables/bridge-parser";
-import { bridge } from "@stackables/bridge-core";
+import { bridge, v2ToLegacy } from "@stackables/bridge-core";
 
 // ── Parser desugaring tests ─────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ describe("expressions: parser desugaring", () => {
       }
     `);
     const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    assert.ok(!instr.wires.some((w) => "expr" in w), "no ExprWire in output");
+    assert.ok(!instr.wires.map(v2ToLegacy).some((w) => "expr" in w), "no ExprWire in output");
     assert.ok(instr.pipeHandles!.length > 0, "has pipe handles");
     const exprHandle = instr.pipeHandles!.find((ph) =>
       ph.handle.startsWith("__expr_"),
@@ -114,7 +114,7 @@ describe("expressions: parser desugaring", () => {
       }
     `);
     const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const bWire = instr.wires.find(
+    const bWire = instr.wires.map(v2ToLegacy).find(
       (w) => "from" in w && w.to.path.length === 1 && w.to.path[0] === "b",
     );
     assert.ok(bWire, "should have a .b wire");
@@ -571,7 +571,7 @@ describe("serializeBridge: keyword strings are quoted", () => {
       const instr = reparsed.instructions.find(
         (i) => i.kind === "bridge",
       ) as any;
-      const wire = instr.wires.find(
+      const wire = instr.wires.map(v2ToLegacy).find(
         (w: any) => "value" in w && w.to?.path?.[0] === "result",
       );
       assert.equal(wire?.value, kw);

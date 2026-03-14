@@ -9,8 +9,9 @@ import type {
   ConstDef,
   NodeRef,
   ToolDef,
-  Wire,
+  WireLegacy,
 } from "@stackables/bridge-core";
+import { v2ToLegacy } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -35,9 +36,7 @@ describe("parseBridge: const blocks", () => {
     const c = parseBridge(bridge`
       version 1.5
       const currency = "EUR"
-    `).instructions.find(
-      (i): i is ConstDef => i.kind === "const",
-    )!;
+    `).instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(c.name, "currency");
     assert.equal(JSON.parse(c.value), "EUR");
   });
@@ -55,9 +54,7 @@ describe("parseBridge: const blocks", () => {
     const c = parseBridge(bridge`
       version 1.5
       const empty = null
-    `).instructions.find(
-      (i): i is ConstDef => i.kind === "const",
-    )!;
+    `).instructions.find((i): i is ConstDef => i.kind === "const")!;
     assert.equal(JSON.parse(c.value), null);
   });
 
@@ -280,7 +277,7 @@ describe("serializeBridge: tool on error roundtrip", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 3. Wire fallback (catch) — parser, serializer roundtrip
+// 3. WireLegacy fallback (catch) — parser, serializer roundtrip
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("parseBridge: wire fallback (catch)", () => {
@@ -299,9 +296,9 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find(
-      (w) => "from" in w && w.catchFallback != null,
-    );
+    const fbWire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && w.catchFallback != null);
     assert.ok(fbWire, "should have a wire with catchFallback");
     if ("from" in fbWire!) {
       assert.equal(fbWire.catchFallback, "0");
@@ -322,9 +319,9 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find(
-      (w) => "from" in w && w.catchFallback != null,
-    );
+    const fbWire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && w.catchFallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.catchFallback, `{"default":true}`);
@@ -345,9 +342,9 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find(
-      (w) => "from" in w && w.catchFallback != null,
-    );
+    const fbWire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && w.catchFallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.catchFallback, `"unknown"`);
@@ -368,9 +365,9 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find(
-      (w) => "from" in w && w.catchFallback != null,
-    );
+    const fbWire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && w.catchFallback != null);
     assert.ok(fbWire);
     if ("from" in fbWire!) {
       assert.equal(fbWire.catchFallback, "null");
@@ -391,9 +388,9 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find(
-      (w) => "from" in w && w.catchFallback != null,
-    );
+    const fbWire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && w.catchFallback != null);
     assert.ok(fbWire, "should have pipe output wire with catchFallback");
     if ("from" in fbWire!) {
       assert.equal(fbWire.catchFallback, `"fallback"`);
@@ -415,7 +412,7 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    for (const w of instr.wires) {
+    for (const w of instr.wires.map(v2ToLegacy)) {
       if ("from" in w) {
         assert.equal(
           w.catchFallback,
@@ -482,7 +479,7 @@ describe("serializeBridge: wire fallback roundtrip", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 4. Wire || falsy-fallback — parser, serializer roundtrip
+// 4. WireLegacy || falsy-fallback — parser, serializer roundtrip
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("parseBridge: wire || falsy-fallback", () => {
@@ -501,7 +498,10 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0] as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires.map(v2ToLegacy)[0] as Extract<
+      WireLegacy,
+      { from: NodeRef }
+    >;
     assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
       { type: "falsy", value: '"World"' },
     ]);
@@ -523,7 +523,10 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0] as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires.map(v2ToLegacy)[0] as Extract<
+      WireLegacy,
+      { from: NodeRef }
+    >;
     assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
       { type: "falsy", value: '"World"' },
     ]);
@@ -547,9 +550,11 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find(
-      (w) => "from" in w && (w as any).from.path[0] === "data",
-    ) as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires
+      .map(v2ToLegacy)
+      .find(
+        (w) => "from" in w && (w as any).from.path[0] === "data",
+      ) as Extract<WireLegacy, { from: NodeRef }>;
     assertDeepStrictEqualIgnoringLoc(wire.fallbacks, [
       { type: "falsy", value: '{"lat":0,"lon":0}' },
     ]);
@@ -570,7 +575,10 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0] as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires.map(v2ToLegacy)[0] as Extract<
+      WireLegacy,
+      { from: NodeRef }
+    >;
     assert.equal(wire.fallbacks, undefined);
   });
 
@@ -590,10 +598,12 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const terminalWire = instr.wires.find(
-      (w) =>
-        "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
-    ) as Extract<Wire, { from: NodeRef }>;
+    const terminalWire = instr.wires
+      .map(v2ToLegacy)
+      .find(
+        (w) =>
+          "from" in w && (w as any).pipe && (w as any).from.path.length === 0,
+      ) as Extract<WireLegacy, { from: NodeRef }>;
     assertDeepStrictEqualIgnoringLoc(terminalWire?.fallbacks, [
       { type: "falsy", value: '"N/A"' },
     ]);
@@ -677,9 +687,11 @@ describe("parseBridge: || source references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter(
-      (w) => "from" in w && (w as any).to.path[0] === "label",
-    ) as Extract<Wire, { from: NodeRef }>[];
+    const labelWires = instr.wires
+      .map(v2ToLegacy)
+      .filter(
+        (w) => "from" in w && (w as any).to.path[0] === "label",
+      ) as Extract<WireLegacy, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1, "should be one wire, not two");
     assert.ok(labelWires[0].fallbacks, "should have fallbacks");
     assert.equal(labelWires[0].fallbacks!.length, 1);
@@ -707,9 +719,11 @@ describe("parseBridge: || source references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter(
-      (w) => "from" in w && (w as any).to.path[0] === "label",
-    ) as Extract<Wire, { from: NodeRef }>[];
+    const labelWires = instr.wires
+      .map(v2ToLegacy)
+      .filter(
+        (w) => "from" in w && (w as any).to.path[0] === "label",
+      ) as Extract<WireLegacy, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1);
     assert.ok(labelWires[0].fallbacks, "should have fallbacks");
     assert.equal(labelWires[0].fallbacks!.length, 2);
@@ -742,9 +756,12 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find(
-      (w) => "from" in w && (w as any).to.path[0] === "label",
-    ) as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires
+      .map(v2ToLegacy)
+      .find((w) => "from" in w && (w as any).to.path[0] === "label") as Extract<
+      WireLegacy,
+      { from: NodeRef }
+    >;
     assert.ok(wire.catchFallbackRef, "should have catchFallbackRef");
     assert.equal(
       wire.catchFallback,
@@ -772,9 +789,12 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find(
-      (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
-    ) as Extract<Wire, { from: NodeRef }>;
+    const wire = instr.wires
+      .map(v2ToLegacy)
+      .find(
+        (w) =>
+          "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
+      ) as Extract<WireLegacy, { from: NodeRef }>;
     assert.ok(wire.catchFallbackRef, "should have catchFallbackRef");
     assert.deepEqual(wire.catchFallbackRef!.path, []);
     assert.ok(
@@ -802,9 +822,12 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter(
-      (w) => "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
-    ) as Extract<Wire, { from: NodeRef }>[];
+    const labelWires = instr.wires
+      .map(v2ToLegacy)
+      .filter(
+        (w) =>
+          "from" in w && !("pipe" in w) && (w as any).to.path[0] === "label",
+      ) as Extract<WireLegacy, { from: NodeRef }>[];
     assert.equal(labelWires.length, 1);
     assert.ok(labelWires[0].fallbacks, "should have fallbacks");
     assert.equal(labelWires[0].fallbacks!.length, 2);

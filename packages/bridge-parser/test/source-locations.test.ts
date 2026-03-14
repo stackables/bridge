@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
-import type { Bridge, Wire } from "@stackables/bridge-core";
+import type { Bridge, WireLegacy } from "@stackables/bridge-core";
+import { v2ToLegacy } from "@stackables/bridge-core";
 import { bridge } from "@stackables/bridge-core";
 
 function getBridge(text: string): Bridge {
@@ -13,7 +14,7 @@ function getBridge(text: string): Bridge {
   return instr;
 }
 
-function assertLoc(wire: Wire | undefined, line: number, column: number): void {
+function assertLoc(wire: WireLegacy | undefined, line: number, column: number): void {
   assert.ok(wire, "expected wire to exist");
   assert.ok(wire.loc, "expected wire to carry a source location");
   assert.equal(wire.loc.startLine, line);
@@ -32,7 +33,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    assertLoc(instr.wires[0], 5, 3);
+    assertLoc(instr.wires.map(v2ToLegacy)[0], 5, 3);
   });
 
   it("constant wire loc is populated", () => {
@@ -44,7 +45,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    assertLoc(instr.wires[0], 4, 3);
+    assertLoc(instr.wires.map(v2ToLegacy)[0], 4, 3);
   });
 
   it("ternary wire loc is populated", () => {
@@ -57,7 +58,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    const ternaryWire = instr.wires.find((wire) => "cond" in wire);
+    const ternaryWire = instr.wires.map(v2ToLegacy).find((wire) => "cond" in wire);
     assertLoc(ternaryWire, 5, 3);
     assert.equal(ternaryWire?.condLoc?.startLine, 5);
     assert.equal(ternaryWire?.condLoc?.startColumn, 13);
@@ -77,7 +78,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    const concatPartWire = instr.wires.find(
+    const concatPartWire = instr.wires.map(v2ToLegacy).find(
       (wire) => wire.to.field === "concat",
     );
     assertLoc(concatPartWire, 5, 3);
@@ -94,14 +95,14 @@ describe("parser source locations", () => {
       }
     `);
 
-    const aliasWire = instr.wires.find(
+    const aliasWire = instr.wires.map(v2ToLegacy).find(
       (wire) => "to" in wire && wire.to.field === "clean",
     );
     assert.ok(aliasWire && "catchLoc" in aliasWire);
     assert.equal(aliasWire.catchLoc?.startLine, 5);
     assert.equal(aliasWire.catchLoc?.startColumn, 35);
 
-    const messageWire = instr.wires.find(
+    const messageWire = instr.wires.map(v2ToLegacy).find(
       (wire) => "to" in wire && wire.to.path.join(".") === "message",
     );
     assert.ok(
@@ -134,7 +135,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    const destinationIdWire = instr.wires.find(
+    const destinationIdWire = instr.wires.map(v2ToLegacy).find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.station.id",
@@ -144,7 +145,7 @@ describe("parser source locations", () => {
     assert.equal(destinationIdWire.fromLoc?.startLine, 8);
     assert.equal(destinationIdWire.fromLoc?.startColumn, 16);
 
-    const destinationPlannedTimeWire = instr.wires.find(
+    const destinationPlannedTimeWire = instr.wires.map(v2ToLegacy).find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.plannedTime",
@@ -156,7 +157,7 @@ describe("parser source locations", () => {
     assert.equal(destinationPlannedTimeWire.fromLoc?.startLine, 11);
     assert.equal(destinationPlannedTimeWire.fromLoc?.startColumn, 23);
 
-    const destinationDelayWire = instr.wires.find(
+    const destinationDelayWire = instr.wires.map(v2ToLegacy).find(
       (wire) =>
         "to" in wire &&
         wire.to.path.join(".") === "legs.destination.delayMinutes",

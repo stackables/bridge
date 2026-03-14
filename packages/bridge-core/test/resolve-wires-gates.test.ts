@@ -12,7 +12,7 @@ import {
 } from "../src/tree-types.ts";
 import { applyFallbackGates, applyCatchGate } from "../src/resolveWires.ts";
 import type { TreeContext } from "../src/tree-types.ts";
-import type { NodeRef, Wire } from "../src/types.ts";
+import type { NodeRef, WireLegacy } from "../src/types.ts";
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ function makeCtx(values: Record<string, unknown> = {}): TreeContext {
 }
 
 /** A wire with no gate modifiers — used as a baseline. */
-type TestWire = Extract<Wire, { from: unknown }>;
+type TestWire = Extract<WireLegacy, { from: unknown }>;
 
 function fromWire(overrides: Partial<TestWire> = {}): TestWire {
   return { from: REF, to: REF, ...overrides } as TestWire;

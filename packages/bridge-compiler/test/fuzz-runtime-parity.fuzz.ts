@@ -5,8 +5,9 @@ import type {
   Bridge,
   BridgeDocument,
   NodeRef,
-  Wire,
+  WireLegacy,
 } from "@stackables/bridge-core";
+import { legacyToV2 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
 import { compileBridge, executeBridge as executeAot } from "../src/index.ts";
@@ -83,7 +84,7 @@ function outputRef(type: string, field: string, path: string[]): NodeRef {
 // ── Deep-path bridge arbitrary ──────────────────────────────────────────────
 // Uses multi-segment paths (1–4 segments) to exercise deep property access.
 
-const deepWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
+const deepWireArb = (type: string, field: string): fc.Arbitrary<WireLegacy> => {
   const toArb = flatPathArb.map((path) => outputRef(type, field, path));
   const fromArb = pathArb.map((path) => inputRef(type, field, path));
 
@@ -113,11 +114,13 @@ const deepBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(deepWireArb(type, field), {
-        minLength: 1,
-        maxLength: 20,
-        selector: (wire) => wire.to.path.join("."),
-      }),
+      wires: fc
+        .uniqueArray(deepWireArb(type, field), {
+          minLength: 1,
+          maxLength: 20,
+          selector: (wire) => wire.to.path.join("."),
+        })
+        .map((ws) => ws.map(legacyToV2)),
     }),
   );
 

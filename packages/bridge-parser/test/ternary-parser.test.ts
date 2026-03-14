@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { bridge } from "@stackables/bridge-core";
+import { v2ToLegacy } from "@stackables/bridge-core";
 
 // ── Parser / desugaring tests for ternary syntax ──────────────────────────
 
@@ -17,7 +18,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire, "should have a conditional wire");
     assert.ok("cond" in condWire);
     assert.ok(condWire.thenRef, "thenRef should be a NodeRef");
@@ -37,7 +38,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, '"premium"');
     assert.equal(condWire.elseValue, '"basic"');
@@ -54,7 +55,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, "20");
     assert.equal(condWire.elseValue, "0");
@@ -71,7 +72,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.thenValue, "true");
     assert.equal(condWire.elseValue, "false");
@@ -88,7 +89,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.ok(condWire.thenRef, "thenRef should be NodeRef");
     assert.equal(condWire.elseValue, "null");
@@ -105,7 +106,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.ok(
       condWire.cond.instance != null && condWire.cond.instance >= 100000,
@@ -129,7 +130,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.fallbacks?.length, 1);
     assert.equal(condWire.fallbacks![0]!.type, "falsy");
@@ -147,7 +148,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find((w) => "cond" in w);
+    const condWire = instr.wires.map(v2ToLegacy).find((w) => "cond" in w);
     assert.ok(condWire && "cond" in condWire);
     assert.equal(condWire.catchFallback, "-1");
   });

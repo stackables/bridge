@@ -9,7 +9,7 @@
  * the full `ExecutionTree` class.
  */
 
-import type { ControlFlowInstruction, NodeRef, Wire } from "./types.ts";
+import type { ControlFlowInstruction, Wire, WireLegacy } from "./types.ts";
 import type {
   LoopControlSignal,
   MaybePromise,
@@ -18,7 +18,6 @@ import type {
 import {
   attachBridgeErrorMetadata,
   isFatalError,
-  isPromise,
   applyControlFlow,
   BridgeAbortError,
   BridgePanicError,
@@ -26,16 +25,15 @@ import {
 } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
+import { resolveSourceEntries } from "./resolveWiresV2.ts";
 
 // ── Wire type helpers ────────────────────────────────────────────────────────
 
 /**
- * A non-constant wire — any Wire variant that carries gate modifiers
- * (`fallbacks`, `catchFallback`, etc.).
- * Excludes the `{ value: string; to: NodeRef }` constant wire which has no
- * modifier slots.
+ * A non-constant legacy wire — used by the backward-compatible
+ * `applyFallbackGates` / `applyCatchGate` exports.
  */
-type WireWithGates = Exclude<Wire, { value: string }>;
+type WireWithGates = Exclude<WireLegacy, { value: string }>;
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -77,9 +75,14 @@ export function resolveWires(
 
   if (wires.length === 1) {
     const w = wires[0]!;
-    if ("value" in w) {
+    // Constant wire — single literal source, no catch
+    if (
+      w.sources.length === 1 &&
+      w.sources[0]!.expr.type === "literal" &&
+      !w.catch
+    ) {
       recordPrimary(ctx, w);
-      return coerceConstant(w.value);
+      return coerceConstant(w.sources[0]!.expr.value);
     }
     const ref = getSimplePullRef(w);
     if (
@@ -87,11 +90,9 @@ export function resolveWires(
       (ctx.traceBits?.get(w) as TraceWireBits | undefined)?.primaryError == null
     ) {
       recordPrimary(ctx, w);
-      return ctx.pullSingle(
-        ref,
-        pullChain,
-        "from" in w ? (w.fromLoc ?? w.loc) : w.loc,
-      );
+      const expr = w.sources[0]!.expr;
+      const refLoc = expr.type === "ref" ? (expr.refLoc ?? w.loc) : w.loc;
+      return ctx.pullSingle(ref, pullChain, refLoc);
     }
   }
   const orderedWires = orderOverdefinedWires(ctx, wires);
@@ -132,31 +133,27 @@ async function resolveWiresAsync(
     // Abort discipline — yield immediately if client disconnected
     if (ctx.signal?.aborted) throw new BridgeAbortError();
 
-    // Constant wire — always wins, no modifiers
-    if ("value" in w) {
+    // Constant wire — single literal source, no catch
+    if (
+      w.sources.length === 1 &&
+      w.sources[0]!.expr.type === "literal" &&
+      !w.catch
+    ) {
       recordPrimary(ctx, w);
-      return coerceConstant(w.value);
+      return coerceConstant(w.sources[0]!.expr.value);
     }
 
-    try {
-      // Layer 1: Execution
-      let value = await evaluateWireSource(ctx, w, pullChain);
+    // Delegate to the unified source-loop resolver
+    const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
 
-      // Layer 2: Fallback Gates (unified || and ?? chain)
-      value = await applyFallbackGates(ctx, w, value, pullChain);
+    try {
+      const value = await resolveSourceEntries(ctx, w, pullChain, bits);
 
       // Overdefinition Boundary
       if (value != null) return value;
     } catch (err: unknown) {
-      // Layer 3: Catch Gate
       if (isFatalError(err)) throw err;
-
-      const recoveredValue = await applyCatchGate(ctx, w, pullChain);
-      if (recoveredValue !== undefined) return recoveredValue;
-
-      lastError = wrapBridgeRuntimeError(err, {
-        bridgeLoc: w.loc,
-      });
+      lastError = err;
     }
   }
 
@@ -193,7 +190,7 @@ export async function applyFallbackGates(
     const isNullishGateOpen = fallback.type === "nullish" && value == null;
 
     if (isFalsyGateOpen || isNullishGateOpen) {
-      recordFallback(ctx, w, fallbackIndex);
+      recordFallback(ctx, w as unknown as Wire, fallbackIndex);
       if (fallback.control) {
         return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
       }
@@ -205,7 +202,7 @@ export async function applyFallbackGates(
             fallback.loc ?? w.loc,
           );
         } catch (err: any) {
-          recordFallbackError(ctx, w, fallbackIndex);
+          recordFallbackError(ctx, w as unknown as Wire, fallbackIndex);
           throw err;
         }
       } else if (fallback.value !== undefined) {
@@ -233,11 +230,11 @@ export async function applyCatchGate(
   pullChain?: Set<string>,
 ): Promise<unknown> {
   if (w.catchControl) {
-    recordCatch(ctx, w);
+    recordCatch(ctx, w as unknown as Wire);
     return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
   }
   if (w.catchFallbackRef) {
-    recordCatch(ctx, w);
+    recordCatch(ctx, w as unknown as Wire);
     try {
       return await ctx.pullSingle(
         w.catchFallbackRef,
@@ -245,12 +242,12 @@ export async function applyCatchGate(
         w.catchLoc ?? w.loc,
       );
     } catch (err: any) {
-      recordCatchError(ctx, w);
+      recordCatchError(ctx, w as unknown as Wire);
       throw err;
     }
   }
   if (w.catchFallback != null) {
-    recordCatch(ctx, w);
+    recordCatch(ctx, w as unknown as Wire);
     return coerceConstant(w.catchFallback);
   }
   return undefined;
@@ -275,150 +272,6 @@ function applyControlFlowWithLoc(
   }
 }
 
-// ── Layer 1: Wire source evaluation ─────────────────────────────────────────
-
-/**
- * Evaluate the primary value of a wire (Layer 1) — the `from`, `cond`,
- * `condAnd`, or `condOr` portion, before any fallback gates are applied.
- *
- * Returns the raw resolved value (or `undefined` if the wire variant is
- * unrecognised).
- */
-async function evaluateWireSource(
-  ctx: TreeContext,
-  w: Wire,
-  pullChain?: Set<string>,
-): Promise<any> {
-  if ("cond" in w) {
-    const condValue = await ctx.pullSingle(
-      w.cond,
-      pullChain,
-      w.condLoc ?? w.loc,
-    );
-    if (condValue) {
-      recordPrimary(ctx, w); // "then" branch → primary bit
-      if (w.thenRef !== undefined) {
-        try {
-          return await ctx.pullSingle(w.thenRef, pullChain, w.thenLoc ?? w.loc);
-        } catch (err: any) {
-          recordPrimaryError(ctx, w);
-          throw err;
-        }
-      }
-      if (w.thenValue !== undefined) return coerceConstant(w.thenValue);
-    } else {
-      recordElse(ctx, w); // "else" branch
-      if (w.elseRef !== undefined) {
-        try {
-          return await ctx.pullSingle(w.elseRef, pullChain, w.elseLoc ?? w.loc);
-        } catch (err: any) {
-          recordElseError(ctx, w);
-          throw err;
-        }
-      }
-      if (w.elseValue !== undefined) return coerceConstant(w.elseValue);
-    }
-    return undefined;
-  }
-
-  if ("condAnd" in w) {
-    recordPrimary(ctx, w);
-    const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condAnd;
-    try {
-      const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
-      if (!leftVal) return false;
-      if (rightRef !== undefined)
-        return Boolean(
-          await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
-        );
-      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-      return Boolean(leftVal);
-    } catch (err: any) {
-      recordPrimaryError(ctx, w);
-      throw err;
-    }
-  }
-
-  if ("condOr" in w) {
-    recordPrimary(ctx, w);
-    const { leftRef, rightRef, rightValue, safe, rightSafe } = w.condOr;
-    try {
-      const leftVal = await pullSafe(ctx, leftRef, safe, pullChain, w.loc);
-      if (leftVal) return true;
-      if (rightRef !== undefined)
-        return Boolean(
-          await pullSafe(ctx, rightRef, rightSafe, pullChain, w.loc),
-        );
-      if (rightValue !== undefined) return Boolean(coerceConstant(rightValue));
-      return Boolean(leftVal);
-    } catch (err: any) {
-      recordPrimaryError(ctx, w);
-      throw err;
-    }
-  }
-
-  if ("from" in w) {
-    recordPrimary(ctx, w);
-    if (w.safe) {
-      try {
-        return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
-      } catch (err: any) {
-        if (isFatalError(err)) throw err;
-        return undefined;
-      }
-    }
-    try {
-      return await ctx.pullSingle(w.from, pullChain, w.fromLoc ?? w.loc);
-    } catch (err: any) {
-      recordPrimaryError(ctx, w);
-      throw err;
-    }
-  }
-
-  return undefined;
-}
-
-// ── Safe-navigation helper ──────────────────────────────────────────────────
-
-/**
- * Pull a ref with optional safe-navigation: catches non-fatal errors and
- * returns `undefined` instead.  Used by condAnd / condOr evaluation.
- * Returns `MaybePromise` so synchronous pulls skip microtask scheduling.
- */
-function pullSafe(
-  ctx: TreeContext,
-  ref: NodeRef,
-  safe: boolean | undefined,
-  pullChain?: Set<string>,
-  bridgeLoc?: Wire["loc"],
-): MaybePromise<any> {
-  // FAST PATH: Unsafe wires bypass the try/catch overhead entirely
-  if (!safe) {
-    return ctx.pullSingle(ref, pullChain, bridgeLoc);
-  }
-
-  // SAFE PATH: We must catch synchronous throws during the invocation
-  let pull: any;
-  try {
-    pull = ctx.pullSingle(ref, pullChain, bridgeLoc);
-  } catch (e: any) {
-    // Caught a synchronous error!
-    if (isFatalError(e)) throw e;
-    return undefined;
-  }
-
-  // If the result was synchronous and didn't throw, we just return it
-  if (!isPromise(pull)) {
-    return pull;
-  }
-
-  // If the result is a Promise, we must catch asynchronous rejections
-  return pull.catch((e: any) => {
-    if (isFatalError(e)) throw e;
-    return undefined;
-  });
-}
-
 // ── Trace recording helpers ─────────────────────────────────────────────────
 // These are designed for minimal overhead: when `traceBits` is not set on the
 // context (tracing disabled), the functions return immediately after a single
@@ -432,11 +285,6 @@ function recordPrimary(ctx: TreeContext, w: Wire): void {
   if (bits?.primary != null) ctx.traceMask![0] |= 1n << BigInt(bits.primary);
 }
 
-function recordElse(ctx: TreeContext, w: Wire): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.else != null) ctx.traceMask![0] |= 1n << BigInt(bits.else);
-}
-
 function recordFallback(ctx: TreeContext, w: Wire, index: number): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
   const fb = bits?.fallbacks;
@@ -446,18 +294,6 @@ function recordFallback(ctx: TreeContext, w: Wire, index: number): void {
 function recordCatch(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
   if (bits?.catch != null) ctx.traceMask![0] |= 1n << BigInt(bits.catch);
-}
-
-function recordPrimaryError(ctx: TreeContext, w: Wire): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.primaryError != null)
-    ctx.traceMask![0] |= 1n << BigInt(bits.primaryError);
-}
-
-function recordElseError(ctx: TreeContext, w: Wire): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.elseError != null)
-    ctx.traceMask![0] |= 1n << BigInt(bits.elseError);
 }
 
 function recordFallbackError(ctx: TreeContext, w: Wire, index: number): void {

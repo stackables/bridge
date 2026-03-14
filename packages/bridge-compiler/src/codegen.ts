@@ -26,11 +26,11 @@
 import type {
   BridgeDocument,
   Bridge,
-  Wire,
+  WireLegacy,
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
-import { BridgePanicError } from "@stackables/bridge-core";
+import { BridgePanicError, v2ToLegacy } from "@stackables/bridge-core";
 import type { SourceLocation } from "@stackables/bridge-types";
 import {
   assertBridgeCompilerCompatible,
@@ -38,6 +38,17 @@ import {
 } from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
+
+type LegacyBridge = Omit<Bridge, "wires"> & { wires: WireLegacy[] };
+type LegacyToolDef = Omit<ToolDef, "wires"> & { wires: WireLegacy[] };
+
+function toLegacyBridge(b: Bridge): LegacyBridge {
+  return { ...b, wires: b.wires.map(v2ToLegacy) };
+}
+
+function toLegacyToolDef(td: ToolDef): LegacyToolDef {
+  return { ...td, wires: td.wires.map(v2ToLegacy) };
+}
 
 function matchesRequestedFields(
   fieldPath: string,
@@ -140,7 +151,7 @@ export function compileBridge(
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Check if a wire has catch fallback modifiers. */
-function hasCatchFallback(w: Wire): boolean {
+function hasCatchFallback(w: WireLegacy): boolean {
   return (
     ("catchFallback" in w && w.catchFallback != null) ||
     ("catchFallbackRef" in w && !!w.catchFallbackRef)
@@ -153,7 +164,7 @@ type DetectedControlFlow = {
 };
 
 /** Check if any wire in a set has a control flow instruction (break/continue/throw/panic). */
-function detectControlFlow(wires: Wire[]): DetectedControlFlow | null {
+function detectControlFlow(wires: WireLegacy[]): DetectedControlFlow | null {
   for (const w of wires) {
     if ("fallbacks" in w && w.fallbacks) {
       for (const fb of w.fallbacks) {
@@ -188,7 +199,7 @@ function detectControlFlow(wires: Wire[]): DetectedControlFlow | null {
 }
 
 /** Check if a wire has a catch control flow instruction. */
-function hasCatchControl(w: Wire): boolean {
+function hasCatchControl(w: WireLegacy): boolean {
   return "catchControl" in w && w.catchControl != null;
 }
 
@@ -299,9 +310,9 @@ const INTERNAL_TOOLS = new Set([
 ]);
 
 class CodegenContext {
-  private bridge: Bridge;
+  private bridge: LegacyBridge;
   private constDefs: Map<string, string>;
-  private toolDefs: ToolDef[];
+  private toolDefs: LegacyToolDef[];
   private selfTrunkKey: string;
   private varMap = new Map<string, string>();
   private tools = new Map<string, ToolInfo>();
@@ -342,9 +353,9 @@ class CodegenContext {
     toolDefs: ToolDef[],
     requestedFields?: string[],
   ) {
-    this.bridge = bridge;
+    this.bridge = toLegacyBridge(bridge);
     this.constDefs = constDefs;
-    this.toolDefs = toolDefs;
+    this.toolDefs = toolDefs.map(toLegacyToolDef);
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
     this.requestedFields = requestedFields?.length
       ? requestedFields
@@ -384,7 +395,7 @@ class CodegenContext {
           // However, tools inlined from define blocks may use type "Define".
           // We detect the correct type by scanning the wires for a matching ref.
           let refType = module === SELF_MODULE ? "Tools" : bridge.type;
-          for (const w of bridge.wires) {
+          for (const w of this.bridge.wires) {
             if (
               w.to.module === module &&
               w.to.field === fieldName &&
@@ -451,7 +462,7 @@ class CodegenContext {
 
     // Detect alias declarations — wires targeting __local:Shadow:<name> modules.
     // These act as virtual containers (like define modules).
-    for (const w of bridge.wires) {
+    for (const w of this.bridge.wires) {
       const toTk = refTrunkKey(w.to);
       if (
         w.to.module === "__local" &&
@@ -609,9 +620,9 @@ class CodegenContext {
     }
 
     // Separate wires into tool inputs, define containers, and output
-    const allOutputWires: Wire[] = [];
-    const toolWires = new Map<string, Wire[]>();
-    const defineWires = new Map<string, Wire[]>();
+    const allOutputWires: WireLegacy[] = [];
+    const toolWires = new Map<string, WireLegacy[]>();
+    const defineWires = new Map<string, WireLegacy[]>();
 
     for (const w of bridge.wires) {
       // Element wires (from array mapping) target the output, not a tool
@@ -624,7 +635,7 @@ class CodegenContext {
       if (toTrunkNoElement === this.selfTrunkKey) {
         allOutputWires.push(w);
       } else if (this.defineContainers.has(toKey)) {
-        // Wire targets a define-in/out container
+        // WireLegacy targets a define-in/out container
         const arr = defineWires.get(toKey) ?? [];
         arr.push(w);
         defineWires.set(toKey, arr);
@@ -1153,7 +1164,7 @@ class CodegenContext {
      * and all fallback refs.  Used by the backward reachability analysis
      * to discover which tools are transitively needed by the output.
      */
-    const collectSourceKeys = (wires: Wire[]): Set<string> => {
+    const collectSourceKeys = (wires: WireLegacy[]): Set<string> => {
       const keys = new Set<string>();
       for (const w of wires) {
         if ("from" in w) keys.add(refTrunkKey(w.from));
@@ -1208,7 +1219,11 @@ class CodegenContext {
     // can execute in parallel — we emit them as a single Promise.all().
     for (const layer of toolLayers) {
       // Classify tools in this layer
-      const parallelBatch: { tk: string; tool: ToolInfo; wires: Wire[] }[] = [];
+      const parallelBatch: {
+        tk: string;
+        tool: ToolInfo;
+        wires: WireLegacy[];
+      }[] = [];
       const sequentialKeys: string[] = [];
 
       for (const tk of layer) {
@@ -1408,7 +1423,7 @@ class CodegenContext {
   private emitToolCall(
     lines: string[],
     tool: ToolInfo,
-    bridgeWires: Wire[],
+    bridgeWires: WireLegacy[],
     mode: "normal" | "fire-and-forget" | "catch-guarded" = "normal",
   ): void {
     const toolDef = this.resolveToolDef(tool.toolName);
@@ -1494,13 +1509,16 @@ class CodegenContext {
           if ("value" in tw && !("cond" in tw)) {
             forkInputs.set(
               path,
-              emitCoerced((tw as Wire & { value: string }).value),
+              emitCoerced((tw as WireLegacy & { value: string }).value),
             );
           } else if ("from" in tw) {
-            const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+            const fromKey = refTrunkKey(
+              (tw as WireLegacy & { from: NodeRef }).from,
+            );
             if (forkExprs.has(fromKey)) {
               let expr = forkExprs.get(fromKey)!;
-              for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+              for (const p of (tw as WireLegacy & { from: NodeRef }).from
+                .path) {
                 expr += `[${JSON.stringify(p)}]`;
               }
               forkInputs.set(path, expr);
@@ -1508,7 +1526,7 @@ class CodegenContext {
               forkInputs.set(
                 path,
                 this.resolveToolWireSource(
-                  tw as Wire & { from: NodeRef },
+                  tw as WireLegacy & { from: NodeRef },
                   toolDef,
                 ),
               );
@@ -1534,7 +1552,7 @@ class CodegenContext {
       if ("value" in tw && !("cond" in tw)) {
         if (forkKeys.has(refTrunkKey(tw.to))) continue;
         const path = tw.to.path;
-        const expr = emitCoerced((tw as Wire & { value: string }).value);
+        const expr = emitCoerced((tw as WireLegacy & { value: string }).value);
         if (path.length > 1) {
           addNestedEntry(path, expr);
         } else {
@@ -1550,17 +1568,17 @@ class CodegenContext {
       // Skip wires with fallbacks — handled below
       if ("fallbacks" in tw && (tw as any).fallbacks?.length > 0) continue;
       const path = tw.to.path;
-      const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+      const fromKey = refTrunkKey((tw as WireLegacy & { from: NodeRef }).from);
       let expr: string;
       if (forkExprs.has(fromKey)) {
         // Source is a fork result
         expr = forkExprs.get(fromKey)!;
-        for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+        for (const p of (tw as WireLegacy & { from: NodeRef }).from.path) {
           expr = `(${expr})[${JSON.stringify(p)}]`;
         }
       } else {
         expr = this.resolveToolWireSource(
-          tw as Wire & { from: NodeRef },
+          tw as WireLegacy & { from: NodeRef },
           toolDef,
         );
       }
@@ -1605,7 +1623,7 @@ class CodegenContext {
       if (!("fallbacks" in tw) || !(tw as any).fallbacks?.length) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
       const path = tw.to.path;
-      const pullWire = tw as Wire & { from: NodeRef; fallbacks: any[] };
+      const pullWire = tw as WireLegacy & { from: NodeRef; fallbacks: any[] };
       let expr = this.resolveToolDefRef(pullWire.from, toolDef, forkExprs);
       for (const fb of pullWire.fallbacks) {
         const op = fb.type === "nullish" ? "??" : "||";
@@ -1722,7 +1740,7 @@ class CodegenContext {
   private emitInternalToolCall(
     lines: string[],
     tool: ToolInfo,
-    bridgeWires: Wire[],
+    bridgeWires: WireLegacy[],
   ): void {
     const fieldName = tool.toolName;
 
@@ -1827,7 +1845,7 @@ class CodegenContext {
    *
    * Results are cached in `toolDepVars` so each dep is called at most once.
    */
-  private emitToolDeps(lines: string[], toolDef: ToolDef): void {
+  private emitToolDeps(lines: string[], toolDef: LegacyToolDef): void {
     // Collect tool-kind handles that haven't been emitted yet
     const pendingDeps: { handle: string; toolName: string }[] = [];
     for (const h of toolDef.handles) {
@@ -1886,7 +1904,7 @@ class CodegenContext {
       for (const tw of depToolDef.wires) {
         if ("value" in tw && !("cond" in tw)) {
           inputParts.push(
-            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as WireLegacy & { value: string }).value)}`,
           );
         }
       }
@@ -1895,7 +1913,7 @@ class CodegenContext {
       for (const tw of depToolDef.wires) {
         if ("from" in tw) {
           const source = this.resolveToolWireSource(
-            tw as Wire & { from: NodeRef },
+            tw as WireLegacy & { from: NodeRef },
             depToolDef,
           );
           inputParts.push(
@@ -1936,12 +1954,12 @@ class CodegenContext {
   }
 
   /**
-   * Resolve a Wire's source NodeRef to a JS expression in the context of a ToolDef.
+   * Resolve a WireLegacy's source NodeRef to a JS expression in the context of a ToolDef.
    * Handles context, const, and tool handle types.
    */
   private resolveToolWireSource(
-    wire: Wire & { from: NodeRef },
-    toolDef: ToolDef,
+    wire: WireLegacy & { from: NodeRef },
+    toolDef: LegacyToolDef,
   ): string {
     const ref = wire.from;
     // Match the ref against tool handles
@@ -1983,7 +2001,7 @@ class CodegenContext {
    */
   private resolveToolDefRef(
     ref: NodeRef,
-    toolDef: ToolDef,
+    toolDef: LegacyToolDef,
     forkExprs: Map<string, string>,
   ): string {
     const key = refTrunkKey(ref);
@@ -1996,7 +2014,7 @@ class CodegenContext {
     }
     // Delegate to resolveToolWireSource via a synthetic wire
     return this.resolveToolWireSource(
-      { from: ref, to: ref } as Wire & { from: NodeRef },
+      { from: ref, to: ref } as WireLegacy & { from: NodeRef },
       toolDef,
     );
   }
@@ -2059,7 +2077,7 @@ class CodegenContext {
    * Resolve a ToolDef source reference (e.g. "ctx.apiKey") to a JS expression.
    * Handles context, const, and tool dependencies.
    */
-  private resolveToolDepSource(source: string, toolDef: ToolDef): string {
+  private resolveToolDepSource(source: string, toolDef: LegacyToolDef): string {
     const dotIdx = source.indexOf(".");
     const handle = dotIdx === -1 ? source : source.substring(0, dotIdx);
     const restPath =
@@ -2122,7 +2140,7 @@ class CodegenContext {
             !("cond" in tw) &&
             tw.to.path.join(".") === pathKey
           ) {
-            expr = `(${expr} ?? ${emitCoerced((tw as Wire & { value: string }).value)})`;
+            expr = `(${expr} ?? ${emitCoerced((tw as WireLegacy & { value: string }).value)})`;
             break;
           }
         }
@@ -2144,12 +2162,12 @@ class CodegenContext {
    * Resolve a ToolDef by name, merging the extends chain.
    * Mirrors the runtime's resolveToolDefByName logic.
    */
-  private resolveToolDef(name: string): ToolDef | undefined {
+  private resolveToolDef(name: string): LegacyToolDef | undefined {
     const base = this.toolDefs.find((t) => t.name === name);
     if (!base) return undefined;
 
     // Build extends chain: root → ... → leaf
-    const chain: ToolDef[] = [base];
+    const chain: LegacyToolDef[] = [base];
     let current = base;
     while (current.extends) {
       const parent = this.toolDefs.find((t) => t.name === current.extends);
@@ -2159,7 +2177,7 @@ class CodegenContext {
     }
 
     // Merge: root provides base, each child overrides
-    const merged: ToolDef = {
+    const merged: LegacyToolDef = {
       kind: "tool",
       name,
       fn: chain[0]!.fn,
@@ -2198,7 +2216,7 @@ class CodegenContext {
 
   // ── Output generation ────────────────────────────────────────────────────
 
-  private emitOutput(lines: string[], outputWires: Wire[]): void {
+  private emitOutput(lines: string[], outputWires: WireLegacy[]): void {
     if (outputWires.length === 0) {
       // Match the runtime's error when no wires target the output
       const { type, field } = this.bridge;
@@ -2414,9 +2432,9 @@ class CodegenContext {
     const arrayFields = new Set(Object.keys(arrayIterators));
 
     // Separate element wires from scalar wires
-    const elementWires = new Map<string, Wire[]>();
-    const scalarWires: Wire[] = [];
-    const arraySourceWires = new Map<string, Wire>();
+    const elementWires = new Map<string, WireLegacy[]>();
+    const scalarWires: WireLegacy[] = [];
+    const arraySourceWires = new Map<string, WireLegacy>();
 
     for (const w of outputWires) {
       const topField = w.to.path[0]!;
@@ -2517,7 +2535,7 @@ class CodegenContext {
       if (!sourceW || elemWires.length === 0) continue;
 
       // Strip the array field prefix from element wire paths
-      const shifted: Wire[] = elemWires.map((w) => ({
+      const shifted: WireLegacy[] = elemWires.map((w) => ({
         ...w,
         to: { ...w.to, path: w.to.path.slice(1) },
       }));
@@ -2716,10 +2734,12 @@ class CodegenContext {
     return `{\n${entries.join(",\n")},\n${innerPad}}`;
   }
 
-  private reorderOverdefinedOutputWires(outputWires: Wire[]): Wire[] {
+  private reorderOverdefinedOutputWires(
+    outputWires: WireLegacy[],
+  ): WireLegacy[] {
     if (outputWires.length < 2) return outputWires;
 
-    const groups = new Map<string, Wire[]>();
+    const groups = new Map<string, WireLegacy[]>();
     for (const wire of outputWires) {
       const pathKey = wire.to.path.join(".");
       const group = groups.get(pathKey) ?? [];
@@ -2728,7 +2748,7 @@ class CodegenContext {
     }
 
     const emitted = new Set<string>();
-    const reordered: Wire[] = [];
+    const reordered: WireLegacy[] = [];
     let changed = false;
 
     for (const wire of outputWires) {
@@ -2761,14 +2781,14 @@ class CodegenContext {
   }
 
   private classifyOverdefinitionWire(
-    wire: Wire,
+    wire: WireLegacy,
     visited = new Set<string>(),
   ): number {
     return this.canResolveWireCheaply(wire, visited) ? 0 : 1;
   }
 
   private canResolveWireCheaply(
-    wire: Wire,
+    wire: WireLegacy,
     visited = new Set<string>(),
   ): boolean {
     if ("value" in wire) return true;
@@ -2889,7 +2909,7 @@ class CodegenContext {
    * is itself an array iterator, a nested `.map()` is generated.
    */
   private buildElementBody(
-    elemWires: Wire[],
+    elemWires: WireLegacy[],
     arrayIterators: Record<string, string>,
     depth: number,
     indent: number,
@@ -2904,8 +2924,8 @@ class CodegenContext {
     const tree: TreeNode = { children: new Map() };
 
     // Group wires by whether they target a sub-array field
-    const subArraySources = new Map<string, Wire>(); // field → source wire
-    const subArrayElements = new Map<string, Wire[]>(); // field → element wires
+    const subArraySources = new Map<string, WireLegacy>(); // field → source wire
+    const subArrayElements = new Map<string, WireLegacy[]>(); // field → element wires
 
     for (const ew of elemWires) {
       const topField = ew.to.path[0]!;
@@ -2947,7 +2967,7 @@ class CodegenContext {
       if (innerElems.length === 0) continue;
 
       // Shift inner element paths: remove the first segment (the sub-array field name)
-      const shifted: Wire[] = innerElems.map((w) => ({
+      const shifted: WireLegacy[] = innerElems.map((w) => ({
         ...w,
         to: { ...w.to, path: w.to.path.slice(1) },
       }));
@@ -3032,7 +3052,7 @@ class CodegenContext {
    * For "break": generates loop body that pushes to _result and breaks
    */
   private buildElementBodyWithControlFlow(
-    elemWires: Wire[],
+    elemWires: WireLegacy[],
     arrayIterators: Record<string, string>,
     depth: number,
     indent: number,
@@ -3111,10 +3131,10 @@ class CodegenContext {
     return `${pad}  if (!${checkExpr}) ${controlStatement}\n${pad}  _result.push(${this.buildElementBody(elemWires, arrayIterators, depth, indent)});`;
   }
 
-  // ── Wire → expression ────────────────────────────────────────────────────
+  // ── WireLegacy → expression ────────────────────────────────────────────────────
 
   /** Convert a wire to a JavaScript expression string. */
-  wireToExpr(w: Wire): string {
+  wireToExpr(w: WireLegacy): string {
     // Constant wire
     if ("value" in w) return emitCoerced(w.value);
 
@@ -3188,7 +3208,7 @@ class CodegenContext {
   }
 
   /** Convert an element wire (inside array mapping) to an expression. */
-  private elementWireToExpr(w: Wire, elVar = "_el0"): string {
+  private elementWireToExpr(w: WireLegacy, elVar = "_el0"): string {
     const prevElVar = this.currentElVar;
     this.elementVarStack.push(elVar);
     this.currentElVar = elVar;
@@ -3200,7 +3220,7 @@ class CodegenContext {
     }
   }
 
-  private wrapWireExpr(w: Wire, expr: string): string {
+  private wrapWireExpr(w: WireLegacy, expr: string): string {
     const loc = this.serializeLoc(w.loc);
     if (expr.includes("await ")) {
       return `await __wrapBridgeErrorAsync(async () => (${expr}), ${loc})`;
@@ -3254,7 +3274,7 @@ class CodegenContext {
     return this.appendPathExpr(elVar, ref, true);
   }
 
-  private _elementWireToExprInner(w: Wire, elVar: string): string {
+  private _elementWireToExprInner(w: WireLegacy, elVar: string): string {
     if ("value" in w) return emitCoerced(w.value);
 
     // Handle ternary (conditional) wires inside array mapping
@@ -3451,7 +3471,7 @@ class CodegenContext {
    * Check if a wire's generated expression would contain `await`.
    * Used to determine whether array loops must be async (for...of) instead of .map()/.flatMap().
    */
-  private wireNeedsAwait(w: Wire): boolean {
+  private wireNeedsAwait(w: WireLegacy): boolean {
     // Element-scoped non-internal tool reference generates await __call()
     if ("from" in w && !w.from.element) {
       const srcKey = refTrunkKey(w.from);
@@ -3482,7 +3502,7 @@ class CodegenContext {
    * When this is true, the array map can be made sync if all tools declare
    * `{ sync: true }` — we generate a dual sync/async path at runtime.
    */
-  private asyncOnlyFromTools(wires: Wire[]): boolean {
+  private asyncOnlyFromTools(wires: WireLegacy[]): boolean {
     for (const w of wires) {
       if (
         (hasCatchFallback(w) || hasCatchControl(w)) &&
@@ -3534,7 +3554,7 @@ class CodegenContext {
    *   inside the sync `.map()` branch of the dual-path array map optimisation.
    */
   private collectElementPreamble(
-    elemWires: Wire[],
+    elemWires: WireLegacy[],
     elVar: string,
     lines: string[],
     syncOnly = false,
@@ -3706,9 +3726,9 @@ class CodegenContext {
   }
 
   private filterCurrentElementWires(
-    elemWires: Wire[],
+    elemWires: WireLegacy[],
     arrayIterators: Record<string, string>,
-  ): Wire[] {
+  ): WireLegacy[] {
     return elemWires.filter(
       (w) => !(w.to.path.length > 1 && w.to.path[0]! in arrayIterators),
     );
@@ -3747,7 +3767,7 @@ class CodegenContext {
    * element-scoped non-internal tools used by the given element wires.
    * Used to build runtime sync-check expressions for array map optimisation.
    */
-  private collectElementToolRefs(elemWires: Wire[]): string[] {
+  private collectElementToolRefs(elemWires: WireLegacy[]): string[] {
     const needed = new Set<string>();
     const collectDeps = (tk: string) => {
       if (needed.has(tk)) return;
@@ -3800,7 +3820,7 @@ class CodegenContext {
   }
 
   /** Build an input object for a tool call inside an array map callback. */
-  private buildElementToolInput(wires: Wire[], elVar: string): string {
+  private buildElementToolInput(wires: WireLegacy[], elVar: string): string {
     if (wires.length === 0) return "{}";
     const entries: string[] = [];
     for (const w of wires) {
@@ -3813,11 +3833,14 @@ class CodegenContext {
     return `{ ${entries.join(", ")} }`;
   }
 
-  private buildElementContainerExpr(wires: Wire[], elVar: string): string {
+  private buildElementContainerExpr(
+    wires: WireLegacy[],
+    elVar: string,
+  ): string {
     if (wires.length === 0) return "undefined";
 
     let rootExpr: string | undefined;
-    const fieldWires: Wire[] = [];
+    const fieldWires: WireLegacy[] = [];
 
     for (const w of wires) {
       if (w.to.path.length === 0) {
@@ -3861,7 +3884,7 @@ class CodegenContext {
   }
 
   /** Apply falsy (||), nullish (??) and catch fallback chains to an expression. */
-  private applyFallbacks(w: Wire, expr: string): string {
+  private applyFallbacks(w: WireLegacy, expr: string): string {
     // Top-level safe flag indicates the wire wants error → undefined conversion.
     // condAnd/condOr wires carry safe INSIDE (condAnd.safe) — those refs already
     // have rootSafe/pathSafe so __get handles null bases; no extra wrapping needed.
@@ -3992,7 +4015,7 @@ class CodegenContext {
 
   /** Get the error flag variable name for a wire's source tool, but ONLY if
    * that tool was compiled in catch-guarded mode (i.e. the `_err` variable exists). */
-  private getSourceErrorFlag(w: Wire): string | undefined {
+  private getSourceErrorFlag(w: WireLegacy): string | undefined {
     if ("from" in w) {
       return this.getErrorFlagForRef(w.from);
     }
@@ -4151,7 +4174,7 @@ class CodegenContext {
               const target = tw.to.path.join(".");
               inputEntries.set(
                 target,
-                `${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+                `${JSON.stringify(target)}: ${emitCoerced((tw as WireLegacy & { value: string }).value)}`,
               );
             }
           }
@@ -4159,7 +4182,7 @@ class CodegenContext {
             if ("from" in tw) {
               const target = tw.to.path.join(".");
               const expr = this.resolveToolWireSource(
-                tw as Wire & { from: NodeRef },
+                tw as WireLegacy & { from: NodeRef },
                 toolDef,
               );
               inputEntries.set(target, `${JSON.stringify(target)}: ${expr}`);
@@ -4199,16 +4222,16 @@ class CodegenContext {
    * and can be lazily evaluated inline instead of eagerly called.
    */
   private analyzeTernaryOnlyTools(
-    outputWires: Wire[],
-    toolWires: Map<string, Wire[]>,
-    defineWires: Map<string, Wire[]>,
+    outputWires: WireLegacy[],
+    toolWires: Map<string, WireLegacy[]>,
+    defineWires: Map<string, WireLegacy[]>,
     forceMap: Map<string, { catchError?: boolean }>,
   ): void {
     // Collect all tool trunk keys referenced in any wire position
     const allRefs = new Set<string>();
     const ternaryBranchRefs = new Set<string>();
 
-    const processWire = (w: Wire) => {
+    const processWire = (w: WireLegacy) => {
       if ("from" in w && !w.from.element) {
         allRefs.add(refTrunkKey(w.from));
       }
@@ -4265,7 +4288,7 @@ class CodegenContext {
 
   private mergeOverdefinedExpr(
     node: { expr?: string; terminal?: boolean },
-    wire: Wire,
+    wire: WireLegacy,
   ): void {
     const nextExpr = this.wireToExpr(wire);
     const nextIsConstant = "value" in wire;
@@ -4292,15 +4315,15 @@ class CodegenContext {
    * Handles nested paths by creating nested object literals.
    */
   private buildObjectLiteral(
-    wires: Wire[],
-    getPath: (w: Wire) => string[],
+    wires: WireLegacy[],
+    getPath: (w: WireLegacy) => string[],
     indent: number,
   ): string {
     if (wires.length === 0) return "{}";
 
     // Separate root wire (path=[]) from field-specific wires
     let rootExpr: string | undefined;
-    const fieldWires: Wire[] = [];
+    const fieldWires: WireLegacy[] = [];
 
     for (const w of wires) {
       const path = getPath(w);
@@ -4395,7 +4418,7 @@ class CodegenContext {
    * The tool should only be called if ANY check expression is null.
    */
   private analyzeOverdefinitionBypass(
-    outputWires: Wire[],
+    outputWires: WireLegacy[],
     toolOrder: string[],
     forceMap: Map<string, { catchError?: boolean }>,
   ): Map<string, { checkExprs: string[] }> {
@@ -4403,7 +4426,7 @@ class CodegenContext {
 
     // Step 1: Group scalar output wires by path, preserving authored order.
     // Skip root wires (empty path) and element wires (array mapping).
-    const outputByPath = new Map<string, Wire[]>();
+    const outputByPath = new Map<string, WireLegacy[]>();
     for (const w of outputWires) {
       if (w.to.path.length === 0) continue;
       if ("from" in w && w.from.element) continue;
@@ -4548,7 +4571,7 @@ class CodegenContext {
   // ── Dependency analysis & topological sort ────────────────────────────────
 
   /** Get all source trunk keys a wire depends on. */
-  private getSourceTrunks(w: Wire): string[] {
+  private getSourceTrunks(w: WireLegacy): string[] {
     const trunks: string[] = [];
     const collectTrunk = (ref: NodeRef) => trunks.push(refTrunkKey(ref));
 
@@ -4607,7 +4630,10 @@ class CodegenContext {
    * inside `Promise.all([...])` — no `await`, no `const` declaration.
    * Only call this for tools where `isParallelizableTool` returns true.
    */
-  private buildNormalCallExpr(tool: ToolInfo, bridgeWires: Wire[]): string {
+  private buildNormalCallExpr(
+    tool: ToolInfo,
+    bridgeWires: WireLegacy[],
+  ): string {
     const toolDef = this.resolveToolDef(tool.toolName);
 
     if (!toolDef) {
@@ -4626,7 +4652,7 @@ class CodegenContext {
         const target = tw.to.path.join(".");
         inputEntries.set(
           target,
-          `    ${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+          `    ${JSON.stringify(target)}: ${emitCoerced((tw as WireLegacy & { value: string }).value)}`,
         );
       }
     }
@@ -4634,7 +4660,7 @@ class CodegenContext {
       if ("from" in tw) {
         const target = tw.to.path.join(".");
         const expr = this.resolveToolWireSource(
-          tw as Wire & { from: NodeRef },
+          tw as WireLegacy & { from: NodeRef },
           toolDef,
         );
         inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
@@ -4661,7 +4687,7 @@ class CodegenContext {
     );
   }
 
-  private topologicalLayers(toolWires: Map<string, Wire[]>): string[][] {
+  private topologicalLayers(toolWires: Map<string, WireLegacy[]>): string[][] {
     const toolKeys = [...this.tools.keys()];
     const allKeys = [...toolKeys, ...this.defineContainers];
     const adj = new Map<string, Set<string>>();
@@ -4715,7 +4741,7 @@ class CodegenContext {
     return layers;
   }
 
-  private topologicalSort(toolWires: Map<string, Wire[]>): string[] {
+  private topologicalSort(toolWires: Map<string, WireLegacy[]>): string[] {
     // All node keys: tools + define containers
     const toolKeys = [...this.tools.keys()];
     const allKeys = [...toolKeys, ...this.defineContainers];

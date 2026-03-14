@@ -206,37 +206,33 @@ export function resolveToolDefByName(
 
 /**
  * Resolve a tool definition's wires into a nested input object.
- * Wires use the unified Wire type — constant wires set fixed values,
- * pull wires resolve sources from handles (context, const, tool deps).
+ * Wires use the unified Wire type with sources[] and catch.
  */
 export async function resolveToolWires(
   ctx: ToolLookupContext,
   toolDef: ToolDef,
   input: Record<string, any>,
 ): Promise<void> {
-  // Build pipe-fork lookup: key → pipeHandle entry
   const forkKeys = new Set<string>();
   if (toolDef.pipeHandles) {
-    for (const ph of toolDef.pipeHandles) {
-      forkKeys.add(ph.key);
-    }
+    for (const ph of toolDef.pipeHandles) forkKeys.add(ph.key);
   }
 
-  // Determine whether a wire targets a pipe fork or the main tool
   const isForkTarget = (w: Wire): boolean => {
-    if (!("to" in w)) return false;
     const key = trunkKey(w.to);
     return forkKeys.has(key);
   };
 
-  // Separate wires: main tool wires vs fork wires
   const mainConstantWires: Wire[] = [];
   const mainPullWires: Wire[] = [];
   const mainTernaryWires: Wire[] = [];
-  // Fork wires grouped by trunk key, sorted by instance for chain ordering
+  const mainComplexWires: Wire[] = [];
   const forkWireMap = new Map<string, { constants: Wire[]; pulls: Wire[] }>();
 
   for (const wire of toolDef.wires) {
+    const primary = wire.sources[0]?.expr;
+    if (!primary) continue;
+
     if (isForkTarget(wire)) {
       const key = trunkKey(wire.to);
       let group = forkWireMap.get(key);
@@ -244,29 +240,25 @@ export async function resolveToolWires(
         group = { constants: [], pulls: [] };
         forkWireMap.set(key, group);
       }
-      if ("value" in wire && !("cond" in wire)) {
+      if (primary.type === "literal" && wire.sources.length === 1) {
         group.constants.push(wire);
-      } else if ("from" in wire) {
+      } else if (primary.type === "ref") {
         group.pulls.push(wire);
       }
-    } else if ("cond" in wire) {
+    } else if (wire.sources.length > 1 || wire.catch) {
+      mainComplexWires.push(wire);
+    } else if (primary.type === "ternary") {
       mainTernaryWires.push(wire);
-    } else if ("value" in wire) {
+    } else if (primary.type === "literal") {
       mainConstantWires.push(wire);
-    } else if ("from" in wire) {
-      // Pull wires with fallbacks/catch are processed separately below
-      if ("fallbacks" in wire || "catchFallback" in wire) {
-        // handled by fallback loop
-      } else {
-        mainPullWires.push(wire);
-      }
+    } else if (primary.type === "ref") {
+      mainPullWires.push(wire);
     }
   }
 
-  // Execute pipe forks in instance order (lower instance first, chains depend on prior results)
+  // Execute pipe forks in instance order
   const forkResults = new Map<string, any>();
   if (forkWireMap.size > 0) {
-    // Sort fork keys by instance number to respect chain ordering
     const sortedForkKeys = [...forkWireMap.keys()].sort((a, b) => {
       const instA = parseInt(a.split(":").pop() ?? "0", 10);
       const instB = parseInt(b.split(":").pop() ?? "0", 10);
@@ -277,62 +269,51 @@ export async function resolveToolWires(
       const group = forkWireMap.get(forkKey)!;
       const forkInput: Record<string, any> = {};
 
-      // Apply constants
       for (const wire of group.constants) {
-        if ("value" in wire && "to" in wire) {
-          setNested(forkInput, wire.to.path, coerceConstant(wire.value));
+        const expr = wire.sources[0]!.expr;
+        if (expr.type === "literal") {
+          setNested(forkInput, wire.to.path, coerceConstant(expr.value));
         }
       }
 
-      // Resolve pull wires (sources may be handles or prior fork results)
       for (const wire of group.pulls) {
-        if (!("from" in wire)) continue;
-        const fromKey = trunkKey(wire.from);
-        let value: any;
-        if (forkResults.has(fromKey)) {
-          // Source is a prior fork's result
-          value = forkResults.get(fromKey);
-          for (const seg of wire.from.path) {
-            value = value?.[seg];
-          }
-        } else {
-          value = await resolveToolNodeRef(ctx, wire.from, toolDef);
-        }
+        const expr = wire.sources[0]!.expr;
+        if (expr.type !== "ref") continue;
+        const value = await resolveToolExprRef(
+          ctx,
+          expr.ref,
+          toolDef,
+          forkResults,
+        );
         setNested(forkInput, wire.to.path, value);
       }
 
-      // Look up and execute the fork tool function
       const forkToolName = forkKey.split(":")[2] ?? "";
       const fn = lookupToolFn(ctx, forkToolName);
-      if (fn) {
-        forkResults.set(forkKey, await fn(forkInput));
-      }
+      if (fn) forkResults.set(forkKey, await fn(forkInput));
     }
   }
 
   // Constants applied synchronously
   for (const wire of mainConstantWires) {
-    if ("value" in wire && "to" in wire) {
-      setNested(input, wire.to.path, coerceConstant(wire.value));
+    const expr = wire.sources[0]!.expr;
+    if (expr.type === "literal") {
+      setNested(input, wire.to.path, coerceConstant(expr.value));
     }
   }
 
-  // Pull wires resolved in parallel (independent deps shouldn't wait on each other)
+  // Pull wires resolved in parallel
   if (mainPullWires.length > 0) {
     const resolved = await Promise.all(
       mainPullWires.map(async (wire) => {
-        if (!("from" in wire)) return null;
-        const fromKey = trunkKey(wire.from);
-        let value: any;
-        if (forkResults.has(fromKey)) {
-          // Source is a fork result (e.g., expression chain output)
-          value = forkResults.get(fromKey);
-          for (const seg of wire.from.path) {
-            value = value?.[seg];
-          }
-        } else {
-          value = await resolveToolNodeRef(ctx, wire.from, toolDef);
-        }
+        const expr = wire.sources[0]!.expr;
+        if (expr.type !== "ref") return null;
+        const value = await resolveToolExprRef(
+          ctx,
+          expr.ref,
+          toolDef,
+          forkResults,
+        );
         return { path: wire.to.path, value };
       }),
     );
@@ -341,87 +322,98 @@ export async function resolveToolWires(
     }
   }
 
-  // Ternary wires: evaluate condition and pick branch
+  // Ternary wires
   for (const wire of mainTernaryWires) {
-    if (!("cond" in wire)) continue;
-    const condValue = await resolveToolNodeRef(ctx, wire.cond, toolDef);
+    const expr = wire.sources[0]!.expr;
+    if (expr.type !== "ternary") continue;
+    const condRef = expr.cond.type === "ref" ? expr.cond.ref : undefined;
+    if (!condRef) continue;
+    const condValue = await resolveToolExprRef(
+      ctx,
+      condRef,
+      toolDef,
+      forkResults,
+    );
+    const branchExpr = condValue ? expr.then : expr.else;
     let value: any;
-    if (condValue) {
-      if ("thenRef" in wire && wire.thenRef) {
-        const fromKey = trunkKey(wire.thenRef);
-        if (forkResults.has(fromKey)) {
-          value = forkResults.get(fromKey);
-          for (const seg of wire.thenRef.path) value = value?.[seg];
-        } else {
-          value = await resolveToolNodeRef(ctx, wire.thenRef, toolDef);
-        }
-      } else if ("thenValue" in wire && wire.thenValue !== undefined) {
-        value = coerceConstant(wire.thenValue);
-      }
-    } else {
-      if ("elseRef" in wire && wire.elseRef) {
-        const fromKey = trunkKey(wire.elseRef);
-        if (forkResults.has(fromKey)) {
-          value = forkResults.get(fromKey);
-          for (const seg of wire.elseRef.path) value = value?.[seg];
-        } else {
-          value = await resolveToolNodeRef(ctx, wire.elseRef, toolDef);
-        }
-      } else if ("elseValue" in wire && wire.elseValue !== undefined) {
-        value = coerceConstant(wire.elseValue);
-      }
+    if (branchExpr.type === "ref") {
+      value = await resolveToolExprRef(
+        ctx,
+        branchExpr.ref,
+        toolDef,
+        forkResults,
+      );
+    } else if (branchExpr.type === "literal") {
+      value = coerceConstant(branchExpr.value);
     }
     if (value !== undefined) setNested(input, wire.to.path, value);
   }
 
-  // Handle fallback wires (coalesce/catch) on main pull wires
-  for (const wire of toolDef.wires) {
+  // Complex wires (with fallbacks and/or catch)
+  for (const wire of mainComplexWires) {
     if (isForkTarget(wire)) continue;
-    if (!("from" in wire) || !("fallbacks" in wire)) continue;
-    // The value was already set by the pull wire resolution above.
-    // Check if it needs fallback processing.
-    const fromKey = trunkKey(wire.from);
+    const primary = wire.sources[0]!.expr;
     let value: any;
-    if (forkResults.has(fromKey)) {
-      value = forkResults.get(fromKey);
-      for (const seg of wire.from.path) value = value?.[seg];
-    } else {
+    if (primary.type === "ref") {
       try {
-        value = await resolveToolNodeRef(ctx, wire.from, toolDef);
+        value = await resolveToolExprRef(
+          ctx,
+          primary.ref,
+          toolDef,
+          forkResults,
+        );
       } catch {
         value = undefined;
       }
+    } else if (primary.type === "literal") {
+      value = coerceConstant(primary.value);
     }
 
-    // Apply fallback chain
-    if (wire.fallbacks) {
-      for (const fb of wire.fallbacks) {
-        const shouldFallback = fb.type === "nullish" ? value == null : !value;
-        if (shouldFallback) {
-          if (fb.value !== undefined) {
-            value = coerceConstant(fb.value);
-          } else if (fb.ref) {
-            const fbKey = trunkKey(fb.ref);
-            if (forkResults.has(fbKey)) {
-              value = forkResults.get(fbKey);
-              for (const seg of fb.ref.path) value = value?.[seg];
-            } else {
-              value = await resolveToolNodeRef(ctx, fb.ref, toolDef);
-            }
-          }
+    // Apply fallback gates
+    for (let j = 1; j < wire.sources.length; j++) {
+      const fb = wire.sources[j]!;
+      const shouldFallback = fb.gate === "nullish" ? value == null : !value;
+      if (shouldFallback) {
+        if (fb.expr.type === "literal") {
+          value = coerceConstant(fb.expr.value);
+        } else if (fb.expr.type === "ref") {
+          value = await resolveToolExprRef(
+            ctx,
+            fb.expr.ref,
+            toolDef,
+            forkResults,
+          );
         }
       }
     }
 
-    // Apply catch fallback
-    if ("catchFallback" in wire && wire.catchFallback !== undefined) {
-      if (value == null) {
-        value = coerceConstant(wire.catchFallback);
+    // Apply catch
+    if (wire.catch && value == null) {
+      if ("value" in wire.catch) {
+        value = coerceConstant(wire.catch.value);
+      } else if ("ref" in wire.catch) {
+        value = await resolveToolNodeRef(ctx, wire.catch.ref, toolDef);
       }
     }
 
     setNested(input, wire.to.path, value);
   }
+}
+
+/** Resolve a NodeRef, checking fork results first. */
+async function resolveToolExprRef(
+  ctx: ToolLookupContext,
+  ref: NodeRef,
+  toolDef: ToolDef,
+  forkResults: Map<string, any>,
+): Promise<any> {
+  const fromKey = trunkKey(ref);
+  if (forkResults.has(fromKey)) {
+    let value = forkResults.get(fromKey);
+    for (const seg of ref.path) value = value?.[seg];
+    return value;
+  }
+  return resolveToolNodeRef(ctx, ref, toolDef);
 }
 
 // ── Tool NodeRef resolution ─────────────────────────────────────────────────
@@ -573,7 +565,15 @@ export function mergeToolDefConstants(toolDef: ToolDef, result: any): any {
   }
 
   for (const wire of toolDef.wires) {
-    if (!("value" in wire) || "cond" in wire || !("to" in wire)) continue;
+    // Only simple constant wires: single literal source, no catch
+    const primary = wire.sources[0]?.expr;
+    if (
+      !primary ||
+      primary.type !== "literal" ||
+      wire.sources.length > 1 ||
+      wire.catch
+    )
+      continue;
     if (forkKeys.size > 0 && forkKeys.has(trunkKey(wire.to))) continue;
 
     const path = wire.to.path;
@@ -581,7 +581,7 @@ export function mergeToolDefConstants(toolDef: ToolDef, result: any): any {
 
     // Only fill in fields the tool didn't already produce
     if (!(path[0] in result)) {
-      setNested(result, path, coerceConstant(wire.value));
+      setNested(result, path, coerceConstant(primary.value));
     }
   }
 

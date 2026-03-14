@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import type { ToolDef } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
+import { SELF_MODULE, v2ToLegacy } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -64,7 +64,7 @@ describe("tool self-wires: constant (=)", () => {
         .baseUrl = "https://example.com"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       value: "https://example.com",
       to: toolRef("api", ["baseUrl"]),
     });
@@ -77,7 +77,7 @@ describe("tool self-wires: constant (=)", () => {
         .method = GET
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       value: "GET",
       to: toolRef("api", ["method"]),
     });
@@ -90,7 +90,7 @@ describe("tool self-wires: constant (=)", () => {
         .headers.Content-Type = "application/json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       value: "application/json",
       to: toolRef("api", ["headers", "Content-Type"]),
     });
@@ -106,7 +106,7 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- context.auth.token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       from: contextRef(["auth", "token"]),
       to: toolRef("api", ["headers", "Authorization"]),
     });
@@ -121,7 +121,7 @@ describe("tool self-wires: simple pull (<-)", () => {
         .timeout <- const.timeout
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       from: constRef(["timeout"]),
       to: toolRef("api", ["timeout"]),
     });
@@ -138,7 +138,7 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- auth.access_token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       from: { ...toolRef("authService", ["access_token"]), instance: 1 },
       to: toolRef("api", ["headers", "Authorization"]),
     });
@@ -153,7 +153,7 @@ describe('tool self-wires: plain string (<- "...")', () => {
         .format <- "json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       value: "json",
       to: toolRef("api", ["format"]),
     });
@@ -171,7 +171,7 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
       }
     `);
     // Should produce a concat fork + pipeHandle, similar to bridge blocks
-    const pathWire = tool.wires.find(
+    const pathWire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "path",
     )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
@@ -192,7 +192,7 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
         .path <- "/users/{context.userId}/profile"
       }
     `);
-    const pathWire = tool.wires.find(
+    const pathWire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "path",
     )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
@@ -230,7 +230,7 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .limit <- const.one + 1
       }
     `);
-    const limitWire = tool.wires.find(
+    const limitWire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "limit",
     )!;
     assert.ok(limitWire, "Expected a wire targeting .limit");
@@ -248,7 +248,7 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .verbose <- const.threshold > 5
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "verbose",
     )!;
     assert.ok(wire, "Expected a wire targeting .verbose");
@@ -267,7 +267,7 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .method <- const.flag ? "POST" : "GET"
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "method",
     )!;
     assert.ok(wire, "Expected a wire targeting .method");
@@ -288,7 +288,7 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .baseUrl <- const.flag ? const.urlA : const.urlB
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "baseUrl",
     )!;
     assert.ok(wire, "Expected a wire targeting .baseUrl");
@@ -307,7 +307,7 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .timeout <- context.settings.timeout ?? "5000"
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "timeout",
     )!;
     assert.ok(wire, "Expected a wire targeting .timeout");
@@ -326,7 +326,7 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .format <- context.settings.format || "json"
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "format",
     )!;
     assert.ok(wire, "Expected a wire targeting .format");
@@ -344,7 +344,7 @@ describe("tool self-wires: catch fallback", () => {
         .path <- context.settings.path catch "/default"
       }
     `);
-    const wire = tool.wires.find((w) => "to" in w && w.to.path[0] === "path")!;
+    const wire = tool.wires.map(v2ToLegacy).find((w) => "to" in w && w.to.path[0] === "path")!;
     assert.ok(wire, "Expected a wire targeting .path");
     assert.ok("from" in wire, "Expected a pull wire");
     assert.equal((wire as any).catchFallback, '"/default"');
@@ -361,7 +361,7 @@ describe("tool self-wires: not prefix", () => {
         .silent <- not const.debug
       }
     `);
-    const wire = tool.wires.find(
+    const wire = tool.wires.map(v2ToLegacy).find(
       (w) => "to" in w && w.to.path[0] === "silent",
     )!;
     assert.ok(wire, "Expected a wire targeting .silent");
@@ -390,28 +390,28 @@ describe("tool self-wires: integration", () => {
     assert.ok(
       tool.wires.length >= 4,
       `Expected at least 4 wires, got ${tool.wires.length}: ${JSON.stringify(
-        tool.wires.map((w) => ("value" in w ? w.value : "pull")),
+        tool.wires.map(v2ToLegacy).map((w) => ("value" in w ? w.value : "pull")),
         null,
         2,
       )}`,
     );
 
     // First 3 are constants
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
       value: "https://nominatim.openstreetmap.org",
       to: toolRef("geo", ["baseUrl"]),
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[1], {
       value: "/search",
       to: toolRef("geo", ["path"]),
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires[2], {
+    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[2], {
       value: "json",
       to: toolRef("geo", ["format"]),
     });
 
     // Expression wire targets .limit (with internal fork wires before it)
-    const limitWire = tool.wires.find(
+    const limitWire = tool.wires.map(v2ToLegacy).find(
       (w) =>
         "to" in w &&
         (w as any).to.field === "geo" &&

@@ -4,7 +4,8 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import type { Bridge, Wire } from "@stackables/bridge-core";
+import type { Bridge, WireLegacy } from "@stackables/bridge-core";
+import { v2ToLegacy } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -28,9 +29,9 @@ describe("path scoping – parser", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.ok(instr);
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
     assert.equal(constWires.length, 2);
     const theme = constWires.find(
       (w) => w.to.path.join(".") === "settings.theme",
@@ -61,9 +62,9 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     assert.equal(pullWires.length, 2);
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "user.name");
     const emailWire = pullWires.find(
@@ -98,11 +99,11 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wires = instr.wires;
+    const wires = instr.wires.map(v2ToLegacy);
 
     // Pull wires
     const pullWires = wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
+      (w): w is Extract<WireLegacy, { from: any }> => "from" in w,
     );
     const idWire = pullWires.find(
       (w) => w.to.path.join(".") === "body.user.profile.id",
@@ -117,7 +118,7 @@ describe("path scoping – parser", () => {
 
     // Constant wires
     const constWires = wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
+      (w): w is Extract<WireLegacy, { value: string }> => "value" in w,
     );
     const themeWire = constWires.find(
       (w) => w.to.path.join(".") === "body.user.settings.theme",
@@ -169,9 +170,9 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
     assert.ok(nameWire);
     assertDeepStrictEqualIgnoringLoc(nameWire.fallbacks, [
@@ -222,7 +223,7 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const ternaryWires = instr.wires.filter((w) => "cond" in w);
+    const ternaryWires = instr.wires.map(v2ToLegacy).filter((w) => "cond" in w);
     assert.equal(ternaryWires.length, 2);
   });
 
@@ -265,9 +266,9 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
     assert.equal(constWires.length, 3);
     assert.ok(constWires.find((w) => w.to.path.join(".") === "method"));
     assert.ok(constWires.find((w) => w.to.path.join(".") === "body.value"));
@@ -298,9 +299,9 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "body.name");
     const emailWire = pullWires.find(
       (w) => w.to.path.join(".") === "body.email",
@@ -377,9 +378,9 @@ describe("path scoping – parser", () => {
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = br.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = br.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
     assert.ok(qWire, "wire to api.q should exist");
   });
@@ -406,9 +407,9 @@ describe("path scoping – parser", () => {
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = br.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = br.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     // Alias creates a __local wire
     const localWire = pullWires.find(
       (w) => w.to.module === "__local" && w.to.field === "upper",
@@ -513,9 +514,9 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
     assert.equal(constWires.length, 1);
     const wire = constWires[0];
     assert.equal(wire.value, "1");
@@ -541,9 +542,9 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const nameWire = pullWires.find((w) => w.to.path.join(".") === "obj.name");
     assert.ok(nameWire, "wire to obj.name should exist");
     assert.equal(nameWire!.from.element, true);
@@ -570,9 +571,9 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
     assert.equal(constWires.length, 1);
     assertDeepStrictEqualIgnoringLoc(constWires[0].to.path, ["a", "b", "c"]);
     assert.equal(constWires[0].to.element, true);
@@ -598,12 +599,12 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     assert.ok(
       constWires.find((w) => w.to.path.join(".") === "nested.x"),
       "nested.x constant should exist",
@@ -641,9 +642,9 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
     assert.ok(spreadWire, "spread wire targeting tool root should exist");
     assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, []);
@@ -669,12 +670,12 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
-    const constWires = instr.wires.filter(
-      (w): w is Extract<Wire, { value: string }> => "value" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
+    const constWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { value: string }> => "value" in w);
     assert.ok(
       pullWires.find((w) => w.to.path.length === 0),
       "spread wire to tool root should exist",
@@ -704,9 +705,9 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const spreadWire = pullWires.find((w) => w.to.path.length === 0);
     assert.ok(spreadWire, "spread wire should exist");
     assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, ["profile"]);
@@ -729,9 +730,9 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const spreadWire = pullWires.find(
       (w) => w.to.path.join(".") === "wrapper" && w.from.path.length === 0,
     );
@@ -757,9 +758,9 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
-      (w): w is Extract<Wire, { from: any }> => "from" in w,
-    );
+    const pullWires = instr.wires
+      .map(v2ToLegacy)
+      .filter((w): w is Extract<WireLegacy, { from: any }> => "from" in w);
     const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");
     assert.ok(spreadWire, "spread wire to tool.nested should exist");
     assertDeepStrictEqualIgnoringLoc(spreadWire.from.path, []);
