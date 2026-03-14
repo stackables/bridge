@@ -303,34 +303,33 @@ export type Wire = {
 
 ### Stage 7: Cleanup
 
-- [ ] Rename `WireV2` → `Wire`, remove old type + `WireFallback`
-- [ ] Remove conversion utilities and `wire-compat.ts`
-- [ ] Update package exports
+- [x] Rename `WireV2` → `Wire`, remove old type + `WireFallback`
+- [x] Remove conversion utilities and `wire-compat.ts`
+- [x] Update package exports
 - [ ] `pnpm changeset` for bridge-core, bridge-parser, bridge-compiler,
       bridge-graphql
-- [ ] **Verify:** `pnpm build && pnpm lint && pnpm test && pnpm e2e`
+- [x] **Verify:** `pnpm build && pnpm lint && pnpm test && pnpm e2e`
 
 ---
 
 ## Files in Scope
 
-| File                                           | What changes                                                                                                        |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `bridge-core/src/types.ts`                     | New types (`Expression`, `WireSourceEntry`, `WireCatch`, `WireV2`), eventually replaces old `Wire` + `WireFallback` |
-| `bridge-core/src/wire-compat.ts`               | NEW — conversion between old and new wire shapes (temporary)                                                        |
-| `bridge-core/src/resolveWires.ts`              | Merge 3-layer model into `evaluateExpression()` + source-loop; unify trace recording                                |
-| `bridge-core/src/tree-utils.ts`                | `getSimplePullRef()` fast-path for new shape                                                                        |
-| `bridge-core/src/enumerate-traversals.ts`      | `TraceWireBits` rename, bit allocation over `sources[]`                                                             |
-| `bridge-core/src/ExecutionTree.ts`             | Wire scheduling, caching, dependency extraction                                                                     |
-| `bridge-core/src/scheduleTools.ts`             | Ref extraction from recursive `Expression`                                                                          |
-| `bridge-core/src/toolLookup.ts`                | Tool wire resolution                                                                                                |
-| `bridge-parser/src/parser/parser.ts`           | Wire construction → `WireV2` with `Expression` nodes                                                                |
-| `bridge-parser/src/bridge-format.ts`           | Serializer: ~60 `w.from` sites, fallback/catch serialization                                                        |
-| `bridge-compiler/src/codegen.ts`               | Compiler: ~70 sites, `wireToExpr()`, `applyFallbacks()`                                                             |
-| `bridge-compiler/src/bridge-asserts.ts`        | Compiler validation                                                                                                 |
-| `bridge-graphql/src/bridge-asserts.ts`         | GraphQL validation                                                                                                  |
-| `bridge-core/test/resolve-wires-gates.test.ts` | ~30 direct wire constructions                                                                                       |
-| `bridge-compiler/test/fuzz-compile.fuzz.ts`    | Fuzz test wire arbitraries                                                                                          |
+| File                                           | What changes                                                                      |
+| ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| `bridge-core/src/types.ts`                     | Unified types (`Expression`, `WireSourceEntry`, `WireCatch`, `Wire`)              |
+| `bridge-core/src/resolveWires.ts`              | Entry point + fast paths; delegates to `resolveSourceEntries()` for complex wires |
+| `bridge-core/src/tree-utils.ts`                | `getSimplePullRef()` fast-path for new shape                                      |
+| `bridge-core/src/enumerate-traversals.ts`      | `TraceWireBits` rename, bit allocation over `sources[]`                           |
+| `bridge-core/src/ExecutionTree.ts`             | Wire scheduling, caching, dependency extraction                                   |
+| `bridge-core/src/scheduleTools.ts`             | Ref extraction from recursive `Expression`                                        |
+| `bridge-core/src/toolLookup.ts`                | Tool wire resolution                                                              |
+| `bridge-parser/src/parser/parser.ts`           | Wire construction → `WireV2` with `Expression` nodes                              |
+| `bridge-parser/src/bridge-format.ts`           | Serializer: ~60 `w.from` sites, fallback/catch serialization                      |
+| `bridge-compiler/src/codegen.ts`               | Compiler: ~70 sites, `wireToExpr()`, `applyFallbacks()`                           |
+| `bridge-compiler/src/bridge-asserts.ts`        | Compiler validation                                                               |
+| `bridge-graphql/src/bridge-asserts.ts`         | GraphQL validation                                                                |
+| `bridge-core/test/resolve-wires-gates.test.ts` | ~30 direct wire constructions                                                     |
+| `bridge-compiler/test/fuzz-compile.fuzz.ts`    | Fuzz test wire arbitraries                                                        |
 
 ---
 

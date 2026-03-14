@@ -1,12 +1,9 @@
 /**
- * Wire resolution V2 — unified source-loop evaluation.
+ * Wire resolution — unified source-loop evaluation.
  *
- * Replaces the three-layer model (evaluateWireSource → applyFallbackGates →
- * applyCatchGate) with a single loop over `WireV2.sources[]`.
- *
- * During the staged migration, the legacy `resolveWires` module delegates
- * here after converting Wire → WireV2. Once all consumers produce WireV2
- * directly, the old module can be removed.
+ * Evaluates `Wire.sources[]` in order with their fallback gates and
+ * optional catch handler. Called from `resolveWires.ts` for the
+ * async resolution path and overdefinition handling.
  */
 
 import type {
@@ -14,7 +11,7 @@ import type {
   Expression,
   NodeRef,
   WireCatch,
-  WireV2,
+  Wire,
 } from "./types.ts";
 import type {
   LoopControlSignal,
@@ -73,7 +70,7 @@ export function evaluateExpression(
 }
 
 /**
- * Resolve a single WireV2 — evaluate its ordered source entries with
+ * Resolve a single Wire — evaluate its ordered source entries with
  * gate semantics, then apply the catch handler on error.
  *
  * Returns the resolved value, or throws if all sources fail and no catch
@@ -85,7 +82,7 @@ export function evaluateExpression(
  */
 export async function resolveSourceEntries(
   ctx: TreeContext,
-  w: WireV2,
+  w: Wire,
   pullChain?: Set<string>,
   bits?: TraceWireBits,
 ): Promise<unknown> {
@@ -155,7 +152,7 @@ export async function resolveSourceEntries(
  */
 export async function applyFallbackGatesV2(
   ctx: TreeContext,
-  w: WireV2,
+  w: Wire,
   value: unknown,
   pullChain?: Set<string>,
   bits?: TraceWireBits,
@@ -214,7 +211,7 @@ export async function applyFallbackGatesV2(
  */
 export async function applyCatchV2(
   ctx: TreeContext,
-  w: WireV2,
+  w: Wire,
   pullChain?: Set<string>,
   bits?: TraceWireBits,
 ): Promise<unknown> {

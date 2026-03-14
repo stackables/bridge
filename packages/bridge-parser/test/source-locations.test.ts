@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
-import type { Bridge, WireLegacy } from "@stackables/bridge-core";
-import { v2ToLegacy } from "@stackables/bridge-core";
+import type { Bridge, Wire } from "@stackables/bridge-core";
 import { bridge } from "@stackables/bridge-core";
 
 function getBridge(text: string): Bridge {
@@ -14,7 +13,7 @@ function getBridge(text: string): Bridge {
   return instr;
 }
 
-function assertLoc(wire: WireLegacy | undefined, line: number, column: number): void {
+function assertLoc(wire: Wire | undefined, line: number, column: number): void {
   assert.ok(wire, "expected wire to exist");
   assert.ok(wire.loc, "expected wire to carry a source location");
   assert.equal(wire.loc.startLine, line);
@@ -33,7 +32,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    assertLoc(instr.wires.map(v2ToLegacy)[0], 5, 3);
+    assertLoc(instr.wires[0], 5, 3);
   });
 
   it("constant wire loc is populated", () => {
@@ -45,7 +44,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    assertLoc(instr.wires.map(v2ToLegacy)[0], 4, 3);
+    assertLoc(instr.wires[0], 4, 3);
   });
 
   it("ternary wire loc is populated", () => {
@@ -58,14 +57,20 @@ describe("parser source locations", () => {
       }
     `);
 
-    const ternaryWire = instr.wires.map(v2ToLegacy).find((wire) => "cond" in wire);
+    const ternaryWire = instr.wires.find(
+      (wire) => wire.sources[0]?.expr.type === "ternary",
+    );
     assertLoc(ternaryWire, 5, 3);
-    assert.equal(ternaryWire?.condLoc?.startLine, 5);
-    assert.equal(ternaryWire?.condLoc?.startColumn, 13);
-    assert.equal(ternaryWire?.thenLoc?.startLine, 5);
-    assert.equal(ternaryWire?.thenLoc?.startColumn, 22);
-    assert.equal(ternaryWire?.elseLoc?.startLine, 5);
-    assert.equal(ternaryWire?.elseLoc?.startColumn, 36);
+    const ternaryExpr = ternaryWire!.sources[0]!.expr;
+    assert.equal(ternaryExpr.type, "ternary");
+    if (ternaryExpr.type === "ternary") {
+      assert.equal(ternaryExpr.condLoc?.startLine, 5);
+      assert.equal(ternaryExpr.condLoc?.startColumn, 13);
+      assert.equal(ternaryExpr.thenLoc?.startLine, 5);
+      assert.equal(ternaryExpr.thenLoc?.startColumn, 22);
+      assert.equal(ternaryExpr.elseLoc?.startLine, 5);
+      assert.equal(ternaryExpr.elseLoc?.startColumn, 36);
+    }
   });
 
   it("desugared template wires inherit the originating source loc", () => {
@@ -78,7 +83,7 @@ describe("parser source locations", () => {
       }
     `);
 
-    const concatPartWire = instr.wires.map(v2ToLegacy).find(
+    const concatPartWire = instr.wires.find(
       (wire) => wire.to.field === "concat",
     );
     assertLoc(concatPartWire, 5, 3);
@@ -95,25 +100,28 @@ describe("parser source locations", () => {
       }
     `);
 
-    const aliasWire = instr.wires.map(v2ToLegacy).find(
-      (wire) => "to" in wire && wire.to.field === "clean",
-    );
-    assert.ok(aliasWire && "catchLoc" in aliasWire);
-    assert.equal(aliasWire.catchLoc?.startLine, 5);
-    assert.equal(aliasWire.catchLoc?.startColumn, 35);
+    const aliasWire = instr.wires.find((wire) => wire.to.field === "clean");
+    assert.ok(aliasWire?.catch);
+    assert.equal(aliasWire.catch.loc?.startLine, 5);
+    assert.equal(aliasWire.catch.loc?.startColumn, 35);
 
-    const messageWire = instr.wires.map(v2ToLegacy).find(
-      (wire) => "to" in wire && wire.to.path.join(".") === "message",
+    const messageWire = instr.wires.find(
+      (wire) => wire.to.path.join(".") === "message",
     );
-    assert.ok(
-      messageWire && "from" in messageWire && "fallbacks" in messageWire,
+    assert.ok(messageWire && messageWire.sources.length >= 2);
+    const msgExpr0 = messageWire.sources[0]!.expr;
+    assert.equal(
+      msgExpr0.type === "ref" ? msgExpr0.refLoc?.startLine : undefined,
+      6,
     );
-    assert.equal(messageWire.fromLoc?.startLine, 6);
-    assert.equal(messageWire.fromLoc?.startColumn, 16);
-    assert.equal(messageWire.fallbacks?.[0]?.loc?.startLine, 6);
-    assert.equal(messageWire.fallbacks?.[0]?.loc?.startColumn, 40);
-    assert.equal(messageWire.catchLoc?.startLine, 6);
-    assert.equal(messageWire.catchLoc?.startColumn, 66);
+    assert.equal(
+      msgExpr0.type === "ref" ? msgExpr0.refLoc?.startColumn : undefined,
+      16,
+    );
+    assert.equal(messageWire.sources[1]!.loc?.startLine, 6);
+    assert.equal(messageWire.sources[1]!.loc?.startColumn, 40);
+    assert.equal(messageWire.catch?.loc?.startLine, 6);
+    assert.equal(messageWire.catch?.loc?.startColumn, 66);
   });
 
   it("element scope wires in nested blocks carry source locations", () => {
@@ -135,40 +143,42 @@ describe("parser source locations", () => {
       }
     `);
 
-    const destinationIdWire = instr.wires.map(v2ToLegacy).find(
-      (wire) =>
-        "to" in wire &&
-        wire.to.path.join(".") === "legs.destination.station.id",
+    const destinationIdWire = instr.wires.find(
+      (wire) => wire.to.path.join(".") === "legs.destination.station.id",
     );
     assertLoc(destinationIdWire, 8, 9);
-    assert.ok(destinationIdWire && "from" in destinationIdWire);
-    assert.equal(destinationIdWire.fromLoc?.startLine, 8);
-    assert.equal(destinationIdWire.fromLoc?.startColumn, 16);
+    assert.ok(destinationIdWire);
+    const idExpr = destinationIdWire.sources[0]!.expr;
+    assert.equal(
+      idExpr.type === "ref" ? idExpr.refLoc?.startLine : undefined,
+      8,
+    );
+    assert.equal(
+      idExpr.type === "ref" ? idExpr.refLoc?.startColumn : undefined,
+      16,
+    );
 
-    const destinationPlannedTimeWire = instr.wires.map(v2ToLegacy).find(
-      (wire) =>
-        "to" in wire &&
-        wire.to.path.join(".") === "legs.destination.plannedTime",
+    const destinationPlannedTimeWire = instr.wires.find(
+      (wire) => wire.to.path.join(".") === "legs.destination.plannedTime",
     );
     assertLoc(destinationPlannedTimeWire, 11, 7);
-    assert.ok(
-      destinationPlannedTimeWire && "from" in destinationPlannedTimeWire,
+    assert.ok(destinationPlannedTimeWire);
+    const ptExpr = destinationPlannedTimeWire.sources[0]!.expr;
+    assert.equal(
+      ptExpr.type === "ref" ? ptExpr.refLoc?.startLine : undefined,
+      11,
     );
-    assert.equal(destinationPlannedTimeWire.fromLoc?.startLine, 11);
-    assert.equal(destinationPlannedTimeWire.fromLoc?.startColumn, 23);
+    assert.equal(
+      ptExpr.type === "ref" ? ptExpr.refLoc?.startColumn : undefined,
+      23,
+    );
 
-    const destinationDelayWire = instr.wires.map(v2ToLegacy).find(
-      (wire) =>
-        "to" in wire &&
-        wire.to.path.join(".") === "legs.destination.delayMinutes",
+    const destinationDelayWire = instr.wires.find(
+      (wire) => wire.to.path.join(".") === "legs.destination.delayMinutes",
     );
-    assert.ok(
-      destinationDelayWire &&
-        "from" in destinationDelayWire &&
-        "fallbacks" in destinationDelayWire,
-    );
+    assert.ok(destinationDelayWire && destinationDelayWire.sources.length >= 2);
     assertLoc(destinationDelayWire, 12, 7);
-    assert.equal(destinationDelayWire.fallbacks?.[0]?.loc?.startLine, 12);
-    assert.equal(destinationDelayWire.fallbacks?.[0]?.loc?.startColumn, 43);
+    assert.equal(destinationDelayWire.sources[1]!.loc?.startLine, 12);
+    assert.equal(destinationDelayWire.sources[1]!.loc?.startColumn, 43);
   });
 });

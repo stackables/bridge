@@ -84,27 +84,10 @@ export type {
   VersionDecl,
   Wire,
   WireCatch,
-  WireFallback,
-  WireLegacy,
   WireSourceEntry,
-  WireV2,
 } from "./types.ts";
 
-// ── Wire compatibility layer ────────────────────────────────────────────────
-
-export {
-  legacyToV2,
-  v2ToLegacy,
-  getSimplePullRefV2,
-  isRefExpr,
-  isLiteralExpr,
-  isTernaryExpr,
-  isAndExpr,
-  isOrExpr,
-  isControlExpr,
-} from "./wire-compat.ts";
-
-// ── Wire resolution V2 ─────────────────────────────────────────────────────
+// ── Wire resolution ─────────────────────────────────────────────────────────
 
 export {
   evaluateExpression,

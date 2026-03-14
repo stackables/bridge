@@ -9,31 +9,12 @@
  * the full `ExecutionTree` class.
  */
 
-import type { ControlFlowInstruction, Wire, WireLegacy } from "./types.ts";
-import type {
-  LoopControlSignal,
-  MaybePromise,
-  TreeContext,
-} from "./tree-types.ts";
-import {
-  attachBridgeErrorMetadata,
-  isFatalError,
-  applyControlFlow,
-  BridgeAbortError,
-  BridgePanicError,
-  wrapBridgeRuntimeError,
-} from "./tree-types.ts";
+import type { Wire } from "./types.ts";
+import type { MaybePromise, TreeContext } from "./tree-types.ts";
+import { isFatalError, BridgeAbortError } from "./tree-types.ts";
 import { coerceConstant, getSimplePullRef } from "./tree-utils.ts";
 import type { TraceWireBits } from "./enumerate-traversals.ts";
 import { resolveSourceEntries } from "./resolveWiresV2.ts";
-
-// ── Wire type helpers ────────────────────────────────────────────────────────
-
-/**
- * A non-constant legacy wire — used by the backward-compatible
- * `applyFallbackGates` / `applyCatchGate` exports.
- */
-type WireWithGates = Exclude<WireLegacy, { value: string }>;
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -42,7 +23,7 @@ type WireWithGates = Exclude<WireLegacy, { value: string }>;
  *
  * Architecture: two distinct resolution axes —
  *
- *  **Fallback Gates** (`||` / `??`, within a wire): unified `fallbacks` array
+ *  **Fallback Gates** (`||` / `??`, within a wire): ordered source entries
  *    → falsy gates trigger on falsy values (0, "", false, null, undefined)
  *    → nullish gates trigger only on null/undefined
  *    → gates are processed left-to-right, allowing mixed `||` and `??` chains
@@ -50,13 +31,8 @@ type WireWithGates = Exclude<WireLegacy, { value: string }>;
  *  **Overdefinition** (across wires): multiple wires target the same path
  *    → nullish check — only null/undefined falls through to the next wire.
  *
- * Per-wire layers:
- *   Layer 1  — Execution (pullSingle + safe modifier)
- *   Layer 2  — Fallback Gates (unified fallbacks array: || and ?? in order)
- *   Layer 3  — Catch         (catchFallbackRef / catchFallback / catchControl)
- *
- * After layers 1–2, the overdefinition boundary (`!= null`) decides whether
- * to return or continue to the next wire.
+ * Resolution is handled by `resolveSourceEntries()` from resolveWiresV2.ts,
+ * which evaluates source entries in order with their gates and catch handler.
  *
  * ---
  *
@@ -161,117 +137,6 @@ async function resolveWiresAsync(
   return undefined;
 }
 
-// ── Layer 2: Fallback Gates (unified || and ??) ─────────────────────────────
-
-/**
- * Apply the unified Fallback Gates (Layer 2) to a resolved value.
- *
- * Walks the `fallbacks` array in order.  Each entry is either a falsy gate
- * (`||`) or a nullish gate (`??`).  A falsy gate opens when `!value`;
- * a nullish gate opens when `value == null`.  When a gate is open, the
- * fallback is applied (control flow, ref pull, or constant coercion) and
- * the result replaces `value` for subsequent gates.
- */
-export async function applyFallbackGates(
-  ctx: TreeContext,
-  w: WireWithGates,
-  value: unknown,
-  pullChain?: Set<string>,
-): Promise<unknown> {
-  if (!w.fallbacks?.length) return value;
-
-  for (
-    let fallbackIndex = 0;
-    fallbackIndex < w.fallbacks.length;
-    fallbackIndex++
-  ) {
-    const fallback = w.fallbacks[fallbackIndex];
-    const isFalsyGateOpen = fallback.type === "falsy" && !value;
-    const isNullishGateOpen = fallback.type === "nullish" && value == null;
-
-    if (isFalsyGateOpen || isNullishGateOpen) {
-      recordFallback(ctx, w as unknown as Wire, fallbackIndex);
-      if (fallback.control) {
-        return applyControlFlowWithLoc(fallback.control, fallback.loc ?? w.loc);
-      }
-      if (fallback.ref) {
-        try {
-          value = await ctx.pullSingle(
-            fallback.ref,
-            pullChain,
-            fallback.loc ?? w.loc,
-          );
-        } catch (err: any) {
-          recordFallbackError(ctx, w as unknown as Wire, fallbackIndex);
-          throw err;
-        }
-      } else if (fallback.value !== undefined) {
-        value = coerceConstant(fallback.value);
-      }
-    }
-  }
-
-  return value;
-}
-
-// ── Layer 3: Catch Gate ──────────────────────────────────────────────────────
-
-/**
- * Apply the Catch Gate (Layer 3) after an error has been thrown by the
- * execution layer.
- *
- * Returns the recovered value if the wire supplies a catch handler, or
- * `undefined` if the error should be stored as `lastError` so the loop can
- * continue to the next wire.
- */
-export async function applyCatchGate(
-  ctx: TreeContext,
-  w: WireWithGates,
-  pullChain?: Set<string>,
-): Promise<unknown> {
-  if (w.catchControl) {
-    recordCatch(ctx, w as unknown as Wire);
-    return applyControlFlowWithLoc(w.catchControl, w.catchLoc ?? w.loc);
-  }
-  if (w.catchFallbackRef) {
-    recordCatch(ctx, w as unknown as Wire);
-    try {
-      return await ctx.pullSingle(
-        w.catchFallbackRef,
-        pullChain,
-        w.catchLoc ?? w.loc,
-      );
-    } catch (err: any) {
-      recordCatchError(ctx, w as unknown as Wire);
-      throw err;
-    }
-  }
-  if (w.catchFallback != null) {
-    recordCatch(ctx, w as unknown as Wire);
-    return coerceConstant(w.catchFallback);
-  }
-  return undefined;
-}
-
-function applyControlFlowWithLoc(
-  control: ControlFlowInstruction,
-  bridgeLoc: Wire["loc"],
-): symbol | LoopControlSignal {
-  try {
-    return applyControlFlow(control);
-  } catch (err) {
-    if (err instanceof BridgePanicError) {
-      throw attachBridgeErrorMetadata(err, {
-        bridgeLoc,
-      });
-    }
-    if (isFatalError(err)) throw err;
-    throw wrapBridgeRuntimeError(err, {
-      bridgeLoc,
-    });
-  }
-}
-
 // ── Trace recording helpers ─────────────────────────────────────────────────
 // These are designed for minimal overhead: when `traceBits` is not set on the
 // context (tracing disabled), the functions return immediately after a single
@@ -283,27 +148,4 @@ function applyControlFlowWithLoc(
 function recordPrimary(ctx: TreeContext, w: Wire): void {
   const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
   if (bits?.primary != null) ctx.traceMask![0] |= 1n << BigInt(bits.primary);
-}
-
-function recordFallback(ctx: TreeContext, w: Wire, index: number): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  const fb = bits?.fallbacks;
-  if (fb && fb[index] != null) ctx.traceMask![0] |= 1n << BigInt(fb[index]);
-}
-
-function recordCatch(ctx: TreeContext, w: Wire): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.catch != null) ctx.traceMask![0] |= 1n << BigInt(bits.catch);
-}
-
-function recordFallbackError(ctx: TreeContext, w: Wire, index: number): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  const fb = bits?.fallbackErrors;
-  if (fb && fb[index] != null) ctx.traceMask![0] |= 1n << BigInt(fb[index]);
-}
-
-function recordCatchError(ctx: TreeContext, w: Wire): void {
-  const bits = ctx.traceBits?.get(w) as TraceWireBits | undefined;
-  if (bits?.catchError != null)
-    ctx.traceMask![0] |= 1n << BigInt(bits.catchError);
 }

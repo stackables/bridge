@@ -29,24 +29,6 @@ export type NodeRef = {
 };
 
 /**
- * A single entry in a wire's fallback chain.
- *
- * Each entry is either a falsy gate (`||`) or a nullish gate (`??`).
- * The unified array allows mixing `||` and `??` in any order:
- *
- *   `o.x <- a.x || b.x ?? "default" || c.x`
- *
- * Exactly one of `ref`, `value`, or `control` should be set.
- */
-export interface WireFallback {
-  type: "falsy" | "nullish";
-  ref?: NodeRef;
-  value?: string;
-  control?: ControlFlowInstruction;
-  loc?: SourceLocation;
-}
-
-/**
  * A wire connects a data source (from) to a data sink (to).
  *
  * Unified shape: every wire has an ordered list of source entries and an
@@ -67,82 +49,6 @@ export type Wire = {
   spread?: true;
   loc?: SourceLocation;
 };
-
-/** Alias — `WireV2` is the same as `Wire` after unification. */
-export type WireV2 = Wire;
-
-/**
- * Legacy wire type — the old 5-variant discriminated union.
- * Kept for backward compatibility with the serializer and compiler during
- * the staged migration. Will be removed in Stage 7.
- *
- * @deprecated Use `Wire` (unified shape) instead.
- */
-export type WireLegacy =
-  | {
-      from: NodeRef;
-      to: NodeRef;
-      loc?: SourceLocation;
-      fromLoc?: SourceLocation;
-      pipe?: true;
-      spread?: true;
-      safe?: true;
-      fallbacks?: WireFallback[];
-      catchLoc?: SourceLocation;
-      catchFallback?: string;
-      catchFallbackRef?: NodeRef;
-      catchControl?: ControlFlowInstruction;
-    }
-  | { value: string; to: NodeRef; loc?: SourceLocation }
-  | {
-      cond: NodeRef;
-      condLoc?: SourceLocation;
-      thenRef?: NodeRef;
-      thenValue?: string;
-      thenLoc?: SourceLocation;
-      elseRef?: NodeRef;
-      elseValue?: string;
-      elseLoc?: SourceLocation;
-      to: NodeRef;
-      loc?: SourceLocation;
-      fallbacks?: WireFallback[];
-      catchLoc?: SourceLocation;
-      catchFallback?: string;
-      catchFallbackRef?: NodeRef;
-      catchControl?: ControlFlowInstruction;
-    }
-  | {
-      condAnd: {
-        leftRef: NodeRef;
-        rightRef?: NodeRef;
-        rightValue?: string;
-        safe?: true;
-        rightSafe?: true;
-      };
-      to: NodeRef;
-      loc?: SourceLocation;
-      fallbacks?: WireFallback[];
-      catchLoc?: SourceLocation;
-      catchFallback?: string;
-      catchFallbackRef?: NodeRef;
-      catchControl?: ControlFlowInstruction;
-    }
-  | {
-      condOr: {
-        leftRef: NodeRef;
-        rightRef?: NodeRef;
-        rightValue?: string;
-        safe?: true;
-        rightSafe?: true;
-      };
-      to: NodeRef;
-      loc?: SourceLocation;
-      fallbacks?: WireFallback[];
-      catchLoc?: SourceLocation;
-      catchFallback?: string;
-      catchFallbackRef?: NodeRef;
-      catchControl?: ControlFlowInstruction;
-    };
 
 /**
  * Bridge definition — wires one GraphQL field to its data sources.
@@ -279,13 +185,10 @@ export type ControlFlowInstruction =
   | { kind: "continue"; levels?: number }
   | { kind: "break"; levels?: number };
 
-// ── Unified Wire Model (V2) ────────────────────────────────────────────────
+// ── Wire Expression Model ───────────────────────────────────────────────────
 //
-// Replaces the discriminated-union Wire type with a single shape where every
-// wire is an ordered list of source entries + an optional catch handler.
-//
-// Migration bridge: both old (`Wire`) and new (`WireV2`) types coexist.
-// Conversion utilities in `wire-compat.ts` translate between them.
+// Every wire is an ordered list of source entries + an optional catch handler.
+// Source entries contain recursive Expression trees that evaluate to values.
 
 /**
  * A recursive expression tree that evaluates to a single value within one

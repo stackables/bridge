@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import type { ToolDef } from "@stackables/bridge-core";
-import { SELF_MODULE, v2ToLegacy } from "@stackables/bridge-core";
+import { SELF_MODULE } from "@stackables/bridge-core";
 import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -64,9 +64,9 @@ describe("tool self-wires: constant (=)", () => {
         .baseUrl = "https://example.com"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      value: "https://example.com",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["baseUrl"]),
+      sources: [{ expr: { type: "literal", value: "https://example.com" } }],
     });
   });
 
@@ -77,9 +77,9 @@ describe("tool self-wires: constant (=)", () => {
         .method = GET
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      value: "GET",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["method"]),
+      sources: [{ expr: { type: "literal", value: "GET" } }],
     });
   });
 
@@ -90,9 +90,9 @@ describe("tool self-wires: constant (=)", () => {
         .headers.Content-Type = "application/json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      value: "application/json",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["headers", "Content-Type"]),
+      sources: [{ expr: { type: "literal", value: "application/json" } }],
     });
   });
 });
@@ -106,9 +106,9 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- context.auth.token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      from: contextRef(["auth", "token"]),
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["headers", "Authorization"]),
+      sources: [{ expr: { type: "ref", ref: contextRef(["auth", "token"]) } }],
     });
   });
 
@@ -121,9 +121,9 @@ describe("tool self-wires: simple pull (<-)", () => {
         .timeout <- const.timeout
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      from: constRef(["timeout"]),
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["timeout"]),
+      sources: [{ expr: { type: "ref", ref: constRef(["timeout"]) } }],
     });
   });
 
@@ -138,9 +138,16 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- auth.access_token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      from: { ...toolRef("authService", ["access_token"]), instance: 1 },
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["headers", "Authorization"]),
+      sources: [
+        {
+          expr: {
+            type: "ref",
+            ref: { ...toolRef("authService", ["access_token"]), instance: 1 },
+          },
+        },
+      ],
     });
   });
 });
@@ -153,9 +160,9 @@ describe('tool self-wires: plain string (<- "...")', () => {
         .format <- "json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      value: "json",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("api", ["format"]),
+      sources: [{ expr: { type: "literal", value: "json" } }],
     });
   });
 });
@@ -171,17 +178,20 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
       }
     `);
     // Should produce a concat fork + pipeHandle, similar to bridge blocks
-    const pathWire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "path",
-    )!;
+    const pathWire = tool.wires.find((w) => w.to.path[0] === "path")!;
     assert.ok(pathWire, "Expected a wire targeting .path");
-    assert.ok("from" in pathWire, "Expected a pull wire, not constant");
-    // The from ref should be the concat fork output
-    assert.equal((pathWire as any).from.field, "concat");
-    assert.ok(
-      (pathWire as any).pipe,
-      "Expected pipe flag on interpolation wire",
+    assert.equal(
+      pathWire.sources[0]!.expr.type,
+      "ref",
+      "Expected a pull wire, not constant",
     );
+    // The from ref should be the concat fork output
+    const pathExpr = pathWire.sources[0]!.expr;
+    assert.equal(
+      pathExpr.type === "ref" ? pathExpr.ref.field : undefined,
+      "concat",
+    );
+    assert.ok(pathWire.pipe, "Expected pipe flag on interpolation wire");
   });
 
   test("string interpolation with context ref", () => {
@@ -192,12 +202,18 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
         .path <- "/users/{context.userId}/profile"
       }
     `);
-    const pathWire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "path",
-    )!;
+    const pathWire = tool.wires.find((w) => w.to.path[0] === "path")!;
     assert.ok(pathWire, "Expected a wire targeting .path");
-    assert.ok("from" in pathWire, "Expected a pull wire, not constant");
-    assert.equal((pathWire as any).from.field, "concat");
+    assert.equal(
+      pathWire.sources[0]!.expr.type,
+      "ref",
+      "Expected a pull wire, not constant",
+    );
+    const ctxPathExpr = pathWire.sources[0]!.expr;
+    assert.equal(
+      ctxPathExpr.type === "ref" ? ctxPathExpr.ref.field : undefined,
+      "concat",
+    );
   });
 
   test("self-reference in interpolation is circular dependency error", () => {
@@ -230,13 +246,15 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .limit <- const.one + 1
       }
     `);
-    const limitWire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "limit",
-    )!;
+    const limitWire = tool.wires.find((w) => w.to.path[0] === "limit")!;
     assert.ok(limitWire, "Expected a wire targeting .limit");
-    assert.ok("from" in limitWire, "Expected a pull wire");
+    assert.equal(
+      limitWire.sources[0]!.expr.type,
+      "ref",
+      "Expected a pull wire",
+    );
     // Expression chains produce a pipe fork (desugared to internal.add/compare/etc.)
-    assert.ok((limitWire as any).pipe, "Expected pipe flag on expression wire");
+    assert.ok(limitWire.pipe, "Expected pipe flag on expression wire");
   });
 
   test("expression with > operator", () => {
@@ -248,12 +266,10 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .verbose <- const.threshold > 5
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "verbose",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "verbose")!;
     assert.ok(wire, "Expected a wire targeting .verbose");
-    assert.ok("from" in wire, "Expected a pull wire");
-    assert.ok((wire as any).pipe, "Expected pipe flag on expression wire");
+    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
+    assert.ok(wire.pipe, "Expected pipe flag on expression wire");
   });
 });
 
@@ -267,14 +283,25 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .method <- const.flag ? "POST" : "GET"
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "method",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "method")!;
     assert.ok(wire, "Expected a wire targeting .method");
-    // Ternary wires have a `cond` field
-    assert.ok("cond" in wire, "Expected a ternary wire with cond field");
-    assert.equal((wire as any).thenValue, '"POST"');
-    assert.equal((wire as any).elseValue, '"GET"');
+    // Ternary wires have sources[0].expr.type === "ternary"
+    assert.equal(
+      wire.sources[0]!.expr.type,
+      "ternary",
+      "Expected a ternary wire",
+    );
+    const expr = wire.sources[0]!.expr;
+    if (expr.type === "ternary") {
+      assert.equal(
+        expr.then.type === "literal" ? expr.then.value : undefined,
+        '"POST"',
+      );
+      assert.equal(
+        expr.else.type === "literal" ? expr.else.value : undefined,
+        '"GET"',
+      );
+    }
   });
 
   test("ternary with ref branches", () => {
@@ -288,13 +315,18 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .baseUrl <- const.flag ? const.urlA : const.urlB
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "baseUrl",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "baseUrl")!;
     assert.ok(wire, "Expected a wire targeting .baseUrl");
-    assert.ok("cond" in wire, "Expected a ternary wire with cond field");
-    assert.ok("thenRef" in wire, "Expected thenRef for ref branch");
-    assert.ok("elseRef" in wire, "Expected elseRef for ref branch");
+    assert.equal(
+      wire.sources[0]!.expr.type,
+      "ternary",
+      "Expected a ternary wire",
+    );
+    const expr = wire.sources[0]!.expr;
+    if (expr.type === "ternary") {
+      assert.equal(expr.then.type, "ref", "Expected thenRef for ref branch");
+      assert.equal(expr.else.type, "ref", "Expected elseRef for ref branch");
+    }
   });
 });
 
@@ -307,15 +339,17 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .timeout <- context.settings.timeout ?? "5000"
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "timeout",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "timeout")!;
     assert.ok(wire, "Expected a wire targeting .timeout");
-    assert.ok("from" in wire, "Expected a pull wire");
-    assert.ok("fallbacks" in wire, "Expected fallbacks for coalesce");
-    assert.equal((wire as any).fallbacks.length, 1);
-    assert.equal((wire as any).fallbacks[0].type, "nullish");
-    assert.equal((wire as any).fallbacks[0].value, '"5000"');
+    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
+    assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
+    assert.equal(wire.sources[1]!.gate, "nullish");
+    assert.equal(
+      wire.sources[1]!.expr.type === "literal"
+        ? wire.sources[1]!.expr.value
+        : undefined,
+      '"5000"',
+    );
   });
 
   test("falsy coalesce with literal fallback", () => {
@@ -326,12 +360,10 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .format <- context.settings.format || "json"
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "format",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "format")!;
     assert.ok(wire, "Expected a wire targeting .format");
-    assert.ok("fallbacks" in wire, "Expected fallbacks for coalesce");
-    assert.equal((wire as any).fallbacks[0].type, "falsy");
+    assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
+    assert.equal(wire.sources[1]!.gate, "falsy");
   });
 });
 
@@ -344,10 +376,14 @@ describe("tool self-wires: catch fallback", () => {
         .path <- context.settings.path catch "/default"
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find((w) => "to" in w && w.to.path[0] === "path")!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "path")!;
     assert.ok(wire, "Expected a wire targeting .path");
-    assert.ok("from" in wire, "Expected a pull wire");
-    assert.equal((wire as any).catchFallback, '"/default"');
+    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
+    assert.ok(wire.catch, "Expected catch handler");
+    assert.equal(
+      "value" in wire.catch ? wire.catch.value : undefined,
+      '"/default"',
+    );
   });
 });
 
@@ -361,13 +397,11 @@ describe("tool self-wires: not prefix", () => {
         .silent <- not const.debug
       }
     `);
-    const wire = tool.wires.map(v2ToLegacy).find(
-      (w) => "to" in w && w.to.path[0] === "silent",
-    )!;
+    const wire = tool.wires.find((w) => w.to.path[0] === "silent")!;
     assert.ok(wire, "Expected a wire targeting .silent");
-    assert.ok("from" in wire, "Expected a pull wire");
+    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
     // `not` produces a pipe fork through the negation tool
-    assert.ok((wire as any).pipe, "Expected pipe flag on not wire");
+    assert.ok(wire.pipe, "Expected pipe flag on not wire");
   });
 });
 
@@ -390,35 +424,47 @@ describe("tool self-wires: integration", () => {
     assert.ok(
       tool.wires.length >= 4,
       `Expected at least 4 wires, got ${tool.wires.length}: ${JSON.stringify(
-        tool.wires.map(v2ToLegacy).map((w) => ("value" in w ? w.value : "pull")),
+        tool.wires.map((w) =>
+          w.sources[0]?.expr.type === "literal"
+            ? w.sources[0].expr.value
+            : "pull",
+        ),
         null,
         2,
       )}`,
     );
 
     // First 3 are constants
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[0], {
-      value: "https://nominatim.openstreetmap.org",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
       to: toolRef("geo", ["baseUrl"]),
+      sources: [
+        {
+          expr: {
+            type: "literal",
+            value: "https://nominatim.openstreetmap.org",
+          },
+        },
+      ],
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[1], {
-      value: "/search",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[1], {
       to: toolRef("geo", ["path"]),
+      sources: [{ expr: { type: "literal", value: "/search" } }],
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires.map(v2ToLegacy)[2], {
-      value: "json",
+    assertDeepStrictEqualIgnoringLoc(tool.wires[2], {
       to: toolRef("geo", ["format"]),
+      sources: [{ expr: { type: "literal", value: "json" } }],
     });
 
     // Expression wire targets .limit (with internal fork wires before it)
-    const limitWire = tool.wires.map(v2ToLegacy).find(
-      (w) =>
-        "to" in w &&
-        (w as any).to.field === "geo" &&
-        (w as any).to.path?.[0] === "limit",
+    const limitWire = tool.wires.find(
+      (w) => w.to.field === "geo" && w.to.path?.[0] === "limit",
     );
     assert.ok(limitWire, "Expected a wire targeting geo.limit");
-    assert.ok("from" in limitWire!, "Expected limit wire to be a pull wire");
-    assert.ok((limitWire as any).pipe, "Expected pipe flag on expression wire");
+    assert.equal(
+      limitWire.sources[0]!.expr.type,
+      "ref",
+      "Expected limit wire to be a pull wire",
+    );
+    assert.ok(limitWire.pipe, "Expected pipe flag on expression wire");
   });
 });
