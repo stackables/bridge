@@ -89,11 +89,13 @@ const deepWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
 
   return fc.oneof(
     fc.record({
-      value: constantValueArb,
+      sources: constantValueArb.map((v) => [
+        { expr: { type: "literal" as const, value: v } },
+      ]),
       to: toArb,
     }),
     fc.record({
-      from: fromArb,
+      sources: fromArb.map((r) => [{ expr: { type: "ref" as const, ref: r } }]),
       to: toArb,
     }),
   );

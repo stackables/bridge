@@ -334,19 +334,29 @@ describe("AOT codegen: fallback operators", () => {
           ],
           wires: [
             {
-              from: {
-                module: "_",
-                type: "Query",
-                field: "nullishProbe",
-                path: ["m"],
-              },
+              sources: [
+                {
+                  expr: {
+                    type: "ref",
+                    ref: {
+                      module: "_",
+                      type: "Query",
+                      field: "nullishProbe",
+                      path: ["m"],
+                    },
+                  },
+                },
+                {
+                  expr: { type: "literal", value: "null" },
+                  gate: "nullish",
+                },
+              ],
               to: {
                 module: "_",
                 type: "Query",
                 field: "nullishProbe",
                 path: ["k"],
               },
-              fallbacks: [{ type: "nullish", value: "null" }],
             },
           ],
         },
@@ -602,15 +612,26 @@ describe("AOT codegen: conditional wires", () => {
           ],
           wires: [
             {
-              condAnd: {
-                leftRef: {
-                  module: "_",
-                  type: "Query",
-                  field: "probe",
-                  path: ["m"],
+              sources: [
+                {
+                  expr: {
+                    type: "and",
+                    left: {
+                      type: "ref",
+                      ref: {
+                        module: "_",
+                        type: "Query",
+                        field: "probe",
+                        path: ["m"],
+                      },
+                    },
+                    right: {
+                      type: "literal",
+                      value: "null",
+                    },
+                  },
                 },
-                rightValue: "null",
-              },
+              ],
               to: {
                 module: "_",
                 type: "Query",
@@ -653,15 +674,26 @@ describe("AOT codegen: conditional wires", () => {
           ],
           wires: [
             {
-              condOr: {
-                leftRef: {
-                  module: "_",
-                  type: "Query",
-                  field: "probeOr",
-                  path: ["m"],
+              sources: [
+                {
+                  expr: {
+                    type: "or",
+                    left: {
+                      type: "ref",
+                      ref: {
+                        module: "_",
+                        type: "Query",
+                        field: "probeOr",
+                        path: ["m"],
+                      },
+                    },
+                    right: {
+                      type: "literal",
+                      value: "null",
+                    },
+                  },
                 },
-                rightValue: "null",
-              },
+              ],
               to: {
                 module: "_",
                 type: "Query",
@@ -1641,7 +1673,7 @@ bridge Query.test {
           handles: [{ kind: "output", handle: "o" }],
           wires: [
             {
-              value: "null",
+              sources: [{ expr: { type: "literal", value: "null" } }],
               to: {
                 module: "_",
                 type: "Query",
@@ -1650,7 +1682,7 @@ bridge Query.test {
               },
             },
             {
-              value: "false",
+              sources: [{ expr: { type: "literal", value: "false" } }],
               to: {
                 module: "_",
                 type: "Query",

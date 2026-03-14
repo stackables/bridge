@@ -29,6 +29,8 @@ import type {
   Wire,
   NodeRef,
   ToolDef,
+  Expression,
+  ControlFlowInstruction,
 } from "@stackables/bridge-core";
 import { BridgePanicError } from "@stackables/bridge-core";
 import type { SourceLocation } from "@stackables/bridge-types";
@@ -38,6 +40,103 @@ import {
 } from "./bridge-asserts.ts";
 
 const SELF_MODULE = "_";
+
+// ── Wire accessor helpers ───────────────────────────────────────────────────
+type RefExpr = Extract<Expression, { type: "ref" }>;
+type LitExpr = Extract<Expression, { type: "literal" }>;
+type TernExpr = Extract<Expression, { type: "ternary" }>;
+type AndOrExpr =
+  | Extract<Expression, { type: "and" }>
+  | Extract<Expression, { type: "or" }>;
+type ControlExpr = Extract<Expression, { type: "control" }>;
+
+function isPull(w: Wire): boolean {
+  return w.sources[0]!.expr.type === "ref";
+}
+function isLit(w: Wire): boolean {
+  return w.sources[0]!.expr.type === "literal";
+}
+function isTern(w: Wire): boolean {
+  return w.sources[0]!.expr.type === "ternary";
+}
+function isAndW(w: Wire): boolean {
+  return w.sources[0]!.expr.type === "and";
+}
+function isOrW(w: Wire): boolean {
+  return w.sources[0]!.expr.type === "or";
+}
+
+/** Primary source ref (for pull wires). */
+function wRef(w: Wire): NodeRef {
+  return (w.sources[0]!.expr as RefExpr).ref;
+}
+/** Primary source literal value (for constant wires). */
+function wVal(w: Wire): string {
+  return (w.sources[0]!.expr as LitExpr).value;
+}
+/** Safe flag on a pull wire's ref expression. */
+function wSafe(w: Wire): true | undefined {
+  return (w.sources[0]!.expr as RefExpr).safe;
+}
+/** Source ref location (for pull wires). */
+function wRefLoc(w: Wire): SourceLocation | undefined {
+  return (w.sources[0]!.expr as RefExpr).refLoc;
+}
+/** Ternary expression from a conditional wire. */
+function wTern(w: Wire): TernExpr {
+  return w.sources[0]!.expr as TernExpr;
+}
+/** And/Or expression from a logical wire. */
+function wAndOr(w: Wire): AndOrExpr {
+  return w.sources[0]!.expr as AndOrExpr;
+}
+/** Ref from an expression (for ref-type expressions). */
+function eRef(e: Expression): NodeRef {
+  return (e as RefExpr).ref;
+}
+/** Value from an expression (for literal-type expressions). */
+function eVal(e: Expression): string {
+  return (e as LitExpr).value;
+}
+
+/** Whether a wire has a catch handler. */
+function hasCatchRef(w: Wire): boolean {
+  return w.catch != null && "ref" in w.catch;
+}
+function hasCatchValue(w: Wire): boolean {
+  return w.catch != null && "value" in w.catch;
+}
+function hasCatchControl(w: Wire): boolean {
+  return w.catch != null && "control" in w.catch;
+}
+/** Whether a wire has any catch fallback (ref or value). */
+function hasCatchFallback(w: Wire): boolean {
+  return hasCatchRef(w) || hasCatchValue(w);
+}
+/** Get the catch ref if present. */
+function catchRef(w: Wire): NodeRef | undefined {
+  return w.catch && "ref" in w.catch ? w.catch.ref : undefined;
+}
+/** Get the catch value if present. */
+function catchValue(w: Wire): string | undefined {
+  return w.catch && "value" in w.catch ? w.catch.value : undefined;
+}
+/** Get the catch control if present. */
+function catchControl(w: Wire): ControlFlowInstruction | undefined {
+  return w.catch && "control" in w.catch ? w.catch.control : undefined;
+}
+/** Get the catch location. */
+function catchLoc(w: Wire): SourceLocation | undefined {
+  return w.catch?.loc;
+}
+/** Get fallback source entries (everything after the primary source). */
+function fallbacks(w: Wire) {
+  return w.sources.slice(1);
+}
+/** Whether a wire has fallback entries. */
+function hasFallbacks(w: Wire): boolean {
+  return w.sources.length > 1;
+}
 
 function matchesRequestedFields(
   fieldPath: string,
@@ -139,14 +238,6 @@ export function compileBridge(
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Check if a wire has catch fallback modifiers. */
-function hasCatchFallback(w: Wire): boolean {
-  return (
-    ("catchFallback" in w && w.catchFallback != null) ||
-    ("catchFallbackRef" in w && !!w.catchFallbackRef)
-  );
-}
-
 type DetectedControlFlow = {
   kind: "break" | "continue" | "throw" | "panic";
   levels: number;
@@ -155,41 +246,28 @@ type DetectedControlFlow = {
 /** Check if any wire in a set has a control flow instruction (break/continue/throw/panic). */
 function detectControlFlow(wires: Wire[]): DetectedControlFlow | null {
   for (const w of wires) {
-    if ("fallbacks" in w && w.fallbacks) {
-      for (const fb of w.fallbacks) {
-        if (fb.control) {
-          const kind = fb.control.kind as
-            | "break"
-            | "continue"
-            | "throw"
-            | "panic";
-          const levels =
-            kind === "break" || kind === "continue"
-              ? Math.max(1, Number((fb.control as any).levels) || 1)
-              : 1;
-          return { kind, levels };
-        }
+    for (const fb of w.sources.slice(1)) {
+      if (fb.expr.type === "control") {
+        const ctrl = fb.expr.control;
+        const kind = ctrl.kind as "break" | "continue" | "throw" | "panic";
+        const levels =
+          kind === "break" || kind === "continue"
+            ? Math.max(1, Number((ctrl as any).levels) || 1)
+            : 1;
+        return { kind, levels };
       }
     }
-    if ("catchControl" in w && w.catchControl) {
-      const kind = w.catchControl.kind as
-        | "break"
-        | "continue"
-        | "throw"
-        | "panic";
+    const cc = catchControl(w);
+    if (cc) {
+      const kind = cc.kind as "break" | "continue" | "throw" | "panic";
       const levels =
         kind === "break" || kind === "continue"
-          ? Math.max(1, Number((w.catchControl as any).levels) || 1)
+          ? Math.max(1, Number((cc as any).levels) || 1)
           : 1;
       return { kind, levels };
     }
   }
   return null;
-}
-
-/** Check if a wire has a catch control flow instruction. */
-function hasCatchControl(w: Wire): boolean {
-  return "catchControl" in w && w.catchControl != null;
 }
 
 function splitToolName(name: string): { module: string; fieldName: string } {
@@ -384,7 +462,7 @@ class CodegenContext {
           // However, tools inlined from define blocks may use type "Define".
           // We detect the correct type by scanning the wires for a matching ref.
           let refType = module === SELF_MODULE ? "Tools" : bridge.type;
-          for (const w of bridge.wires) {
+          for (const w of this.bridge.wires) {
             if (
               w.to.module === module &&
               w.to.field === fieldName &&
@@ -394,12 +472,12 @@ class CodegenContext {
               break;
             }
             if (
-              "from" in w &&
-              w.from.module === module &&
-              w.from.field === fieldName &&
-              w.from.instance != null
+              isPull(w) &&
+              wRef(w).module === module &&
+              wRef(w).field === fieldName &&
+              wRef(w).instance != null
             ) {
-              refType = w.from.type;
+              refType = wRef(w).type;
               break;
             }
           }
@@ -451,7 +529,7 @@ class CodegenContext {
 
     // Detect alias declarations — wires targeting __local:Shadow:<name> modules.
     // These act as virtual containers (like define modules).
-    for (const w of bridge.wires) {
+    for (const w of this.bridge.wires) {
       const toTk = refTrunkKey(w.to);
       if (
         w.to.module === "__local" &&
@@ -463,11 +541,11 @@ class CodegenContext {
         this.defineContainers.add(toTk);
       }
       if (
-        "from" in w &&
-        w.from.module === "__local" &&
-        w.from.type === "Shadow"
+        isPull(w) &&
+        wRef(w).module === "__local" &&
+        wRef(w).type === "Shadow"
       ) {
-        const fromTk = refTrunkKey(w.from);
+        const fromTk = refTrunkKey(wRef(w));
         if (!this.varMap.has(fromTk)) {
           const vn = `_a${++this.toolCounter}`;
           this.varMap.set(fromTk, vn);
@@ -494,13 +572,13 @@ class CodegenContext {
       )
         instances.push(w.to.instance);
       if (
-        "from" in w &&
-        w.from.module === module &&
-        w.from.type === type &&
-        w.from.field === field &&
-        w.from.instance != null
+        isPull(w) &&
+        wRef(w).module === module &&
+        wRef(w).type === type &&
+        wRef(w).field === field &&
+        wRef(w).instance != null
       )
-        instances.push(w.from.instance);
+        instances.push(wRef(w).instance!);
     }
     const uniqueInstances = [...new Set(instances)].sort((a, b) => a - b);
     const nextIndex = this.toolInstanceCursors.get(sig) ?? 0;
@@ -565,19 +643,21 @@ class CodegenContext {
     // 2. pullSingle guard — reject unsafe keys in wire source paths
     for (const w of bridge.wires) {
       const refs: NodeRef[] = [];
-      if ("from" in w) refs.push(w.from);
-      if ("cond" in w) {
-        refs.push(w.cond);
-        if (w.thenRef) refs.push(w.thenRef);
-        if (w.elseRef) refs.push(w.elseRef);
+      if (isPull(w)) refs.push(wRef(w));
+      if (isTern(w)) {
+        refs.push(eRef(wTern(w).cond));
+        if ((wTern(w).then as RefExpr).ref)
+          refs.push((wTern(w).then as RefExpr).ref);
+        if ((wTern(w).else as RefExpr).ref)
+          refs.push((wTern(w).else as RefExpr).ref);
       }
-      if ("condAnd" in w) {
-        refs.push(w.condAnd.leftRef);
-        if (w.condAnd.rightRef) refs.push(w.condAnd.rightRef);
+      if (isAndW(w)) {
+        refs.push(eRef(wAndOr(w).left));
+        if (eRef(wAndOr(w).right)) refs.push(eRef(wAndOr(w).right));
       }
-      if ("condOr" in w) {
-        refs.push(w.condOr.leftRef);
-        if (w.condOr.rightRef) refs.push(w.condOr.rightRef);
+      if (isOrW(w)) {
+        refs.push(eRef(wAndOr(w).left));
+        if (eRef(wAndOr(w).right)) refs.push(eRef(wAndOr(w).right));
       }
       for (const ref of refs) {
         for (const seg of ref.path) {
@@ -663,39 +743,45 @@ class CodegenContext {
       const needsCatch =
         hasCatchFallback(w) ||
         hasCatchControl(w) ||
-        ("safe" in w && w.safe) ||
-        ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
-        ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
+        wSafe(w) ||
+        (isAndW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe)) ||
+        (isOrW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe));
       if (!needsCatch) continue;
-      if ("from" in w) {
-        const srcKey = refTrunkKey(w.from);
+      if (isPull(w)) {
+        const srcKey = refTrunkKey(wRef(w));
         this.catchGuardedTools.add(srcKey);
       }
-      if ("condAnd" in w) {
-        this.catchGuardedTools.add(refTrunkKey(w.condAnd.leftRef));
-        if (w.condAnd.rightRef)
-          this.catchGuardedTools.add(refTrunkKey(w.condAnd.rightRef));
+      if (isAndW(w)) {
+        this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).left)));
+        if (eRef(wAndOr(w).right))
+          this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).right)));
       }
-      if ("condOr" in w) {
-        this.catchGuardedTools.add(refTrunkKey(w.condOr.leftRef));
-        if (w.condOr.rightRef)
-          this.catchGuardedTools.add(refTrunkKey(w.condOr.rightRef));
+      if (isOrW(w)) {
+        this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).left)));
+        if (eRef(wAndOr(w).right))
+          this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).right)));
       }
     }
     // Also mark tools catch-guarded if referenced by catch-guarded or safe define wires
     for (const [, dwires] of defineWires) {
       for (const w of dwires) {
         const needsCatch =
-          hasCatchFallback(w) || hasCatchControl(w) || ("safe" in w && w.safe);
+          hasCatchFallback(w) || hasCatchControl(w) || wSafe(w);
         if (!needsCatch) continue;
-        if ("from" in w) {
-          const srcKey = refTrunkKey(w.from);
+        if (isPull(w)) {
+          const srcKey = refTrunkKey(wRef(w));
           this.catchGuardedTools.add(srcKey);
         }
-        if ("cond" in w) {
-          this.catchGuardedTools.add(refTrunkKey(w.cond));
-          if (w.thenRef) this.catchGuardedTools.add(refTrunkKey(w.thenRef));
-          if (w.elseRef) this.catchGuardedTools.add(refTrunkKey(w.elseRef));
+        if (isTern(w)) {
+          this.catchGuardedTools.add(refTrunkKey(eRef(wTern(w).cond)));
+          if ((wTern(w).then as RefExpr).ref)
+            this.catchGuardedTools.add(
+              refTrunkKey((wTern(w).then as RefExpr).ref),
+            );
+          if ((wTern(w).else as RefExpr).ref)
+            this.catchGuardedTools.add(
+              refTrunkKey((wTern(w).else as RefExpr).ref),
+            );
         }
       }
     }
@@ -704,22 +790,22 @@ class CodegenContext {
     for (const [, twires] of toolWires) {
       for (const w of twires) {
         const isSafe =
-          ("safe" in w && w.safe) ||
-          ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
-          ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
+          wSafe(w) ||
+          (isAndW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe)) ||
+          (isOrW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe));
         if (!isSafe) continue;
-        if ("from" in w) {
-          this.catchGuardedTools.add(refTrunkKey(w.from));
+        if (isPull(w)) {
+          this.catchGuardedTools.add(refTrunkKey(wRef(w)));
         }
-        if ("condAnd" in w) {
-          this.catchGuardedTools.add(refTrunkKey(w.condAnd.leftRef));
-          if (w.condAnd.rightRef)
-            this.catchGuardedTools.add(refTrunkKey(w.condAnd.rightRef));
+        if (isAndW(w)) {
+          this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).left)));
+          if (eRef(wAndOr(w).right))
+            this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).right)));
         }
-        if ("condOr" in w) {
-          this.catchGuardedTools.add(refTrunkKey(w.condOr.leftRef));
-          if (w.condOr.rightRef)
-            this.catchGuardedTools.add(refTrunkKey(w.condOr.rightRef));
+        if (isOrW(w)) {
+          this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).left)));
+          if (eRef(wAndOr(w).right))
+            this.catchGuardedTools.add(refTrunkKey(eRef(wAndOr(w).right)));
         }
       }
     }
@@ -737,7 +823,7 @@ class CodegenContext {
       for (const [tk, wires] of elementScopeEntries) {
         if (this.elementScopedTools.has(tk)) continue;
         for (const w of wires) {
-          if ("from" in w && w.from.element) {
+          if (isPull(w) && wRef(w).element) {
             this.elementScopedTools.add(tk);
             changed = true;
             break;
@@ -1156,27 +1242,31 @@ class CodegenContext {
     const collectSourceKeys = (wires: Wire[]): Set<string> => {
       const keys = new Set<string>();
       for (const w of wires) {
-        if ("from" in w) keys.add(refTrunkKey(w.from));
-        if ("cond" in w) {
-          keys.add(refTrunkKey(w.cond));
-          if (w.thenRef) keys.add(refTrunkKey(w.thenRef));
-          if (w.elseRef) keys.add(refTrunkKey(w.elseRef));
+        if (isPull(w)) keys.add(refTrunkKey(wRef(w)));
+        if (isTern(w)) {
+          keys.add(refTrunkKey(eRef(wTern(w).cond)));
+          if ((wTern(w).then as RefExpr).ref)
+            keys.add(refTrunkKey((wTern(w).then as RefExpr).ref));
+          if ((wTern(w).else as RefExpr).ref)
+            keys.add(refTrunkKey((wTern(w).else as RefExpr).ref));
         }
-        if ("condAnd" in w) {
-          keys.add(refTrunkKey(w.condAnd.leftRef));
-          if (w.condAnd.rightRef) keys.add(refTrunkKey(w.condAnd.rightRef));
+        if (isAndW(w)) {
+          keys.add(refTrunkKey(eRef(wAndOr(w).left)));
+          if (eRef(wAndOr(w).right))
+            keys.add(refTrunkKey(eRef(wAndOr(w).right)));
         }
-        if ("condOr" in w) {
-          keys.add(refTrunkKey(w.condOr.leftRef));
-          if (w.condOr.rightRef) keys.add(refTrunkKey(w.condOr.rightRef));
+        if (isOrW(w)) {
+          keys.add(refTrunkKey(eRef(wAndOr(w).left)));
+          if (eRef(wAndOr(w).right))
+            keys.add(refTrunkKey(eRef(wAndOr(w).right)));
         }
-        if ("fallbacks" in w && w.fallbacks) {
-          for (const fb of w.fallbacks) {
-            if (fb.ref) keys.add(refTrunkKey(fb.ref));
+        if (hasFallbacks(w)) {
+          for (const fb of fallbacks(w)) {
+            if (eRef(fb.expr)) keys.add(refTrunkKey(eRef(fb.expr)));
           }
         }
-        if ("catchFallbackRef" in w && w.catchFallbackRef) {
-          keys.add(refTrunkKey(w.catchFallbackRef));
+        if (hasCatchRef(w)) {
+          keys.add(refTrunkKey(catchRef(w)!));
         }
       }
       return keys;
@@ -1208,7 +1298,11 @@ class CodegenContext {
     // can execute in parallel — we emit them as a single Promise.all().
     for (const layer of toolLayers) {
       // Classify tools in this layer
-      const parallelBatch: { tk: string; tool: ToolInfo; wires: Wire[] }[] = [];
+      const parallelBatch: {
+        tk: string;
+        tool: ToolInfo;
+        wires: Wire[];
+      }[] = [];
       const sequentialKeys: string[] = [];
 
       for (const tk of layer) {
@@ -1257,22 +1351,26 @@ class CodegenContext {
           } else if (wires.length === 1 && wires[0]!.to.path.length === 0) {
             const w = wires[0]!;
             let expr = this.wireToExpr(w);
-            if ("safe" in w && w.safe) {
+            if (wSafe(w)) {
               const errFlags: string[] = [];
-              const wAny = w as any;
-              if (wAny.from) {
+              if (isPull(w)) {
                 const ef = this.getSourceErrorFlag(w);
                 if (ef) errFlags.push(ef);
               }
-              if (wAny.cond) {
-                const condEf = this.getErrorFlagForRef(wAny.cond);
+              if (isTern(w)) {
+                const tern = wTern(w);
+                const condEf = this.getErrorFlagForRef(eRef(tern.cond));
                 if (condEf) errFlags.push(condEf);
-                if (wAny.thenRef) {
-                  const ef = this.getErrorFlagForRef(wAny.thenRef);
+                if (tern.then.type === "ref") {
+                  const ef = this.getErrorFlagForRef(
+                    (tern.then as RefExpr).ref,
+                  );
                   if (ef) errFlags.push(ef);
                 }
-                if (wAny.elseRef) {
-                  const ef = this.getErrorFlagForRef(wAny.elseRef);
+                if (tern.else.type === "ref") {
+                  const ef = this.getErrorFlagForRef(
+                    (tern.else as RefExpr).ref,
+                  );
                   if (ef) errFlags.push(ef);
                 }
               }
@@ -1491,27 +1589,18 @@ class CodegenContext {
         for (const tw of toolDef.wires) {
           if (refTrunkKey(tw.to) !== forkKey) continue;
           const path = tw.to.path.join(".");
-          if ("value" in tw && !("cond" in tw)) {
-            forkInputs.set(
-              path,
-              emitCoerced((tw as Wire & { value: string }).value),
-            );
-          } else if ("from" in tw) {
-            const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+          if (isLit(tw) && !isTern(tw)) {
+            forkInputs.set(path, emitCoerced(wVal(tw)));
+          } else if (isPull(tw)) {
+            const fromKey = refTrunkKey(wRef(tw));
             if (forkExprs.has(fromKey)) {
               let expr = forkExprs.get(fromKey)!;
-              for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+              for (const p of wRef(tw).path) {
                 expr += `[${JSON.stringify(p)}]`;
               }
               forkInputs.set(path, expr);
             } else {
-              forkInputs.set(
-                path,
-                this.resolveToolWireSource(
-                  tw as Wire & { from: NodeRef },
-                  toolDef,
-                ),
-              );
+              forkInputs.set(path, this.resolveToolWireSource(tw, toolDef));
             }
           }
         }
@@ -1531,10 +1620,10 @@ class CodegenContext {
 
     // ToolDef constant wires (skip fork-targeted wires)
     for (const tw of toolDef.wires) {
-      if ("value" in tw && !("cond" in tw)) {
+      if (isLit(tw) && !isTern(tw)) {
         if (forkKeys.has(refTrunkKey(tw.to))) continue;
         const path = tw.to.path;
-        const expr = emitCoerced((tw as Wire & { value: string }).value);
+        const expr = emitCoerced(wVal(tw));
         if (path.length > 1) {
           addNestedEntry(path, expr);
         } else {
@@ -1545,24 +1634,21 @@ class CodegenContext {
 
     // ToolDef pull wires — resolved from tool handles (skip fork-targeted wires)
     for (const tw of toolDef.wires) {
-      if (!("from" in tw)) continue;
+      if (!isPull(tw)) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
       // Skip wires with fallbacks — handled below
-      if ("fallbacks" in tw && (tw as any).fallbacks?.length > 0) continue;
+      if (hasFallbacks(tw)) continue;
       const path = tw.to.path;
-      const fromKey = refTrunkKey((tw as Wire & { from: NodeRef }).from);
+      const fromKey = refTrunkKey(wRef(tw));
       let expr: string;
       if (forkExprs.has(fromKey)) {
         // Source is a fork result
         expr = forkExprs.get(fromKey)!;
-        for (const p of (tw as Wire & { from: NodeRef }).from.path) {
+        for (const p of wRef(tw).path) {
           expr = `(${expr})[${JSON.stringify(p)}]`;
         }
       } else {
-        expr = this.resolveToolWireSource(
-          tw as Wire & { from: NodeRef },
-          toolDef,
-        );
+        expr = this.resolveToolWireSource(tw, toolDef);
       }
       if (path.length > 1) {
         addNestedEntry(path, expr);
@@ -1573,24 +1659,35 @@ class CodegenContext {
 
     // ToolDef ternary wires
     for (const tw of toolDef.wires) {
-      if (!("cond" in tw)) continue;
+      if (!isTern(tw)) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
       const path = tw.to.path;
+      const tern = wTern(tw);
       const condExpr = this.resolveToolDefRef(
-        (tw as any).cond,
+        eRef(tern.cond),
         toolDef,
         forkExprs,
       );
-      const thenExpr = (tw as any).thenRef
-        ? this.resolveToolDefRef((tw as any).thenRef, toolDef, forkExprs)
-        : (tw as any).thenValue !== undefined
-          ? emitCoerced((tw as any).thenValue)
-          : "undefined";
-      const elseExpr = (tw as any).elseRef
-        ? this.resolveToolDefRef((tw as any).elseRef, toolDef, forkExprs)
-        : (tw as any).elseValue !== undefined
-          ? emitCoerced((tw as any).elseValue)
-          : "undefined";
+      const thenExpr =
+        tern.then.type === "ref"
+          ? this.resolveToolDefRef(
+              (tern.then as RefExpr).ref,
+              toolDef,
+              forkExprs,
+            )
+          : tern.then.type === "literal"
+            ? emitCoerced((tern.then as LitExpr).value)
+            : "undefined";
+      const elseExpr =
+        tern.else.type === "ref"
+          ? this.resolveToolDefRef(
+              (tern.else as RefExpr).ref,
+              toolDef,
+              forkExprs,
+            )
+          : tern.else.type === "literal"
+            ? emitCoerced((tern.else as LitExpr).value)
+            : "undefined";
       const expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       if (path.length > 1) {
         addNestedEntry(path, expr);
@@ -1601,18 +1698,22 @@ class CodegenContext {
 
     // ToolDef fallback/coalesce wires (pull wires with fallbacks array)
     for (const tw of toolDef.wires) {
-      if (!("from" in tw)) continue;
-      if (!("fallbacks" in tw) || !(tw as any).fallbacks?.length) continue;
+      if (!isPull(tw)) continue;
+      if (!hasFallbacks(tw) || !fallbacks(tw).length) continue;
       if (forkKeys.has(refTrunkKey(tw.to))) continue;
       const path = tw.to.path;
-      const pullWire = tw as Wire & { from: NodeRef; fallbacks: any[] };
-      let expr = this.resolveToolDefRef(pullWire.from, toolDef, forkExprs);
-      for (const fb of pullWire.fallbacks) {
-        const op = fb.type === "nullish" ? "??" : "||";
-        if (fb.value !== undefined) {
-          expr = `(${expr} ${op} ${emitCoerced(fb.value)})`;
-        } else if (fb.ref) {
-          const refExpr = this.resolveToolDefRef(fb.ref, toolDef, forkExprs);
+      const pullWire = tw;
+      let expr = this.resolveToolDefRef(wRef(pullWire), toolDef, forkExprs);
+      for (const fb of fallbacks(pullWire)) {
+        const op = fb.gate === "nullish" ? "??" : "||";
+        if (eVal(fb.expr) !== undefined) {
+          expr = `(${expr} ${op} ${emitCoerced(eVal(fb.expr))})`;
+        } else if (eRef(fb.expr)) {
+          const refExpr = this.resolveToolDefRef(
+            eRef(fb.expr),
+            toolDef,
+            forkExprs,
+          );
           expr = `(${expr} ${op} ${refExpr})`;
         }
       }
@@ -1849,7 +1950,7 @@ class CodegenContext {
           );
         }
         for (const tw of depToolDef.wires) {
-          if (("value" in tw || "from" in tw) && !("cond" in tw)) {
+          if ((isLit(tw) || isPull(tw)) && !isTern(tw)) {
             if (tw.to.path.length > 1) {
               throw new BridgeCompilerIncompatibleError(
                 `${this.bridge.type}.${this.bridge.field}`,
@@ -1884,20 +1985,17 @@ class CodegenContext {
 
       // Constant wires
       for (const tw of depToolDef.wires) {
-        if ("value" in tw && !("cond" in tw)) {
+        if (isLit(tw) && !isTern(tw)) {
           inputParts.push(
-            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+            `      ${JSON.stringify(tw.to.path.join("."))}: ${emitCoerced(wVal(tw))}`,
           );
         }
       }
 
       // Pull wires — resolved from the dep's own handles
       for (const tw of depToolDef.wires) {
-        if ("from" in tw) {
-          const source = this.resolveToolWireSource(
-            tw as Wire & { from: NodeRef },
-            depToolDef,
-          );
+        if (isPull(tw)) {
+          const source = this.resolveToolWireSource(tw, depToolDef);
           inputParts.push(
             `      ${JSON.stringify(tw.to.path.join("."))}: ${source}`,
           );
@@ -1939,11 +2037,8 @@ class CodegenContext {
    * Resolve a Wire's source NodeRef to a JS expression in the context of a ToolDef.
    * Handles context, const, and tool handle types.
    */
-  private resolveToolWireSource(
-    wire: Wire & { from: NodeRef },
-    toolDef: ToolDef,
-  ): string {
-    const ref = wire.from;
+  private resolveToolWireSource(wire: Wire, toolDef: ToolDef): string {
+    const ref = wRef(wire);
     // Match the ref against tool handles
     const h = toolDef.handles.find((handle) => {
       if (handle.kind === "context") {
@@ -1996,7 +2091,7 @@ class CodegenContext {
     }
     // Delegate to resolveToolWireSource via a synthetic wire
     return this.resolveToolWireSource(
-      { from: ref, to: ref } as Wire & { from: NodeRef },
+      { to: ref, sources: [{ expr: { type: "ref" as const, ref: ref } }] },
       toolDef,
     );
   }
@@ -2117,12 +2212,8 @@ class CodegenContext {
       if (depToolDef) {
         const pathKey = restPath.join(".");
         for (const tw of depToolDef.wires) {
-          if (
-            "value" in tw &&
-            !("cond" in tw) &&
-            tw.to.path.join(".") === pathKey
-          ) {
-            expr = `(${expr} ?? ${emitCoerced((tw as Wire & { value: string }).value)})`;
+          if (isLit(tw) && !isTern(tw) && tw.to.path.join(".") === pathKey) {
+            expr = `(${expr} ?? ${emitCoerced(wVal(tw))})`;
             break;
           }
         }
@@ -2220,10 +2311,10 @@ class CodegenContext {
     // Separate root wires into passthrough vs spread
     const rootWires = outputWires.filter((w) => w.to.path.length === 0);
     const spreadRootWires = rootWires.filter(
-      (w) => "from" in w && "spread" in w && w.spread,
+      (w) => isPull(w) && w.spread && w.spread,
     );
     const passthroughRootWire = rootWires.find(
-      (w) => !("from" in w && "spread" in w && w.spread),
+      (w) => !(isPull(w) && w.spread && w.spread),
     );
 
     // Passthrough (non-spread root wire) — return directly
@@ -2242,8 +2333,9 @@ class CodegenContext {
       );
       let arrayExpr = this.wireToExpr(rootWire);
       // Check for catch control on root wire (e.g., `catch continue` returns [])
-      const rootCatchCtrl =
-        "catchControl" in rootWire ? rootWire.catchControl : undefined;
+      const rootCatchCtrl = hasCatchControl(rootWire)
+        ? catchControl(rootWire)
+        : undefined;
       if (
         rootCatchCtrl &&
         (rootCatchCtrl.kind === "continue" || rootCatchCtrl.kind === "break")
@@ -2421,17 +2513,17 @@ class CodegenContext {
     for (const w of outputWires) {
       const topField = w.to.path[0]!;
       const isElementWire =
-        ("from" in w &&
-          (w.from.element ||
+        (isPull(w) &&
+          (wRef(w).element ||
             w.to.element ||
-            this.elementScopedTools.has(refTrunkKey(w.from)) ||
+            this.elementScopedTools.has(refTrunkKey(wRef(w))) ||
             // Wires from bridge-level refs targeting inside an array mapping
             (arrayFields.has(topField) && w.to.path.length > 1))) ||
-        (w.to.element && ("value" in w || "cond" in w)) ||
+        (w.to.element && (isLit(w) || isTern(w))) ||
         // Cond wires targeting a field inside an array mapping are element wires
-        ("cond" in w && arrayFields.has(topField) && w.to.path.length > 1) ||
+        (isTern(w) && arrayFields.has(topField) && w.to.path.length > 1) ||
         // Const wires targeting a field inside an array mapping are element wires
-        ("value" in w && arrayFields.has(topField) && w.to.path.length > 1);
+        (isLit(w) && arrayFields.has(topField) && w.to.path.length > 1);
       if (isElementWire) {
         // Element wire — belongs to an array mapping
         const arr = elementWires.get(topField) ?? [];
@@ -2440,12 +2532,7 @@ class CodegenContext {
       } else if (arrayFields.has(topField) && w.to.path.length === 1) {
         // Root wire for an array field
         arraySourceWires.set(topField, w);
-      } else if (
-        "from" in w &&
-        "spread" in w &&
-        w.spread &&
-        w.to.path.length === 0
-      ) {
+      } else if (isPull(w) && w.spread && w.spread && w.to.path.length === 0) {
         // Spread root wire — handled separately via spreadRootWires
       } else {
         scalarWires.push(w);
@@ -2463,10 +2550,10 @@ class CodegenContext {
 
     // First pass: handle nested spread wires (spread with path.length > 0)
     const nestedSpreadWires = scalarWires.filter(
-      (w) => "from" in w && "spread" in w && w.spread && w.to.path.length > 0,
+      (w) => isPull(w) && w.spread && w.spread && w.to.path.length > 0,
     );
     const normalScalarWires = scalarWires.filter(
-      (w) => !("from" in w && "spread" in w && w.spread),
+      (w) => !(isPull(w) && w.spread && w.spread),
     );
 
     // Add nested spread expressions to tree nodes
@@ -2771,83 +2858,89 @@ class CodegenContext {
     wire: Wire,
     visited = new Set<string>(),
   ): boolean {
-    if ("value" in wire) return true;
+    if (isLit(wire)) return true;
 
-    if ("from" in wire) {
-      if (!this.refIsZeroCost(wire.from, visited)) return false;
-      for (const fallback of wire.fallbacks ?? []) {
-        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+    if (isPull(wire)) {
+      if (!this.refIsZeroCost(wRef(wire), visited)) return false;
+      for (const fallback of fallbacks(wire) ?? []) {
+        if (
+          eRef(fallback.expr) &&
+          !this.refIsZeroCost(eRef(fallback.expr), visited)
+        ) {
           return false;
         }
       }
-      if (
-        wire.catchFallbackRef &&
-        !this.refIsZeroCost(wire.catchFallbackRef, visited)
-      ) {
+      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
         return false;
       }
       return true;
     }
 
-    if ("cond" in wire) {
-      if (!this.refIsZeroCost(wire.cond, visited)) return false;
-      if (wire.thenRef && !this.refIsZeroCost(wire.thenRef, visited))
+    if (isTern(wire)) {
+      if (!this.refIsZeroCost(eRef(wTern(wire).cond), visited)) return false;
+      if (
+        (wTern(wire).then as RefExpr).ref &&
+        !this.refIsZeroCost((wTern(wire).then as RefExpr).ref, visited)
+      )
         return false;
-      if (wire.elseRef && !this.refIsZeroCost(wire.elseRef, visited))
+      if (
+        (wTern(wire).else as RefExpr).ref &&
+        !this.refIsZeroCost((wTern(wire).else as RefExpr).ref, visited)
+      )
         return false;
-      for (const fallback of wire.fallbacks ?? []) {
-        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+      for (const fallback of fallbacks(wire) ?? []) {
+        if (
+          eRef(fallback.expr) &&
+          !this.refIsZeroCost(eRef(fallback.expr), visited)
+        ) {
           return false;
         }
       }
-      if (
-        wire.catchFallbackRef &&
-        !this.refIsZeroCost(wire.catchFallbackRef, visited)
-      ) {
+      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
         return false;
       }
       return true;
     }
 
-    if ("condAnd" in wire) {
-      if (!this.refIsZeroCost(wire.condAnd.leftRef, visited)) return false;
+    if (isAndW(wire)) {
+      if (!this.refIsZeroCost(eRef(wAndOr(wire).left), visited)) return false;
       if (
-        wire.condAnd.rightRef &&
-        !this.refIsZeroCost(wire.condAnd.rightRef, visited)
+        eRef(wAndOr(wire).right) &&
+        !this.refIsZeroCost(eRef(wAndOr(wire).right), visited)
       ) {
         return false;
       }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+      for (const fallback of fallbacks(wire) ?? []) {
+        if (
+          eRef(fallback.expr) &&
+          !this.refIsZeroCost(eRef(fallback.expr), visited)
+        ) {
           return false;
         }
       }
-      if (
-        wire.catchFallbackRef &&
-        !this.refIsZeroCost(wire.catchFallbackRef, visited)
-      ) {
+      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
         return false;
       }
       return true;
     }
 
-    if ("condOr" in wire) {
-      if (!this.refIsZeroCost(wire.condOr.leftRef, visited)) return false;
+    if (isOrW(wire)) {
+      if (!this.refIsZeroCost(eRef(wAndOr(wire).left), visited)) return false;
       if (
-        wire.condOr.rightRef &&
-        !this.refIsZeroCost(wire.condOr.rightRef, visited)
+        eRef(wAndOr(wire).right) &&
+        !this.refIsZeroCost(eRef(wAndOr(wire).right), visited)
       ) {
         return false;
       }
-      for (const fallback of wire.fallbacks ?? []) {
-        if (fallback.ref && !this.refIsZeroCost(fallback.ref, visited)) {
+      for (const fallback of fallbacks(wire) ?? []) {
+        if (
+          eRef(fallback.expr) &&
+          !this.refIsZeroCost(eRef(fallback.expr), visited)
+        ) {
           return false;
         }
       }
-      if (
-        wire.catchFallbackRef &&
-        !this.refIsZeroCost(wire.catchFallbackRef, visited)
-      ) {
+      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
         return false;
       }
       return true;
@@ -3046,11 +3139,11 @@ class CodegenContext {
     const controlWire = elemWires.find(
       (w) =>
         w.to.path.length === 1 &&
-        (("fallbacks" in w && w.fallbacks?.some((fb) => fb.control != null)) ||
-          ("catchControl" in w && w.catchControl != null)),
+        (fallbacks(w).some((fb) => fb.expr.type === "control") ||
+          hasCatchControl(w)),
     );
 
-    if (!controlWire || !("from" in controlWire)) {
+    if (!controlWire || !isPull(controlWire)) {
       // No control flow found — fall back to simple body
       const body = this.buildElementBody(
         elemWires,
@@ -3068,14 +3161,16 @@ class CodegenContext {
     const checkExpr = this.elementWireToExpr(controlWire, elVar);
 
     // Determine the check type
-    const isNullish =
-      controlWire.fallbacks?.some(
-        (fb) => fb.type === "nullish" && fb.control != null,
-      ) ?? false;
-    const ctrlFromFallback = controlWire.fallbacks?.find(
-      (fb) => fb.control != null,
-    )?.control;
-    const ctrl = ctrlFromFallback ?? controlWire.catchControl;
+    const isNullish = fallbacks(controlWire).some(
+      (fb) => fb.gate === "nullish" && fb.expr.type === "control",
+    );
+    const ctrlFb = fallbacks(controlWire).find(
+      (fb) => fb.expr.type === "control",
+    );
+    const ctrlFromFallback = ctrlFb
+      ? (ctrlFb.expr as ControlExpr).control
+      : undefined;
+    const ctrl = ctrlFromFallback ?? catchControl(controlWire);
     const controlKind = ctrl?.kind === "continue" ? "continue" : "break";
     const controlLevels =
       ctrl && (ctrl.kind === "continue" || ctrl.kind === "break")
@@ -3116,32 +3211,38 @@ class CodegenContext {
   /** Convert a wire to a JavaScript expression string. */
   wireToExpr(w: Wire): string {
     // Constant wire
-    if ("value" in w) return emitCoerced(w.value);
+    if (isLit(w)) return emitCoerced(wVal(w));
 
     // Pull wire
-    if ("from" in w) {
-      let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
+    if (isPull(w)) {
+      let expr = this.wrapExprWithLoc(this.refToExpr(wRef(w)), wRefLoc(w));
       expr = this.applyFallbacks(w, expr);
       return this.wrapWireExpr(w, expr);
     }
 
     // Conditional wire (ternary)
-    if ("cond" in w) {
+    if (isTern(w)) {
       const condExpr = this.wrapExprWithLoc(
-        this.refToExpr(w.cond),
-        w.condLoc ?? w.loc,
+        this.refToExpr(eRef(wTern(w).cond)),
+        wTern(w).condLoc ?? w.loc,
       );
       const thenExpr =
-        w.thenRef !== undefined
-          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.thenRef), w.thenLoc)
-          : w.thenValue !== undefined
-            ? emitCoerced(w.thenValue)
+        (wTern(w).then as RefExpr).ref !== undefined
+          ? this.wrapExprWithLoc(
+              this.lazyRefToExpr((wTern(w).then as RefExpr).ref),
+              wTern(w).thenLoc,
+            )
+          : (wTern(w).then as LitExpr).value !== undefined
+            ? emitCoerced((wTern(w).then as LitExpr).value)
             : "undefined";
       const elseExpr =
-        w.elseRef !== undefined
-          ? this.wrapExprWithLoc(this.lazyRefToExpr(w.elseRef), w.elseLoc)
-          : w.elseValue !== undefined
-            ? emitCoerced(w.elseValue)
+        (wTern(w).else as RefExpr).ref !== undefined
+          ? this.wrapExprWithLoc(
+              this.lazyRefToExpr((wTern(w).else as RefExpr).ref),
+              wTern(w).elseLoc,
+            )
+          : (wTern(w).else as LitExpr).value !== undefined
+            ? emitCoerced((wTern(w).else as LitExpr).value)
             : "undefined";
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
@@ -3149,13 +3250,17 @@ class CodegenContext {
     }
 
     // Logical AND
-    if ("condAnd" in w) {
-      const { leftRef, rightRef, rightValue, rightSafe } = w.condAnd;
+    if (isAndW(w)) {
+      const ao = wAndOr(w);
+      const leftRef = eRef(ao.left);
+      const rightRef = ao.right.type === "ref" ? eRef(ao.right) : undefined;
+      const rightValue =
+        ao.right.type === "literal" ? eVal(ao.right) : undefined;
       const left = this.refToExpr(leftRef);
       let expr: string;
       if (rightRef) {
         let rightExpr = this.lazyRefToExpr(rightRef);
-        if (rightSafe && this.ternaryOnlyTools.has(refTrunkKey(rightRef))) {
+        if (ao.rightSafe && this.ternaryOnlyTools.has(refTrunkKey(rightRef))) {
           rightExpr = `await (async () => { try { return ${rightExpr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return undefined; } })()`;
         }
         expr = `(Boolean(${left}) && Boolean(${rightExpr}))`;
@@ -3167,19 +3272,26 @@ class CodegenContext {
     }
 
     // Logical OR
-    if ("condOr" in w) {
-      const { leftRef, rightRef, rightValue, rightSafe } = w.condOr;
-      const left = this.refToExpr(leftRef);
+    if (isOrW(w)) {
+      const ao2 = wAndOr(w);
+      const leftRef2 = eRef(ao2.left);
+      const rightRef2 = ao2.right.type === "ref" ? eRef(ao2.right) : undefined;
+      const rightValue2 =
+        ao2.right.type === "literal" ? eVal(ao2.right) : undefined;
+      const left2 = this.refToExpr(leftRef2);
       let expr: string;
-      if (rightRef) {
-        let rightExpr = this.lazyRefToExpr(rightRef);
-        if (rightSafe && this.ternaryOnlyTools.has(refTrunkKey(rightRef))) {
+      if (rightRef2) {
+        let rightExpr = this.lazyRefToExpr(rightRef2);
+        if (
+          ao2.rightSafe &&
+          this.ternaryOnlyTools.has(refTrunkKey(rightRef2))
+        ) {
           rightExpr = `await (async () => { try { return ${rightExpr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; return undefined; } })()`;
         }
-        expr = `(Boolean(${left}) || Boolean(${rightExpr}))`;
-      } else if (rightValue !== undefined)
-        expr = `(Boolean(${left}) || Boolean(${emitCoerced(rightValue)}))`;
-      else expr = `Boolean(${left})`;
+        expr = `(Boolean(${left2}) || Boolean(${rightExpr}))`;
+      } else if (rightValue2 !== undefined)
+        expr = `(Boolean(${left2}) || Boolean(${emitCoerced(rightValue2)}))`;
+      else expr = `Boolean(${left2})`;
       expr = this.applyFallbacks(w, expr);
       return this.wrapWireExpr(w, expr);
     }
@@ -3214,16 +3326,23 @@ class CodegenContext {
    */
   private findPullingWireLoc(trunkKey: string): SourceLocation | undefined {
     for (const w of this.bridge.wires) {
-      if ("from" in w) {
-        const srcKey = refTrunkKey(w.from);
-        if (srcKey === trunkKey) return w.fromLoc ?? w.loc;
+      if (isPull(w)) {
+        const srcKey = refTrunkKey(wRef(w));
+        if (srcKey === trunkKey) return wRefLoc(w) ?? w.loc;
       }
-      if ("cond" in w) {
-        if (refTrunkKey(w.cond) === trunkKey) return w.condLoc ?? w.loc;
-        if (w.thenRef && refTrunkKey(w.thenRef) === trunkKey)
-          return w.thenLoc ?? w.loc;
-        if (w.elseRef && refTrunkKey(w.elseRef) === trunkKey)
-          return w.elseLoc ?? w.loc;
+      if (isTern(w)) {
+        if (refTrunkKey(eRef(wTern(w).cond)) === trunkKey)
+          return wTern(w).condLoc ?? w.loc;
+        if (
+          (wTern(w).then as RefExpr).ref &&
+          refTrunkKey((wTern(w).then as RefExpr).ref) === trunkKey
+        )
+          return wTern(w).thenLoc ?? w.loc;
+        if (
+          (wTern(w).else as RefExpr).ref &&
+          refTrunkKey((wTern(w).else as RefExpr).ref) === trunkKey
+        )
+          return wTern(w).elseLoc ?? w.loc;
       }
     }
     return undefined;
@@ -3255,11 +3374,11 @@ class CodegenContext {
   }
 
   private _elementWireToExprInner(w: Wire, elVar: string): string {
-    if ("value" in w) return emitCoerced(w.value);
+    if (isLit(w)) return emitCoerced(wVal(w));
 
     // Handle ternary (conditional) wires inside array mapping
-    if ("cond" in w) {
-      const condRef = w.cond;
+    if (isTern(w)) {
+      const condRef = eRef(wTern(w).cond);
       let condExpr: string;
       if (condRef.element) {
         condExpr = this.refToElementExpr(condRef);
@@ -3274,7 +3393,7 @@ class CodegenContext {
           condExpr = this.refToExpr(condRef);
         }
       }
-      condExpr = this.wrapExprWithLoc(condExpr, w.condLoc ?? w.loc);
+      condExpr = this.wrapExprWithLoc(condExpr, wTern(w).condLoc ?? w.loc);
       const resolveBranch = (
         ref: NodeRef | undefined,
         val: string | undefined,
@@ -3294,41 +3413,49 @@ class CodegenContext {
         }
         return val !== undefined ? emitCoerced(val) : "undefined";
       };
-      const thenExpr = resolveBranch(w.thenRef, w.thenValue, w.thenLoc);
-      const elseExpr = resolveBranch(w.elseRef, w.elseValue, w.elseLoc);
+      const thenExpr = resolveBranch(
+        (wTern(w).then as RefExpr).ref,
+        (wTern(w).then as LitExpr).value,
+        wTern(w).thenLoc,
+      );
+      const elseExpr = resolveBranch(
+        (wTern(w).else as RefExpr).ref,
+        (wTern(w).else as LitExpr).value,
+        wTern(w).elseLoc,
+      );
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
       return expr;
     }
 
-    if ("from" in w) {
+    if (isPull(w)) {
       // Check if the source is an element-scoped tool (needs inline computation)
-      if (!w.from.element) {
-        const srcKey = refTrunkKey(w.from);
+      if (!wRef(w).element) {
+        const srcKey = refTrunkKey(wRef(w));
         if (this.elementScopedTools.has(srcKey)) {
           let expr = this.buildInlineToolExpr(srcKey, elVar);
-          if (w.from.path.length > 0) {
-            expr = this.appendPathExpr(`(${expr})`, w.from);
+          if (wRef(w).path.length > 0) {
+            expr = this.appendPathExpr(`(${expr})`, wRef(w));
           }
-          expr = this.wrapExprWithLoc(expr, w.fromLoc);
+          expr = this.wrapExprWithLoc(expr, wRefLoc(w));
           expr = this.applyFallbacks(w, expr);
           return expr;
         }
         // Non-element ref inside array mapping — use normal refToExpr
-        let expr = this.wrapExprWithLoc(this.refToExpr(w.from), w.fromLoc);
+        let expr = this.wrapExprWithLoc(this.refToExpr(wRef(w)), wRefLoc(w));
         expr = this.applyFallbacks(w, expr);
         return expr;
       }
       // Element refs: from.element === true, path = ["srcField"]
       // Resolve elementDepth to find the correct enclosing element variable
-      const elemDepth = w.from.elementDepth ?? 0;
+      const elemDepth = wRef(w).elementDepth ?? 0;
       let targetVar = elVar;
       if (elemDepth > 0) {
         const currentDepth = parseInt(elVar.slice(3), 10);
         targetVar = `_el${currentDepth - elemDepth}`;
       }
-      let expr = this.appendPathExpr(targetVar, w.from, true);
-      expr = this.wrapExprWithLoc(expr, w.fromLoc);
+      let expr = this.appendPathExpr(targetVar, wRef(w), true);
+      expr = this.wrapExprWithLoc(expr, wRefLoc(w));
       expr = this.applyFallbacks(w, expr);
       return expr;
     }
@@ -3356,18 +3483,18 @@ class CodegenContext {
       if (wires.length === 1 && wires[0]!.to.path.length === 0) {
         const w = wires[0]!;
         // Check if the wire itself is element-scoped
-        if ("from" in w && w.from.element) {
+        if (isPull(w) && wRef(w).element) {
           return this.elementWireToExpr(w, elVar);
         }
-        if ("from" in w && !w.from.element) {
+        if (isPull(w) && !wRef(w).element) {
           // Check if the source is another element-scoped tool
-          const srcKey = refTrunkKey(w.from);
+          const srcKey = refTrunkKey(wRef(w));
           if (this.elementScopedTools.has(srcKey)) {
             return this.elementWireToExpr(w, elVar);
           }
         }
         // Check if this is a pipe tool call (alias tool:source as name)
-        if ("from" in w && w.pipe) {
+        if (isPull(w) && w.pipe) {
           return this.elementWireToExpr(w, elVar);
         }
         return this.wireToExpr(w);
@@ -3453,8 +3580,8 @@ class CodegenContext {
    */
   private wireNeedsAwait(w: Wire): boolean {
     // Element-scoped non-internal tool reference generates await __call()
-    if ("from" in w && !w.from.element) {
-      const srcKey = refTrunkKey(w.from);
+    if (isPull(w) && !wRef(w).element) {
+      const srcKey = refTrunkKey(wRef(w));
       if (
         this.elementScopedTools.has(srcKey) &&
         !this.internalToolKeys.has(srcKey)
@@ -3499,8 +3626,8 @@ class CodegenContext {
       (w) => refTrunkKey(w.to) === trunkKey,
     );
     for (const w of wires) {
-      if ("from" in w && !w.from.element) {
-        const srcKey = refTrunkKey(w.from);
+      if (isPull(w) && !wRef(w).element) {
+        const srcKey = refTrunkKey(wRef(w));
         if (
           this.elementScopedTools.has(srcKey) &&
           !this.internalToolKeys.has(srcKey) &&
@@ -3514,8 +3641,8 @@ class CodegenContext {
           return this.hasAsyncElementDeps(srcKey);
         }
       }
-      if ("from" in w && w.pipe) {
-        const srcKey = refTrunkKey(w.from);
+      if (isPull(w) && w.pipe) {
+        const srcKey = refTrunkKey(wRef(w));
         if (
           this.elementScopedTools.has(srcKey) &&
           !this.internalToolKeys.has(srcKey)
@@ -3549,8 +3676,8 @@ class CodegenContext {
         (w) => refTrunkKey(w.to) === tk,
       );
       for (const w of depWires) {
-        if ("from" in w && !w.from.element) {
-          const srcKey = refTrunkKey(w.from);
+        if (isPull(w) && !wRef(w).element) {
+          const srcKey = refTrunkKey(wRef(w));
           if (
             this.elementScopedTools.has(srcKey) &&
             !this.internalToolKeys.has(srcKey)
@@ -3558,8 +3685,8 @@ class CodegenContext {
             collectDeps(srcKey);
           }
         }
-        if ("from" in w && w.pipe) {
-          const srcKey = refTrunkKey(w.from);
+        if (isPull(w) && w.pipe) {
+          const srcKey = refTrunkKey(wRef(w));
           if (
             this.elementScopedTools.has(srcKey) &&
             !this.internalToolKeys.has(srcKey)
@@ -3571,8 +3698,8 @@ class CodegenContext {
     };
 
     for (const w of elemWires) {
-      if ("from" in w && !w.from.element) {
-        const srcKey = refTrunkKey(w.from);
+      if (isPull(w) && !wRef(w).element) {
+        const srcKey = refTrunkKey(wRef(w));
         if (
           this.elementScopedTools.has(srcKey) &&
           !this.internalToolKeys.has(srcKey)
@@ -3592,7 +3719,7 @@ class CodegenContext {
         if (wires.length === 1 && wires[0]!.to.path.length === 0) {
           const w = wires[0]!;
           const hasCatch = hasCatchFallback(w) || hasCatchControl(w);
-          const hasSafe = "from" in w && w.safe;
+          const hasSafe = isPull(w) && wSafe(w);
           const expr = this.elementWireToExpr(w, elVar);
           if (hasCatch || hasSafe) {
             lines.push(
@@ -3671,7 +3798,7 @@ class CodegenContext {
             const err = new BridgePanicError(
               `Circular dependency detected: "${key}" depends on itself`,
             );
-            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            (err as any).bridgeLoc = isPull(w) ? wRefLoc(w) : w.loc;
             throw err;
           }
           if (!needed.has(src)) continue;
@@ -3756,8 +3883,8 @@ class CodegenContext {
         (w) => refTrunkKey(w.to) === tk,
       );
       for (const w of depWires) {
-        if ("from" in w && !w.from.element) {
-          const srcKey = refTrunkKey(w.from);
+        if (isPull(w) && !wRef(w).element) {
+          const srcKey = refTrunkKey(wRef(w));
           if (
             this.elementScopedTools.has(srcKey) &&
             !this.internalToolKeys.has(srcKey)
@@ -3765,8 +3892,8 @@ class CodegenContext {
             collectDeps(srcKey);
           }
         }
-        if ("from" in w && w.pipe) {
-          const srcKey = refTrunkKey(w.from);
+        if (isPull(w) && w.pipe) {
+          const srcKey = refTrunkKey(wRef(w));
           if (
             this.elementScopedTools.has(srcKey) &&
             !this.internalToolKeys.has(srcKey)
@@ -3777,8 +3904,8 @@ class CodegenContext {
       }
     };
     for (const w of elemWires) {
-      if ("from" in w && !w.from.element) {
-        const srcKey = refTrunkKey(w.from);
+      if (isPull(w) && !wRef(w).element) {
+        const srcKey = refTrunkKey(wRef(w));
         if (
           this.elementScopedTools.has(srcKey) &&
           !this.internalToolKeys.has(srcKey)
@@ -3865,14 +3992,13 @@ class CodegenContext {
     // Top-level safe flag indicates the wire wants error → undefined conversion.
     // condAnd/condOr wires carry safe INSIDE (condAnd.safe) — those refs already
     // have rootSafe/pathSafe so __get handles null bases; no extra wrapping needed.
-    const wireSafe = "safe" in w && w.safe;
+    const wireSafe = wSafe(w);
     // When safe (?.) has fallbacks (?? / ||), convert tool error → undefined
     // BEFORE the fallback chain so that `a?.name ?? panic "msg"` triggers
     // the panic when the tool errors (safe makes it undefined, then ?? fires).
-    const hasFallbacks =
-      "fallbacks" in w && w.fallbacks && w.fallbacks.length > 0;
+    const wireHasFallbacks = hasFallbacks(w);
     if (
-      hasFallbacks &&
+      wireHasFallbacks &&
       wireSafe &&
       !hasCatchFallback(w) &&
       !hasCatchControl(w)
@@ -3883,15 +4009,15 @@ class CodegenContext {
       }
     }
 
-    if ("fallbacks" in w && w.fallbacks) {
-      for (const fb of w.fallbacks) {
-        if (fb.type === "falsy") {
-          if (fb.ref) {
-            expr = `(${expr} || ${this.wrapExprWithLoc(this.lazyRefToExpr(fb.ref), fb.loc)})`; // lgtm [js/code-injection]
-          } else if (fb.value != null) {
-            expr = `(${expr} || ${emitCoerced(fb.value)})`; // lgtm [js/code-injection]
-          } else if (fb.control) {
-            const ctrl = fb.control;
+    if (hasFallbacks(w)) {
+      for (const fb of fallbacks(w)) {
+        if (fb.gate === "falsy") {
+          if (eRef(fb.expr)) {
+            expr = `(${expr} || ${this.wrapExprWithLoc(this.lazyRefToExpr(eRef(fb.expr)), fb.loc)})`; // lgtm [js/code-injection]
+          } else if (eVal(fb.expr) != null) {
+            expr = `(${expr} || ${emitCoerced(eVal(fb.expr))})`; // lgtm [js/code-injection]
+          } else if ((fb.expr as ControlExpr).control) {
+            const ctrl = (fb.expr as ControlExpr).control;
             const fbLoc = this.serializeLoc(fb.loc);
             if (ctrl.kind === "throw") {
               expr = `(${expr} || (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${fbLoc} }); })())`; // lgtm [js/code-injection]
@@ -3901,12 +4027,12 @@ class CodegenContext {
           }
         } else {
           // nullish
-          if (fb.ref) {
-            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.lazyRefToExpr(fb.ref), fb.loc)}))`; // lgtm [js/code-injection]
-          } else if (fb.value != null) {
-            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(fb.value)}))`; // lgtm [js/code-injection]
-          } else if (fb.control) {
-            const ctrl = fb.control;
+          if (eRef(fb.expr)) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${this.wrapExprWithLoc(this.lazyRefToExpr(eRef(fb.expr)), fb.loc)}))`; // lgtm [js/code-injection]
+          } else if (eVal(fb.expr) != null) {
+            expr = `((__v) => (__v == null ? undefined : __v))((${expr} ?? ${emitCoerced(eVal(fb.expr))}))`; // lgtm [js/code-injection]
+          } else if ((fb.expr as ControlExpr).control) {
+            const ctrl = (fb.expr as ControlExpr).control;
             const fbLoc = this.serializeLoc(fb.loc);
             if (ctrl.kind === "throw") {
               expr = `(${expr} ?? (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${fbLoc} }); })())`; // lgtm [js/code-injection]
@@ -3923,13 +4049,13 @@ class CodegenContext {
 
     if (hasCatchFallback(w)) {
       let catchExpr: string;
-      if ("catchFallbackRef" in w && w.catchFallbackRef) {
+      if (hasCatchRef(w)) {
         catchExpr = this.wrapExprWithLoc(
-          this.refToExpr(w.catchFallbackRef),
-          "catchLoc" in w ? w.catchLoc : undefined,
+          this.refToExpr(catchRef(w)!),
+          catchLoc(w),
         );
-      } else if ("catchFallback" in w && w.catchFallback != null) {
-        catchExpr = emitCoerced(w.catchFallback);
+      } else if (hasCatchValue(w)) {
+        catchExpr = emitCoerced(catchValue(w)!);
       } else {
         catchExpr = "undefined";
       }
@@ -3943,7 +4069,7 @@ class CodegenContext {
     } else if (wireSafe && !hasCatchControl(w)) {
       // Safe navigation (?.) without catch — return undefined on error.
       // When fallbacks are present, the early conversion already happened above.
-      if (!hasFallbacks) {
+      if (!wireHasFallbacks) {
         if (errFlag) {
           expr = `(${errFlag} !== undefined ? undefined : ${expr})`; // lgtm [js/code-injection]
         } else {
@@ -3955,8 +4081,8 @@ class CodegenContext {
       // so __get handles null bases gracefully. Don't re-throw; the natural Boolean()
       // evaluation produces the correct result (e.g. Boolean(undefined) → false).
       const isCondSafe =
-        ("condAnd" in w && (w.condAnd.safe || w.condAnd.rightSafe)) ||
-        ("condOr" in w && (w.condOr.safe || w.condOr.rightSafe));
+        (isAndW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe)) ||
+        (isOrW(w) && (wAndOr(w).leftSafe || wAndOr(w).rightSafe));
       if (!isCondSafe) {
         // This wire has NO catch fallback but its source tool is catch-guarded by another
         // wire. If the tool failed, re-throw the stored error rather than silently
@@ -3966,23 +4092,21 @@ class CodegenContext {
     }
 
     // Catch control flow (throw/panic on catch gate)
-    if ("catchControl" in w && w.catchControl) {
-      const ctrl = w.catchControl;
-      const catchLoc = this.serializeLoc(
-        "catchLoc" in w ? w.catchLoc : undefined,
-      );
+    if (hasCatchControl(w)) {
+      const ctrl = catchControl(w)!;
+      const cLoc = this.serializeLoc(catchLoc(w));
       if (ctrl.kind === "throw") {
         // Wrap in catch IIFE — on error, throw the custom message
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${catchLoc} }); })() : ${expr})`; // lgtm [js/code-injection]
+          expr = `(${errFlag} !== undefined ? (() => { throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${cLoc} }); })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${catchLoc} }); } })()`; // lgtm [js/code-injection]
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; throw new __BridgeRuntimeError(${JSON.stringify(ctrl.message)}, { bridgeLoc: ${cLoc} }); } })()`; // lgtm [js/code-injection]
         }
       } else if (ctrl.kind === "panic") {
         if (errFlag) {
-          expr = `(${errFlag} !== undefined ? (() => { const _e = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _e.bridgeLoc = ${catchLoc}; throw _e; })() : ${expr})`; // lgtm [js/code-injection]
+          expr = `(${errFlag} !== undefined ? (() => { const _e = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _e.bridgeLoc = ${cLoc}; throw _e; })() : ${expr})`; // lgtm [js/code-injection]
         } else {
-          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; const _pe = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _pe.bridgeLoc = ${catchLoc}; throw _pe; } })()`; // lgtm [js/code-injection]
+          expr = `await (async () => { try { return ${expr}; } catch (_e) { if (_e?.name === "BridgePanicError" || _e?.name === "BridgeAbortError") throw _e; const _pe = new __BridgePanicError(${JSON.stringify(ctrl.message)}); _pe.bridgeLoc = ${cLoc}; throw _pe; } })()`; // lgtm [js/code-injection]
         }
       }
     }
@@ -3993,41 +4117,41 @@ class CodegenContext {
   /** Get the error flag variable name for a wire's source tool, but ONLY if
    * that tool was compiled in catch-guarded mode (i.e. the `_err` variable exists). */
   private getSourceErrorFlag(w: Wire): string | undefined {
-    if ("from" in w) {
-      return this.getErrorFlagForRef(w.from);
+    if (isPull(w)) {
+      return this.getErrorFlagForRef(wRef(w));
     }
     // For ternary wires, check all referenced tools
-    if ("cond" in w) {
+    if (isTern(w)) {
       const flags: string[] = [];
-      const cf = this.getErrorFlagForRef(w.cond);
+      const cf = this.getErrorFlagForRef(eRef(wTern(w).cond));
       if (cf) flags.push(cf);
-      if (w.thenRef) {
-        const f = this.getErrorFlagForRef(w.thenRef);
+      if ((wTern(w).then as RefExpr).ref) {
+        const f = this.getErrorFlagForRef((wTern(w).then as RefExpr).ref);
         if (f && !flags.includes(f)) flags.push(f);
       }
-      if (w.elseRef) {
-        const f = this.getErrorFlagForRef(w.elseRef);
+      if ((wTern(w).else as RefExpr).ref) {
+        const f = this.getErrorFlagForRef((wTern(w).else as RefExpr).ref);
         if (f && !flags.includes(f)) flags.push(f);
       }
       if (flags.length > 0) return flags.join(" ?? "); // Combine error flags
     }
     // For condAnd/condOr wires, check leftRef and rightRef
-    if ("condAnd" in w) {
+    if (isAndW(w)) {
       const flags: string[] = [];
-      const lf = this.getErrorFlagForRef(w.condAnd.leftRef);
+      const lf = this.getErrorFlagForRef(eRef(wAndOr(w).left));
       if (lf) flags.push(lf);
-      if (w.condAnd.rightRef) {
-        const rf = this.getErrorFlagForRef(w.condAnd.rightRef);
+      if (eRef(wAndOr(w).right)) {
+        const rf = this.getErrorFlagForRef(eRef(wAndOr(w).right));
         if (rf && !flags.includes(rf)) flags.push(rf);
       }
       if (flags.length > 0) return flags.join(" ?? ");
     }
-    if ("condOr" in w) {
+    if (isOrW(w)) {
       const flags: string[] = [];
-      const lf = this.getErrorFlagForRef(w.condOr.leftRef);
+      const lf = this.getErrorFlagForRef(eRef(wAndOr(w).left));
       if (lf) flags.push(lf);
-      if (w.condOr.rightRef) {
-        const rf = this.getErrorFlagForRef(w.condOr.rightRef);
+      if (eRef(wAndOr(w).right)) {
+        const rf = this.getErrorFlagForRef(eRef(wAndOr(w).right));
         if (rf && !flags.includes(rf)) flags.push(rf);
       }
       if (flags.length > 0) return flags.join(" ?? ");
@@ -4147,21 +4271,18 @@ class CodegenContext {
         if (toolDef) {
           const inputEntries = new Map<string, string>();
           for (const tw of toolDef.wires) {
-            if ("value" in tw && !("cond" in tw)) {
+            if (isLit(tw) && !isTern(tw)) {
               const target = tw.to.path.join(".");
               inputEntries.set(
                 target,
-                `${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+                `${JSON.stringify(target)}: ${emitCoerced(wVal(tw))}`,
               );
             }
           }
           for (const tw of toolDef.wires) {
-            if ("from" in tw) {
+            if (isPull(tw)) {
               const target = tw.to.path.join(".");
-              const expr = this.resolveToolWireSource(
-                tw as Wire & { from: NodeRef },
-                toolDef,
-              );
+              const expr = this.resolveToolWireSource(tw, toolDef);
               inputEntries.set(target, `${JSON.stringify(target)}: ${expr}`);
             }
           }
@@ -4209,33 +4330,34 @@ class CodegenContext {
     const ternaryBranchRefs = new Set<string>();
 
     const processWire = (w: Wire) => {
-      if ("from" in w && !w.from.element) {
-        allRefs.add(refTrunkKey(w.from));
+      if (isPull(w) && !wRef(w).element) {
+        allRefs.add(refTrunkKey(wRef(w)));
       }
-      if ("cond" in w) {
-        allRefs.add(refTrunkKey(w.cond));
-        if (w.thenRef) ternaryBranchRefs.add(refTrunkKey(w.thenRef));
-        if (w.elseRef) ternaryBranchRefs.add(refTrunkKey(w.elseRef));
+      if (isTern(w)) {
+        allRefs.add(refTrunkKey(eRef(wTern(w).cond)));
+        if ((wTern(w).then as RefExpr).ref)
+          ternaryBranchRefs.add(refTrunkKey((wTern(w).then as RefExpr).ref));
+        if ((wTern(w).else as RefExpr).ref)
+          ternaryBranchRefs.add(refTrunkKey((wTern(w).else as RefExpr).ref));
       }
-      if ("condAnd" in w) {
-        allRefs.add(refTrunkKey(w.condAnd.leftRef));
-        if (w.condAnd.rightRef)
-          ternaryBranchRefs.add(refTrunkKey(w.condAnd.rightRef));
+      if (isAndW(w)) {
+        allRefs.add(refTrunkKey(eRef(wAndOr(w).left)));
+        if (eRef(wAndOr(w).right))
+          ternaryBranchRefs.add(refTrunkKey(eRef(wAndOr(w).right)));
       }
-      if ("condOr" in w) {
-        allRefs.add(refTrunkKey(w.condOr.leftRef));
-        if (w.condOr.rightRef)
-          ternaryBranchRefs.add(refTrunkKey(w.condOr.rightRef));
+      if (isOrW(w)) {
+        allRefs.add(refTrunkKey(eRef(wAndOr(w).left)));
+        if (eRef(wAndOr(w).right))
+          ternaryBranchRefs.add(refTrunkKey(eRef(wAndOr(w).right)));
       }
       // Fallback refs — on ternary wires, treat as lazy (ternary-branch-like)
-      if ("fallbacks" in w && w.fallbacks) {
-        const refSet = "cond" in w ? ternaryBranchRefs : allRefs;
-        for (const fb of w.fallbacks) {
-          if (fb.ref) refSet.add(refTrunkKey(fb.ref));
+      if (hasFallbacks(w)) {
+        const refSet = isTern(w) ? ternaryBranchRefs : allRefs;
+        for (const fb of fallbacks(w)) {
+          if (eRef(fb.expr)) refSet.add(refTrunkKey(eRef(fb.expr)));
         }
       }
-      if ("catchFallbackRef" in w && w.catchFallbackRef)
-        allRefs.add(refTrunkKey(w.catchFallbackRef));
+      if (hasCatchRef(w)) allRefs.add(refTrunkKey(catchRef(w)!));
     };
 
     for (const w of outputWires) processWire(w);
@@ -4268,7 +4390,7 @@ class CodegenContext {
     wire: Wire,
   ): void {
     const nextExpr = this.wireToExpr(wire);
-    const nextIsConstant = "value" in wire;
+    const nextIsConstant = isLit(wire);
 
     if (node.expr == null) {
       node.expr = nextExpr;
@@ -4406,7 +4528,7 @@ class CodegenContext {
     const outputByPath = new Map<string, Wire[]>();
     for (const w of outputWires) {
       if (w.to.path.length === 0) continue;
-      if ("from" in w && w.from.element) continue;
+      if (isPull(w) && wRef(w).element) continue;
       const pathKey = w.to.path.join(".");
       const arr = outputByPath.get(pathKey) ?? [];
       arr.push(w);
@@ -4438,8 +4560,8 @@ class CodegenContext {
         const wireExpr = this.wireToExpr(w);
 
         // Check if this wire pulls from a tool
-        if ("from" in w && !w.from.element) {
-          const srcTk = refTrunkKey(w.from);
+        if (isPull(w) && !wRef(w).element) {
+          const srcTk = refTrunkKey(wRef(w));
           if (this.tools.has(srcTk) && !this.defineContainers.has(srcTk)) {
             if (!toolInfo.has(srcTk)) {
               toolInfo.set(srcTk, { secondaryPaths: [], hasPrimary: false });
@@ -4464,8 +4586,8 @@ class CodegenContext {
         }
 
         // Track tools referenced in this wire (for cascading conditionals)
-        if ("from" in w && !w.from.element) {
-          const refTk = refTrunkKey(w.from);
+        if (isPull(w) && !wRef(w).element) {
+          const refTk = refTrunkKey(wRef(w));
           if (this.tools.has(refTk)) priorToolsForPath.add(refTk);
         }
 
@@ -4520,9 +4642,9 @@ class CodegenContext {
         info.secondaryPaths.map((sp) => sp.pathKey),
       );
       for (const w of outputWires) {
-        if (!("from" in w)) continue;
-        if (w.from.element) continue;
-        const srcTk = refTrunkKey(w.from);
+        if (!isPull(w)) continue;
+        if (wRef(w).element) continue;
+        const srcTk = refTrunkKey(wRef(w));
         if (srcTk !== toolTk) continue;
         if (w.to.path.length === 0) {
           hasUncaptured = true;
@@ -4552,28 +4674,29 @@ class CodegenContext {
     const trunks: string[] = [];
     const collectTrunk = (ref: NodeRef) => trunks.push(refTrunkKey(ref));
 
-    if ("from" in w) {
-      collectTrunk(w.from);
-      if (w.fallbacks) {
-        for (const fb of w.fallbacks) {
-          if (fb.ref) collectTrunk(fb.ref);
+    if (isPull(w)) {
+      collectTrunk(wRef(w));
+      if (fallbacks(w)) {
+        for (const fb of fallbacks(w)) {
+          if (eRef(fb.expr)) collectTrunk(eRef(fb.expr));
         }
       }
-      if ("catchFallbackRef" in w && w.catchFallbackRef)
-        collectTrunk(w.catchFallbackRef);
+      if (hasCatchRef(w)) collectTrunk(catchRef(w)!);
     }
-    if ("cond" in w) {
-      collectTrunk(w.cond);
-      if (w.thenRef) collectTrunk(w.thenRef);
-      if (w.elseRef) collectTrunk(w.elseRef);
+    if (isTern(w)) {
+      collectTrunk(eRef(wTern(w).cond));
+      if ((wTern(w).then as RefExpr).ref)
+        collectTrunk((wTern(w).then as RefExpr).ref);
+      if ((wTern(w).else as RefExpr).ref)
+        collectTrunk((wTern(w).else as RefExpr).ref);
     }
-    if ("condAnd" in w) {
-      collectTrunk(w.condAnd.leftRef);
-      if (w.condAnd.rightRef) collectTrunk(w.condAnd.rightRef);
+    if (isAndW(w)) {
+      collectTrunk(eRef(wAndOr(w).left));
+      if (eRef(wAndOr(w).right)) collectTrunk(eRef(wAndOr(w).right));
     }
-    if ("condOr" in w) {
-      collectTrunk(w.condOr.leftRef);
-      if (w.condOr.rightRef) collectTrunk(w.condOr.rightRef);
+    if (isOrW(w)) {
+      collectTrunk(eRef(wAndOr(w).left));
+      if (eRef(wAndOr(w).right)) collectTrunk(eRef(wAndOr(w).right));
     }
     return trunks;
   }
@@ -4622,21 +4745,18 @@ class CodegenContext {
     const fnName = toolDef.fn ?? tool.toolName;
     const inputEntries = new Map<string, string>();
     for (const tw of toolDef.wires) {
-      if ("value" in tw && !("cond" in tw)) {
+      if (isLit(tw) && !isTern(tw)) {
         const target = tw.to.path.join(".");
         inputEntries.set(
           target,
-          `    ${JSON.stringify(target)}: ${emitCoerced((tw as Wire & { value: string }).value)}`,
+          `    ${JSON.stringify(target)}: ${emitCoerced(wVal(tw))}`,
         );
       }
     }
     for (const tw of toolDef.wires) {
-      if ("from" in tw) {
+      if (isPull(tw)) {
         const target = tw.to.path.join(".");
-        const expr = this.resolveToolWireSource(
-          tw as Wire & { from: NodeRef },
-          toolDef,
-        );
+        const expr = this.resolveToolWireSource(tw, toolDef);
         inputEntries.set(target, `    ${JSON.stringify(target)}: ${expr}`);
       }
     }
@@ -4678,7 +4798,7 @@ class CodegenContext {
             const err = new BridgePanicError(
               `Circular dependency detected: "${key}" depends on itself`,
             );
-            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            (err as any).bridgeLoc = isPull(w) ? wRefLoc(w) : w.loc;
             throw err;
           }
           if (adj.has(src)) {
@@ -4734,7 +4854,7 @@ class CodegenContext {
             const err = new BridgePanicError(
               `Circular dependency detected: "${key}" depends on itself`,
             );
-            (err as any).bridgeLoc = "fromLoc" in w ? w.fromLoc : w.loc;
+            (err as any).bridgeLoc = isPull(w) ? wRefLoc(w) : w.loc;
             throw err;
           }
           if (adj.has(src)) {

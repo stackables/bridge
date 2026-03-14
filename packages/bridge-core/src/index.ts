@@ -69,6 +69,7 @@ export type {
   ConstDef,
   ControlFlowInstruction,
   DefineDef,
+  Expression,
   HandleBinding,
   Instruction,
   NodeRef,
@@ -82,8 +83,18 @@ export type {
   ToolMetadata,
   VersionDecl,
   Wire,
-  WireFallback,
+  WireCatch,
+  WireSourceEntry,
 } from "./types.ts";
+
+// ── Wire resolution ─────────────────────────────────────────────────────────
+
+export {
+  evaluateExpression,
+  resolveSourceEntries,
+  applyFallbackGates as applyFallbackGatesV2,
+  applyCatch as applyCatchV2,
+} from "./resolveWiresSources.ts";
 
 // ── Traversal enumeration ───────────────────────────────────────────────────
 

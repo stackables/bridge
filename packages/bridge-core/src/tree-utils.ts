@@ -171,28 +171,37 @@ export const SIMPLE_PULL_CACHE = Symbol.for("bridge.simplePull");
 // ── Wire helpers ────────────────────────────────────────────────────────────
 
 /**
- * Returns the `from` NodeRef when a wire qualifies for the simple-pull fast
- * path (single `from` wire, no safe/fallbacks/catch modifiers).  Returns
+ * Get the primary NodeRef from a wire's first source expression, if it's a ref.
+ * Unlike `getSimplePullRef`, this works for any wire (including those with
+ * fallbacks, catch, or safe access).
+ */
+export function getPrimaryRef(w: Wire): NodeRef | undefined {
+  const expr = w.sources[0]?.expr;
+  return expr?.type === "ref" ? expr.ref : undefined;
+}
+
+/** Return true if the wire's primary source is a ref expression. */
+export function isPullWire(w: Wire): boolean {
+  return w.sources[0]?.expr.type === "ref";
+}
+
+/**
+ * Returns the source NodeRef when a wire qualifies for the simple-pull fast
+ * path: single ref source, not safe, no fallbacks, no catch.  Returns
  * `null` otherwise.  The result is cached on the wire via a Symbol key so
  * subsequent calls are a single property read without affecting V8 shapes.
  * See packages/bridge-core/performance.md (#11).
  */
 export function getSimplePullRef(w: Wire): NodeRef | null {
-  if ("from" in w) {
-    const cached = (w as any)[SIMPLE_PULL_CACHE];
-    if (cached !== undefined) return cached;
-    const ref =
-      !w.safe &&
-      !w.fallbacks?.length &&
-      !w.catchControl &&
-      !w.catchFallbackRef &&
-      w.catchFallback == null
-        ? w.from
-        : null;
-    (w as any)[SIMPLE_PULL_CACHE] = ref;
-    return ref;
+  const cached = (w as any)[SIMPLE_PULL_CACHE];
+  if (cached !== undefined) return cached;
+  let ref: NodeRef | null = null;
+  if (w.sources.length === 1 && !w.catch) {
+    const expr = w.sources[0]!.expr;
+    if (expr.type === "ref" && !expr.safe) ref = expr.ref;
   }
-  return null;
+  (w as any)[SIMPLE_PULL_CACHE] = ref;
+  return ref;
 }
 
 // ── Misc ────────────────────────────────────────────────────────────────────

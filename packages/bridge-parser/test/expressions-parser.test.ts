@@ -115,10 +115,13 @@ describe("expressions: parser desugaring", () => {
     `);
     const instr = doc.instructions.find((i) => i.kind === "bridge")!;
     const bWire = instr.wires.find(
-      (w) => "from" in w && w.to.path.length === 1 && w.to.path[0] === "b",
+      (w) =>
+        w.sources[0]?.expr.type === "ref" &&
+        w.to.path.length === 1 &&
+        w.to.path[0] === "b",
     );
     assert.ok(bWire, "should have a .b wire");
-    assert.ok("from" in bWire!);
+    assert.ok(bWire!.sources[0]?.expr.type === "ref");
   });
 
   test("expression in array mapping element", () => {
@@ -572,9 +575,16 @@ describe("serializeBridge: keyword strings are quoted", () => {
         (i) => i.kind === "bridge",
       ) as any;
       const wire = instr.wires.find(
-        (w: any) => "value" in w && w.to?.path?.[0] === "result",
+        (w: any) =>
+          w.sources?.[0]?.expr?.type === "literal" &&
+          w.to?.path?.[0] === "result",
       );
-      assert.equal(wire?.value, kw);
+      assert.equal(
+        wire?.sources[0]?.expr.type === "literal"
+          ? wire.sources[0].expr.value
+          : undefined,
+        kw,
+      );
     });
   }
 });

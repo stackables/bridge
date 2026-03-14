@@ -4,6 +4,7 @@ import { parseBridgeChevrotain } from "../../bridge-parser/src/index.ts";
 import {
   buildTraversalManifest,
   type Bridge,
+  type Expression,
   type SourceLocation,
   type TraversalEntry,
   type Wire,
@@ -27,12 +28,12 @@ function assertLoc(
   assert.deepEqual(entry.loc, expected);
 }
 
-function isPullWire(wire: Wire): wire is Extract<Wire, { from: unknown }> {
-  return "from" in wire;
+function isPullWire(wire: Wire): boolean {
+  return wire.sources.length >= 1 && wire.sources[0]!.expr.type === "ref";
 }
 
-function isTernaryWire(wire: Wire): wire is Extract<Wire, { cond: unknown }> {
-  return "cond" in wire;
+function isTernaryWire(wire: Wire): boolean {
+  return wire.sources.length >= 1 && wire.sources[0]!.expr.type === "ternary";
 }
 
 describe("buildTraversalManifest source locations", () => {
@@ -57,25 +58,33 @@ describe("buildTraversalManifest source locations", () => {
     assert.ok(messageWire);
 
     const manifest = buildTraversalManifest(instr);
+    const msgExpr = messageWire.sources[0]!.expr as Extract<
+      Expression,
+      { type: "ref" }
+    >;
     assertLoc(
       manifest.find((entry) => entry.id === "message/primary"),
-      messageWire.fromLoc,
+      msgExpr.refLoc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "message/fallback:0"),
-      messageWire.fallbacks?.[0]?.loc,
+      messageWire.sources[1]?.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "message/catch"),
-      messageWire.catchLoc,
+      messageWire.catch?.loc,
     );
+    const aliasExpr = aliasWire.sources[0]!.expr as Extract<
+      Expression,
+      { type: "ref" }
+    >;
     assertLoc(
       manifest.find((entry) => entry.id === "clean/primary"),
-      aliasWire.fromLoc,
+      aliasExpr.refLoc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "clean/catch"),
-      aliasWire.catchLoc,
+      aliasWire.catch?.loc,
     );
   });
 
@@ -92,14 +101,18 @@ describe("buildTraversalManifest source locations", () => {
     const ternaryWire = instr.wires.find(isTernaryWire);
     assert.ok(ternaryWire);
 
+    const ternaryExpr = ternaryWire.sources[0]!.expr as Extract<
+      Expression,
+      { type: "ternary" }
+    >;
     const manifest = buildTraversalManifest(instr);
     assertLoc(
       manifest.find((entry) => entry.id === "name/then"),
-      ternaryWire.thenLoc,
+      ternaryExpr.thenLoc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "name/else"),
-      ternaryWire.elseLoc,
+      ternaryExpr.elseLoc,
     );
   });
 
