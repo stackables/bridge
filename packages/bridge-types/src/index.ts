@@ -98,6 +98,13 @@ export interface ToolMetadata {
    */
   batch?: true | BatchToolMetadata;
 
+  /**
+   * Overdefinition priority cost.  Lower values are tried first when
+   * multiple wires target the same field.
+   * Default: 1 for sync tools, 2 for async tools.
+   */
+  cost?: number;
+
   // ─── Observability ────────────────────────────────────────────────────
 
   /**

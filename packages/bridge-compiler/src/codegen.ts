@@ -2851,128 +2851,89 @@ class CodegenContext {
     wire: Wire,
     visited = new Set<string>(),
   ): number {
-    return this.canResolveWireCheaply(wire, visited) ? 0 : 1;
+    // Optimistic cost — cost of the first source only.
+    return this.computeExprCost(wire.sources[0]!.expr, visited);
   }
 
-  private canResolveWireCheaply(
-    wire: Wire,
-    visited = new Set<string>(),
-  ): boolean {
-    if (isLit(wire)) return true;
-
-    if (isPull(wire)) {
-      if (!this.refIsZeroCost(wRef(wire), visited)) return false;
-      for (const fallback of fallbacks(wire) ?? []) {
-        if (
-          eRef(fallback.expr) &&
-          !this.refIsZeroCost(eRef(fallback.expr), visited)
-        ) {
-          return false;
-        }
-      }
-      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
-        return false;
-      }
-      return true;
+  /**
+   * Pessimistic wire cost — sum of all source expression costs plus catch.
+   * Represents worst-case cost when all fallback sources fire.
+   */
+  private computeWireCost(wire: Wire, visited: Set<string>): number {
+    let cost = 0;
+    for (const source of wire.sources) {
+      cost += this.computeExprCost(source.expr, visited);
     }
-
-    if (isTern(wire)) {
-      if (!this.refIsZeroCost(eRef(wTern(wire).cond), visited)) return false;
-      if (
-        (wTern(wire).then as RefExpr).ref &&
-        !this.refIsZeroCost((wTern(wire).then as RefExpr).ref, visited)
-      )
-        return false;
-      if (
-        (wTern(wire).else as RefExpr).ref &&
-        !this.refIsZeroCost((wTern(wire).else as RefExpr).ref, visited)
-      )
-        return false;
-      for (const fallback of fallbacks(wire) ?? []) {
-        if (
-          eRef(fallback.expr) &&
-          !this.refIsZeroCost(eRef(fallback.expr), visited)
-        ) {
-          return false;
-        }
-      }
-      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
-        return false;
-      }
-      return true;
+    if (catchRef(wire)) {
+      cost += this.computeRefCost(catchRef(wire)!, visited);
     }
-
-    if (isAndW(wire)) {
-      if (!this.refIsZeroCost(eRef(wAndOr(wire).left), visited)) return false;
-      if (
-        eRef(wAndOr(wire).right) &&
-        !this.refIsZeroCost(eRef(wAndOr(wire).right), visited)
-      ) {
-        return false;
-      }
-      for (const fallback of fallbacks(wire) ?? []) {
-        if (
-          eRef(fallback.expr) &&
-          !this.refIsZeroCost(eRef(fallback.expr), visited)
-        ) {
-          return false;
-        }
-      }
-      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
-        return false;
-      }
-      return true;
-    }
-
-    if (isOrW(wire)) {
-      if (!this.refIsZeroCost(eRef(wAndOr(wire).left), visited)) return false;
-      if (
-        eRef(wAndOr(wire).right) &&
-        !this.refIsZeroCost(eRef(wAndOr(wire).right), visited)
-      ) {
-        return false;
-      }
-      for (const fallback of fallbacks(wire) ?? []) {
-        if (
-          eRef(fallback.expr) &&
-          !this.refIsZeroCost(eRef(fallback.expr), visited)
-        ) {
-          return false;
-        }
-      }
-      if (catchRef(wire) && !this.refIsZeroCost(catchRef(wire)!, visited)) {
-        return false;
-      }
-      return true;
-    }
-
-    return false;
+    return cost;
   }
 
-  private refIsZeroCost(ref: NodeRef, visited = new Set<string>()): boolean {
-    if (ref.element) return true;
+  private computeExprCost(expr: Expression, visited: Set<string>): number {
+    switch (expr.type) {
+      case "literal":
+      case "control":
+        return 0;
+      case "ref":
+        return this.computeRefCost(expr.ref, visited);
+      case "ternary":
+        return Math.max(
+          this.computeExprCost(expr.cond, visited),
+          this.computeExprCost(expr.then, visited),
+          this.computeExprCost(expr.else, visited),
+        );
+      case "and":
+      case "or":
+        return Math.max(
+          this.computeExprCost(expr.left, visited),
+          this.computeExprCost(expr.right, visited),
+        );
+    }
+  }
+
+  private computeRefCost(ref: NodeRef, visited: Set<string>): number {
+    if (ref.element) return 0;
+    // Self-module input/context/const — free
     if (
       ref.module === SELF_MODULE &&
       ((ref.type === this.bridge.type && ref.field === this.bridge.field) ||
         (ref.type === "Context" && ref.field === "context") ||
         (ref.type === "Const" && ref.field === "const"))
     ) {
-      return true;
+      return 0;
     }
-    if (ref.module.startsWith("__define_")) return false;
 
     const key = refTrunkKey(ref);
-    if (visited.has(key)) return false;
+    if (visited.has(key)) return Infinity;
     visited.add(key);
 
+    // Define — recursive, cheapest incoming wire wins
+    if (ref.module.startsWith("__define_")) {
+      const incoming = this.bridge.wires.filter(
+        (wire) => refTrunkKey(wire.to) === key,
+      );
+      let best = Infinity;
+      for (const wire of incoming) {
+        best = Math.min(best, this.computeWireCost(wire, visited));
+      }
+      return best === Infinity ? 2 : best;
+    }
+
+    // Local alias — recursive, cheapest incoming wire wins
     if (ref.module === "__local") {
       const incoming = this.bridge.wires.filter(
         (wire) => refTrunkKey(wire.to) === key,
       );
-      return incoming.some((wire) => this.canResolveWireCheaply(wire, visited));
+      let best = Infinity;
+      for (const wire of incoming) {
+        best = Math.min(best, this.computeWireCost(wire, visited));
+      }
+      return best === Infinity ? 2 : best;
     }
 
-    return false;
+    // External tool — compiler has no metadata, default to async cost
+    return 2;
   }
 
   /**

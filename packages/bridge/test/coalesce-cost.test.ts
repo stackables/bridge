@@ -266,6 +266,81 @@ regressionTest("overdefinition: cost-based prioritization", {
   },
 });
 
+// ── Cost tiers: sync vs async and explicit cost ─────────────────────────
+
+regressionTest("overdefinition: sync beats async", {
+  bridge: bridge`
+    version 1.5
+
+    bridge SyncAsync.lookup {
+      with test.async.multitool as slow
+      with test.sync.multitool as fast
+      with input as i
+      with output as o
+
+      slow <- i.data
+      fast <- i.data
+
+      o.label <- slow.label
+      o.label <- fast.label
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "SyncAsync.lookup": {
+      "sync tool (cost 1) tried before async (cost 2)": {
+        input: { data: { label: "hello" } },
+        allowDowngrade: true,
+        assertData: { label: "hello" },
+        // sync tool fires first (cost 1) and succeeds → async never called
+        assertTraces: 1,
+      },
+      "sync null → async fires": {
+        input: { data: {} },
+        allowDowngrade: true,
+        assertData: { label: undefined },
+        assertTraces: 2,
+      },
+    },
+  },
+});
+
+regressionTest("overdefinition: explicit cost override", {
+  bridge: bridge`
+    version 1.5
+
+    bridge ExplCost.lookup {
+      with test.async.multitool as expensive
+      with test.cheap.multitool as cheap
+      with input as i
+      with output as o
+
+      expensive <- i.data
+      cheap <- i.data
+
+      o.label <- expensive.label
+      o.label <- cheap.label
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "ExplCost.lookup": {
+      "cost-0 tool tried before async tool": {
+        input: { data: { label: "win" } },
+        allowDowngrade: true,
+        assertData: { label: "win" },
+        assertTraces: 1,
+      },
+      "cost-0 null → async fires": {
+        input: { data: {} },
+        allowDowngrade: true,
+        assertData: { label: undefined },
+        assertTraces: 2,
+      },
+    },
+  },
+});
+
 // ── ?. safe execution modifier ────────────────────────────────────────────
 
 regressionTest("?. safe execution modifier", {

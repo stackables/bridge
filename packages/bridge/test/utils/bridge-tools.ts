@@ -59,6 +59,17 @@ batchMultitool.bridge = {
   log: { execution: "info" },
 };
 
+function cheapMultitool(input: Record<string, any>, _context: ToolContext) {
+  if (input?._error) {
+    throw new Error(String(input._error));
+  }
+  return cleanupInstructions(input);
+}
+cheapMultitool.bridge = {
+  sync: true,
+  cost: 0,
+};
+
 export const tools = {
   test: {
     multitool: (a: any, c: ToolContext) => {
@@ -75,6 +86,9 @@ export const tools = {
     },
     batch: {
       multitool: batchMultitool,
+    },
+    cheap: {
+      multitool: cheapMultitool,
     },
   },
 };

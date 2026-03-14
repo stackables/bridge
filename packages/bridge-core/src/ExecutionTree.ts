@@ -4,6 +4,7 @@ import {
   schedule as _schedule,
   trunkDependsOnElement,
 } from "./scheduleTools.ts";
+import { lookupToolFn } from "./toolLookup.ts";
 import { internal } from "./tools/index.ts";
 import type { EffectiveToolLog, ToolTrace } from "./tracing.ts";
 import {
@@ -1095,78 +1096,100 @@ export class ExecutionTree implements TreeContext {
   }
 
   classifyOverdefinitionWire(wire: Wire): number {
-    return this.canResolveWireWithoutScheduling(wire) ? 0 : 1;
+    // Optimistic cost — cost of the first source only.
+    // This is the minimum we'll pay; used for overdefinition ordering.
+    const visited = new Set<string>();
+    return this.computeExprCost(wire.sources[0]!.expr, visited);
   }
 
-  private canResolveWireWithoutScheduling(
-    wire: Wire,
-    visited = new Set<string>(),
-  ): boolean {
-    // Check all source expressions
+  /**
+   * Pessimistic wire cost — sum of all source expression costs plus catch.
+   * Represents worst-case cost when all fallback sources fire.
+   */
+  private computeWireCost(wire: Wire, visited: Set<string>): number {
+    let cost = 0;
     for (const source of wire.sources) {
-      if (!this.canResolveExprWithoutScheduling(source.expr, visited)) {
-        return false;
-      }
+      cost += this.computeExprCost(source.expr, visited);
     }
-    // Check catch handler ref
     if (wire.catch && "ref" in wire.catch) {
-      if (!this.canResolveRefWithoutScheduling(wire.catch.ref, visited)) {
-        return false;
-      }
+      cost += this.computeRefCost(wire.catch.ref, visited);
     }
-    return true;
+    return cost;
   }
 
-  private canResolveExprWithoutScheduling(
-    expr: Expression,
-    visited: Set<string>,
-  ): boolean {
+  private computeExprCost(expr: Expression, visited: Set<string>): number {
     switch (expr.type) {
       case "literal":
       case "control":
-        return true;
+        return 0;
       case "ref":
-        return this.canResolveRefWithoutScheduling(expr.ref, visited);
+        return this.computeRefCost(expr.ref, visited);
       case "ternary":
-        return (
-          this.canResolveExprWithoutScheduling(expr.cond, visited) &&
-          this.canResolveExprWithoutScheduling(expr.then, visited) &&
-          this.canResolveExprWithoutScheduling(expr.else, visited)
+        return Math.max(
+          this.computeExprCost(expr.cond, visited),
+          this.computeExprCost(expr.then, visited),
+          this.computeExprCost(expr.else, visited),
         );
       case "and":
       case "or":
-        return (
-          this.canResolveExprWithoutScheduling(expr.left, visited) &&
-          this.canResolveExprWithoutScheduling(expr.right, visited)
+        return Math.max(
+          this.computeExprCost(expr.left, visited),
+          this.computeExprCost(expr.right, visited),
         );
     }
   }
 
-  private canResolveRefWithoutScheduling(
-    ref: NodeRef,
-    visited = new Set<string>(),
-  ): boolean {
-    if (ref.element) return true;
-    if (this.hasCachedRef(ref)) return true;
+  private computeRefCost(ref: NodeRef, visited: Set<string>): number {
+    if (ref.element) return 0;
+    // Already resolved or already-scheduled promise — cost already paid
+    if (this.hasCachedRef(ref)) return 0;
 
     const key = ((ref as any)[TRUNK_KEY_CACHE] ??= trunkKey(ref));
-    if (visited.has(key)) return false;
+    if (visited.has(key)) return Infinity;
     visited.add(key);
 
-    if (ref.module.startsWith("__define_")) return false;
+    // Self-module input/context/const — free
+    if (
+      ref.module === SELF_MODULE &&
+      ((ref.type === this.bridge?.type && ref.field === this.bridge?.field) ||
+        ref.type === "Context" ||
+        ref.type === "Const")
+    ) {
+      return 0;
+    }
 
+    // Define — recursive, best (cheapest) incoming wire wins
+    if (ref.module.startsWith("__define_")) {
+      const incoming =
+        this.bridge?.wires.filter((wire) => sameTrunk(wire.to, ref)) ?? [];
+      let best = Infinity;
+      for (const wire of incoming) {
+        best = Math.min(best, this.computeWireCost(wire, visited));
+      }
+      return best === Infinity ? 2 : best;
+    }
+
+    // Local alias — recursive, cheapest incoming wire wins
     if (ref.module === "__local") {
       const incoming =
         this.bridge?.wires.filter((wire) => sameTrunk(wire.to, ref)) ?? [];
+      let best = Infinity;
       for (const wire of incoming) {
-        if (this.canResolveWireWithoutScheduling(wire, visited)) {
-          return true;
-        }
+        best = Math.min(best, this.computeWireCost(wire, visited));
       }
-      return false;
+      return best === Infinity ? 2 : best;
     }
 
-    return false;
+    // External tool — look up metadata for cost
+    const toolName =
+      ref.module === SELF_MODULE ? ref.field : `${ref.module}.${ref.field}`;
+    const fn = lookupToolFn(this, toolName);
+    if (fn) {
+      const meta = (fn as any).bridge;
+      if (meta?.cost != null) return meta.cost;
+      return meta?.sync ? 1 : 2;
+    }
+    return 2;
   }
 
   private hasCachedRef(ref: NodeRef): boolean {
