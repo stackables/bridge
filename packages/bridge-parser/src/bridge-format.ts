@@ -8,7 +8,7 @@ import type {
   ToolDef,
   Wire,
 } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
+import { getInternalSourceToolName, SELF_MODULE } from "@stackables/bridge-core";
 import {
   parseBridgeChevrotain,
   type ParseBridgeOptions,
@@ -544,20 +544,22 @@ function serializeToolBlock(tool: ToolDef): string {
 function serializeToolWireSource(ref: NodeRef, tool: ToolDef): string {
   for (const h of tool.handles) {
     if (h.kind === "context") {
+      const toolName = getInternalSourceToolName("context");
+      const lastDot = toolName.lastIndexOf(".");
       if (
-        ref.module === SELF_MODULE &&
-        ref.type === "Context" &&
-        ref.field === "context"
+        ref.module === toolName.substring(0, lastDot) &&
+        ref.field === toolName.substring(lastDot + 1)
       ) {
         return ref.path.length > 0
           ? `${h.handle}.${ref.path.join(".")}`
           : h.handle;
       }
     } else if (h.kind === "const") {
+      const toolName = getInternalSourceToolName("const");
+      const lastDot = toolName.lastIndexOf(".");
       if (
-        ref.module === SELF_MODULE &&
-        ref.type === "Const" &&
-        ref.field === "const"
+        ref.module === toolName.substring(0, lastDot) &&
+        ref.field === toolName.substring(lastDot + 1)
       ) {
         return ref.path.length > 0
           ? `${h.handle}.${ref.path.join(".")}`
@@ -2682,15 +2684,16 @@ function buildHandleMap(bridge: Bridge): {
       }
       case "input":
         inputHandle = h.handle;
+        handleMap.set(`internal:${bridge.type}:input`, h.handle);
         break;
       case "output":
         outputHandle = h.handle;
         break;
       case "context":
-        handleMap.set(`${SELF_MODULE}:Context:context`, h.handle);
+        handleMap.set(`internal:${bridge.type}:context`, h.handle);
         break;
       case "const":
-        handleMap.set(`${SELF_MODULE}:Const:const`, h.handle);
+        handleMap.set(`internal:${bridge.type}:consts`, h.handle);
         break;
       case "define":
         handleMap.set(

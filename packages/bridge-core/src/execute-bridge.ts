@@ -1,6 +1,7 @@
 import { ExecutionTree } from "./ExecutionTree.ts";
 import { attachBridgeErrorDocumentContext } from "./formatBridgeError.ts";
 import { TraceCollector } from "./tracing.ts";
+import { buildInternalToolNamespace } from "./source-tools.ts";
 import type { Logger } from "./tree-types.ts";
 import type { ToolTrace, TraceLevel } from "./tracing.ts";
 import type { BridgeDocument, ToolMap } from "./types.ts";
@@ -129,7 +130,16 @@ export async function executeBridge<T = unknown>(
     userTools,
   );
 
-  const allTools: ToolMap = { std: activeStd, ...userTools };
+  const allTools: ToolMap = {
+    std: activeStd,
+    ...userTools,
+    internal: buildInternalToolNamespace(
+      doc,
+      input,
+      context,
+      (userTools as any)?.internal,
+    ),
+  };
 
   // Verify all @version-tagged handles can be satisfied
   checkHandleVersions(doc.instructions, allTools, activeStdVersion);

@@ -7,7 +7,7 @@ import { bridge } from "@stackables/bridge";
 //
 //   • || chains evaluate sequentially (left to right) with short-circuit
 //   • ?? chains use nullish coalescing (only null/undefined trigger next)
-//   • Overdefinition uses cost-based ordering
+//   • Overdefinition prefers already-resolved aliases, otherwise authored order
 //   • ?. modifier converts tool errors to undefined
 //
 // All tools are passthrough: output mirrors input. Wire `err` to throw.
@@ -121,7 +121,7 @@ regressionTest("|| fallback chains", {
 
 // ── Cost-based resolution: overdefinition ────────────────────────────────
 
-regressionTest("overdefinition: cost-based prioritization", {
+regressionTest("overdefinition: authored order for scheduled sources", {
   bridge: bridge`
     version 1.5
 
@@ -162,11 +162,11 @@ regressionTest("overdefinition: cost-based prioritization", {
   tools: tools,
   scenarios: {
     "Overdef.lookup": {
-      "input beats tool — zero-cost short-circuit": {
+      "tool keeps authored precedence over input source": {
         input: { api: { label: "expensive" }, hint: "cheap" },
         fields: ["inputBeats"],
-        assertData: { inputBeats: "cheap" },
-        assertTraces: 0,
+        assertData: { inputBeats: "expensive" },
+        assertTraces: 1,
       },
       "input null → tool fires": {
         input: {
@@ -178,17 +178,33 @@ regressionTest("overdefinition: cost-based prioritization", {
         assertData: { inputBeats: "from-api" },
         assertTraces: 1,
       },
-      "context beats tool": {
+      "tool undefined → input source wins second": {
+        input: {
+          api: {},
+          hint: "cheap",
+        },
+        fields: ["inputBeats"],
+        assertData: { inputBeats: "cheap" },
+        assertTraces: 1,
+      },
+      "tool keeps authored precedence over context source": {
         input: { api: { label: "expensive" } },
         fields: ["contextBeats"],
         context: { defaultLabel: "from-context" },
-        assertData: { contextBeats: "from-context" },
-        assertTraces: 0,
+        assertData: { contextBeats: "expensive" },
+        assertTraces: 1,
       },
       "context null → tool fires": {
         input: { api: { label: "from-api" } },
         fields: ["contextBeats"],
         assertData: { contextBeats: "from-api" },
+        assertTraces: 1,
+      },
+      "tool undefined → context source wins second": {
+        input: { api: {} },
+        fields: ["contextBeats"],
+        context: { defaultLabel: "from-context" },
+        assertData: { contextBeats: "from-context" },
         assertTraces: 1,
       },
       "same-cost tools use authored order": {
@@ -241,11 +257,17 @@ regressionTest("overdefinition: cost-based prioritization", {
       },
     },
     "AliasOverdef.lookup": {
-      "alias treated as zero-cost": {
+      "tool keeps authored precedence over alias backed by input source": {
         input: { api: { label: "expensive" }, hint: "cached" },
         allowDowngrade: true,
+        assertData: { label: "expensive" },
+        assertTraces: 1,
+      },
+      "tool undefined → alias fallback fires": {
+        input: { api: {}, hint: "cached" },
+        allowDowngrade: true,
         assertData: { label: "cached" },
-        assertTraces: 0,
+        assertTraces: 1,
       },
       "alias null → tool fires": {
         input: { api: { label: "from-api" } },

@@ -82,7 +82,7 @@ import type {
   Wire,
   WireFallback,
 } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
+import { getInternalSourceToolName, SELF_MODULE } from "@stackables/bridge-core";
 
 // ── Reserved-word guards (mirroring the regex parser) ──────────────────────
 
@@ -3280,6 +3280,17 @@ function buildBridgeBody(
   const arrayIterators: Record<string, string> = {};
   let nextForkSeq = 0;
   const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
+  const resolveInternalSource = (
+    kind: "input" | "context" | "const",
+  ): HandleResolution => {
+    const name = getInternalSourceToolName(kind);
+    const lastDot = name.lastIndexOf(".");
+    return {
+      module: name.substring(0, lastDot),
+      type: bridgeType,
+      field: name.substring(lastDot + 1),
+    };
+  };
 
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
@@ -3313,11 +3324,7 @@ function buildBridgeBody(
         : "input";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "input" });
-      handleRes.set(handle, {
-        module: SELF_MODULE,
-        type: bridgeType,
-        field: bridgeField,
-      });
+      handleRes.set(handle, resolveInternalSource("input"));
     } else if (wc.outputKw) {
       if (options?.forbiddenHandleKinds?.has("output")) {
         throw new Error(
@@ -3350,11 +3357,7 @@ function buildBridgeBody(
         : "context";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "context" });
-      handleRes.set(handle, {
-        module: SELF_MODULE,
-        type: "Context",
-        field: "context",
-      });
+      handleRes.set(handle, resolveInternalSource("context"));
     } else if (wc.constKw) {
       if (wc.memoizeKw) {
         throw new Error(
@@ -3366,11 +3369,7 @@ function buildBridgeBody(
         : "const";
       checkDuplicate(handle);
       handleBindings.push({ handle, kind: "const" });
-      handleRes.set(handle, {
-        module: SELF_MODULE,
-        type: "Const",
-        field: "const",
-      });
+      handleRes.set(handle, resolveInternalSource("const"));
     } else if (wc.refName) {
       const name = extractDottedName((wc.refName as CstNode[])[0]);
       const versionTag = (

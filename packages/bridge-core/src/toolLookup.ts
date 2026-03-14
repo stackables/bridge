@@ -9,6 +9,7 @@
  */
 
 import type {
+  HandleBinding,
   Instruction,
   NodeRef,
   ToolCallFn,
@@ -16,7 +17,7 @@ import type {
   ToolMap,
   Wire,
 } from "./types.ts";
-import { SELF_MODULE } from "./types.ts";
+import { getHandleBindingToolName, SELF_MODULE } from "./types.ts";
 import type { MaybePromise } from "./tree-types.ts";
 import {
   trunkKey,
@@ -436,38 +437,7 @@ export async function resolveToolNodeRef(
 ): Promise<any> {
   // Find the matching handle by looking at how the ref was built
   // The ref's module/type/field encode which handle it came from
-  const handle = toolDef.handles.find((h) => {
-    if (h.kind === "context") {
-      return (
-        ref.module === SELF_MODULE &&
-        ref.type === "Context" &&
-        ref.field === "context"
-      );
-    }
-    if (h.kind === "const") {
-      return (
-        ref.module === SELF_MODULE &&
-        ref.type === "Const" &&
-        ref.field === "const"
-      );
-    }
-    if (h.kind === "tool") {
-      // Tool handle: module is the namespace part, field is the tool name part
-      const lastDot = h.name.lastIndexOf(".");
-      if (lastDot !== -1) {
-        return (
-          ref.module === h.name.substring(0, lastDot) &&
-          ref.field === h.name.substring(lastDot + 1)
-        );
-      }
-      return (
-        ref.module === SELF_MODULE &&
-        ref.type === "Tools" &&
-        ref.field === h.name
-      );
-    }
-    return false;
-  });
+  const handle = toolDef.handles.find((h) => matchesHandleRef(h, ref));
 
   if (!handle) {
     throw new Error(
@@ -476,28 +446,13 @@ export async function resolveToolNodeRef(
   }
 
   let value: any;
-  if (handle.kind === "context") {
-    // Walk the full parent chain for context
-    let cursor: ToolLookupContext | undefined = ctx;
-    while (cursor && value === undefined) {
-      value = cursor.context;
-      cursor = cursor.parent;
-    }
-  } else if (handle.kind === "const") {
-    // Walk the full parent chain for const state
-    const constKey = trunkKey({
-      module: SELF_MODULE,
-      type: "Const",
-      field: "const",
-    });
-    let cursor: ToolLookupContext | undefined = ctx;
-    while (cursor && value === undefined) {
-      value = cursor.state[constKey];
-      cursor = cursor.parent;
-    }
-  } else if (handle.kind === "tool") {
-    value = await resolveToolDep(ctx, handle.name);
+  const toolName = getHandleBindingToolName(handle);
+  if (!toolName) {
+    throw new Error(
+      `Cannot resolve source in tool "${toolDef.name}": handle "${handle.handle}" is not a readable source`,
+    );
   }
+  value = await resolveToolDep(ctx, toolName);
 
   for (const segment of ref.path) {
     value = value[segment];
@@ -524,27 +479,12 @@ export async function resolveToolSource(
   if (!handle)
     throw new Error(`Unknown source "${handleName}" in tool "${toolDef.name}"`);
 
-  let value: any;
-  if (handle.kind === "context") {
-    let cursor: ToolLookupContext | undefined = ctx;
-    while (cursor && value === undefined) {
-      value = cursor.context;
-      cursor = cursor.parent;
-    }
-  } else if (handle.kind === "const") {
-    const constKey = trunkKey({
-      module: SELF_MODULE,
-      type: "Const",
-      field: "const",
-    });
-    let cursor: ToolLookupContext | undefined = ctx;
-    while (cursor && value === undefined) {
-      value = cursor.state[constKey];
-      cursor = cursor.parent;
-    }
-  } else if (handle.kind === "tool") {
-    value = await resolveToolDep(ctx, handle.name);
+  const toolName = getHandleBindingToolName(handle);
+  if (!toolName) {
+    throw new Error(`Unknown source "${handleName}" in tool "${toolDef.name}"`);
   }
+
+  let value = await resolveToolDep(ctx, toolName);
 
   for (const segment of restPath) {
     if (value == null) return undefined;
@@ -605,7 +545,11 @@ export function resolveToolDep(
 
   const promise = (async () => {
     const toolDef = resolveToolDefByName(ctx, toolName);
-    if (!toolDef) throw new Error(`Tool dependency "${toolName}" not found`);
+    if (!toolDef) {
+      const directFn = lookupToolFn(ctx, toolName);
+      if (!directFn) throw new Error(`Tool dependency "${toolName}" not found`);
+      return ctx.callTool(toolName, toolName, directFn, {});
+    }
 
     const input: Record<string, any> = {};
     await resolveToolWires(ctx, toolDef, input);
@@ -626,4 +570,23 @@ export function resolveToolDep(
 
   ctx.toolDepCache.set(toolName, promise);
   return promise;
+}
+
+function matchesHandleRef(handle: HandleBinding, ref: NodeRef): boolean {
+  const toolName = getHandleBindingToolName(handle);
+  if (!toolName) return false;
+
+  const lastDot = toolName.lastIndexOf(".");
+  if (lastDot !== -1) {
+    return (
+      ref.module === toolName.substring(0, lastDot) &&
+      ref.field === toolName.substring(lastDot + 1)
+    );
+  }
+
+  return (
+    ref.module === SELF_MODULE &&
+    ref.type === "Tools" &&
+    ref.field === toolName
+  );
 }

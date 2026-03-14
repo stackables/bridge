@@ -26,11 +26,17 @@
 import type {
   BridgeDocument,
   Bridge,
+  HandleBinding,
   Wire,
   NodeRef,
   ToolDef,
 } from "@stackables/bridge-core";
-import { BridgePanicError } from "@stackables/bridge-core";
+import {
+  BridgePanicError,
+  getHandleBindingToolName,
+  getInternalSourceToolName,
+  isInternalSourceToolRef,
+} from "@stackables/bridge-core";
 import type { SourceLocation } from "@stackables/bridge-types";
 import {
   assertBridgeCompilerCompatible,
@@ -117,23 +123,12 @@ export function compileBridge(
 
   assertBridgeCompilerCompatible(bridge, options.requestedFields);
 
-  // Collect const definitions from the document
-  const constDefs = new Map<string, string>();
-  for (const inst of document.instructions) {
-    if (inst.kind === "const") constDefs.set(inst.name, inst.value);
-  }
-
   // Collect tool definitions from the document
   const toolDefs = document.instructions.filter(
     (i): i is ToolDef => i.kind === "tool",
   );
 
-  const ctx = new CodegenContext(
-    bridge,
-    constDefs,
-    toolDefs,
-    options.requestedFields,
-  );
+  const ctx = new CodegenContext(bridge, toolDefs, options.requestedFields);
   return ctx.compile();
 }
 
@@ -257,21 +252,6 @@ function emitNestedObjectLiteral(entries: [string[], string][]): string {
   return `{ ${parts.join(", ")} }`;
 }
 
-/**
- * Parse a const value at compile time and emit it as an inline JS literal.
- * Since const values are JSON, we can JSON.parse at compile time and
- * re-serialize as a JavaScript expression, avoiding runtime JSON.parse.
- */
-function emitParsedConst(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw);
-    return JSON.stringify(parsed);
-  } catch {
-    // If JSON.parse fails, fall back to runtime parsing
-    return `JSON.parse(${JSON.stringify(raw)})`;
-  }
-}
-
 // ── Code-generation context ─────────────────────────────────────────────────
 
 interface ToolInfo {
@@ -300,7 +280,6 @@ const INTERNAL_TOOLS = new Set([
 
 class CodegenContext {
   private bridge: Bridge;
-  private constDefs: Map<string, string>;
   private toolDefs: ToolDef[];
   private selfTrunkKey: string;
   private varMap = new Map<string, string>();
@@ -338,12 +317,10 @@ class CodegenContext {
 
   constructor(
     bridge: Bridge,
-    constDefs: Map<string, string>,
     toolDefs: ToolDef[],
     requestedFields?: string[],
   ) {
     this.bridge = bridge;
-    this.constDefs = constDefs;
     this.toolDefs = toolDefs;
     this.selfTrunkKey = `${SELF_MODULE}:${bridge.type}:${bridge.field}`;
     this.requestedFields = requestedFields?.length
@@ -353,14 +330,19 @@ class CodegenContext {
     for (const h of bridge.handles) {
       switch (h.kind) {
         case "input":
-        case "output":
-          // Input and output share the self trunk key; distinguished by wire direction
-          break;
         case "context":
-          this.varMap.set(`${SELF_MODULE}:Context:context`, "context");
+        case "const": {
+          const toolName = getInternalSourceToolName(h.kind);
+          const { module, fieldName } = splitToolName(toolName);
+          const tk = `${module}:${bridge.type}:${fieldName}`;
+          if (!this.varMap.has(tk)) {
+            const vn = `_t${++this.toolCounter}`;
+            this.varMap.set(tk, vn);
+            this.tools.set(tk, { trunkKey: tk, toolName, varName: vn });
+          }
           break;
-        case "const":
-          // Constants are inlined directly
+        }
+        case "output":
           break;
         case "define": {
           // Define blocks are inlined at parse time. The parser creates
@@ -413,6 +395,42 @@ class CodegenContext {
           }
           break;
         }
+      }
+    }
+
+    for (const wire of bridge.wires) {
+      if ("from" in wire) {
+        this.ensureInternalSourceRef(wire.from);
+        for (const fallback of wire.fallbacks ?? []) {
+          if (fallback.ref) this.ensureInternalSourceRef(fallback.ref);
+        }
+        if (wire.catchFallbackRef) {
+          this.ensureInternalSourceRef(wire.catchFallbackRef);
+        }
+        continue;
+      }
+
+      if ("cond" in wire) {
+        this.ensureInternalSourceRef(wire.cond);
+        if (wire.thenRef) this.ensureInternalSourceRef(wire.thenRef);
+        if (wire.elseRef) this.ensureInternalSourceRef(wire.elseRef);
+      } else if ("condAnd" in wire) {
+        this.ensureInternalSourceRef(wire.condAnd.leftRef);
+        if (wire.condAnd.rightRef) {
+          this.ensureInternalSourceRef(wire.condAnd.rightRef);
+        }
+      } else if ("condOr" in wire) {
+        this.ensureInternalSourceRef(wire.condOr.leftRef);
+        if (wire.condOr.rightRef) {
+          this.ensureInternalSourceRef(wire.condOr.rightRef);
+        }
+      }
+
+      for (const fallback of wire.fallbacks ?? []) {
+        if (fallback.ref) this.ensureInternalSourceRef(fallback.ref);
+      }
+      if (wire.catchFallbackRef) {
+        this.ensureInternalSourceRef(wire.catchFallbackRef);
       }
     }
 
@@ -1831,8 +1849,9 @@ class CodegenContext {
     // Collect tool-kind handles that haven't been emitted yet
     const pendingDeps: { handle: string; toolName: string }[] = [];
     for (const h of toolDef.handles) {
-      if (h.kind === "tool" && !this.toolDepVars.has(h.name)) {
-        pendingDeps.push({ handle: h.handle, toolName: h.name });
+      const toolName = getHandleBindingToolName(h);
+      if (toolName && !this.toolDepVars.has(toolName)) {
+        pendingDeps.push({ handle: h.handle, toolName });
       }
     }
     if (pendingDeps.length === 0) return;
@@ -1945,30 +1964,9 @@ class CodegenContext {
   ): string {
     const ref = wire.from;
     // Match the ref against tool handles
-    const h = toolDef.handles.find((handle) => {
-      if (handle.kind === "context") {
-        return (
-          ref.module === SELF_MODULE &&
-          ref.type === "Context" &&
-          ref.field === "context"
-        );
-      }
-      if (handle.kind === "const") {
-        return (
-          ref.module === SELF_MODULE &&
-          ref.type === "Const" &&
-          ref.field === "const"
-        );
-      }
-      if (handle.kind === "tool") {
-        return (
-          ref.module === SELF_MODULE &&
-          ref.type === "Tools" &&
-          ref.field === handle.name
-        );
-      }
-      return false;
-    });
+    const h = toolDef.handles.find((handle) =>
+      this.matchesHandleRef(handle, ref),
+    );
 
     if (!h) return "undefined";
 
@@ -2068,41 +2066,22 @@ class CodegenContext {
     const h = toolDef.handles.find((d) => d.handle === handle);
     if (!h) return "undefined";
 
+    const toolName = getHandleBindingToolName(h);
+    if (!toolName) {
+      return "undefined";
+    }
+
     let baseExpr: string;
-    if (h.kind === "context") {
-      baseExpr = "context";
-    } else if (h.kind === "const") {
-      // Resolve from the const definitions — inline parsed value
-      if (restPath.length > 0) {
-        const constName = restPath[0]!;
-        const val = this.constDefs.get(constName);
-        if (val != null) {
-          const base = emitParsedConst(val);
-          if (restPath.length === 1) return base;
-          const tail = restPath
-            .slice(1)
-            .map((p) => `[${JSON.stringify(p)}]`)
-            .join("");
-          return `(${base})${tail}`;
-        }
-      }
-      return "undefined";
-    } else if (h.kind === "tool") {
-      // Tool dependency — first check ToolDef-level dep vars (emitted by emitToolDeps),
-      // then fall back to bridge-level tool handles
-      const depVar = this.toolDepVars.get(h.name);
-      if (depVar) {
-        baseExpr = depVar;
-      } else {
-        const depToolInfo = this.findToolByName(h.name);
-        if (depToolInfo) {
-          baseExpr = depToolInfo.varName;
-        } else {
-          return "undefined";
-        }
-      }
+    const depVar = this.toolDepVars.get(toolName);
+    if (depVar) {
+      baseExpr = depVar;
     } else {
-      return "undefined";
+      const depToolInfo = this.findToolByName(toolName);
+      if (depToolInfo) {
+        baseExpr = depToolInfo.varName;
+      } else {
+        return "undefined";
+      }
     }
 
     if (restPath.length === 0) return baseExpr;
@@ -2860,9 +2839,8 @@ class CodegenContext {
     if (ref.element) return true;
     if (
       ref.module === SELF_MODULE &&
-      ((ref.type === this.bridge.type && ref.field === this.bridge.field) ||
-        (ref.type === "Context" && ref.field === "context") ||
-        (ref.type === "Const" && ref.field === "const"))
+      ref.type === this.bridge.type &&
+      ref.field === this.bridge.field
     ) {
       return true;
     }
@@ -4052,35 +4030,6 @@ class CodegenContext {
 
   /** Convert a NodeRef to a JavaScript expression. */
   private refToExpr(ref: NodeRef): string {
-    // Const access: parse the JSON value at runtime, then access path
-    if (ref.type === "Const" && ref.field === "const" && ref.path.length > 0) {
-      const constName = ref.path[0]!;
-      const val = this.constDefs.get(constName);
-      if (val != null) {
-        const base = emitParsedConst(val);
-        if (ref.path.length === 1) return base;
-        // Delegate sub-path to appendPathExpr so pathSafe flags are respected.
-        const subRef: NodeRef = {
-          ...ref,
-          path: ref.path.slice(1),
-          rootSafe: ref.pathSafe?.[1] ?? false,
-          pathSafe: ref.pathSafe?.slice(1),
-        };
-        return this.appendPathExpr(`(${base})`, subRef);
-      }
-    }
-
-    // Self-module input reference
-    if (
-      ref.module === SELF_MODULE &&
-      ref.type === this.bridge.type &&
-      ref.field === this.bridge.field &&
-      !ref.element
-    ) {
-      if (ref.path.length === 0) return "input";
-      return this.appendPathExpr("input", ref);
-    }
-
     // Tool result reference
     const key = refTrunkKey(ref);
 
@@ -4106,6 +4055,42 @@ class CodegenContext {
       );
     if (ref.path.length === 0) return varName;
     return this.appendPathExpr(varName, ref);
+  }
+
+  private matchesHandleRef(handle: HandleBinding, ref: NodeRef): boolean {
+    const toolName = getHandleBindingToolName(handle);
+    if (!toolName) return false;
+
+    const { module, fieldName } = splitToolName(toolName);
+    if (module !== SELF_MODULE) {
+      return ref.module === module && ref.field === fieldName;
+    }
+
+    return (
+      ref.module === SELF_MODULE &&
+      ref.type === "Tools" &&
+      ref.field === fieldName
+    );
+  }
+
+  private ensureInternalSourceRef(ref: NodeRef): void {
+    if (!isInternalSourceToolRef(ref)) return;
+
+    let toolName: string;
+    if (ref.field === "input") {
+      toolName = getInternalSourceToolName("input");
+    } else if (ref.field === "context") {
+      toolName = getInternalSourceToolName("context");
+    } else {
+      toolName = getInternalSourceToolName("const");
+    }
+
+    const tk = refTrunkKey(ref);
+    if (this.varMap.has(tk)) return;
+
+    const vn = `_t${++this.toolCounter}`;
+    this.varMap.set(tk, vn);
+    this.tools.set(tk, { trunkKey: tk, toolName, varName: vn });
   }
 
   private appendPathExpr(

@@ -221,7 +221,13 @@ export class ExecutionTree implements TreeContext {
       );
     }
     this.elementTrunkKey = `${trunk.module}:${trunk.type}:${trunk.field}:*`;
-    this.toolFns = { internal, ...(toolFns ?? {}) };
+    this.toolFns = {
+      ...(toolFns ?? {}),
+      internal: {
+        ...internal,
+        ...((toolFns as any)?.internal ?? {}),
+      },
+    };
     const instructions = document.instructions;
     this.bridge = instructions.find(
       (i): i is Bridge =>
@@ -261,23 +267,6 @@ export class ExecutionTree implements TreeContext {
           this.memoizedToolKeys.add(key);
         }
       }
-    }
-    if (context) {
-      this.state[
-        trunkKey({ module: SELF_MODULE, type: "Context", field: "context" })
-      ] = context;
-    }
-    // Collect const definitions into a single namespace object
-    const constObj: Record<string, any> = {};
-    for (const inst of instructions) {
-      if (inst.kind === "const") {
-        constObj[inst.name] = JSON.parse(inst.value);
-      }
-    }
-    if (Object.keys(constObj).length > 0) {
-      this.state[
-        trunkKey({ module: SELF_MODULE, type: "Const", field: "const" })
-      ] = constObj;
     }
   }
 

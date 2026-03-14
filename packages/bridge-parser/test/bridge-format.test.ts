@@ -96,9 +96,9 @@ describe("parseBridge", () => {
 
     assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
       from: {
-        module: SELF_MODULE,
+        module: "internal",
         type: "Query",
-        field: "geocode",
+        field: "input",
         path: ["search"],
       },
       to: {
@@ -110,9 +110,9 @@ describe("parseBridge", () => {
     });
     assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
       from: {
-        module: SELF_MODULE,
+        module: "internal",
         type: "Query",
-        field: "geocode",
+        field: "input",
         path: ["search"],
       },
       to: {
@@ -367,8 +367,8 @@ describe("parseBridge", () => {
       kind: "context",
     });
     assertDeepStrictEqualIgnoringLoc((instr.wires[0] as PullWire).from, {
-      module: SELF_MODULE,
-      type: "Context",
+      module: "internal",
+      type: "Query",
       field: "context",
       path: ["maxBudget"],
     });
@@ -705,8 +705,8 @@ describe("parseBridge: tool blocks", () => {
       },
       {
         from: {
-          module: "_",
-          type: "Context",
+          module: "internal",
+          type: "Tools",
           field: "context",
           path: ["hereapi", "apiKey"],
         },
@@ -783,8 +783,8 @@ describe("parseBridge: tool blocks", () => {
       },
       {
         from: {
-          module: "_",
-          type: "Context",
+          module: "internal",
+          type: "Tools",
           field: "context",
           path: ["sendgrid", "bearerToken"],
         },

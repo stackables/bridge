@@ -23,6 +23,7 @@ import type {
   ControlFlowInstruction,
   SourceLocation,
 } from "./types.ts";
+import { isInternalSourceToolRef } from "./types.ts";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -140,9 +141,11 @@ function buildHandleMap(bridge: Bridge): Map<string, string> {
       // Tool/define refs use type="Tools" and field=tool name.
       map.set(`Tools:${h.name}`, h.handle);
     } else if (h.kind === "input") {
-      map.set("input", h.handle);
+      map.set("internal:input", h.handle);
     } else if (h.kind === "context") {
-      map.set("context", h.handle);
+      map.set("internal:context", h.handle);
+    } else if (h.kind === "const") {
+      map.set("internal:consts", h.handle);
     }
   }
   // Pipe handles use a non-"_" module (e.g., "std.str") with type="Query".
@@ -167,11 +170,11 @@ function refLabel(ref: NodeRef, hmap: Map<string, string>): string {
   let alias: string | undefined;
   if (ref.type === "Tools") {
     alias = hmap.get(`Tools:${ref.field}`);
+  } else if (isInternalSourceToolRef(ref)) {
+    alias = hmap.get(`${ref.module}:${ref.field}`);
   } else if (ref.module !== "_") {
     // Pipe handle — look up by module name.
     alias = hmap.get(`pipe:${ref.module}`);
-  } else {
-    alias = hmap.get("input") ?? hmap.get("context");
   }
   alias ??= ref.field;
   return ref.path.length > 0 ? `${alias}.${ref.path.join(".")}` : alias;

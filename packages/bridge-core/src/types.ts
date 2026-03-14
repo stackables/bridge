@@ -191,6 +191,50 @@ export type HandleBinding =
   | { handle: string; kind: "const" }
   | { handle: string; kind: "define"; name: string };
 
+export type InternalSourceHandleKind = "input" | "context" | "const";
+
+export const INTERNAL_SOURCE_TOOL_NAMES: Record<
+  InternalSourceHandleKind,
+  string
+> = {
+  input: "internal.input",
+  context: "internal.context",
+  const: "internal.consts",
+};
+
+export function getInternalSourceToolName(
+  kind: InternalSourceHandleKind,
+): string {
+  return INTERNAL_SOURCE_TOOL_NAMES[kind];
+}
+
+export function getHandleBindingToolName(
+  handle: HandleBinding,
+): string | undefined {
+  if (handle.kind === "tool") return handle.name;
+  if (
+    handle.kind === "input" ||
+    handle.kind === "context" ||
+    handle.kind === "const"
+  ) {
+    return getInternalSourceToolName(handle.kind);
+  }
+  return undefined;
+}
+
+const INTERNAL_SOURCE_TOOL_FIELDS = new Set(
+  Object.values(INTERNAL_SOURCE_TOOL_NAMES).map((name) =>
+    name.slice(name.lastIndexOf(".") + 1),
+  ),
+);
+
+export function isInternalSourceToolRef(ref: {
+  module: string;
+  field: string;
+}): boolean {
+  return ref.module === "internal" && INTERNAL_SOURCE_TOOL_FIELDS.has(ref.field);
+}
+
 /** Internal module identifier for the bridge's own trunk (input args + output fields) */
 export const SELF_MODULE = "_";
 

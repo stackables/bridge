@@ -18,6 +18,7 @@ export type {
   ExecuteBridgeOptions,
   ExecuteBridgeResult,
 } from "./execute-bridge.ts";
+export { buildInternalToolNamespace } from "./source-tools.ts";
 
 // ── Version check ───────────────────────────────────────────────────────────
 
@@ -83,6 +84,12 @@ export type {
   VersionDecl,
   Wire,
   WireFallback,
+} from "./types.ts";
+export {
+  INTERNAL_SOURCE_TOOL_NAMES,
+  getInternalSourceToolName,
+  getHandleBindingToolName,
+  isInternalSourceToolRef,
 } from "./types.ts";
 
 // ── Traversal enumeration ───────────────────────────────────────────────────

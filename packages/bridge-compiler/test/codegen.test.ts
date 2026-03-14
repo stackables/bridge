@@ -1458,7 +1458,7 @@ bridge Query.test {
     assert.deepStrictEqual(callLog, ["expensiveApi"], "tool should be called");
   });
 
-  test("tool before input — zero-cost input still wins", async () => {
+  test("tool before input — authored precedence still calls the tool first", async () => {
     const callLog: string[] = [];
     const result = await compileAndRun(
       `version 1.5
@@ -1479,8 +1479,8 @@ bridge Query.test {
         },
       },
     );
-    assert.equal(result.label, "from-input");
-    assert.deepStrictEqual(callLog, []);
+    assert.equal(result.label, "from-api");
+    assert.deepStrictEqual(callLog, ["api"]);
   });
 
   test("two tools — compile rejects unsupported same-cost tool overdefinition", async () => {
@@ -1587,7 +1587,7 @@ bridge Query.test {
     assert.deepStrictEqual(aotNoCache.data, rtNoCache.data);
   });
 
-  test("overdefinition parity — zero-cost sources win before tool calls", async () => {
+  test("overdefinition parity — authored tool source wins before internal sources", async () => {
     const bridgeText = bridge`
       version 1.5
       bridge Query.test {
@@ -1625,10 +1625,10 @@ bridge Query.test {
     });
     const aotLog = [...callLog];
 
-    assert.deepStrictEqual(rtWithCache.data, { val: "hit" });
-    assert.deepStrictEqual(aotWithCache.data, { val: "hit" });
-    assert.deepStrictEqual(rtLog, []);
-    assert.deepStrictEqual(aotLog, []);
+    assert.deepStrictEqual(rtWithCache.data, { val: "expensive" });
+    assert.deepStrictEqual(aotWithCache.data, { val: "expensive" });
+    assert.deepStrictEqual(rtLog, ["expensiveApi"]);
+    assert.deepStrictEqual(aotLog, ["expensiveApi"]);
   });
 
   test("constant overdefinition parity — first constant remains terminal", async () => {

@@ -13,6 +13,7 @@ import {
 import {
   ExecutionTree,
   TraceCollector,
+  buildInternalToolNamespace,
   executeBridge as executeBridgeDefault,
   formatBridgeError,
   resolveStd,
@@ -322,20 +323,6 @@ export function bridgeTransform(
                 userTools,
               );
 
-            // std is always included; user tools merge on top (shallow)
-            // internal tools are injected automatically by ExecutionTree
-            const allTools: ToolMap = {
-              std: activeStd,
-              ...userTools,
-            };
-
-            // Verify all @version-tagged handles can be satisfied
-            checkHandleVersions(
-              activeDoc.instructions,
-              allTools,
-              activeStdVersion,
-            );
-
             // Only intercept fields that have a matching bridge instruction.
             // Fields without one fall through to their original resolver,
             // allowing hand-coded resolvers to coexist with bridge-powered ones.
@@ -352,6 +339,25 @@ export function bridgeTransform(
             const bridgeContext = contextMapper
               ? contextMapper(context)
               : (context ?? {});
+
+            // std is always included; user tools merge on top (shallow)
+            const allTools: ToolMap = {
+              std: activeStd,
+              ...userTools,
+              internal: buildInternalToolNamespace(
+                activeDoc,
+                (args ?? {}) as Record<string, unknown>,
+                bridgeContext,
+                (userTools as any)?.internal,
+              ),
+            };
+
+            // Verify all @version-tagged handles can be satisfied
+            checkHandleVersions(
+              activeDoc.instructions,
+              allTools,
+              activeStdVersion,
+            );
 
             // Standalone execution path — used when the operation is incompatible
             // with field-by-field GraphQL resolution, or when an explicit

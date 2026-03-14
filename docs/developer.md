@@ -196,12 +196,7 @@ The engine is **pull-based**: resolution starts from a demanded GraphQL field an
 
 ### Cost-sorted resolution
 
-When a bridge field has multiple sources (overdefinition, `||` falsy coalesce, `??` nullish gate, `catch` error boundary), the engine sorts candidates by inferred cost:
-
-- **Cost 0**: `input` arguments, `context`, `const` — already in memory
-- **Cost 1**: tool calls — require a network or compute call
-
-It evaluates cost-0 sources first. If they resolve, it short-circuits and never makes the expensive call. This is how you get field-level caching for free.
+When a bridge field has multiple sources (overdefinition, `||` falsy coalesce, `??` nullish gate, `catch` error boundary), the engine only short-circuits sources that are already resolved in the current execution state (for example cached aliases). Otherwise it preserves authored order and lets ordinary source/tool metadata control scheduling.
 
 ### Array mapping
 

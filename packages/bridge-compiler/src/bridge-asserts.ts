@@ -1,5 +1,6 @@
 import {
   SELF_MODULE,
+  isInternalSourceToolRef,
   type Bridge,
   type NodeRef,
 } from "@stackables/bridge-core";
@@ -43,8 +44,7 @@ function isToolRef(ref: NodeRef, bridge: Bridge): boolean {
     ref.field === bridge.field
   )
     return false;
-  if (ref.module === SELF_MODULE && ref.type === "Context") return false;
-  if (ref.module === SELF_MODULE && ref.type === "Const") return false;
+  if (isInternalSourceToolRef(ref)) return false;
   if (ref.module.startsWith("__define_")) return false;
   if (ref.module === "__local") return false;
   return true;

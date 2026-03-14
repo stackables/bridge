@@ -20,6 +20,7 @@ import {
   BridgeRuntimeError,
   BridgeTimeoutError,
   attachBridgeErrorDocumentContext,
+  buildInternalToolNamespace,
   executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
@@ -291,7 +292,16 @@ export async function executeBridge<T = unknown>(
 
   // Merge built-in std namespace with user-provided tools, then flatten
   // so the generated code can access them via dotted keys like tools["std.str.toUpperCase"].
-  const allTools: ToolMap = { std: bundledStd, ...userTools };
+  const allTools: ToolMap = {
+    std: bundledStd,
+    ...userTools,
+    internal: buildInternalToolNamespace(
+      document,
+      input,
+      context,
+      (userTools as any)?.internal,
+    ),
+  };
   const flatTools = flattenTools(allTools as Record<string, any>);
 
   // Set up tracing if requested

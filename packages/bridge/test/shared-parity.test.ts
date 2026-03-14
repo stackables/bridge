@@ -1317,13 +1317,13 @@ regressionTest("parity: overdefinition", {
   `,
   scenarios: {
     "Query.lookup": {
-      "zero-cost input beats tool even when tool wire is first": {
+      "authored tool wire beats input source when both are available": {
         input: { q: "x", hint: "cheap" },
         tools: {
           expensiveApi: async () => ({ label: "from-api" }),
         },
-        assertData: { label: "cheap" },
-        assertTraces: 0,
+        assertData: { label: "from-api" },
+        assertTraces: 1,
       },
       "tool wire used when input is undefined": {
         input: { q: "x" },
@@ -1333,16 +1333,24 @@ regressionTest("parity: overdefinition", {
         assertData: { label: "from-api" },
         assertTraces: 1,
       },
+      "input source is used when the tool returns undefined": {
+        input: { q: "x", hint: "cheap" },
+        tools: {
+          expensiveApi: async () => ({}),
+        },
+        assertData: { label: "cheap" },
+        assertTraces: 1,
+      },
     },
     "Query.lookupCtx": {
-      "zero-cost context beats tool even when tool wire is first": {
+      "authored tool wire beats context source when both are available": {
         input: { q: "x" },
         context: { defaultLabel: "from-context" },
         tools: {
           expensiveApi: async () => ({ label: "from-api" }),
         },
-        assertData: { label: "from-context" },
-        assertTraces: 0,
+        assertData: { label: "from-api" },
+        assertTraces: 1,
       },
       "tool wire used when context key is missing": {
         input: { q: "x" },
@@ -1351,6 +1359,15 @@ regressionTest("parity: overdefinition", {
           expensiveApi: async () => ({ label: "from-api" }),
         },
         assertData: { label: "from-api" },
+        assertTraces: 1,
+      },
+      "context source is used when the tool returns undefined": {
+        input: { q: "x" },
+        context: { defaultLabel: "from-context" },
+        tools: {
+          expensiveApi: async () => ({}),
+        },
+        assertData: { label: "from-context" },
         assertTraces: 1,
       },
     },
