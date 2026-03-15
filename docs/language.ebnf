@@ -1,0 +1,44 @@
+program
+    = "version 1.5", { const
+    | bridge
+    | define
+    | tool };
+
+const
+    = "const", name, '=', json;
+
+bridge
+    = "bridge", name, "{", { with
+    | wire }, "}";
+
+define
+    = "define", name, "{", { with
+    | wire }, "}";
+
+tool
+    = "tool", name, "from", name, "{", { with
+    | wire }, [ "on error", "=", json ], "}";
+
+with
+    = "with", name, [ "as", name ];
+
+wire
+    = [ "alias" ], target, ( "<-", expression, { ( "||"
+    | "??" ), expression }, [ "catch", expression ]
+    | "=", json );
+
+ref
+    = source, [ [ "?" ], ".", field ], { [ "?" ], ".", field };
+
+expression
+    = ( json
+    | ref
+    | ref, "[]", "as", iterator_name, "{", { with
+    | wire }, "}"
+    | ( "throw"
+    | "panic" ), [ message ]
+    | ( "continue"
+    | "break" ), [ level ] ), [ "?", expression, ":", expression ];
+
+json
+    = ? Any valid JSON value as defined by RFC 8259 ?;
