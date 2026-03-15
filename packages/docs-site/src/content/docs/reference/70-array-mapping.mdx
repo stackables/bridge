@@ -75,7 +75,7 @@ You can also use aliases inside loops purely for readability, without triggering
 o.list <- api.items[] as it {
 
   # Bind a deep sub-object to a cleaner name
-  alias it.metadata.authorInfo as author
+  alias author <- it.metadata.authorInfo
 
   .name <- author.name
   .role <- author.role
@@ -163,11 +163,11 @@ bridge Query.getActiveAdmins {
   filter.active = true
 
   # usage as pipe
-  # alias filter:ctx.users as final
+  # alias final <- filter:ctx.users
 
   # usage as tool node
   filter.in <- ctx.users
-  alias filter as final
+  alias final <- filter
 
   o <- final[] as user {
     .id <- user.id

@@ -240,16 +240,19 @@ class BridgeParser extends CstParser {
 
   /**
    * Node alias at bridge body level:
-   *   alias <sourceExpr> as <name>
+   *   alias <name> <- <wireRHS>
    *
    * Creates a local __local binding that caches the result of the source
    * expression. Subsequent wires can reference the alias as a handle.
+   * Uses the same wire RHS syntax as regular pull wires.
    */
   public bridgeNodeAlias = this.RULE("bridgeNodeAlias", () => {
     this.CONSUME(AliasKw);
+    this.SUBRULE(this.nameToken, { LABEL: "nodeAliasName" });
+    this.CONSUME(Arrow, { LABEL: "aliasArrow" });
     this.OR([
       {
-        // String literal as source: alias "..." [op operand]* [? then : else] as name
+        // String literal as source: alias name <- "..." [op operand]*
         ALT: () => {
           this.CONSUME(StringLiteral, { LABEL: "aliasStringSource" });
           // Optional expression chain after string literal
@@ -271,7 +274,7 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // [not] (parenExpr | sourceExpr) [op operand]* [? then : else] as name
+        // [not] (parenExpr | sourceExpr) [op operand]* [? then : else]
         ALT: () => {
           this.OPTION3(() => {
             this.CONSUME(NotKw, { LABEL: "aliasNotPrefix" });
@@ -303,6 +306,8 @@ class BridgeParser extends CstParser {
         },
       },
     ]);
+    // Optional array mapping: [] as <iter> { ... }
+    this.OPTION(() => this.SUBRULE(this.arrayMapping));
     // || / ?? coalesce chain (mixed order)
     this.MANY(() => {
       this.SUBRULE4(this.coalesceChainItem, { LABEL: "aliasCoalesceItem" });
@@ -312,8 +317,6 @@ class BridgeParser extends CstParser {
       this.CONSUME(CatchKw);
       this.SUBRULE3(this.coalesceAlternative, { LABEL: "aliasCatchAlt" });
     });
-    this.CONSUME(AsKw);
-    this.SUBRULE(this.nameToken, { LABEL: "nodeAliasName" });
   });
 
   /** force <handle> [?? null] */
@@ -471,7 +474,7 @@ class BridgeParser extends CstParser {
         },
       },
       {
-        // Path scoping block: target { lines: .field <- source, .field = value, .field { ... }, alias ... as ..., ...source }
+        // Path scoping block: target { lines: .field <- source, .field = value, .field { ... }, alias name <- ..., ...source }
         ALT: () => {
           this.CONSUME(LCurly, { LABEL: "scopeBlock" });
           this.MANY3(() =>
@@ -510,14 +513,23 @@ class BridgeParser extends CstParser {
 
   /**
    * Block-scoped binding inside array mapping:
-   *   alias <sourceExpr> as <name>
+   *   alias <name> <- <sourceExpr> [|| alt]* [catch fallback]
    * Evaluates the source once per element and binds the result to <name>.
    */
   public elementWithDecl = this.RULE("elementWithDecl", () => {
     this.CONSUME(AliasKw);
-    this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
-    this.CONSUME(AsKw);
     this.SUBRULE(this.nameToken, { LABEL: "elemWithAlias" });
+    this.CONSUME(Arrow, { LABEL: "elemArrow" });
+    this.SUBRULE(this.sourceExpr, { LABEL: "elemWithSource" });
+    // || / ?? coalesce chain (mixed order)
+    this.MANY(() => {
+      this.SUBRULE(this.coalesceChainItem, { LABEL: "elemCoalesceItem" });
+    });
+    // catch error fallback
+    this.OPTION(() => {
+      this.CONSUME(CatchKw);
+      this.SUBRULE(this.coalesceAlternative, { LABEL: "elemCatchAlt" });
+    });
   });
 
   /**
@@ -3652,10 +3664,30 @@ function buildBridgeBody(
         field: alias,
         path: [],
       };
-      wires.push({
+
+      // Process coalesce and catch from elementWithDecl
+      const elemFallbacks: WireSourceEntry[] = [];
+      for (const item of subs(withDecl, "elemCoalesceItem")) {
+        const type = tok(item, "falsyOp")
+          ? ("falsy" as const)
+          : ("nullish" as const);
+        const altNode = sub(item, "altValue")!;
+        const altResult = extractCoalesceAlt(altNode, lineNum, iterScope);
+        elemFallbacks.push(buildSourceEntry(type, altNode, altResult));
+      }
+      let elemCatch: WireCatch | undefined;
+      const elemCatchAlt = sub(withDecl, "elemCatchAlt");
+      if (elemCatchAlt) {
+        const altResult = extractCoalesceAlt(elemCatchAlt, lineNum, iterScope);
+        elemCatch = buildCatchHandler(elemCatchAlt, altResult);
+      }
+
+      const wire: Wire = {
         to: localToRef,
-        sources: [{ expr: { type: "ref", ref: sourceRef } }],
-      });
+        sources: [{ expr: { type: "ref", ref: sourceRef } }, ...elemFallbacks],
+      };
+      if (elemCatch) wire.catch = elemCatch;
+      wires.push(wire);
     }
     return () => {
       for (const [alias, previous] of shadowedAliases) {
@@ -5417,7 +5449,7 @@ function buildBridgeBody(
         nodeAliasNode.children.aliasStringSource as IToken[] | undefined
       )?.[0];
       if (aliasStringToken) {
-        // String literal source: alias "template..." [op right]* as name
+        // String literal source: alias name <- "template..." [op right]*
         const raw = aliasStringToken.image.slice(1, -1);
         const segs = parseTemplateString(raw);
         const stringExprOps = subs(nodeAliasNode, "aliasStringExprOp");
@@ -5445,7 +5477,7 @@ function buildBridgeBody(
           sourceRef = strRef;
         }
         sourceLoc = aliasLoc;
-        // Ternary after string source (e.g. alias "a" == "b" ? x : y as name)
+        // Ternary after string source (e.g. alias name <- "a" == "b" ? x : y)
         const strTernaryOp = (
           nodeAliasNode.children.aliasStringTernaryOp as IToken[] | undefined
         )?.[0];
@@ -5672,6 +5704,77 @@ function buildBridgeBody(
         field: alias,
         path: [],
       };
+
+      // ── Array mapping on alias: alias name <- source[] as it { ... } ──
+      const aliasArrayMapping = (
+        nodeAliasNode.children.arrayMapping as CstNode[] | undefined
+      )?.[0];
+      if (aliasArrayMapping) {
+        wires.push(
+          withLoc(
+            {
+              to: localToRef,
+              sources: [
+                {
+                  expr: {
+                    type: "ref",
+                    ref: sourceRef,
+                    ...(aliasSafe ? { safe: true } : {}),
+                    ...(sourceLoc ? { refLoc: sourceLoc } : {}),
+                  },
+                },
+                ...aliasFallbacks,
+              ],
+              ...(aliasCatchHandler ? { catch: aliasCatchHandler } : {}),
+            },
+            aliasLoc,
+          ),
+        );
+        wires.push(...aliasFallbackInternalWires);
+        wires.push(...aliasCatchInternalWires);
+
+        const iterName = extractNameToken(sub(aliasArrayMapping, "iterName")!);
+        assertNotReserved(iterName, lineNum, "iterator handle");
+        const arrayToPath = localToRef.path;
+        arrayIterators[arrayToPath.join(".")] = iterName;
+
+        const elemWithDecls = subs(aliasArrayMapping, "elementWithDecl");
+        const elemToolWithDecls = subs(
+          aliasArrayMapping,
+          "elementToolWithDecl",
+        );
+        const { writableHandles, cleanup: toolCleanup } =
+          processLocalToolBindings(elemToolWithDecls);
+        const aliasElemCleanup = processLocalBindings(elemWithDecls, iterName);
+        processElementHandleWires(
+          subs(aliasArrayMapping, "elementHandleWire"),
+          iterName,
+          writableHandles,
+        );
+        processElementLines(
+          subs(aliasArrayMapping, "elementLine"),
+          arrayToPath,
+          iterName,
+          bridgeType,
+          bridgeField,
+          wires,
+          arrayIterators,
+          buildSourceExpr,
+          extractCoalesceAlt,
+          desugarExprChain,
+          extractTernaryBranch,
+          processLocalBindings,
+          processLocalToolBindings,
+          processElementHandleWires,
+          desugarTemplateString,
+          desugarNot,
+          resolveParenExpr,
+        );
+        aliasElemCleanup();
+        toolCleanup();
+        continue;
+      }
+
       wires.push(
         withLoc(
           {
@@ -5734,10 +5837,12 @@ function buildBridgeBody(
     // ── Path scoping block: target { .field ... } ──
     if (wc.scopeBlock) {
       // Process alias declarations inside the scope block first
+      // Scope aliases use the same bridgeNodeAlias rule — process with full
+      // expression support (coalesce, catch, ternary, string templates, etc.)
       const scopeAliases = subs(wireNode, "scopeAlias");
       for (const aliasNode of scopeAliases) {
         const aliasLineNum = line(findFirstToken(aliasNode));
-        const sourceNode = sub(aliasNode, "nodeAliasSource")!;
+        const aliasNodeLoc = locFromNode(aliasNode);
         const alias = extractNameToken(sub(aliasNode, "nodeAliasName")!);
         assertNotReserved(alias, aliasLineNum, "node alias");
         if (handleRes.has(alias)) {
@@ -5745,10 +5850,125 @@ function buildBridgeBody(
             `Line ${aliasLineNum}: Duplicate handle name "${alias}"`,
           );
         }
-        const { ref: sourceRef, safe: aliasSafe } = buildSourceExprSafe(
-          sourceNode,
-          aliasLineNum,
-        );
+
+        // Extract coalesce modifiers
+        const scopeAliasFallbacks: WireSourceEntry[] = [];
+        const scopeAliasFbWires: Wire[] = [];
+        for (const item of subs(aliasNode, "aliasCoalesceItem")) {
+          const type = tok(item, "falsyOp")
+            ? ("falsy" as const)
+            : ("nullish" as const);
+          const altNode = sub(item, "altValue")!;
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(altNode, aliasLineNum);
+          scopeAliasFallbacks.push(buildSourceEntry(type, altNode, altResult));
+          if ("sourceRef" in altResult) {
+            scopeAliasFbWires.push(...wires.splice(preLen));
+          }
+        }
+        let scopeAliasCatch: WireCatch | undefined;
+        let scopeAliasCatchWires: Wire[] = [];
+        const scopeCatchAlt = sub(aliasNode, "aliasCatchAlt");
+        if (scopeCatchAlt) {
+          const preLen = wires.length;
+          const altResult = extractCoalesceAlt(scopeCatchAlt, aliasLineNum);
+          scopeAliasCatch = buildCatchHandler(scopeCatchAlt, altResult);
+          if ("sourceRef" in altResult) {
+            scopeAliasCatchWires = wires.splice(preLen);
+          }
+        }
+
+        // Compute source ref (same logic as top-level alias)
+        const scopeStringToken = (
+          aliasNode.children.aliasStringSource as IToken[] | undefined
+        )?.[0];
+        let scopeSrcRef: NodeRef;
+        let scopeSrcLoc: SourceLocation | undefined;
+        let scopeSafe: boolean | undefined;
+
+        if (scopeStringToken) {
+          const raw = scopeStringToken.image.slice(1, -1);
+          const segs = parseTemplateString(raw);
+          const strRef = segs
+            ? desugarTemplateString(segs, aliasLineNum, undefined, aliasNodeLoc)
+            : desugarTemplateString(
+                [{ kind: "text", value: raw }],
+                aliasLineNum,
+                undefined,
+                aliasNodeLoc,
+              );
+          const strOps = subs(aliasNode, "aliasStringExprOp");
+          if (strOps.length > 0) {
+            scopeSrcRef = desugarExprChain(
+              strRef,
+              strOps,
+              subs(aliasNode, "aliasStringExprRight"),
+              aliasLineNum,
+              undefined,
+              undefined,
+              aliasNodeLoc,
+            );
+          } else {
+            scopeSrcRef = strRef;
+          }
+          scopeSrcLoc = aliasNodeLoc;
+          scopeSafe = false;
+        } else {
+          const fpn = sub(aliasNode, "aliasFirstParen");
+          const fsn = sub(aliasNode, "nodeAliasSource");
+          const hn = fsn ? sub(fsn, "head") : undefined;
+          const safe = hn ? !!extractAddressPath(hn).rootSafe : false;
+          const ops = subs(aliasNode, "aliasExprOp");
+          const rights = subs(aliasNode, "aliasExprRight");
+          scopeSrcLoc = locFromNodeRange(
+            fpn ?? fsn,
+            rights[rights.length - 1] ?? fpn ?? fsn,
+          );
+
+          if (fpn) {
+            const pr = resolveParenExpr(fpn, aliasLineNum, undefined, safe);
+            scopeSrcRef =
+              ops.length > 0
+                ? desugarExprChain(
+                    pr,
+                    ops,
+                    rights,
+                    aliasLineNum,
+                    undefined,
+                    safe,
+                    aliasNodeLoc,
+                  )
+                : pr;
+          } else if (ops.length > 0) {
+            scopeSrcRef = desugarExprChain(
+              buildSourceExpr(fsn!, aliasLineNum),
+              ops,
+              rights,
+              aliasLineNum,
+              undefined,
+              safe,
+              aliasNodeLoc,
+            );
+          } else {
+            const r = buildSourceExprSafe(fsn!, aliasLineNum);
+            scopeSrcRef = r.ref;
+            scopeSafe = r.safe;
+          }
+
+          if (
+            (aliasNode.children.aliasNotPrefix as IToken[] | undefined)?.[0]
+          ) {
+            scopeSrcRef = desugarNot(
+              scopeSrcRef,
+              aliasLineNum,
+              safe,
+              aliasNodeLoc,
+            );
+          }
+
+          if (scopeSafe === undefined) scopeSafe = safe || undefined;
+        }
+
         const localRes: HandleResolution = {
           module: "__local",
           type: "Shadow",
@@ -5769,15 +5989,20 @@ function buildBridgeBody(
                 {
                   expr: {
                     type: "ref",
-                    ref: sourceRef,
-                    ...(aliasSafe ? { safe: true as const } : {}),
+                    ref: scopeSrcRef,
+                    ...(scopeSafe ? { safe: true as const } : {}),
+                    ...(scopeSrcLoc ? { refLoc: scopeSrcLoc } : {}),
                   },
                 },
+                ...scopeAliasFallbacks,
               ],
+              ...(scopeAliasCatch ? { catch: scopeAliasCatch } : {}),
             },
-            locFromNode(aliasNode),
+            aliasNodeLoc,
           ),
         );
+        wires.push(...scopeAliasFbWires);
+        wires.push(...scopeAliasCatchWires);
       }
       const scopeLines = subs(wireNode, "pathScopeLine");
       // Process spread lines inside the scope block: ...sourceExpr

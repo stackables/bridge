@@ -95,7 +95,7 @@ describe("parser source locations", () => {
       bridge Query.test {
         with input as i
         with output as o
-        alias i.empty.array.error catch i.empty.array.error as clean
+        alias clean <- i.empty.array.error catch i.empty.array.error
         o.message <- i.empty.array?.error ?? i.empty.array.error catch clean
       }
     `);
@@ -103,7 +103,7 @@ describe("parser source locations", () => {
     const aliasWire = instr.wires.find((wire) => wire.to.field === "clean");
     assert.ok(aliasWire?.catch);
     assert.equal(aliasWire.catch.loc?.startLine, 5);
-    assert.equal(aliasWire.catch.loc?.startColumn, 35);
+    assert.equal(aliasWire.catch.loc?.startColumn, 44);
 
     const messageWire = instr.wires.find(
       (wire) => wire.to.path.join(".") === "message",

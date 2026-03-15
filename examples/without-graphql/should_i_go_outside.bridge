@@ -27,7 +27,7 @@ bridge Query.should_i_go_outside {
   g.q <- i.cityName
   g.format = "json"
 
-  alias first:g as f
+  alias f <- first:g
 
   w.latitude  <- f.lat
   w.longitude <- f.lon

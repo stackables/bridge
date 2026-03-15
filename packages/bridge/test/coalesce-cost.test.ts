@@ -152,7 +152,7 @@ regressionTest("overdefinition: cost-based prioritization", {
       with input as i
       with output as o
 
-      alias i.hint as cached
+      alias cached <- i.hint
       api <- i.api
 
       o.label <- api.label

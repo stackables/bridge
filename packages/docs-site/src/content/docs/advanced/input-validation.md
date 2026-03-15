@@ -49,7 +49,7 @@ bridge Query.location {
 
   # 1. Create a Gate: If age >= 18, yield the input. Otherwise, yield null.
   # 2. The ?? fallback catches the null and throws!
-  alias (i.age >= 18) ? i : null ?? throw "Must be 18 or older" as ageChecked
+  alias ageChecked <- (i.age >= 18) ? i : null ?? throw "Must be 18 or older"
 
   # 3. Wire from the gated input.
   geo.q <- ageChecked.city
@@ -71,7 +71,7 @@ bridge Query.location {
   with output as o
 
   # 1. Declare the business rule using inline boolean logic.
-  alias (i.age >= 18) || throw "Must be 18 or older" as ageCheck
+  alias ageCheck <- (i.age >= 18) || throw "Must be 18 or older"
 
   # 2. Force the engine to evaluate the rule eagerly!
   force ageCheck

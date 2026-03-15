@@ -127,7 +127,25 @@ function handleExpect(
       state.expect = "";
       return undefined;
 
-    // alias  SOURCE (pipe:handle.path or handle.path)
+    // alias  NAME
+    case "aliasName":
+      if (stream.match(/^[A-Za-z_]\w*/)) {
+        state.expect = "aliasArrow";
+        return "def";
+      }
+      state.expect = "";
+      return undefined;
+
+    // alias name  <-
+    case "aliasArrow":
+      if (stream.match(/^<-/)) {
+        state.expect = "aliasSource";
+        return "operator";
+      }
+      state.expect = "";
+      return undefined;
+
+    // alias name <-  SOURCE (pipe:handle.path or handle.path)
     case "aliasSource":
       if (stream.match(/^[A-Za-z_][\w.]*/)) {
         state.expect = "aliasColon";
@@ -136,12 +154,8 @@ function handleExpect(
       state.expect = "";
       return undefined;
 
-    // alias source  : (pipe separator — optional, loop back)
+    // alias name <- source  : (pipe separator — optional, loop back)
     case "aliasColon":
-      if (stream.match(/^as\b/)) {
-        state.expect = "aliasName";
-        return "keyword";
-      }
       if (stream.eat(":")) {
         state.expect = "aliasSource";
         return "operator";
@@ -153,20 +167,11 @@ function handleExpect(
       state.expect = "";
       return undefined;
 
-    // alias source.  FIELD
+    // alias name <- source.  FIELD
     case "aliasDotField":
       if (stream.match(/^[A-Za-z_]\w*/)) {
         state.expect = "aliasColon";
         return "variable";
-      }
-      state.expect = "";
-      return undefined;
-
-    // alias source as  NAME
-    case "aliasName":
-      if (stream.match(/^[A-Za-z_]\w*/)) {
-        state.expect = "";
-        return "def";
       }
       state.expect = "";
       return undefined;
@@ -305,7 +310,7 @@ function token(stream: StringStream, state: State): string | null {
     return "keyword";
   }
   if (stream.match(/^alias\b/)) {
-    state.expect = "aliasSource";
+    state.expect = "aliasName";
     state.lineStart = false;
     return "keyword";
   }

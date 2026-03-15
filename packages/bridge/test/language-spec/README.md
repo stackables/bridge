@@ -100,7 +100,7 @@ result. This enables progressive enrichment without explicit conditionals.
 
 ### 14. `alias.test.ts` — Caching resolved values
 
-`alias source as name` evaluates once and caches the result. Prevents duplicate
+`alias name <- source` evaluates once and caches the result. Prevents duplicate
 tool calls. Top-level aliases live for the whole request; iterator-scoped
 aliases are re-evaluated per array element.
 

@@ -439,7 +439,7 @@ describe("path scoping – parser", () => {
 
         o {
           .info {
-            alias uc:i.name as upper
+            alias upper <- uc:i.name
             .displayName <- upper
             .email <- i.email
           }

@@ -669,7 +669,7 @@ describe("serializeBridge", () => {
         with output as o
 
       o.items <- a.data[] as item {
-        alias item.title as nm
+        alias nm <- item.title
         .label <- nm
         .price <- item.cost
       }
@@ -679,7 +679,7 @@ describe("serializeBridge", () => {
     const instructions = parseBridge(input);
     const ser1 = serializeBridge(instructions);
     // Validate the alias statement is present in serialized output
-    assert.ok(ser1.includes("alias item.title as nm"));
+    assert.ok(ser1.includes("alias nm <- item.title"));
     // Validate idempotency: re-serialize produces identical output
     const ser2 = serializeBridge(parseBridge(ser1));
     assert.equal(ser1, ser2);
@@ -694,7 +694,7 @@ describe("serializeBridge", () => {
         with output as o
 
       api.q <- i.search
-      alias api.result.data as d
+      alias d <- api.result.data
 
       o.name <- d.name
       o.email <- d.email

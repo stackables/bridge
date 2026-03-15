@@ -569,22 +569,22 @@ bridge Query.profile {
   with output as o
 
   # 1. Simple rename — give a deeply nested path a short name
-  alias api.address.city as city
+  alias city <- api.address.city
 
   # 2. Falsy fallback — use "Anonymous" if username is empty or null
-  alias api.username || "Anonymous" as displayName
+  alias displayName <- api.username || "Anonymous"
 
   # 3. Nullish fallback — only override if value is strictly null/undefined
-  alias api.website ?? "https://example.com" as site
+  alias site <- api.website ?? "https://example.com"
 
   # 4. Mixed chain — ?? then || in any order
-  alias api.nickname ?? api.username || "Guest" as greeting
+  alias greeting <- api.nickname ?? api.username || "Guest"
 
   # 4. Error boundary — if the pipe tool throws, default to "UNKNOWN"
-  alias uc:api.name catch "UNKNOWN" as upperName
+  alias upperName <- uc:api.name catch "UNKNOWN"
 
   # 5. Math/comparison expression — alias fully evaluates the expression
-  alias api.id <= 5 as isPremium
+  alias isPremium <- api.id <= 5
 
   o.displayName <- displayName
   o.location <- city || "Unknown city"
@@ -1101,7 +1101,7 @@ define formatProfile {
   with output as o
   with std.str.toUpperCase as uc
 
-  alias "{i.first} {i.last}" as fullName
+  alias fullName <- "{i.first} {i.last}"
 
   o.displayName <- fullName
   o.locationLabel <- "Based in {i.city}"
@@ -1407,11 +1407,11 @@ bridge Query.activeAdmins {
   filter.active = true
 
   # usage as pipe
-  # alias filter:ctx.users as final
+  # alias final <- filter:ctx.users
 
   # usage as tool node
   filter.in <- ctx.users
-  alias filter as final
+  alias final <- filter
 
   o <- final[] as user {
     .id <- user.id

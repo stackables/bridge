@@ -123,7 +123,7 @@ bridge Query.getTags {
 
   # Whether api.tags is a string or an array of strings,
   # 'safeTags' is guaranteed to be an array.
-  alias toArr:api.tags as safeTags
+  alias safeTags <- toArr:api.tags
 
   o.tags <- safeTags[] as tag {
     .name <- tag

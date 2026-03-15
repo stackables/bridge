@@ -191,7 +191,7 @@ regressionTest("array blocks: pipe, alias, and ternary", {
       src <- i.src
       o.title <- src.name ?? "Untitled"
       o.entries <- src.items[] as it {
-        alias enrich:it as e
+        alias e <- enrich:it
         .id <- it.item_id
         .label <- e.in.name
       }
@@ -457,7 +457,7 @@ regressionTest("alias: iterator-scoped aliases", {
 
       api <- i.api
       o <- api.items[] as it {
-        alias enrich:it as resp
+        alias resp <- enrich:it
         .a <- resp.in.id
         .b <- resp.in.name
       }
@@ -470,7 +470,7 @@ regressionTest("alias: iterator-scoped aliases", {
 
       api <- i.api
       o <- api.items[] as it {
-        alias it.nested as n
+        alias n <- it.nested
         .x <- n.a
         .y <- n.b
       }
@@ -484,7 +484,7 @@ regressionTest("alias: iterator-scoped aliases", {
 
       api <- i.api
       o <- api.items[] as it {
-        alias uc:it.name as upper
+        alias upper <- uc:it.name
         .label <- upper
         .id <- it.id
       }
@@ -515,7 +515,7 @@ regressionTest("alias: iterator-scoped aliases", {
       },
     },
     "Query.aliasIterSub": {
-      "alias iter.subfield as name": {
+      "alias name <- iter.subfield": {
         input: {
           api: {
             items: [{ nested: { a: 1, b: 2 } }, { nested: { a: 3, b: 4 } }],
@@ -569,7 +569,7 @@ regressionTest("alias: top-level aliases", {
       with input as i
       with output as o
 
-      alias uc:i.name as cached
+      alias cached <- uc:i.name
 
       o.greeting <- cached
       o.label <- cached
@@ -582,7 +582,7 @@ regressionTest("alias: top-level aliases", {
       with output as o
 
       api <- i.api
-      alias api.result.data as d
+      alias d <- api.result.data
 
       o.name <- d.name
       o.email <- d.email
@@ -595,10 +595,10 @@ regressionTest("alias: top-level aliases", {
       with input as i
 
       api <- i.api
-      alias uc:i.category as upperCat
+      alias upperCat <- uc:i.category
 
       o <- api.products[] as it {
-        alias uc:it.title as upper
+        alias upper <- uc:it.title
         .name <- upper
         .price <- it.price
         .category <- upperCat
@@ -619,7 +619,7 @@ regressionTest("alias: top-level aliases", {
       },
     },
     "Query.aliasTopHandle": {
-      "top-level alias handle.path as name — simple rename": {
+      "top-level alias name <- handle.path — simple rename": {
         input: {
           api: {
             result: { data: { name: "Alice", email: "alice@test.com" } },
@@ -667,7 +667,7 @@ regressionTest("alias: expressions and modifiers", {
       with output as o
       with input as i
 
-      alias i.nickname || "Guest" as displayName
+      alias displayName <- i.nickname || "Guest"
 
       o.name <- displayName
     }
@@ -676,7 +676,7 @@ regressionTest("alias: expressions and modifiers", {
       with output as o
       with input as i
 
-      alias i.score ?? 0 as score
+      alias score <- i.score ?? 0
 
       o.score <- score
     }
@@ -687,7 +687,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
 
       api <- i.api
-      alias api.value catch 99 as safeVal
+      alias safeVal <- api.value catch 99
 
       o.result <- safeVal
     }
@@ -698,7 +698,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
 
       api <- i.api
-      alias api?.value as safeVal
+      alias safeVal <- api?.value
 
       o.result <- safeVal || "fallback"
     }
@@ -707,7 +707,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias i.price + 10 as bumped
+      alias bumped <- i.price + 10
 
       o.result <- bumped
     }
@@ -716,7 +716,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias i.role == "admin" as isAdmin
+      alias isAdmin <- i.role == "admin"
 
       o.isAdmin <- isAdmin
     }
@@ -725,7 +725,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias (i.a + i.b) * 2 as doubled
+      alias doubled <- (i.a + i.b) * 2
 
       o.result <- doubled
     }
@@ -733,7 +733,7 @@ regressionTest("alias: expressions and modifiers", {
     bridge AliasStringLit.test {
       with output as o
 
-      alias "hello world" as greeting
+      alias greeting <- "hello world"
 
       o.result <- greeting
     }
@@ -742,7 +742,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias "a" == i.val as matchesA
+      alias matchesA <- "a" == i.val
 
       o.result <- matchesA
     }
@@ -751,7 +751,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias not i.blocked as allowed
+      alias allowed <- not i.blocked
 
       o.allowed <- allowed
     }
@@ -760,7 +760,7 @@ regressionTest("alias: expressions and modifiers", {
       with input as i
       with output as o
 
-      alias i.score >= 90 ? "A" : "B" as grade
+      alias grade <- i.score >= 90 ? "A" : "B"
 
       o.grade <- grade
     }
