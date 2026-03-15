@@ -163,7 +163,7 @@ regressionTest("path scoping: alias inside nested scope", {
       with output as o
 
       a.q <- i.q
-      alias a.metadata as meta
+      alias meta <- a.metadata
       o.info {
         .title <- a.title
         .author <- meta.author

@@ -82,7 +82,7 @@ The `.bridge` language is designed to be scannable.
 | **Null Coalesce** | `o.name <- i.name \|\| "N/A"`  | Alternative used if the current source resolves to `null`.                              |
 | **Error Guard**   | `o.price <- api.price catch 0` | Alternative used if the current source **throws** an exception.                         |
 | **Ternary**       | `o.val <- i.isPro ? a : b`     | Evaluates condition; strictly pulls only the chosen branch.                             |
-| **Node Alias**    | `alias uc:i.name as name`      | Evaluates an expression once and caches it as a local graph node.                       |
+| **Node Alias**    | `alias name <- uc:i.name`      | Evaluates an expression once and caches it as a local graph node.                       |
 | **Arrays**        | `o <- items[] as it { }`       | Iterates over an array, creating a local shadow scope for each element.                 |
 
 **[Read the Full Language Guide](https://bridge.sdk42.com/reference/10-core-concepts/)**

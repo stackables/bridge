@@ -1241,7 +1241,7 @@ regressionTest("parity: alias declarations", {
     bridge Query.aliasSimple {
       with api
       with output as o
-      alias api.result.data as d
+      alias d <- api.result.data
       o.value <- d.name
     }
 
@@ -1250,7 +1250,7 @@ regressionTest("parity: alias declarations", {
       with input as i
       with output as o
 
-      alias myUC:i.name as upper
+      alias upper <- myUC:i.name
       o.greeting <- upper.out
     }
   `,

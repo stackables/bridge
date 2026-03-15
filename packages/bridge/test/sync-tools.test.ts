@@ -203,7 +203,7 @@ regressionTest("sync array map", {
       with output as o
 
       o <- src.items[] as it {
-        alias enrich:it as e
+        alias e <- enrich:it
         .id <- it.item_id
         .label <- e.name
       }

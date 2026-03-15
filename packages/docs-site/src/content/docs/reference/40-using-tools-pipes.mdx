@@ -144,7 +144,7 @@ bridge Query.formatNames {
 
 Because pipes fork the tool, the engine runs them entirely in parallel. For pure functions like `upperCase`, this is perfectly fine. But if you are piping data into an HTTP API tool, **you are firing multiple independent network requests**.
 
-## 4. Node Aliasing (`alias ... as`)
+## 4. Node Aliasing (`alias name <- source`)
 
 Because the pipe operator always forks a new node, what happens if you pipe data through an API, but need to read multiple different fields from the resulting object?
 
@@ -157,7 +157,7 @@ bridge Query.getUser {
   with output as o
 
   # Evaluate the tool ONCE, safely catch network errors, and cache as 'user'
-  alias userApi:i.userId catch {} as user
+  alias user <- userApi:i.userId catch {}
 
   # Read from the cached node (cost-free memory reads)
   o.city <- user.city

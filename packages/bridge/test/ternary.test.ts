@@ -287,7 +287,7 @@ regressionTest("alias ternary: panic gate on age check", {
       with input as i
       with output as o
 
-      alias (i.age >= 18) ? i : null ?? panic "Must be 18 or older" as ageChecked
+      alias ageChecked <- (i.age >= 18) ? i : null ?? panic "Must be 18 or older"
 
       geo.q <- ageChecked?.city
 
@@ -327,7 +327,7 @@ regressionTest("alias ternary: fallback variants", {
       with input as i
       with output as o
 
-      alias i.score >= 50 ? i.grade : null || "F" as grade
+      alias grade <- i.score >= 50 ? i.grade : null || "F"
       o.grade <- grade
     }
 
@@ -337,7 +337,7 @@ regressionTest("alias ternary: fallback variants", {
       with output as o
 
       fb <- i.fb
-      alias i.score >= 50 ? i.grade : null || fb.grade as grade
+      alias grade <- i.score >= 50 ? i.grade : null || fb.grade
       o.grade <- grade
     }
 
@@ -347,7 +347,7 @@ regressionTest("alias ternary: fallback variants", {
       with output as o
 
       a <- i.a
-      alias a.ok ? a.value : a.alt catch "safe" as result
+      alias result <- a.ok ? a.value : a.alt catch "safe"
       o.val <- result
     }
 
@@ -355,7 +355,7 @@ regressionTest("alias ternary: fallback variants", {
       with input as i
       with output as o
 
-      alias "hello" == i.secret ? "access granted" : null ?? panic "wrong secret" as result
+      alias result <- "hello" == i.secret ? "access granted" : null ?? panic "wrong secret"
       o.msg <- result
     }
   `,

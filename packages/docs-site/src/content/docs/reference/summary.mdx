@@ -27,9 +27,9 @@ _Tools for data manipulation and code organization._
 
 | Feature                      | Example                                                  |
 | ---------------------------- | -------------------------------------------------------- |
-| **`alias` declarations**     | `alias api.result.data as d`                             |
-| **Safe-exec aliases** (`?.`) | `alias api?.value as safeVal`                            |
-| **Alias fallbacks**          | `alias (expr) ? val : null ?? panic "msg" as x`          |
+| **`alias` declarations**     | `alias d <- api.result.data`                             |
+| **Safe-exec aliases** (`?.`) | `alias safeVal <- api?.value`                            |
+| **Alias fallbacks**          | `alias x <- (expr) ? val : null ?? panic "msg"`          |
 | **Math / Comparison**        | `o.total <- i.price * i.qty`, `o.isAdult <- i.age >= 18` |
 | **String interpolation**     | `o.msg <- "Hello, {i.name}!"`                            |
 | **Pipe operators**           | `o.loud <- tu:i.text`                                    |

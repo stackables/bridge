@@ -2021,7 +2021,7 @@ describe("AOT codegen: async array mapping", () => {
         with output as o
 
         o.items <- api.results[] as item {
-          alias enricher:item as e
+          alias e <- enricher:item
           .name <- item.name ?? continue
           .extra <- e.data
         }
@@ -2107,7 +2107,7 @@ describe("AOT codegen: async array mapping", () => {
         o <- api.groups[] as g {
           .label <- g.name
           .items <- g.items[] as sub {
-            alias enricher:sub as e
+            alias e <- enricher:sub
             .value <- e.data
           }
         }
@@ -2145,7 +2145,7 @@ describe("AOT codegen: async array mapping", () => {
         with output as o
 
         o.items <- api.results[] as item {
-          alias enricher:item as e
+          alias e <- enricher:item
           .name <- item.name ?? continue
           .extra <- e.data catch "n/a"
         }
@@ -2178,7 +2178,7 @@ describe("AOT codegen: async array mapping", () => {
 
         o.title <- api.title
         o.items <- api.items[] as item {
-          alias enricher:item as e
+          alias e <- enricher:item
           .name <- item.name ?? continue
           .extra <- e.data
         }
@@ -2279,7 +2279,7 @@ bridge Query.catalog {
   with output as o
 
   o <- src.items[] as it {
-    alias enrich:it as e
+    alias e <- enrich:it
     .id <- it.item_id
     .label <- e.name
   }

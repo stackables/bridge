@@ -489,7 +489,7 @@ bridge Query.list {
   with output as o
 
   o <- api.items[] as it {
-    alias enrich:it as resp
+    alias resp <- enrich:it
     .a <- resp.a
     .b <- resp.b
   }
@@ -504,7 +504,7 @@ bridge Query.list {
   with output as o
 
   o <- api.items[] as it {
-    alias it.nested as n
+    alias n <- it.nested
     .x <- n.a
     .y <- n.b
   }
@@ -519,7 +519,7 @@ bridge Query.test {
   with input as i
   with output as o
 
-  alias uc:i.name as upper
+  alias upper <- uc:i.name
 
   o.label <- upper
 }`,
@@ -534,7 +534,7 @@ bridge Query.test {
   with output as o
 
   api.q <- i.q
-  alias api.result.data as d
+  alias d <- api.result.data
 
   o.name <- d.name
   o.email <- d.email
