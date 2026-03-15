@@ -103,7 +103,7 @@ describe("parser source locations", () => {
     const aliasWire = instr.wires.find((wire) => wire.to.field === "clean");
     assert.ok(aliasWire?.catch);
     assert.equal(aliasWire.catch.loc?.startLine, 5);
-    assert.equal(aliasWire.catch.loc?.startColumn, 45);
+    assert.equal(aliasWire.catch.loc?.startColumn, 44);
 
     const messageWire = instr.wires.find(
       (wire) => wire.to.path.join(".") === "message",

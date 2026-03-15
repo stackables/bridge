@@ -141,13 +141,12 @@
           }
         },
         {
-          "comment": "alias <source> as <name>  (node alias / rename)",
-          "match": "^\\s*(alias)\\s+(.+?)\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "comment": "alias <name> <- <source>  (node alias / rename)",
+          "match": "^\\s*(alias)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<-)",
           "captures": {
             "1": { "name": "keyword.control.bridge" },
-            "2": { "name": "entity.name.function.bridge" },
-            "3": { "name": "keyword.control.bridge" },
-            "4": { "name": "variable.other.handle.bridge" }
+            "2": { "name": "variable.other.handle.bridge" },
+            "3": { "name": "keyword.operator.wire.bridge" }
           }
         },
         {

@@ -1650,7 +1650,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       }
     }
 
-    // Emit block-scoped local bindings: alias <source> as <name>
+    // Emit block-scoped local bindings: alias <name> <- <source>
     for (const [alias, info] of localBindingsByAlias) {
       // Ternary alias in element scope
       if (info.ternaryWire) {
@@ -1679,7 +1679,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
         const fallbackStr = serFallbacks(tw, sPipeOrRef);
         const errf = serCatch(tw, sPipeOrRef);
         lines.push(
-          `${indent}alias ${condStr} ? ${thenStr} : ${elseStr}${fallbackStr}${errf} as ${alias}`,
+          `${indent}alias ${alias} <- ${condStr} ? ${thenStr} : ${elseStr}${fallbackStr}${errf}`,
         );
         continue;
       }
@@ -1769,7 +1769,11 @@ function serializeBridgeBlock(bridge: Bridge): string {
           sourcePart = sRef(fromRef, true);
         }
       }
-      lines.push(`${indent}alias ${sourcePart} as ${alias}`);
+      const elemFb = serFallbacks(srcWire, sPipeOrRef);
+      const elemErrf = serCatch(srcWire, sPipeOrRef);
+      lines.push(
+        `${indent}alias ${alias} <- ${sourcePart}${elemFb}${elemErrf}`,
+      );
     }
 
     // Emit element-scoped tool declarations: with <tool> as <handle>
@@ -2219,7 +2223,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
   }
 
   // ── Top-level alias declarations ─────────────────────────────────────
-  // Emit `alias <source> as <name>` for __local bindings that are NOT
+  // Emit `alias <name> <- <source>` for __local bindings that are NOT
   // element-scoped (those are handled inside serializeArrayElements).
   for (const [alias, info] of localBindingsByAlias) {
     // Ternary alias: emit `alias <cond> ? <then> : <else> [fallbacks] as <name>`
@@ -2237,7 +2241,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
       const fallbackStr = serFallbacks(tw, sPipeOrRef);
       const errf = serCatch(tw, sPipeOrRef);
       lines.push(
-        `alias ${condStr} ? ${thenStr} : ${elseStr}${fallbackStr}${errf} as ${alias}`,
+        `alias ${alias} <- ${condStr} ? ${thenStr} : ${elseStr}${fallbackStr}${errf}`,
       );
       continue;
     }
@@ -2294,7 +2298,7 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
     const aliasFb = serFallbacks(srcWire, sPipeOrRef);
     const aliasErrf = serCatch(srcWire, sPipeOrRef);
-    lines.push(`alias ${sourcePart}${aliasFb}${aliasErrf} as ${alias}`);
+    lines.push(`alias ${alias} <- ${sourcePart}${aliasFb}${aliasErrf}`);
   }
   // Also emit wires reading from top-level __local bindings
   for (const lw of localReadWires) {

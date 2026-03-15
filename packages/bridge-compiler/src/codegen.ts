@@ -3454,7 +3454,7 @@ class CodegenContext {
             return this.elementWireToExpr(w, elVar);
           }
         }
-        // Check if this is a pipe tool call (alias tool:source as name)
+        // Check if this is a pipe tool call (alias name <- tool:source)
         if (isPull(w) && w.pipe) {
           return this.elementWireToExpr(w, elVar);
         }

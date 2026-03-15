@@ -248,7 +248,7 @@ bridge Query.enriched {
   with output as o
 
   o <- api.items[] as it {
-    alias enrich:it as resp
+    alias resp <- enrich:it
     .a <- resp.a
     .b <- resp.b
   }
