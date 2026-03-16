@@ -21,10 +21,12 @@ import type {
 import { SELF_MODULE } from "../types.ts";
 import { TraceCollector, resolveToolMeta } from "../tracing.ts";
 import {
+  BridgeAbortError,
   isFatalError,
   applyControlFlow,
   isLoopControlSignal,
   decrementLoopControl,
+  wrapBridgeRuntimeError,
   BREAK_SYM,
   CONTINUE_SYM,
 } from "../tree-types.ts";
@@ -531,9 +533,16 @@ class ExecutionScope {
         setPath(input, wire.target.path, value);
       }
 
+      // Short-circuit if externally aborted
+      if (this.engine.signal?.aborted) throw new BridgeAbortError();
+
+      const toolContext = {
+        logger: this.engine.logger,
+        signal: this.engine.signal,
+      };
       const startMs = performance.now();
       try {
-        const result = await fn(input, { logger: this.engine.logger });
+        const result = await fn(input, toolContext);
         const durationMs = performance.now() - startMs;
 
         if (this.engine.tracer && doTrace) {
@@ -551,6 +560,15 @@ class ExecutionScope {
 
         return result;
       } catch (err) {
+        // Normalize platform AbortError to BridgeAbortError
+        if (
+          this.engine.signal?.aborted &&
+          err instanceof DOMException &&
+          err.name === "AbortError"
+        ) {
+          throw new BridgeAbortError();
+        }
+
         const durationMs = performance.now() - startMs;
 
         if (this.engine.tracer && doTrace) {
@@ -676,6 +694,7 @@ interface EngineContext {
   readonly context: Record<string, unknown>;
   readonly logger?: Logger;
   readonly tracer?: TraceCollector;
+  readonly signal?: AbortSignal;
   readonly toolDefCache: Map<string, ToolDef | null>;
 }
 
@@ -1239,9 +1258,15 @@ async function evaluatePipeExpression(
   setPath(input, pipePath, sourceValue);
 
   // 5. Call tool (not memoized — each pipe is independent)
+  if (scope.engine.signal?.aborted) throw new BridgeAbortError();
+
+  const toolContext = {
+    logger: scope.engine.logger,
+    signal: scope.engine.signal,
+  };
   const startMs = performance.now();
   try {
-    const result = await fn(input, { logger: scope.engine.logger });
+    const result = await fn(input, toolContext);
     const durationMs = performance.now() - startMs;
 
     if (scope.engine.tracer && doTrace) {
@@ -1259,6 +1284,14 @@ async function evaluatePipeExpression(
 
     return result;
   } catch (err) {
+    if (
+      scope.engine.signal?.aborted &&
+      err instanceof DOMException &&
+      err.name === "AbortError"
+    ) {
+      throw new BridgeAbortError();
+    }
+
     const durationMs = performance.now() - startMs;
 
     if (scope.engine.tracer && doTrace) {
@@ -1355,7 +1388,8 @@ function resolveConst(ref: NodeRef, scope: ExecutionScope): unknown {
 
   const parsed: unknown = JSON.parse(constDef.value);
   const remaining = ref.path.slice(1);
-  return getPath(parsed, remaining, ref.rootSafe, ref.pathSafe);
+  const remainingPathSafe = ref.pathSafe?.slice(1);
+  return getPath(parsed, remaining, ref.rootSafe, remainingPathSafe);
 }
 
 /**
@@ -1440,6 +1474,7 @@ export async function executeBridge<T = unknown>(
     context,
     logger: options.logger,
     tracer,
+    signal: options.signal,
     toolDefCache: new Map(),
   };
 
@@ -1460,11 +1495,20 @@ export async function executeBridge<T = unknown>(
       ...forcePromises,
     ]);
   } catch (err) {
-    // Attach collected traces to error for harness/caller access
-    if (tracer) {
-      (err as { traces?: ToolTrace[] }).traces = tracer.traces;
+    if (isFatalError(err)) {
+      // Attach collected traces to fatal errors (abort, panic)
+      if (tracer) {
+        (err as { traces?: ToolTrace[] }).traces = tracer.traces;
+      }
+      throw err;
     }
-    throw err;
+    // Wrap non-fatal errors in BridgeRuntimeError with traces
+    const wrapped = wrapBridgeRuntimeError(err);
+    if (tracer) {
+      wrapped.traces = tracer.traces;
+    }
+    wrapped.executionTraceId = 0n;
+    throw wrapped;
   }
 
   // Extract root value if a wire wrote to the output root with a non-object value

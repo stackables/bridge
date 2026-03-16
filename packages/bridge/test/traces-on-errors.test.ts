@@ -50,7 +50,6 @@ regressionTest("traces on errors", {
         assertTraces: 2,
       },
       "error carries traces from tools that completed before the failure": {
-        disable: ["v3"],
         input: {
           good: { greeting: "hello alice" },
           bad: { _error: "tool boom" },
@@ -78,7 +77,6 @@ regressionTest("traces on errors", {
     },
     "Query.soloFailure": {
       "error carries executionTraceId and traces array": {
-        disable: ["v3"],
         input: { bad: { _error: "tool boom" } },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);

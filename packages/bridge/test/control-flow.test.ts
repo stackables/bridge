@@ -409,8 +409,7 @@ regressionTest("continue and break in arrays", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("AbortSignal control flow", {
-  // v3 does not yet support AbortSignal propagation
-  disable: ["v3"],
+  disable: [],
   bridge: bridge`
     version 1.5
 

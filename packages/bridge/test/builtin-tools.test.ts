@@ -55,7 +55,6 @@ describe("builtin tools", () => {
           assertTraces: 4,
         },
         "missing std tool when namespace overridden": {
-          disable: ["v3"],
           input: { text: "Hello" },
           tools: {
             std: { somethingElse: () => ({}) },
@@ -162,7 +161,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
-          disable: ["v3"],
           input: {},
           tools: {
             getUsers: async () => {
@@ -212,7 +210,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
-          disable: ["v3"],
           input: { role: "editor" },
           tools: {
             getUsers: async () => {
@@ -223,7 +220,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "find tool failure propagates to projected fields": {
-          disable: ["v3"],
           input: { role: "editor" },
           tools: {
             std: {
@@ -265,7 +261,6 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "first tool failure propagates": {
-          disable: ["v3"],
           input: { items: ["a", "b"] },
           tools: {
             std: {
@@ -311,7 +306,6 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "strict errors with multiple elements": {
-          disable: ["v3"],
           input: { items: ["a", "b"] },
           assertError: /RuntimeError/,
           assertTraces: 0,
@@ -349,7 +343,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "toArray tool failure propagates": {
-          disable: ["v3"],
           input: { value: "hello" },
           tools: {
             std: {

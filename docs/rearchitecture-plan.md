@@ -297,36 +297,44 @@ shared-parity.test.ts (ToolDef, define), scope-and-edges.test.ts
 - `with const as c` — reading from document-level `const` declarations
 - Const values resolved via `resolveRef` scope chain
 
-#### V3-Phase 8: Overdefinition / Multi-wire
+#### V3-Phase 8: AbortSignal + Error Wrapping + Traces ✅ COMPLETE
+
+**Unlocks:** control-flow.test.ts (AbortSignal), traces-on-errors.test.ts,
+coalesce-cost.test.ts (error propagation), builtin-tools.test.ts (error propagation)
+
+- AbortSignal propagation: signal added to EngineContext, pre-abort check in callTool/pipe
+- AbortSignal passed through toolContext alongside logger
+- Platform AbortError (`DOMException`) normalized to `BridgeAbortError`
+- Non-fatal errors wrapped in `BridgeRuntimeError` via `wrapBridgeRuntimeError`
+- Traces and `executionTraceId` attached to error objects on failure
+- Fix: const `pathSafe` array sliced alongside path in `resolveConst`
+- Safe navigation (`?.`) on non-existent const paths now works correctly
+
+#### V3-Phase 9: Overdefinition / Multi-wire
 
 **Unlocks:** coalesce-cost.test.ts (overdefinition), shared-parity.test.ts
 (overdefinition)
 
 - Multiple wires to same target with cost-based prioritization
 - Nullish coalescing across wires
-- Currently 8 scenarios disabled for v3 in coalesce-cost.test.ts
 
-#### V3-Phase 9: Advanced Features
+#### V3-Phase 10: Advanced Features
 
 - Spread syntax (`... <- a`)
 - Native batching
 - Memoized loop tools
-- Error location tracking (BridgeRuntimeError wrapping)
+- Error location tracking (bridgeLoc on BridgeRuntimeError)
 - Prototype pollution guards
 - Infinite loop protection
-- Context binding (`with context`)
-- AbortSignal propagation to tool context
 - Eager tool evaluation for trace count parity with v1
+- Catch pipe source (blocked by parser: `catch tool:source`)
 
 #### V3 Remaining Disabled Scenarios
 
-These scenarios are individually disabled for v3 due to architectural
-differences (lazy vs eager evaluation):
+These scenarios are individually disabled for v3:
 
-- `builtin-tools.test.ts` — 7 scenarios (trace count mismatches due to lazy eval)
-- `control-flow.test.ts` — 1 scenario (panic trace count), 1 group (AbortSignal)
-- `traces-on-errors.test.ts` — 2 scenarios (error trace ordering)
-- `resilience.test.ts` — 2 scenarios (overdefinition-related)
+- `control-flow.test.ts` — 1 scenario (panic ordering: lazy eval fires panic before tool wires)
+- `resilience.test.ts` — 2 scenarios (catch pipe source: blocked by parser)
 
 ---
 

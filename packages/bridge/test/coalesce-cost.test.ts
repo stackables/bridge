@@ -83,7 +83,7 @@ regressionTest("|| fallback chains", {
       "a throws → uncaught wires fail": {
         input: { a: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 1,
         assertGraphql: {
@@ -96,7 +96,7 @@ regressionTest("|| fallback chains", {
       "b throws → fallback error propagates": {
         input: { b: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
         assertGraphql: {
@@ -109,7 +109,7 @@ regressionTest("|| fallback chains", {
       "c throws → third-position fallback error": {
         input: { c: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 3,
         assertGraphql: {
@@ -401,7 +401,7 @@ regressionTest("?. safe execution modifier", {
       "?. on non-existent const paths": {
         input: {},
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         fields: ["constChained", "constMixed"],
         assertData: {
           constChained: "A",
@@ -412,7 +412,7 @@ regressionTest("?. safe execution modifier", {
       "b throws in fallback position → error propagates": {
         input: { a: { _error: "any" }, b: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         fields: ["withToolFallback"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
@@ -507,7 +507,7 @@ regressionTest("mixed || and ?? chains", {
       "a throws → error on all wires": {
         input: { a: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 1,
         assertGraphql: {
@@ -519,7 +519,7 @@ regressionTest("mixed || and ?? chains", {
       "b throws → fallback error": {
         input: { b: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
         assertGraphql: {
@@ -531,7 +531,7 @@ regressionTest("mixed || and ?? chains", {
       "c throws → fallback:1 error on fourItem": {
         input: { c: { _error: "boom" } },
         allowDowngrade: true,
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         fields: ["fourItem"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 3,
