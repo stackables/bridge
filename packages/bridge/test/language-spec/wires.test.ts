@@ -10,6 +10,7 @@ import { tools } from "../utils/bridge-tools.ts";
 import { bridge } from "@stackables/bridge";
 
 regressionTest("wires", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

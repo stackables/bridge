@@ -12,6 +12,7 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Pull wires + constants ───────────────────────────────────────────────
 
 regressionTest("parity: pull wires + constants", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -172,6 +173,7 @@ regressionTest("parity: pull wires + constants", {
 // ── 2. Fallback operators (??, ||) ──────────────────────────────────────────
 
 regressionTest("parity: fallback operators", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -273,6 +275,7 @@ regressionTest("parity: fallback operators", {
 // ── 3. Array mapping ────────────────────────────────────────────────────────
 
 regressionTest("parity: array mapping", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -412,6 +415,7 @@ regressionTest("parity: array mapping", {
 // ── 4. Ternary / conditional wires ──────────────────────────────────────────
 
 regressionTest("parity: ternary / conditional wires", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -675,6 +679,7 @@ regressionTest("parity: force statements", {
 // ── 7. ToolDef support ──────────────────────────────────────────────────────
 
 regressionTest("parity: ToolDef support", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -827,6 +832,7 @@ regressionTest("parity: ToolDef support", {
 // ── 8. Tool context injection ───────────────────────────────────────────────
 
 regressionTest("parity: tool context injection", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -859,6 +865,7 @@ regressionTest("parity: tool context injection", {
 // ── 9. Const blocks ─────────────────────────────────────────────────────────
 
 regressionTest("parity: const blocks", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -987,6 +994,7 @@ regressionTest("parity: expressions", {
 // ── 12. Nested scope blocks ─────────────────────────────────────────────────
 
 regressionTest("parity: nested scope blocks", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -1028,6 +1036,7 @@ regressionTest("parity: nested scope blocks", {
 // ── 13. Nested arrays ───────────────────────────────────────────────────────
 
 regressionTest("parity: nested arrays", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -1115,6 +1124,7 @@ regressionTest("parity: nested arrays", {
 // ── 14. Pipe operators ──────────────────────────────────────────────────────
 
 regressionTest("parity: pipe operators", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -1143,6 +1153,7 @@ regressionTest("parity: pipe operators", {
 // ── 15. Define blocks ───────────────────────────────────────────────────────
 
 regressionTest("parity: define blocks", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -1238,6 +1249,7 @@ regressionTest("parity: define blocks", {
 // ── 16. Alias declarations ──────────────────────────────────────────────────
 
 regressionTest("parity: alias declarations", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

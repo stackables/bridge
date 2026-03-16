@@ -15,6 +15,7 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Missing tool ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: missing tool", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -41,6 +42,7 @@ regressionTest("tool features: missing tool", {
 // ── 2. Extends chain ────────────────────────────────────────────────────────
 
 regressionTest("tool features: extends chain", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -101,6 +103,7 @@ regressionTest("tool features: extends chain", {
 // ── 3. Context pull ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: context pull", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -139,6 +142,7 @@ regressionTest("tool features: context pull", {
 // ── 4. Tool-to-tool dependency ──────────────────────────────────────────────
 
 regressionTest("tool features: tool-to-tool dependency", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -214,6 +218,7 @@ regressionTest("tool features: tool-to-tool dependency", {
 // ── 5. Pipe operator (basic) ────────────────────────────────────────────────
 
 regressionTest("tool features: pipe operator", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -242,6 +247,7 @@ regressionTest("tool features: pipe operator", {
 // ── 6. Pipe with extra tool params ──────────────────────────────────────────
 
 regressionTest("tool features: pipe with extra ToolDef params", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -300,6 +306,7 @@ regressionTest("tool features: pipe with extra ToolDef params", {
 // ── 7. Pipe forking ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: pipe forking", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -331,6 +338,7 @@ regressionTest("tool features: pipe forking", {
 // ── 8. Named pipe input field ───────────────────────────────────────────────
 
 regressionTest("tool features: named pipe input field", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

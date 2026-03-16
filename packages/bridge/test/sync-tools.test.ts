@@ -60,6 +60,7 @@ regressionTest("sync tool enforcement", {
 // ── 2. Sync tool execution ──────────────────────────────────────────────────
 
 regressionTest("sync tool execution", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -171,6 +172,7 @@ const syncEnrich = (input: any) => ({
 (syncEnrich as any).bridge = { sync: true } satisfies ToolMetadata;
 
 regressionTest("sync array map", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

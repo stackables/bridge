@@ -1997,6 +1997,24 @@ export function buildBody(
         continue;
       }
 
+      // Scope block: .field { .sub <- source, ... }
+      if (wc.elemScopeBlock) {
+        const scopeBody: Statement[] = [];
+        for (const scopeLine of subs(selfWire, "elemScopeLine")) {
+          buildPathScopeLine(scopeLine, scopeBody, undefined);
+        }
+        for (const spreadLine of subs(selfWire, "elemSpreadLine")) {
+          buildSpreadLine(spreadLine, scopeBody, undefined);
+        }
+        body.push({
+          kind: "scope",
+          target: toRef,
+          body: scopeBody,
+          loc: locFromNode(selfWire),
+        } satisfies ScopeStatement);
+        continue;
+      }
+
       // Pull wire
       const rhs = buildWireRHS(selfWire, selfLineNum, undefined, {
         stringSource: "elemStringSource",

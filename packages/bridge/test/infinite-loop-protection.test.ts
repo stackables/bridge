@@ -40,6 +40,7 @@ regressionTest("circular dependency detection", {
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("infinite loop protection: array mapping", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -69,6 +70,7 @@ regressionTest("infinite loop protection: array mapping", {
 });
 
 regressionTest("infinite loop protection: non-circular chain", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

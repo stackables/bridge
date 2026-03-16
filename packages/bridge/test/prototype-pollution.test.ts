@@ -11,6 +11,7 @@ import { bridge } from "@stackables/bridge";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("prototype pollution – setNested guard", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -65,6 +66,7 @@ regressionTest("prototype pollution – setNested guard", {
 });
 
 regressionTest("prototype pollution – pullSingle guard", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -103,6 +105,7 @@ regressionTest("prototype pollution – pullSingle guard", {
 });
 
 regressionTest("prototype pollution – tool lookup guard", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

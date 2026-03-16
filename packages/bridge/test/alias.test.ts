@@ -21,12 +21,12 @@ regressionTest("alias keyword", {
         .value <- i.value || "Fallback 1"
       } || c.realArray[] as i {
         .value <- i.value || "Fallback 2"
-      } catch "No arrays"
+      } catch []
 
     }
 
   `,
-  disable: true,
+  disable: ["compiled", "parser"],
   tools: tools,
   scenarios: {
     "Array.is_wire": {

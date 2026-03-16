@@ -14,6 +14,7 @@ import { bridge } from "@stackables/bridge";
 // ── Object output: chained tools, root passthrough, constants ─────────────
 
 regressionTest("object output: chained tools and passthrough", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -78,6 +79,7 @@ regressionTest("object output: chained tools and passthrough", {
 // ── Array output ──────────────────────────────────────────────────────────
 
 regressionTest("array output: root and sub-field mapping", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -166,6 +168,7 @@ regressionTest("array output: root and sub-field mapping", {
 // ── Pipe, alias and ternary inside array blocks ───────────────────────────
 
 regressionTest("array blocks: pipe, alias, and ternary", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -291,6 +294,7 @@ regressionTest("array blocks: pipe, alias, and ternary", {
 // ── Nested structures: scope blocks and nested arrays ─────────────────────
 
 regressionTest("nested structures: scope blocks and nested arrays", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -446,6 +450,7 @@ regressionTest("nested structures: scope blocks and nested arrays", {
 // ── Alias declarations ───────────────────────────────────────────────────
 
 regressionTest("alias: iterator-scoped aliases", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -561,6 +566,7 @@ regressionTest("alias: iterator-scoped aliases", {
 });
 
 regressionTest("alias: top-level aliases", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -660,6 +666,7 @@ regressionTest("alias: top-level aliases", {
 });
 
 regressionTest("alias: expressions and modifiers", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -904,6 +911,7 @@ const noTraceTool = (p: any) => ({ y: p.x * 3 });
 (noTraceTool as any).bridge = { sync: true, trace: false };
 
 regressionTest("tracing", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

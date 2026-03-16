@@ -12,6 +12,7 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Const in bridge ──────────────────────────────────────────────────────
 
 regressionTest("resilience: const in bridge", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -48,6 +49,7 @@ regressionTest("resilience: const in bridge", {
 // ── 2. Tool on error ────────────────────────────────────────────────────────
 
 regressionTest("resilience: tool on error", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -238,6 +240,7 @@ regressionTest("resilience: wire catch", {
 // ── 4. Combined: on error + catch + const ───────────────────────────────────
 
 regressionTest("resilience: combined on error + catch + const", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

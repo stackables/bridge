@@ -3,8 +3,12 @@ import type { Logger } from "../tree-types.ts";
 import type {
   Bridge,
   BridgeDocument,
+  ConstDef,
+  DefineDef,
   Expression,
+  HandleBinding,
   NodeRef,
+  ScopeStatement,
   SourceChain,
   Statement,
   ToolDef,
@@ -14,8 +18,9 @@ import type {
   WireStatement,
 } from "../types.ts";
 import { SELF_MODULE } from "../types.ts";
-import { TraceCollector } from "../tracing.ts";
+import { TraceCollector, resolveToolMeta } from "../tracing.ts";
 import { isFatalError } from "../tree-types.ts";
+import { UNSAFE_KEYS } from "../tree-utils.ts";
 import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
@@ -131,12 +136,19 @@ function getPath(
 ): unknown {
   let current: unknown = obj;
   for (let i = 0; i < path.length; i++) {
+    const segment = path[i]!;
+    if (UNSAFE_KEYS.has(segment))
+      throw new Error(`Unsafe property traversal: ${segment}`);
     if (current == null || typeof current !== "object") {
       const safe = pathSafe?.[i] ?? (i === 0 ? (rootSafe ?? false) : false);
-      if (safe) return undefined;
-      return undefined; // path traversal naturally returns undefined
+      if (safe) {
+        current = undefined;
+        continue;
+      }
+      // Strict path: simulate JS property access to get TypeError on null
+      return (current as Record<string, unknown>)[segment];
     }
-    current = (current as Record<string, unknown>)[path[i]!];
+    current = (current as Record<string, unknown>)[segment];
   }
   return current;
 }
@@ -166,6 +178,8 @@ function setPath(
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i]!;
+    if (UNSAFE_KEYS.has(segment))
+      throw new Error(`Unsafe assignment key: ${segment}`);
     if (
       current[segment] == null ||
       typeof current[segment] !== "object" ||
@@ -177,6 +191,8 @@ function setPath(
   }
   const leaf = path[path.length - 1];
   if (leaf !== undefined) {
+    if (UNSAFE_KEYS.has(leaf))
+      throw new Error(`Unsafe assignment key: ${leaf}`);
     current[leaf] = value;
   }
 }
@@ -199,6 +215,7 @@ function lookupToolFn(
     const parts = name.split(".");
     let current: unknown = tools;
     for (const part of parts) {
+      if (UNSAFE_KEYS.has(part)) return undefined;
       if (current == null || typeof current !== "object") return undefined;
       current = (current as Record<string, unknown>)[part];
     }
@@ -247,6 +264,18 @@ class ExecutionScope {
   /** Cached alias evaluation results. */
   private readonly aliasResults = new Map<string, Promise<unknown>>();
 
+  /** Handle bindings — maps handle alias to binding info. */
+  private readonly handleBindings = new Map<string, HandleBinding>();
+
+  /** Owned define modules — keyed by __define_<handle> prefix. */
+  private readonly ownedDefines = new Set<string>();
+
+  /** Define input wires indexed by "module:field" key. */
+  private readonly defineInputWires = new Map<string, WireStatement[]>();
+
+  /** When true, this scope acts as a root for output writes (define scopes). */
+  private isRootScope = false;
+
   constructor(
     parent: ExecutionScope | null,
     selfInput: Record<string, unknown>,
@@ -262,6 +291,52 @@ class ExecutionScope {
   /** Register that this scope owns a tool declared via `with`. */
   declareToolBinding(name: string): void {
     this.ownedTools.add(bindingOwnerKey(name));
+  }
+
+  /** Register that this scope owns a define block declared via `with`. */
+  declareDefineBinding(handle: string): void {
+    this.ownedDefines.add(`__define_${handle}`);
+  }
+
+  /** Index a define input wire (wire targeting a __define_* module). */
+  addDefineInputWire(wire: WireStatement): void {
+    const key = `${wire.target.module}:${wire.target.field}`;
+    let wires = this.defineInputWires.get(key);
+    if (!wires) {
+      wires = [];
+      this.defineInputWires.set(key, wires);
+    }
+    wires.push(wire);
+  }
+
+  /** Register a handle binding for later lookup (pipe expressions, etc.). */
+  registerHandle(binding: HandleBinding): void {
+    this.handleBindings.set(binding.handle, binding);
+  }
+
+  /** Look up a handle binding by alias, walking the scope chain. */
+  getHandleBinding(handle: string): HandleBinding | undefined {
+    const local = this.handleBindings.get(handle);
+    if (local) return local;
+    return this.parent?.getHandleBinding(handle);
+  }
+
+  /**
+   * Collect all tool input wires matching a tool name (any instance).
+   * Used by pipe expressions to merge bridge wires into the pipe call.
+   */
+  collectToolInputWiresFor(toolName: string): WireStatement[] {
+    const dot = toolName.lastIndexOf(".");
+    const module = dot === -1 ? SELF_MODULE : toolName.substring(0, dot);
+    const field = dot === -1 ? toolName : toolName.substring(dot + 1);
+    const prefix = `${module}:${field}`;
+    const result: WireStatement[] = [];
+    for (const [key, wires] of this.toolInputWires) {
+      if (key === prefix || key.startsWith(prefix + ":")) {
+        result.push(...wires);
+      }
+    }
+    return result;
   }
 
   /** Index a tool input wire for lazy evaluation during tool call. */
@@ -368,10 +443,10 @@ class ExecutionScope {
     return undefined;
   }
 
-  /** Get the root scope (for non-element output writes). */
+  /** Get the root scope (stops at define boundaries). */
   root(): ExecutionScope {
     let scope: ExecutionScope = this;
-    while (scope.parent) scope = scope.parent;
+    while (scope.parent && !scope.isRootScope) scope = scope.parent;
     return scope;
   }
 
@@ -409,6 +484,8 @@ class ExecutionScope {
   /**
    * Lazily call a tool — evaluates input wires on demand, invokes the
    * tool function, and caches the result.
+   *
+   * Supports ToolDef resolution (extends chain, base wires, onError).
    */
   private callTool(
     key: string,
@@ -416,28 +493,42 @@ class ExecutionScope {
     field: string,
   ): Promise<unknown> {
     const promise = (async () => {
-      // Pull: evaluate tool input wires lazily
+      const toolName = module === SELF_MODULE ? field : `${module}.${field}`;
+
+      // Resolve ToolDef (extends chain → root fn, merged wires, onError)
+      const toolDef = resolveToolDefByName(
+        this.engine.instructions,
+        toolName,
+        this.engine.toolDefCache,
+      );
+      const fnName = toolDef?.fn ?? toolName;
+      const fn = lookupToolFn(this.engine.tools, fnName);
+      if (!fn) throw new Error(`No tool found for "${fnName}"`);
+      const { doTrace } = resolveToolMeta(fn);
+
+      // Build input: ToolDef base wires first, then bridge wires override
       const input: Record<string, unknown> = {};
+
+      if (toolDef?.body) {
+        await evaluateToolDefBody(toolDef.body, input, this);
+      }
+
       const wires = this.toolInputWires.get(key) ?? [];
       for (const wire of wires) {
         const value = await evaluateSourceChain(wire, this);
         setPath(input, wire.target.path, value);
       }
 
-      const toolName = module === SELF_MODULE ? field : `${module}.${field}`;
-      const fn = lookupToolFn(this.engine.tools, toolName);
-      if (!fn) throw new Error(`Tool function "${toolName}" not registered`);
-
       const startMs = performance.now();
       try {
         const result = await fn(input, { logger: this.engine.logger });
         const durationMs = performance.now() - startMs;
 
-        if (this.engine.tracer) {
+        if (this.engine.tracer && doTrace) {
           this.engine.tracer.record(
             this.engine.tracer.entry({
               tool: toolName,
-              fn: toolName,
+              fn: fnName,
               input,
               output: result,
               durationMs,
@@ -450,11 +541,11 @@ class ExecutionScope {
       } catch (err) {
         const durationMs = performance.now() - startMs;
 
-        if (this.engine.tracer) {
+        if (this.engine.tracer && doTrace) {
           this.engine.tracer.record(
             this.engine.tracer.entry({
               tool: toolName,
-              fn: toolName,
+              fn: fnName,
               input,
               error: (err as Error).message,
               durationMs,
@@ -463,8 +554,100 @@ class ExecutionScope {
           );
         }
 
+        if (isFatalError(err)) throw err;
+
+        if (toolDef?.onError) {
+          if ("value" in toolDef.onError)
+            return JSON.parse(toolDef.onError.value);
+          // source-based onError — resolve from ToolDef handles
+          if ("source" in toolDef.onError) {
+            const parts = toolDef.onError.source.split(".");
+            const src = parts[0]!;
+            const path = parts.slice(1);
+            const handle = toolDef.handles.find((h) => h.handle === src);
+            if (handle?.kind === "context") {
+              return getPath(this.engine.context, path);
+            }
+          }
+        }
+
         throw err;
       }
+    })();
+
+    this.toolResults.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Resolve a define block result via scope chain.
+   * Creates a child scope, indexes define body, and pulls output.
+   */
+  async resolveDefine(
+    module: string,
+    field: string,
+    instance: number | undefined,
+  ): Promise<unknown> {
+    const key = `${module}:${field}`;
+
+    // Check memoization
+    if (this.toolResults.has(key)) return this.toolResults.get(key)!;
+
+    // Check ownership
+    if (this.ownedDefines.has(module)) {
+      return this.executeDefine(key, module);
+    }
+
+    // Delegate to parent
+    if (this.parent) {
+      return this.parent.resolveDefine(module, field, instance);
+    }
+
+    throw new Error(`Define "${module}" not found in any scope`);
+  }
+
+  /**
+   * Execute a define block — build input from bridge wires, create
+   * child scope with define body, pull output.
+   */
+  private executeDefine(key: string, module: string): Promise<unknown> {
+    const promise = (async () => {
+      // Map from handle alias to define name via handle bindings
+      const handle = module.substring("__define_".length);
+      const binding = this.getHandleBinding(handle);
+      const defineName = binding?.kind === "define" ? binding.name : handle;
+
+      const defineDef = this.engine.instructions.find(
+        (i): i is DefineDef => i.kind === "define" && i.name === defineName,
+      );
+      if (!defineDef?.body)
+        throw new Error(`Define "${defineName}" not found or has no body`);
+
+      // Collect bridge wires targeting this define (input wires)
+      const inputWires = this.defineInputWires.get(key) ?? [];
+      const defineInput: Record<string, unknown> = {};
+      for (const wire of inputWires) {
+        const value = await evaluateSourceChain(wire, this);
+        setPath(defineInput, wire.target.path, value);
+      }
+
+      // Create child scope with define input as selfInput
+      const defineOutput: Record<string, unknown> = {};
+      const defineScope = new ExecutionScope(
+        this,
+        defineInput,
+        defineOutput,
+        this.engine,
+      );
+      defineScope.isRootScope = true;
+
+      // Index define body and pull output
+      indexStatements(defineDef.body, defineScope);
+      await resolveRequestedFields(defineScope, []);
+
+      return "__rootValue__" in defineOutput
+        ? defineOutput.__rootValue__
+        : defineOutput;
     })();
 
     this.toolResults.set(key, promise);
@@ -475,12 +658,143 @@ class ExecutionScope {
 /** Shared engine-wide context. */
 interface EngineContext {
   readonly tools: ToolMap;
-  readonly instructions: readonly (Bridge | ToolDef | { kind: string })[];
+  readonly instructions: readonly (Bridge | ToolDef | ConstDef | DefineDef)[];
   readonly type: string;
   readonly field: string;
   readonly context: Record<string, unknown>;
   readonly logger?: Logger;
   readonly tracer?: TraceCollector;
+  readonly toolDefCache: Map<string, ToolDef | null>;
+}
+
+// ── ToolDef resolution ──────────────────────────────────────────────────────
+
+/**
+ * Resolve a ToolDef by name, walking the extends chain.
+ * Returns a merged ToolDef with fn from root, accumulated body, last onError.
+ * Returns undefined if no ToolDef exists for this name.
+ */
+function resolveToolDefByName(
+  instructions: readonly (Bridge | ToolDef | ConstDef | DefineDef)[],
+  name: string,
+  cache: Map<string, ToolDef | null>,
+): ToolDef | undefined {
+  if (cache.has(name)) return cache.get(name) ?? undefined;
+
+  const toolDefs = instructions.filter((i): i is ToolDef => i.kind === "tool");
+  const base = toolDefs.find((t) => t.name === name);
+  if (!base) {
+    cache.set(name, null);
+    return undefined;
+  }
+
+  // Build extends chain: root → ... → leaf
+  const chain: ToolDef[] = [base];
+  let current = base;
+  while (current.extends) {
+    const parent = toolDefs.find((t) => t.name === current.extends);
+    if (!parent)
+      throw new Error(
+        `Tool "${current.name}" extends unknown tool "${current.extends}"`,
+      );
+    chain.unshift(parent);
+    current = parent;
+  }
+
+  // Merge: fn from root, handles deduplicated, body accumulated, onError last wins
+  const merged: ToolDef = {
+    kind: "tool",
+    name,
+    fn: chain[0]!.fn,
+    handles: [],
+    wires: [],
+    body: [],
+  };
+
+  for (const def of chain) {
+    for (const h of def.handles) {
+      if (!merged.handles.some((mh) => mh.handle === h.handle)) {
+        merged.handles.push(h);
+      }
+    }
+    if (def.body) {
+      merged.body!.push(...def.body);
+    }
+    if (def.onError) merged.onError = def.onError;
+  }
+
+  cache.set(name, merged);
+  return merged;
+}
+
+/**
+ * Evaluate ToolDef body statements to build base tool input.
+ * Creates a child scope for inner tool handles and context resolution.
+ */
+async function evaluateToolDefBody(
+  body: Statement[],
+  input: Record<string, unknown>,
+  callerScope: ExecutionScope,
+): Promise<void> {
+  // Create a temporary scope for ToolDef body — inner tools are owned here
+  const toolDefScope = new ExecutionScope(
+    callerScope,
+    callerScope.selfInput,
+    {},
+    callerScope.engine,
+  );
+
+  // Register inner tool handles
+  for (const stmt of body) {
+    if (stmt.kind === "with") {
+      if (stmt.binding.kind === "tool") {
+        toolDefScope.declareToolBinding(stmt.binding.name);
+      }
+      toolDefScope.registerHandle(stmt.binding);
+    }
+  }
+
+  // Index inner tool input wires (for tool-to-tool deps within ToolDef)
+  for (const stmt of body) {
+    if (stmt.kind === "wire" && stmt.target.instance != null) {
+      toolDefScope.addToolInputWire(stmt);
+    }
+  }
+
+  // Evaluate wires targeting the tool itself (no instance = tool config)
+  for (const stmt of body) {
+    if (stmt.kind === "wire" && stmt.target.instance == null) {
+      const value = await evaluateSourceChain(stmt, toolDefScope);
+      setPath(input, stmt.target.path, value);
+    } else if (stmt.kind === "scope") {
+      await evaluateToolDefScope(stmt, input, toolDefScope);
+    }
+  }
+}
+
+/** Recursively evaluate scope blocks inside ToolDef bodies. */
+async function evaluateToolDefScope(
+  scope: ScopeStatement,
+  input: Record<string, unknown>,
+  toolDefScope: ExecutionScope,
+): Promise<void> {
+  const prefix = scope.target.path;
+  for (const inner of scope.body) {
+    if (inner.kind === "wire" && inner.target.instance == null) {
+      const value = await evaluateSourceChain(inner, toolDefScope);
+      setPath(input, [...prefix, ...inner.target.path], value);
+    } else if (inner.kind === "scope") {
+      // Nest the inner scope under the current prefix
+      const nested: ScopeStatement = {
+        ...inner,
+        target: {
+          ...inner.target,
+          path: [...prefix, ...inner.target.path],
+        },
+      };
+      await evaluateToolDefScope(nested, input, toolDefScope);
+    }
+  }
 }
 
 // ── Statement indexing & pulling ────────────────────────────────────────────
@@ -499,10 +813,18 @@ function indexStatements(
       case "with":
         if (stmt.binding.kind === "tool") {
           scope.declareToolBinding(stmt.binding.name);
+        } else if (stmt.binding.kind === "define") {
+          scope.declareDefineBinding(stmt.binding.handle);
         }
+        scope.registerHandle(stmt.binding);
         break;
       case "wire": {
         const target = stmt.target;
+        // Define input wire — wire targeting a __define_* module
+        if (target.module.startsWith("__define_")) {
+          scope.addDefineInputWire(stmt);
+          break;
+        }
         const isToolInput = target.instance != null && !target.element;
         if (isToolInput) {
           // Direct tool input wire (e.g. a.q <- i.q)
@@ -756,9 +1078,7 @@ async function evaluateExpression(
     }
 
     case "pipe":
-      throw new Error(
-        `Expression type "${expr.type}" not implemented in v3 POC`,
-      );
+      return evaluatePipeExpression(expr, scope);
 
     default:
       throw new Error(`Unknown expression type: ${(expr as Expression).type}`);
@@ -775,8 +1095,9 @@ async function evaluateExpression(
 async function evaluateArrayExpr(
   expr: Extract<Expression, { type: "array" }>,
   scope: ExecutionScope,
-): Promise<unknown[]> {
+): Promise<unknown[] | null> {
   const sourceValue = await evaluateExpression(expr.source, scope);
+  if (sourceValue == null) return null;
   if (!Array.isArray(sourceValue)) return [];
 
   const results: unknown[] = [];
@@ -802,6 +1123,107 @@ async function evaluateArrayExpr(
 }
 
 /**
+ * Evaluate a pipe expression — creates an independent tool call.
+ *
+ * Each pipe evaluation is a separate, non-memoized tool call.
+ * Pipe source goes to `input.in` (default) or `input.<named>` (if path set).
+ * ToolDef base wires and bridge input wires are merged in.
+ */
+async function evaluatePipeExpression(
+  expr: Extract<Expression, { type: "pipe" }>,
+  scope: ExecutionScope,
+): Promise<unknown> {
+  // 1. Evaluate source
+  const sourceValue = await evaluateExpression(expr.source, scope);
+
+  // 2. Look up handle binding
+  const binding = scope.getHandleBinding(expr.handle);
+  if (!binding)
+    throw new Error(`Pipe handle "${expr.handle}" not found in scope`);
+
+  if (binding.kind !== "tool")
+    throw new Error(
+      `Pipe handle "${expr.handle}" must reference a tool, got "${binding.kind}"`,
+    );
+
+  // 3. Resolve ToolDef
+  const toolName = binding.name;
+  const toolDef = resolveToolDefByName(
+    scope.engine.instructions,
+    toolName,
+    scope.engine.toolDefCache,
+  );
+  const fnName = toolDef?.fn ?? toolName;
+  const fn = lookupToolFn(scope.engine.tools, fnName);
+  if (!fn) throw new Error(`No tool found for "${fnName}"`);
+  const { doTrace } = resolveToolMeta(fn);
+
+  // 4. Build input
+  const input: Record<string, unknown> = {};
+
+  // 4a. ToolDef body wires (base configuration)
+  if (toolDef?.body) {
+    await evaluateToolDefBody(toolDef.body, input, scope);
+  }
+
+  // 4b. Bridge wires for this tool (non-pipe input wires)
+  const bridgeWires = scope.collectToolInputWiresFor(toolName);
+  for (const wire of bridgeWires) {
+    const value = await evaluateSourceChain(wire, scope);
+    setPath(input, wire.target.path, value);
+  }
+
+  // 4c. Pipe source → "in" or named field
+  const pipePath = expr.path && expr.path.length > 0 ? expr.path : ["in"];
+  setPath(input, pipePath, sourceValue);
+
+  // 5. Call tool (not memoized — each pipe is independent)
+  const startMs = performance.now();
+  try {
+    const result = await fn(input, { logger: scope.engine.logger });
+    const durationMs = performance.now() - startMs;
+
+    if (scope.engine.tracer && doTrace) {
+      scope.engine.tracer.record(
+        scope.engine.tracer.entry({
+          tool: toolName,
+          fn: fnName,
+          input,
+          output: result,
+          durationMs,
+          startedAt: scope.engine.tracer.now() - durationMs,
+        }),
+      );
+    }
+
+    return result;
+  } catch (err) {
+    const durationMs = performance.now() - startMs;
+
+    if (scope.engine.tracer && doTrace) {
+      scope.engine.tracer.record(
+        scope.engine.tracer.entry({
+          tool: toolName,
+          fn: fnName,
+          input,
+          error: (err as Error).message,
+          durationMs,
+          startedAt: scope.engine.tracer.now() - durationMs,
+        }),
+      );
+    }
+
+    if (isFatalError(err)) throw err;
+
+    if (toolDef?.onError) {
+      if ("value" in toolDef.onError) return JSON.parse(toolDef.onError.value);
+    }
+
+    throw err;
+  }
+}
+
+/**
  * Resolve a NodeRef to its value.
  */
 async function resolveRef(
@@ -824,6 +1246,26 @@ async function resolveRef(
     return getPath(aliasResult, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
+  // Context reference — reading from engine-supplied context
+  if (ref.type === "Context") {
+    return getPath(scope.engine.context, ref.path, ref.rootSafe, ref.pathSafe);
+  }
+
+  // Const reference — reading from const definitions
+  if (ref.type === "Const") {
+    return resolveConst(ref, scope);
+  }
+
+  // Define reference — resolve define subgraph
+  if (ref.module.startsWith("__define_")) {
+    const result = await scope.resolveDefine(
+      ref.module,
+      ref.field,
+      ref.instance,
+    );
+    return getPath(result, ref.path, ref.rootSafe, ref.pathSafe);
+  }
+
   // Self-module input reference — reading from input args
   if (ref.module === SELF_MODULE && ref.instance == null) {
     return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
@@ -836,6 +1278,23 @@ async function resolveRef(
     ref.instance,
   );
   return getPath(toolResult, ref.path, ref.rootSafe, ref.pathSafe);
+}
+
+/**
+ * Resolve a const reference — looks up the ConstDef by name and traverses path.
+ */
+function resolveConst(ref: NodeRef, scope: ExecutionScope): unknown {
+  if (!ref.path.length) return undefined;
+
+  const constName = ref.path[0]!;
+  const constDef = scope.engine.instructions.find(
+    (i): i is ConstDef => i.kind === "const" && i.name === constName,
+  );
+  if (!constDef) throw new Error(`Const "${constName}" not found`);
+
+  const parsed: unknown = JSON.parse(constDef.value);
+  const remaining = ref.path.slice(1);
+  return getPath(parsed, remaining, ref.rootSafe, ref.pathSafe);
 }
 
 /**
@@ -920,6 +1379,7 @@ export async function executeBridge<T = unknown>(
     context,
     logger: options.logger,
     tracer,
+    toolDefCache: new Map(),
   };
 
   // Create root scope and execute

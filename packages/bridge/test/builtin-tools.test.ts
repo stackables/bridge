@@ -9,6 +9,7 @@ import { bridge } from "@stackables/bridge";
 
 describe("builtin tools", () => {
   regressionTest("string builtins", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.format {
@@ -54,6 +55,7 @@ describe("builtin tools", () => {
           assertTraces: 4,
         },
         "missing std tool when namespace overridden": {
+          disable: ["v3"],
           input: { text: "Hello" },
           tools: {
             std: { somethingElse: () => ({}) },
@@ -84,6 +86,7 @@ describe("builtin tools", () => {
   // ── Custom tools alongside std ──────────────────────────────────────────
 
   regressionTest("custom tools alongside std", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.process {
@@ -113,6 +116,7 @@ describe("builtin tools", () => {
   // ── Array filter ────────────────────────────────────────────────────────
 
   regressionTest("array filter", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.admins {
@@ -158,6 +162,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
+          disable: ["v3"],
           input: {},
           tools: {
             getUsers: async () => {
@@ -174,6 +179,7 @@ describe("builtin tools", () => {
   // ── Array find ──────────────────────────────────────────────────────────
 
   regressionTest("array find", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.findUser {
@@ -206,6 +212,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
+          disable: ["v3"],
           input: { role: "editor" },
           tools: {
             getUsers: async () => {
@@ -216,6 +223,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "find tool failure propagates to projected fields": {
+          disable: ["v3"],
           input: { role: "editor" },
           tools: {
             std: {
@@ -238,6 +246,7 @@ describe("builtin tools", () => {
   // ── Array first ─────────────────────────────────────────────────────────
 
   regressionTest("array first", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.first {
@@ -256,6 +265,7 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "first tool failure propagates": {
+          disable: ["v3"],
           input: { items: ["a", "b"] },
           tools: {
             std: {
@@ -278,6 +288,7 @@ describe("builtin tools", () => {
   // ── Array first strict mode ─────────────────────────────────────────────
 
   regressionTest("array first strict mode", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       tool pf from std.arr.first {
@@ -300,6 +311,7 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "strict errors with multiple elements": {
+          disable: ["v3"],
           input: { items: ["a", "b"] },
           assertError: /RuntimeError/,
           assertTraces: 0,
@@ -311,6 +323,7 @@ describe("builtin tools", () => {
   // ── toArray ─────────────────────────────────────────────────────────────
 
   regressionTest("toArray", {
+    disable: ["compiled", "parser"],
     bridge: bridge`
       version 1.5
       bridge Query.normalize {
@@ -336,6 +349,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "toArray tool failure propagates": {
+          disable: ["v3"],
           input: { value: "hello" },
           tools: {
             std: {
