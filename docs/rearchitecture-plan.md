@@ -1,0 +1,217 @@
+# Rearchitect Bridge IR to Nested Scoped Statements
+
+## TL;DR
+
+Replace the flat `Wire[]` + detached `arrayIterators: Record<string, string>` IR
+with a recursive `Statement[]` tree that preserves scope boundaries, supports
+`with` declarations at any scope level with shadowing semantics, and treats
+array iterators as first-class expression-level constructs.
+
+This is the foundational change that enables all future language evolution —
+the parser→IR→engine→compiler pipeline is rebuilt bottom-up across 7 phases.
+
+---
+
+## Current Architecture (What's Broken)
+
+**Problem 1 — Flat Wire List:** `Bridge.wires: Wire[]` is a flat array. The
+parser flattens all scope nesting at parse time (e.g., `o { .lat <- x }` becomes
+flat wire `o.lat <- x`). This destroys scope boundaries that are meaningful for
+tool registration and execution.
+
+**Problem 2 — Detached Array Iterators:** Array mappings are split into:
+(a) a regular wire for the source, (b) element-marked wires with `element: true`
+in the flat list, (c) a `Record<string, string>` metadata map (`arrayIterators`).
+This makes arrays non-composable and non-aliasable.
+
+**Problem 3 — No `with` in Scopes:** Tool registrations (`with`) only work at
+bridge body level. The EBNF grammar defines `statement = with | wire | wire_alias | scope` —
+meaning `with` should work anywhere statements are allowed, including inside
+scopes and array bodies.
+
+**Problem 4 — EBNF Divergence:** The grammar treats array mapping as a
+`base_expression` (`ref[] as id { statement* }`) — it should be an expression
+chainable with `||`, `??`, `catch`, and `alias`. Currently it's baked into wire syntax.
+
+---
+
+## Phase 1: Preparation — Disable Coupled Tests
+
+_No dependencies. Single commit._
+
+1. Mark compiler tests as disabled — prefix all scripts in `bridge-compiler/package.json`
+2. Mark compiler fuzz tests as disabled
+3. Disable parser roundtrip in regression harness — `isDisabled()` globally
+   returns `true` for `"compiled"` and `"parser"` checks
+4. Skip parser roundtrip test files:
+   - `packages/bridge-parser/test/bridge-format.test.ts`
+   - `packages/bridge-parser/test/bridge-printer.test.ts`
+   - `packages/bridge-parser/test/bridge-printer-examples.test.ts`
+5. Skip IR-structure-dependent core tests:
+   - `packages/bridge-core/test/execution-tree.test.ts`
+   - `packages/bridge-core/test/enumerate-traversals.test.ts`
+   - `packages/bridge-core/test/resolve-wires.test.ts`
+6. **Keep enabled:** All behavioral `regressionTest` tests in `packages/bridge/test/`
+   (runtime path) — these are the correctness anchor
+7. Verify `pnpm build && pnpm test` passes with skipped tests noted
+
+---
+
+## Phase 2: Define New IR Data Structures
+
+_Depends on Phase 1. Changes only `bridge-core/src/types.ts`._
+
+### New types to add:
+
+```typescript
+// Scope-aware statement — the building block of nested bridge bodies
+type Statement =
+  | WireStatement // target <- expression chain
+  | WireAliasStatement // alias name <- expression chain
+  | WithStatement // with <name> [as <handle>] [memoize]
+  | ScopeStatement // target { Statement[] }
+  | ForceStatement; // force handle [catch null]
+
+// Array mapping as a first-class expression
+// Added to the Expression union:
+//   { type: "array"; source: Expression; iteratorName: string; body: Statement[] }
+```
+
+### Modifications to existing types (transition period):
+
+- **`Bridge`**: Add `body?: Statement[]` alongside existing `wires`. When `body`
+  is present, consumers should prefer it. `wires`, `arrayIterators`, `forces`
+  become legacy and are removed after migration.
+- **`ToolDef`**: Add `body?: Statement[]` alongside existing `wires`.
+- **`DefineDef`**: Add `body?: Statement[]` alongside existing `wires`.
+- **`Expression`**: Add `| { type: "array"; ... }` variant to the union.
+
+### Design constraints:
+
+- `Statement[]` is ordered — execution engine walks sequentially for wiring,
+  pulls lazily for values
+- Each `ScopeStatement` and `ArrayExpression.body` creates a new scope layer
+- Scope lookup is lexical: inner shadowing, fallthrough to parent for missing handles
+- `Wire` type itself stays — wrapped in `WireStatement` in the tree
+
+---
+
+## Phase 3: Update Parser Visitor to Produce Nested IR
+
+_Depends on Phase 2. Changes `bridge-parser/src/parser/parser.ts` visitor only._
+
+1. **`processScopeLines()`**: Stop flattening paths. Emit `ScopeStatement`.
+2. **`processElementLines()`**: Stop creating flat element-marked wires.
+   Produce `ArrayExpression` in the expression tree with `body: Statement[]`.
+3. **`bridgeBodyLine` visitor**: Emit `WithStatement` nodes in body.
+4. **Array mapping on wires**: Produce wire with source
+   `{ type: "array", ... }` instead of splitting into wire + metadata.
+5. **`force` handling**: Convert from `bridge.forces[]` to `ForceStatement`.
+6. **Expression desugaring** (arithmetic, concat, pipes): Keep as expression-level IR.
+
+**No Chevrotain grammar changes needed** — only the CST→AST visitor.
+
+---
+
+## Phase 4: Update Execution Engine
+
+_Depends on Phase 3. Most critical phase._
+
+Files: `ExecutionTree.ts`, `scheduleTools.ts`, `resolveWires.ts`,
+`resolveWiresSources.ts`, `materializeShadows.ts`.
+
+1. **Scope chain**: `ScopeFrame { handles, wires, parent? }` — tool lookup
+   walks frames upward (shadowing semantics)
+2. **Wire pre-indexing**: Walk statement tree once at construction, build
+   `Map<trunkKey, Wire[]>` for O(1) lookup
+3. **Array execution**: `ArrayExpression` evaluated → shadow tree per element
+   with nested `body: Statement[]` and iterator binding
+4. **Define inlining**: Inline as nested `Statement[]` blocks
+5. **`schedule()`/`pullSingle()`**: Scope-aware resolution
+
+**Gate:** All behavioral `regressionTest` suites must pass.
+
+---
+
+## Phase 5: Reimplement Serializer + Re-enable Parser Tests
+
+_Depends on Phase 4. Can run parallel with early Phase 6._
+
+1. Rewrite `bridge-format.ts` to walk `Statement[]` tree
+2. Update `bridge-printer.ts` for new AST shape
+3. Update `bridge-lint.ts` to walk `Statement[]`
+4. Re-enable parser roundtrip tests (with updated fixtures)
+5. Re-enable `execution-tree.test.ts`, `resolve-wires.test.ts`,
+   `enumerate-traversals.test.ts` with updated assertions
+
+---
+
+## Phase 6: Reimplement Compiler + Re-enable Compiler Tests
+
+_Depends on Phase 4. Mostly parallel with Phase 5._
+
+1. Update `codegen.ts` `CodegenContext` to walk `Statement[]`
+2. Element scoping is now explicit — wires inside `ArrayExpression.body`
+   are inherently element-scoped (simpler detection)
+3. Array codegen from `ArrayExpression` nodes
+4. Topological sort on wire graph from statement tree
+5. Re-enable `codegen.test.ts` + fuzz tests
+
+---
+
+## Phase 7: Final Validation
+
+_Depends on all phases._
+
+1. `pnpm build` — 0 type errors
+2. `pnpm lint` — 0 lint errors
+3. `pnpm test` — all tests pass, no remaining skips
+4. `pnpm e2e` — all example E2E tests pass
+5. Verify playground, VS Code extension language server, GraphQL adapter
+6. Remove legacy `wires` field from `Bridge`, `ToolDef`, `DefineDef`
+7. `pnpm changeset`
+
+---
+
+## Key Decisions
+
+| Decision              | Choice                             | Rationale                                     |
+| --------------------- | ---------------------------------- | --------------------------------------------- |
+| Scope shadowing       | Inner `with` shadows outer         | Follows lexical scoping convention            |
+| Array model           | Single-level + nesting in body     | Simpler than chained expression form          |
+| Define blocks         | Adopt nested `Statement[]`         | Consistent with bridges                       |
+| Migration             | Single branch, incremental commits | Behavioral tests are continuous anchor        |
+| Lexer/grammar         | NO changes                         | Chevrotain already parses nested syntax       |
+| Expression desugaring | Keep at expression level           | Self-contained, doesn't interact with scoping |
+
+---
+
+## Relevant Files
+
+| Area         | File                                             | Impact                                                            |
+| ------------ | ------------------------------------------------ | ----------------------------------------------------------------- |
+| Types        | `packages/bridge-core/src/types.ts`              | Add Statement, ArrayExpression; modify Bridge, ToolDef, DefineDef |
+| Parser       | `packages/bridge-parser/src/parser/parser.ts`    | `toBridgeAst()` visitor only                                      |
+| Lexer        | `packages/bridge-parser/src/parser/lexer.ts`     | NO changes                                                        |
+| Engine       | `packages/bridge-core/src/ExecutionTree.ts`      | Scope chain, wire collection, shadow creation                     |
+| Engine       | `packages/bridge-core/src/scheduleTools.ts`      | Scope-aware tool scheduling                                       |
+| Engine       | `packages/bridge-core/src/resolveWires.ts`       | Wire resolution from tree                                         |
+| Engine       | `packages/bridge-core/src/materializeShadows.ts` | Array materialization                                             |
+| Serializer   | `packages/bridge-parser/src/bridge-format.ts`    | Full rewrite for `Statement[]`                                    |
+| Compiler     | `packages/bridge-compiler/src/codegen.ts`        | `CodegenContext` tree walking                                     |
+| Linter       | `packages/bridge-parser/src/bridge-lint.ts`      | Walk `Statement[]` instead of `Wire[]`                            |
+| Lang Service | `packages/bridge-parser/src/language-service.ts` | Update for new AST                                                |
+
+---
+
+## Verification Checkpoints
+
+| After   | Check                      | Criteria                                                 |
+| ------- | -------------------------- | -------------------------------------------------------- |
+| Phase 1 | `pnpm build && pnpm test`  | Passes with noted skips, 0 failures                      |
+| Phase 2 | `pnpm build`               | Type-checks with 0 errors                                |
+| Phase 3 | Parser produces nested IR  | Behavioral parse tests still work                        |
+| Phase 4 | `pnpm test` (runtime path) | All ~36 regression suites pass                           |
+| Phase 5 | Parse → serialize → parse  | Roundtrip tests pass                                     |
+| Phase 6 | AOT parity                 | Compiler tests + fuzz parity pass                        |
+| Phase 7 | Full suite                 | `pnpm build && pnpm lint && pnpm test && pnpm e2e` green |
