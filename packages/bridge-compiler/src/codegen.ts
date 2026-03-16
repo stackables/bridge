@@ -119,7 +119,7 @@ function catchRef(w: Wire): NodeRef | undefined {
 }
 /** Get the catch value if present. */
 function catchValue(w: Wire): string | undefined {
-  return w.catch && "value" in w.catch ? w.catch.value : undefined;
+  return w.catch && "value" in w.catch ? (w.catch.value as string) : undefined;
 }
 /** Get the catch control if present. */
 function catchControl(w: Wire): ControlFlowInstruction | undefined {

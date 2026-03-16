@@ -197,7 +197,8 @@ function sourceEntryDescription(
 
 function catchDescription(w: Wire, hmap: Map<string, string>): string {
   if (!w.catch) return "catch";
-  if ("value" in w.catch) return `catch ${w.catch.value}`;
+  if ("value" in w.catch)
+    return `catch ${typeof w.catch.value === "string" ? w.catch.value : JSON.stringify(w.catch.value)}`;
   if ("ref" in w.catch) return `catch ${refLabel(w.catch.ref, hmap)}`;
   if ("control" in w.catch) return `catch ${controlLabel(w.catch.control)}`;
   return "catch";

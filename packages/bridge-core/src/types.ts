@@ -399,7 +399,7 @@ export interface WireSourceEntry {
  */
 export type WireCatch =
   | { ref: NodeRef; loc?: SourceLocation }
-  | { value: string; loc?: SourceLocation }
+  | { value: JsonValue; loc?: SourceLocation }
   | { control: ControlFlowInstruction; loc?: SourceLocation };
 
 /**

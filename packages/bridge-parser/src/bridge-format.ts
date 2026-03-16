@@ -104,7 +104,7 @@ function serializeControl(ctrl: ControlFlowInstruction): string {
 function serFallbacks(
   w: Wire,
   refFn: (ref: NodeRef) => string,
-  valFn: (v: string) => string = (v) => v,
+  valFn: (v: string) => string = (v: string) => v,
 ): string {
   if (w.sources.length <= 1) return "";
   return w.sources
@@ -124,13 +124,13 @@ function serFallbacks(
 function serCatch(
   w: Wire,
   refFn: (ref: NodeRef) => string,
-  valFn: (v: string) => string = (v) => v,
+  valFn: (v: string) => string = (v: string) => v,
 ): string {
   if (!w.catch) return "";
   if ("control" in w.catch)
     return ` catch ${serializeControl(w.catch.control)}`;
   if ("ref" in w.catch) return ` catch ${refFn(w.catch.ref)}`;
-  return ` catch ${valFn(w.catch.value)}`;
+  return ` catch ${valFn(w.catch.value as string)}`;
 }
 
 // ── Serializer ───────────────────────────────────────────────────────────────

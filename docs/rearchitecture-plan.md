@@ -120,18 +120,31 @@ type Statement =
 
 ---
 
-## Phase 3: Update Parser Visitor to Produce Nested IR
+## Phase 3: New AST Builder ✅ COMPLETE
 
-_Depends on Phase 2. Changes `bridge-parser/src/parser/parser.ts` visitor only._
+_Depends on Phase 2. New file `bridge-parser/src/parser/ast-builder.ts`._
 
-1. **`processScopeLines()`**: Stop flattening paths. Emit `ScopeStatement`.
-2. **`processElementLines()`**: Stop creating flat element-marked wires.
-   Produce `ArrayExpression` in the expression tree with `body: Statement[]`.
-3. **`bridgeBodyLine` visitor**: Emit `WithStatement` nodes in body.
-4. **Array mapping on wires**: Produce wire with source
-   `{ type: "array", ... }` instead of splitting into wire + metadata.
-5. **`force` handling**: Convert from `bridge.forces[]` to `ForceStatement`.
-6. **Expression desugaring** (arithmetic, concat, pipes): Keep as expression-level IR.
+Created a new CST→AST visitor (`buildBody()`) that produces `body: Statement[]`
+directly from Chevrotain CST nodes, separate from the legacy `buildBridgeBody()`.
+
+### Changes:
+
+- ✅ New file: `packages/bridge-parser/src/parser/ast-builder.ts` (~2050 lines)
+- ✅ `buildBody()` — core visitor: CST body lines → `Statement[]` with nested scoping
+- ✅ `buildBodies()` — top-level hook for future integration
+- ✅ Scope blocks (`target { ... }`) → `ScopeStatement` (not flattened)
+- ✅ Array mappings → `ArrayExpression` in expression tree with `body: Statement[]`
+- ✅ `with` declarations → `WithStatement` with handle resolution
+- ✅ `force` → `ForceStatement`
+- ✅ Operators (+,-,\*,/,==,!=,>,<,>=,<=) → `BinaryExpression` (not tool forks)
+- ✅ `not` → `UnaryExpression` (not tool fork)
+- ✅ Template strings → `ConcatExpression` (not tool fork)
+- ✅ Pipe chains → `PipeExpression` (not synthetic fork wires)
+- ✅ Literal values pre-parsed as `JsonValue`
+- ✅ Self-contained helpers (duplicated from parser.ts to avoid coupling)
+- ✅ Spread lines → `SpreadStatement`
+- ✅ Coalesce chains, ternary, catch handlers all preserved
+- ✅ build + lint + test all pass (0 errors, 0 failures)
 
 **No Chevrotain grammar changes needed** — only the CST→AST visitor.
 
