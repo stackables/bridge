@@ -14,7 +14,6 @@ import { bridge } from "@stackables/bridge-core";
 
 describe(
   "formatBridge - full examples",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("simple tool declaration", () => {
       const input = bridge`

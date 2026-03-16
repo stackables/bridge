@@ -46,7 +46,7 @@ function makeWire(sources: Wire["sources"], opts: Partial<Wire> = {}): Wire {
 
 // ── evaluateExpression ──────────────────────────────────────────────────────
 
-describe("evaluateExpression", { skip: "Phase 1: IR rearchitecture" }, () => {
+describe("evaluateExpression", () => {
   test("evaluates a ref expression", async () => {
     const ctx = makeCtx({ "m.x": "hello" });
     const expr: Expression = { type: "ref", ref: ref("x") };
@@ -169,7 +169,6 @@ describe("evaluateExpression", { skip: "Phase 1: IR rearchitecture" }, () => {
 
 describe(
   "applyFallbackGates — falsy (||)",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("passes through a truthy value unchanged", async () => {
       const ctx = makeCtx();
@@ -273,7 +272,6 @@ describe(
 
 describe(
   "applyFallbackGates — nullish (??)",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("passes through a non-nullish value unchanged", async () => {
       const ctx = makeCtx();
@@ -310,7 +308,6 @@ describe(
 
 describe(
   "applyFallbackGates — mixed || and ??",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("A ?? B || C — nullish then falsy", async () => {
       const ctx = makeCtx({ "m.b": 0, "m.c": "found" });
@@ -367,7 +364,7 @@ describe(
 
 // ── applyCatch ──────────────────────────────────────────────────────────
 
-describe("applyCatch", { skip: "Phase 1: IR rearchitecture" }, () => {
+describe("applyCatch", () => {
   test("returns undefined when no catch handler", async () => {
     const ctx = makeCtx();
     const w = makeWire([{ expr: { type: "ref", ref: REF } }]);

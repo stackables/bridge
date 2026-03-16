@@ -19,7 +19,6 @@ function ref(path: string[], rootSafe = false): NodeRef {
 
 describe(
   "ExecutionTree edge cases",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("constructor rejects parent depth beyond hard recursion limit", () => {
       const parent = { depth: 30 } as unknown as ExecutionTree;
@@ -91,7 +90,6 @@ describe(
 
 describe(
   "BridgePanicError / BridgeAbortError",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("BridgePanicError extends Error", () => {
       const err = new BridgePanicError("test");

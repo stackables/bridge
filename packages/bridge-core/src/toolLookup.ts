@@ -393,12 +393,8 @@ export async function resolveToolWires(
         value = coerceConstant(wire.catch.value);
       } else if ("ref" in wire.catch) {
         value = await resolveToolNodeRef(ctx, wire.catch.ref, toolDef);
-      } else if ("expr" in wire.catch) {
-        // expr variant: extract the innermost ref and resolve it
-        const innerRef = extractExprRef(wire.catch.expr);
-        if (innerRef) {
-          value = await resolveToolNodeRef(ctx, innerRef, toolDef);
-        }
+      } else if ("expr" in wire.catch && wire.catch.expr.type === "ref") {
+        value = await resolveToolNodeRef(ctx, wire.catch.expr.ref, toolDef);
       }
     }
 

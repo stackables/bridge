@@ -29,7 +29,6 @@ function ids(entries: TraversalEntry[]): string[] {
 
 describe(
   "enumerateTraversalIds",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("simple pull wire — 1 traversal (primary)", () => {
       const instr = getBridge(bridge`
@@ -572,7 +571,6 @@ describe(
 
 describe(
   "buildTraversalManifest",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("is an alias for enumerateTraversalIds", () => {
       assert.strictEqual(buildTraversalManifest, enumerateTraversalIds);
@@ -606,7 +604,7 @@ describe(
 
 // ── decodeExecutionTrace ────────────────────────────────────────────────────
 
-describe("decodeExecutionTrace", { skip: "Phase 1: IR rearchitecture" }, () => {
+describe("decodeExecutionTrace", () => {
   test("empty trace returns empty array", () => {
     const instr = getBridge(bridge`
       version 1.5
@@ -711,7 +709,6 @@ function getDoc(source: string): BridgeDocument {
 
 describe(
   "executionTraceId: end-to-end",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("simple pull wire — primary bits are set", async () => {
       const doc = getDoc(`version 1.5

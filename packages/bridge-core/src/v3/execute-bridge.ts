@@ -942,10 +942,12 @@ async function resolveRequestedFields(
 
   // Evaluate all wires concurrently — allows tool calls from later wires to
   // start before earlier wires that might panic synchronously.
+  type Signal = LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM;
+
   const settled = await Promise.allSettled(
-    wires.map(async (wire) => {
+    wires.map(async (wire): Promise<Signal | undefined> => {
       const value = await evaluateSourceChain(wire, scope);
-      if (isLoopControlSignal(value)) return { signal: value };
+      if (isLoopControlSignal(value)) return value;
       writeTarget(wire.target, value, scope);
       return undefined;
     }),
@@ -954,11 +956,7 @@ async function resolveRequestedFields(
   // Process results: collect errors and signals, preserving wire order.
   let fatalError: unknown;
   let firstError: unknown;
-  let firstSignal:
-    | LoopControlSignal
-    | typeof BREAK_SYM
-    | typeof CONTINUE_SYM
-    | undefined;
+  let firstSignal: Signal | undefined;
 
   for (const result of settled) {
     if (result.status === "rejected") {
@@ -968,7 +966,7 @@ async function resolveRequestedFields(
         if (!firstError) firstError = result.reason;
       }
     } else if (result.value != null) {
-      if (!firstSignal) firstSignal = result.value.signal;
+      if (!firstSignal) firstSignal = result.value;
     }
   }
 

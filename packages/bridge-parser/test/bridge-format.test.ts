@@ -429,7 +429,7 @@ describe("parseBridge", () => {
 
 // ── serializeBridge ─────────────────────────────────────────────────────────
 
-describe("serializeBridge", { skip: "Phase 1: IR rearchitecture" }, () => {
+describe("serializeBridge", () => {
   test("simple bridge roundtrip", () => {
     const input = bridge`
       version 1.5
@@ -984,7 +984,6 @@ describe("parseBridge: tool blocks", () => {
 
 describe(
   "serializeBridge: tool roundtrip",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("GET tool roundtrips", () => {
       const input = bridge`
@@ -1477,7 +1476,6 @@ describe("version tags: parser produces version on HandleBinding", () => {
 
 describe(
   "version tags: round-trip serialization",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("bridge handle @version survives parse → serialize → parse", () => {
       const src = bridge`
@@ -1545,7 +1543,6 @@ describe(
 
 describe(
   "version tags: VersionDecl in serializer",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("serializer preserves declared version from VersionDecl", () => {
       const src = bridge`
@@ -1583,7 +1580,6 @@ describe(
 
 describe(
   "serializeBridge string keyword quoting",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("keeps reserved-word strings quoted in constant wires", () => {
       const src = bridge`
@@ -1605,7 +1601,6 @@ describe(
 
 describe(
   "parser diagnostics and serializer edge cases",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("parseBridgeDiagnostics reports lexer errors with a range", () => {
       const result = parseBridgeDiagnostics(

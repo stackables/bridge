@@ -16,7 +16,6 @@ import { bridge } from "@stackables/bridge-core";
 
 describe(
   "formatBridge - spacing",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("operator spacing: '<-' gets spaces", () => {
       const input = `o.x<-i.y`;
@@ -76,7 +75,6 @@ describe(
 
 describe(
   "formatBridge - indentation",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("bridge body is indented 2 spaces", () => {
       const input = `bridge Query.test {
@@ -111,7 +109,6 @@ on error {
 
 describe(
   "formatBridge - blank lines",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("blank line after version", () => {
       const input = bridge`
@@ -176,7 +173,6 @@ describe(
 
 describe(
   "formatBridge - comments",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("standalone comment preserved", () => {
       const input = `# This is a comment
@@ -206,7 +202,6 @@ tool geo from std.httpCall
 
 describe(
   "formatBridge - on error blocks",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("on error with simple value", () => {
       const input = `on error=null`;
@@ -224,7 +219,6 @@ describe(
 
 describe(
   "prettyPrintToSource - edge cases",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("empty input", () => {
       assert.equal(formatSnippet(""), "");
@@ -252,7 +246,6 @@ describe(
 
 describe(
   "prettyPrintToSource - safety and options",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("is idempotent", () => {
       const input = bridge`
@@ -323,7 +316,6 @@ describe(
 
 describe(
   "formatBridge - line splitting and joining",
-  { skip: "Phase 1: IR rearchitecture" },
   () => {
     test("content after '{' moves to new indented line", () => {
       const input = `bridge Query.greet {

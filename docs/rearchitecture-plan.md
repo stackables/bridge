@@ -262,10 +262,10 @@ scheduling.test.ts, property-search.test.ts
 - `panic` — calls `applyControlFlow()` → raises BridgePanicError (fatal)
 - `break` / `continue` — loop control signals returned as sentinel values
 - Multi-level `break N` / `continue N` — propagated across nested array boundaries
-- `resolveRequestedFields` per-wire error isolation (non-fatal caught, first re-thrown)
+- `resolveRequestedFields` concurrent wire evaluation via `Promise.allSettled`
+  (matches v1 eager semantics — tool wires start before input-only wires that may panic)
 - `evaluateArrayExpr` handles BREAK_SYM/CONTINUE_SYM/LoopControlSignal
 - `applyCatchHandler` delegates to `applyControlFlow()` for all catch control flows
-- Known limitation: panic trace count mismatch (lazy eval fires panic before tool wires)
 
 #### V3-Phase 5: ToolDef / Define / Extends / on error ✅ COMPLETE
 
@@ -326,15 +326,19 @@ coalesce-cost.test.ts (error propagation), builtin-tools.test.ts (error propagat
 - Error location tracking (bridgeLoc on BridgeRuntimeError)
 - Prototype pollution guards
 - Infinite loop protection
-- Eager tool evaluation for trace count parity with v1
-- Catch pipe source (blocked by parser: `catch tool:source`)
+- ✅ Catch pipe source — `WireCatch` extended with `{ expr: Expression }` variant;
+  `buildCatch` in ast-builder uses `buildSourceExpression` for pipe chains;
+  `applyCatchHandler` in v3 engine evaluates full expressions;
+  serializer `serCatch` handles `{ expr }` via `serCatchExpr` helper
 
 #### V3 Remaining Disabled Scenarios
 
-These scenarios are individually disabled for v3:
+All previously v3-disabled scenarios are now resolved:
 
-- `control-flow.test.ts` — 1 scenario (panic ordering: lazy eval fires panic before tool wires)
-- `resilience.test.ts` — 2 scenarios (catch pipe source: blocked by parser)
+- ✅ `control-flow.test.ts` — panic ordering fixed via concurrent wire evaluation
+- ✅ `resilience.test.ts` — catch pipe source fixed via `WireCatch { expr }` variant
+- Remaining: 1 scenario with `disable: true` (alias.test.ts — parser limitation:
+  array mapping inside coalesce alternative)
 
 ---
 
