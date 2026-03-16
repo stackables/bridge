@@ -210,3 +210,72 @@ export function getSimplePullRef(w: Wire): NodeRef | null {
 export function roundMs(ms: number): number {
   return Math.round(ms * 100) / 100;
 }
+
+// ── Wire pre-index ──────────────────────────────────────────────────────────
+
+/**
+ * Pre-indexes wires by their target trunk key for O(1) lookup.
+ * Built once at bridge construction time in a single O(n) pass.
+ *
+ * Two levels:
+ * - `byTrunk` maps `trunkKey(wire.to)` → Wire[] (all wires targeting that trunk)
+ * - `byTrunkAndPath` maps `trunkKey + "\0" + path.join("\0")` → Wire[]
+ *   (exact trunk+path match)
+ */
+export class WireIndex {
+  private readonly byTrunk = new Map<string, Wire[]>();
+  private readonly byTrunkAndPath = new Map<string, Wire[]>();
+
+  constructor(wires: Wire[]) {
+    for (const w of wires) {
+      const tk = trunkKey(w.to);
+      let trunkList = this.byTrunk.get(tk);
+      if (!trunkList) {
+        trunkList = [];
+        this.byTrunk.set(tk, trunkList);
+      }
+      trunkList.push(w);
+
+      const pathKey = tk + "\0" + w.to.path.join("\0");
+      let pathList = this.byTrunkAndPath.get(pathKey);
+      if (!pathList) {
+        pathList = [];
+        this.byTrunkAndPath.set(pathKey, pathList);
+      }
+      pathList.push(w);
+    }
+  }
+
+  /** All wires targeting a trunk (ignoring path). Also includes element-scoped wires. */
+  forTrunk(ref: Trunk & { element?: boolean }): Wire[] {
+    const key = trunkKey(ref);
+    const wires = this.byTrunk.get(key);
+    // Also look up element-scoped wires (key:*) when the query isn't element-scoped
+    if (!ref.element) {
+      const elemKey = `${ref.module}:${ref.type}:${ref.field}:*`;
+      const elemWires = this.byTrunk.get(elemKey);
+      if (elemWires) {
+        return wires ? [...wires, ...elemWires] : elemWires;
+      }
+    }
+    return wires ?? EMPTY_WIRES;
+  }
+
+  /** All wires targeting a trunk at an exact path. Also includes element-scoped wires. */
+  forTrunkAndPath(ref: Trunk & { element?: boolean }, path: string[]): Wire[] {
+    const key = trunkKey(ref) + "\0" + path.join("\0");
+    const wires = this.byTrunkAndPath.get(key);
+    // Also look up element-scoped wires when the query isn't element-scoped
+    if (!ref.element) {
+      const elemKey =
+        `${ref.module}:${ref.type}:${ref.field}:*` + "\0" + path.join("\0");
+      const elemWires = this.byTrunkAndPath.get(elemKey);
+      if (elemWires) {
+        return wires ? [...wires, ...elemWires] : elemWires;
+      }
+    }
+    return wires ?? EMPTY_WIRES;
+  }
+}
+
+const EMPTY_WIRES: Wire[] = [];

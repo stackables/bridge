@@ -166,17 +166,22 @@ Files: `ExecutionTree.ts`, `scheduleTools.ts`, `resolveWires.ts`,
 - ✅ **WireCatch.value → JsonValue** — proper JSON literal support (not string fallback)
 - ✅ **Hook ast-builder into parser** — `buildBody()` called in `buildBridge`,
   `buildToolDef`, `buildDefineDef`; `body: Statement[]` populated alongside legacy `wires`
+- ✅ **Wire pre-indexing** — `WireIndex` class in `tree-utils.ts`:
+  - Two-level index: `byTrunk` (trunk key → Wire[]) and `byTrunkAndPath` (trunk+path → Wire[])
+  - Element-scoped wire awareness (`:*` suffix keys merged with non-element queries)
+  - Built once at construction in O(n), shared across shadow trees
+  - All 22 linear-scan sites in `ExecutionTree.ts`, `scheduleTools.ts`, `materializeShadows.ts`
+    refactored to use O(1) index lookups
+  - `sameTrunk` and `pathEquals` no longer imported in ExecutionTree.ts
 
 ### Remaining
 
 1. **Scope chain**: `ScopeFrame { handles, wires, parent? }` — tool lookup
    walks frames upward (shadowing semantics)
-2. **Wire pre-indexing**: Walk statement tree once at construction, build
-   `Map<trunkKey, Wire[]>` for O(1) lookup
-3. **Array execution**: `ArrayExpression` evaluated → shadow tree per element
+2. **Array execution**: `ArrayExpression` evaluated → shadow tree per element
    with nested `body: Statement[]` and iterator binding
-4. **Define inlining**: Inline as nested `Statement[]` blocks
-5. **`schedule()`/`pullSingle()`**: Scope-aware resolution
+3. **Define inlining**: Inline as nested `Statement[]` blocks
+4. **`schedule()`/`pullSingle()`**: Scope-aware resolution
 
 **Gate:** All behavioral `regressionTest` suites must pass.
 

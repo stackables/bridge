@@ -42,14 +42,13 @@ import {
   MAX_EXECUTION_DEPTH,
 } from "./tree-types.ts";
 import {
-  pathEquals,
   getPrimaryRef,
   isPullWire,
   roundMs,
-  sameTrunk,
   TRUNK_KEY_CACHE,
   trunkKey,
   UNSAFE_KEYS,
+  WireIndex,
 } from "./tree-utils.ts";
 import type {
   Bridge,
@@ -118,6 +117,7 @@ type BatchToolQueue = {
 export class ExecutionTree implements TreeContext {
   state: Record<string, any> = {};
   bridge: Bridge | undefined;
+  wireIndex: WireIndex | undefined;
   source?: string;
   filename?: string;
   /**
@@ -231,6 +231,9 @@ export class ExecutionTree implements TreeContext {
       (i): i is Bridge =>
         i.kind === "bridge" && i.type === trunk.type && i.field === trunk.field,
     );
+    if (this.bridge) {
+      this.wireIndex = new WireIndex(this.bridge.wires);
+    }
     if (this.bridge?.pipeHandles) {
       this.pipeHandleMap = new Map(
         this.bridge.pipeHandles.map((ph) => [ph.key, ph]),
@@ -748,6 +751,7 @@ export class ExecutionTree implements TreeContext {
     child.toolDefCache = new Map();
     // Share read-only pre-computed data from parent
     child.bridge = this.bridge;
+    child.wireIndex = this.wireIndex;
     child.pipeHandleMap = this.pipeHandleMap;
     child.handleVersionMap = this.handleVersionMap;
     child.memoizedToolKeys = this.memoizedToolKeys;
@@ -990,10 +994,7 @@ export class ExecutionTree implements TreeContext {
       // dependency chains (e.g. requesting "city" should not fire the
       // lat/lon coalesce chains that call the geo tool).
       if (ref.path.length > 0 && ref.module.startsWith("__define_")) {
-        const fieldWires =
-          this.bridge?.wires.filter(
-            (w) => sameTrunk(w.to, ref) && pathEquals(w.to.path, ref.path),
-          ) ?? [];
+        const fieldWires = this.wireIndex?.forTrunkAndPath(ref, ref.path) ?? [];
         if (fieldWires.length > 0) {
           // resolveWires already delivers the value at ref.path — no applyPath.
           return this.resolveWires(fieldWires, nextChain);
@@ -1178,8 +1179,7 @@ export class ExecutionTree implements TreeContext {
 
     // Define — recursive, best (cheapest) incoming wire wins
     if (ref.module.startsWith("__define_")) {
-      const incoming =
-        this.bridge?.wires.filter((wire) => sameTrunk(wire.to, ref)) ?? [];
+      const incoming = this.wireIndex?.forTrunk(ref) ?? [];
       let best = Infinity;
       for (const wire of incoming) {
         best = Math.min(best, this.computeWireCost(wire, visited));
@@ -1189,8 +1189,7 @@ export class ExecutionTree implements TreeContext {
 
     // Local alias — recursive, cheapest incoming wire wins
     if (ref.module === "__local") {
-      const incoming =
-        this.bridge?.wires.filter((wire) => sameTrunk(wire.to, ref)) ?? [];
+      const incoming = this.wireIndex?.forTrunk(ref) ?? [];
       let best = Infinity;
       for (const wire of incoming) {
         best = Math.min(best, this.computeWireCost(wire, visited));
@@ -1246,10 +1245,7 @@ export class ExecutionTree implements TreeContext {
    *               in a shadow tree (mirrors `response()` array handling).
    */
   async pullOutputField(path: string[], array = false): Promise<unknown> {
-    const matches =
-      this.bridge?.wires.filter(
-        (w) => sameTrunk(w.to, this.trunk) && pathEquals(w.to.path, path),
-      ) ?? [];
+    const matches = this.wireIndex?.forTrunkAndPath(this.trunk, path) ?? [];
     if (matches.length === 0) return undefined;
     const result = this.resolveWires(matches);
     if (!array) return result;
@@ -1264,12 +1260,17 @@ export class ExecutionTree implements TreeContext {
   }
 
   private isElementScopedTrunk(ref: NodeRef): boolean {
-    return trunkDependsOnElement(this.bridge, {
-      module: ref.module,
-      type: ref.type,
-      field: ref.field,
-      instance: ref.instance,
-    });
+    return trunkDependsOnElement(
+      this.bridge,
+      {
+        module: ref.module,
+        type: ref.type,
+        field: ref.field,
+        instance: ref.instance,
+      },
+      undefined,
+      this.wireIndex,
+    );
   }
 
   /**
@@ -1289,16 +1290,10 @@ export class ExecutionTree implements TreeContext {
    * Shared by `collectOutput()` and `run()`.
    */
   private async resolveNestedField(prefix: string[]): Promise<unknown> {
-    const bridge = this.bridge!;
     const { type, field } = this.trunk;
+    const trunkRef = { module: SELF_MODULE, type, field };
 
-    const exactWires = bridge.wires.filter(
-      (w) =>
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field &&
-        pathEquals(w.to.path, prefix),
-    );
+    const exactWires = this.wireIndex?.forTrunkAndPath(trunkRef, prefix) ?? [];
 
     // Separate spread wires from regular wires
     const spreadWires = exactWires.filter((w) => isPullWire(w) && w.spread);
@@ -1309,16 +1304,14 @@ export class ExecutionTree implements TreeContext {
       // element-level wires deeper than prefix (the field mappings).
       // E.g. `o.entries <- src[] as x { .id <- x.item_id }` produces
       // an exact wire at ["entries"] and element wires at ["entries","id"].
-      const hasElementWires = bridge.wires.some((w) => {
+      const allTrunkWires = this.wireIndex?.forTrunk(trunkRef) ?? [];
+      const hasElementWires = allTrunkWires.some((w) => {
         const ref = getPrimaryRef(w);
         return (
           ref != null &&
           (ref.element === true ||
             this.isElementScopedTrunk(ref) ||
             w.to.element === true) &&
-          w.to.module === SELF_MODULE &&
-          w.to.type === type &&
-          w.to.field === field &&
           w.to.path.length > prefix.length &&
           prefix.every((seg, i) => w.to.path[i] === seg)
         );
@@ -1338,15 +1331,10 @@ export class ExecutionTree implements TreeContext {
 
     // Collect sub-fields from deeper wires
     const subFields = new Set<string>();
-    for (const wire of bridge.wires) {
+    const allTrunkWires2 = this.wireIndex?.forTrunk(trunkRef) ?? [];
+    for (const wire of allTrunkWires2) {
       const p = wire.to.path;
-      if (
-        wire.to.module === SELF_MODULE &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        p.length > prefix.length &&
-        prefix.every((seg, i) => p[i] === seg)
-      ) {
+      if (p.length > prefix.length && prefix.every((seg, i) => p[i] === seg)) {
         subFields.add(p[prefix.length]!);
       }
     }
@@ -1430,14 +1418,11 @@ export class ExecutionTree implements TreeContext {
         return elementData;
       }
 
+      const trunkRef = { module: SELF_MODULE, type, field };
       const outputFields = new Set<string>();
-      for (const wire of bridge.wires) {
-        if (
-          wire.to.module === SELF_MODULE &&
-          wire.to.type === type &&
-          wire.to.field === field &&
-          wire.to.path.length > 0
-        ) {
+      const allTrunkWires = this.wireIndex?.forTrunk(trunkRef) ?? [];
+      for (const wire of allTrunkWires) {
+        if (wire.to.path.length > 0) {
           outputFields.add(wire.to.path[0]!);
         }
       }
@@ -1455,27 +1440,19 @@ export class ExecutionTree implements TreeContext {
     }
 
     // Root wire (`o <- src`) — whole-object passthrough
-    const hasRootWire = bridge.wires.some(
-      (w) =>
-        isPullWire(w) &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field &&
-        w.to.path.length === 0,
-    );
+    const trunkRef2 = { module: SELF_MODULE, type, field };
+    const hasRootWire = (
+      this.wireIndex?.forTrunkAndPath(trunkRef2, []) ?? []
+    ).some((w) => isPullWire(w));
     if (hasRootWire) {
       return this.pullOutputField([]);
     }
 
     // Object output — collect unique top-level field names
     const outputFields = new Set<string>();
-    for (const wire of bridge.wires) {
-      if (
-        wire.to.module === SELF_MODULE &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        wire.to.path.length > 0
-      ) {
+    const allTrunkWires2 = this.wireIndex?.forTrunk(trunkRef2) ?? [];
+    for (const wire of allTrunkWires2) {
+      if (wire.to.path.length > 0) {
         outputFields.add(wire.to.path[0]!);
       }
     }
@@ -1521,16 +1498,12 @@ export class ExecutionTree implements TreeContext {
     const forcePromises = this.executeForced();
 
     const { type, field } = this.trunk;
+    const selfTrunkRef = { module: SELF_MODULE, type, field };
 
     // Separate root-level wires into passthrough vs spread
-    const rootWires = bridge.wires.filter(
-      (w) =>
-        isPullWire(w) &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field &&
-        w.to.path.length === 0,
-    );
+    const rootWires = (
+      this.wireIndex?.forTrunkAndPath(selfTrunkRef, []) ?? []
+    ).filter((w) => isPullWire(w));
 
     // Passthrough wire: root wire without spread flag
     const hasPassthroughWire = rootWires.some(
@@ -1547,16 +1520,14 @@ export class ExecutionTree implements TreeContext {
     // (`o <- api.user`) only has the root wire.
     // Pipe fork output wires in element context (e.g. concat template strings)
     // may have to.element === true instead.
-    const hasElementWires = bridge.wires.some((w) => {
+    const allSelfTrunkWires = this.wireIndex?.forTrunk(selfTrunkRef) ?? [];
+    const hasElementWires = allSelfTrunkWires.some((w) => {
       const ref = getPrimaryRef(w);
       return (
         ref != null &&
         (ref.element === true ||
           this.isElementScopedTrunk(ref) ||
-          w.to.element === true) &&
-        w.to.module === SELF_MODULE &&
-        w.to.type === type &&
-        w.to.field === field
+          w.to.element === true)
       );
     });
 
@@ -1579,13 +1550,8 @@ export class ExecutionTree implements TreeContext {
 
     // Object output — collect unique top-level field names
     const outputFields = new Set<string>();
-    for (const wire of bridge.wires) {
-      if (
-        wire.to.module === SELF_MODULE &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        wire.to.path.length > 0
-      ) {
+    for (const wire of allSelfTrunkWires) {
+      if (wire.to.path.length > 0) {
         outputFields.add(wire.to.path[0]!);
       }
     }
@@ -1648,12 +1614,7 @@ export class ExecutionTree implements TreeContext {
     if (pathSegments.length === 0 && (array || scalar)) {
       // Direct output for scalar/list return types (e.g. [String!])
       const directOutput =
-        this.bridge?.wires.filter(
-          (w) =>
-            sameTrunk(w.to, this.trunk) &&
-            w.to.path.length === 1 &&
-            w.to.path[0] === this.trunk.field,
-        ) ?? [];
+        this.wireIndex?.forTrunkAndPath(this.trunk, [this.trunk.field]) ?? [];
       if (directOutput.length > 0) {
         return this.resolveWires(directOutput);
       }
@@ -1663,13 +1624,11 @@ export class ExecutionTree implements TreeContext {
     const cleanPath = pathSegments.filter((p) => !/^\d+$/.test(p));
 
     // Find wires whose target matches this trunk + path
-    const matches =
-      this.bridge?.wires.filter(
-        (w) =>
-          (w.to.element ? !!this.parent : true) &&
-          sameTrunk(w.to, this.trunk) &&
-          pathEquals(w.to.path, cleanPath),
-      ) ?? [];
+    const allMatches =
+      this.wireIndex?.forTrunkAndPath(this.trunk, cleanPath) ?? [];
+    const matches = allMatches.filter((w) =>
+      w.to.element ? !!this.parent : true,
+    );
 
     if (matches.length > 0) {
       // ── Lazy define resolution ──────────────────────────────────────
@@ -1729,17 +1688,15 @@ export class ExecutionTree implements TreeContext {
       // GraphQL won't call sub-field resolvers so shadow trees are
       // unnecessary — return the plain resolved array directly.
       if (scalar) {
-        const { type, field } = this.trunk;
-        const hasElementWires = this.bridge?.wires.some((w) => {
+        const allResponseTrunkWires =
+          this.wireIndex?.forTrunk(this.trunk) ?? [];
+        const hasElementWires = allResponseTrunkWires.some((w) => {
           const ref = getPrimaryRef(w);
           return (
             ref != null &&
             (ref.element === true ||
               this.isElementScopedTrunk(ref) ||
               w.to.element === true) &&
-            w.to.module === SELF_MODULE &&
-            w.to.type === type &&
-            w.to.field === field &&
             w.to.path.length > cleanPath.length &&
             cleanPath.every((seg, i) => w.to.path[i] === seg)
           );
@@ -1857,16 +1814,14 @@ export class ExecutionTree implements TreeContext {
    * for ones matching the requested field path.
    */
   private findDefineFieldWires(cleanPath: string[]): Wire[] {
-    const forwards =
-      this.bridge?.wires.filter(
-        (w): boolean =>
-          w.sources.length === 1 &&
-          w.sources[0]!.expr.type === "ref" &&
-          sameTrunk(w.to, this.trunk) &&
-          w.to.path.length === 0 &&
-          w.sources[0]!.expr.ref.module.startsWith("__define_out_") &&
-          w.sources[0]!.expr.ref.path.length === 0,
-      ) ?? [];
+    const rootWires = this.wireIndex?.forTrunkAndPath(this.trunk, []) ?? [];
+    const forwards = rootWires.filter(
+      (w): boolean =>
+        w.sources.length === 1 &&
+        w.sources[0]!.expr.type === "ref" &&
+        w.sources[0]!.expr.ref.module.startsWith("__define_out_") &&
+        w.sources[0]!.expr.ref.path.length === 0,
+    );
 
     if (forwards.length === 0) return [];
 
@@ -1876,10 +1831,7 @@ export class ExecutionTree implements TreeContext {
         fw.sources[0]!.expr as Extract<Expression, { type: "ref" }>
       ).ref;
       const fieldWires =
-        this.bridge?.wires.filter(
-          (w) =>
-            sameTrunk(w.to, defOutTrunk) && pathEquals(w.to.path, cleanPath),
-        ) ?? [];
+        this.wireIndex?.forTrunkAndPath(defOutTrunk, cleanPath) ?? [];
       result.push(...fieldWires);
     }
     return result;

@@ -12,7 +12,12 @@ import type { Bridge, Expression, NodeRef, ToolDef, Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
 import { isPromise, wrapBridgeRuntimeError } from "./tree-types.ts";
 import type { MaybePromise, Trunk } from "./tree-types.ts";
-import { trunkKey, sameTrunk, setNested } from "./tree-utils.ts";
+import {
+  trunkKey,
+  sameTrunk,
+  setNested,
+  type WireIndex,
+} from "./tree-utils.ts";
 import {
   lookupToolFn,
   resolveToolDefByName,
@@ -35,6 +40,7 @@ import {
 export interface SchedulerContext extends ToolLookupContext {
   // ── Scheduler-specific fields ──────────────────────────────────────────
   readonly bridge: Bridge | undefined;
+  readonly wireIndex: WireIndex | undefined;
   /** Parent tree for shadow-tree delegation.  `schedule()` recurses via parent. */
   readonly parent?: SchedulerContext | undefined;
   /** Pipe fork lookup map — maps fork trunk keys to their base trunk. */
@@ -124,6 +130,7 @@ export function trunkDependsOnElement(
   bridge: Bridge | undefined,
   target: Trunk,
   visited = new Set<string>(),
+  wireIdx?: WireIndex,
 ): boolean {
   if (!bridge) return false;
 
@@ -143,7 +150,9 @@ export function trunkDependsOnElement(
   if (visited.has(key)) return false;
   visited.add(key);
 
-  const incoming = bridge.wires.filter((wire) => sameTrunk(wire.to, target));
+  const incoming = wireIdx
+    ? wireIdx.forTrunk(target)
+    : bridge.wires.filter((wire) => sameTrunk(wire.to, target));
   for (const wire of incoming) {
     if (wire.to.element) return true;
 
@@ -155,7 +164,7 @@ export function trunkDependsOnElement(
         field: ref.field,
         instance: ref.instance,
       };
-      if (trunkDependsOnElement(bridge, sourceTrunk, visited)) {
+      if (trunkDependsOnElement(bridge, sourceTrunk, visited, wireIdx)) {
         return true;
       }
     }
@@ -184,7 +193,7 @@ export function schedule(
   // the target fork has bridge wires sourced from element data,
   // including transitive sources routed through __local / __define_* trunks.
   if (ctx.parent) {
-    if (!trunkDependsOnElement(ctx.bridge, target)) {
+    if (!trunkDependsOnElement(ctx.bridge, target, undefined, ctx.wireIndex)) {
       return ctx.parent.schedule(target, pullChain);
     }
   }
@@ -198,13 +207,10 @@ export function schedule(
   const baseTrunk = pipeFork?.baseTrunk;
 
   const baseWires = baseTrunk
-    ? (ctx.bridge?.wires.filter(
-        (w) => !("pipe" in w) && sameTrunk(w.to, baseTrunk),
-      ) ?? [])
+    ? (ctx.wireIndex?.forTrunk(baseTrunk) ?? []).filter((w) => !("pipe" in w))
     : [];
   // Fork-specific wires (pipe wires targeting the fork's own instance)
-  const forkWires =
-    ctx.bridge?.wires.filter((w) => sameTrunk(w.to, target)) ?? [];
+  const forkWires = ctx.wireIndex?.forTrunk(target) ?? [];
   // Merge: base provides defaults, fork overrides
   const bridgeWires = [...baseWires, ...forkWires];
 

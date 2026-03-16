@@ -10,7 +10,7 @@
 
 import type { Wire } from "./types.ts";
 import { SELF_MODULE } from "./types.ts";
-import { setNested } from "./tree-utils.ts";
+import { setNested, type WireIndex } from "./tree-utils.ts";
 import {
   BREAK_SYM,
   CONTINUE_SYM,
@@ -31,6 +31,7 @@ import { matchesRequestedFields } from "./requested-fields.ts";
  */
 export interface MaterializerHost {
   readonly bridge: { readonly wires: readonly Wire[] } | undefined;
+  readonly wireIndex: WireIndex | undefined;
   readonly trunk: Trunk;
   /** Sparse fieldset filter — passed through from ExecutionTree. */
   readonly requestedFields?: string[] | undefined;
@@ -62,8 +63,16 @@ export interface MaterializableShadow {
  * `materializeShadows` to drive the execution phase.
  */
 export function planShadowOutput(host: MaterializerHost, pathPrefix: string[]) {
-  const wires = host.bridge!.wires;
   const { type, field } = host.trunk;
+  const trunkRef = { module: SELF_MODULE, type, field };
+  const trunkWires =
+    host.wireIndex?.forTrunk(trunkRef) ??
+    host.bridge!.wires.filter(
+      (w) =>
+        w.to.module === SELF_MODULE &&
+        w.to.type === type &&
+        w.to.field === field,
+    );
 
   const directFields = new Set<string>();
   const deepPaths = new Map<string, string[][]>();
@@ -71,14 +80,8 @@ export function planShadowOutput(host: MaterializerHost, pathPrefix: string[]) {
   // Key: wire.to.path joined by \0 (null char is safe — field names are identifiers).
   const wireGroupsByPath = new Map<string, Wire[]>();
 
-  for (const wire of wires) {
+  for (const wire of trunkWires) {
     const p = wire.to.path;
-    if (
-      wire.to.module !== SELF_MODULE ||
-      wire.to.type !== type ||
-      wire.to.field !== field
-    )
-      continue;
     if (p.length <= pathPrefix.length) continue;
     if (!pathPrefix.every((seg, i) => p[i] === seg)) continue;
 
