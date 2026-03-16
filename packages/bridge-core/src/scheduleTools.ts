@@ -98,6 +98,12 @@ function collectExprRefs(expr: Expression, refs: NodeRef[]): void {
       collectExprRefs(expr.left, refs);
       collectExprRefs(expr.right, refs);
       break;
+    case "array":
+      collectExprRefs(expr.source, refs);
+      break;
+    case "pipe":
+      collectExprRefs(expr.source, refs);
+      break;
     // literal, control — no refs
   }
 }

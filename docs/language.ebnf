@@ -21,35 +21,42 @@ tool
     = "tool", identifier, "from", identifier, "{", { statement }, [ "on error", "=", json ], "}";
 
 (* --- 2. STATEMENTS & SCOPE --- *)
-(* ONE unified statement list for everything *)
 statement
     = with
     | wire
     | wire_alias
-    | scope;
+    | scope
+    | spread
+    | force;
 
 with
-    = "with", identifier, [ "as", identifier ], [ "memoize" ];
+    = "with", identifier, [ "as", identifier ];
 
-(* ONE scope rule *)
 scope
     = target, "{", { statement }, "}";
 
-(* ONE wire rule *)
+(* Standard assignment *)
 wire
     = target, ( routing
     | "=", json );
 
-(* ONE alias rule *)
+(* Local memory assignment *)
 wire_alias
     = "alias", identifier, routing;
 
+(* Merge into current scope object *)
+spread
+    = "...", routing;
+
+(* Eager side-effect evaluation *)
+force
+    = "force", identifier, [ "catch", "null" ];
+
 (* --- 3. SHARED PATHS & ROUTING --- *)
-(* The parser accepts leading dots everywhere. 
-   The compiler will reject them if they are at the root. *)
 target
     = [ "." ], identifier, { ".", identifier };
 
+(* The Right-Hand Side Evaluation Chain *)
 routing
     = "<-", expression, { ( "||"
     | "??" ), expression }, [ "catch", expression ];
@@ -58,8 +65,13 @@ routing
 ref
     = identifier, [ [ "?" ], ".", identifier ], { [ "?" ], ".", identifier };
 
+(* An expression is a piped value, optionally followed by a ternary gate *)
 expression
-    = base_expression, [ "?", expression, ":", expression ];
+    = pipe_chain, [ "?", expression, ":", expression ];
+
+(* A pipe chain allows infinite routing:  handle:handle:source *)
+pipe_chain
+    = { identifier, [ ".", identifier ], ":" }, base_expression;
 
 base_expression
     = json
@@ -70,7 +82,7 @@ base_expression
     | ( "continue"
     | "break" ), [ integer ];
 
-(* --- 4. EMBEDDED JSON (RFC 8259) --- *)
+(* --- 5. EMBEDDED JSON (RFC 8259) --- *)
 json
     = object
     | array
@@ -86,8 +98,7 @@ object
 array
     = "[", [ json, { ",", json } ], "]";
 
-(* --- 5. LEXICAL RULES (TOKENS) --- *)
-(* Identifiers map to your names, sources, fields, and iterators *)
+(* --- 6. LEXICAL RULES (TOKENS) --- *)
 identifier
     = letter, { letter
     | digit
@@ -155,8 +166,7 @@ letter
     | "W"
     | "X"
     | "Y"
-    | "Z"
-    | "_";
+    | "Z";
 
 digit
     = "0"

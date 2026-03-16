@@ -35,25 +35,25 @@ chainable with `||`, `??`, `catch`, and `alias`. Currently it's baked into wire 
 
 ---
 
-## Phase 1: Preparation — Disable Coupled Tests
+## Phase 1: Preparation — Disable Coupled Tests ✅ COMPLETE
 
 _No dependencies. Single commit._
 
-1. Mark compiler tests as disabled — prefix all scripts in `bridge-compiler/package.json`
-2. Mark compiler fuzz tests as disabled
-3. Disable parser roundtrip in regression harness — `isDisabled()` globally
+1. ✅ Mark compiler tests as disabled — prefix all scripts in `bridge-compiler/package.json`
+2. ✅ Mark compiler fuzz tests as disabled
+3. ✅ Disable parser roundtrip in regression harness — `isDisabled()` globally
    returns `true` for `"compiled"` and `"parser"` checks
-4. Skip parser roundtrip test files:
+4. ✅ Skip parser roundtrip test files:
    - `packages/bridge-parser/test/bridge-format.test.ts`
    - `packages/bridge-parser/test/bridge-printer.test.ts`
    - `packages/bridge-parser/test/bridge-printer-examples.test.ts`
-5. Skip IR-structure-dependent core tests:
+5. ✅ Skip IR-structure-dependent core tests:
    - `packages/bridge-core/test/execution-tree.test.ts`
    - `packages/bridge-core/test/enumerate-traversals.test.ts`
    - `packages/bridge-core/test/resolve-wires.test.ts`
-6. **Keep enabled:** All behavioral `regressionTest` tests in `packages/bridge/test/`
+6. ✅ **Kept enabled:** All behavioral `regressionTest` tests in `packages/bridge/test/`
    (runtime path) — these are the correctness anchor
-7. Verify `pnpm build && pnpm test` passes with skipped tests noted
+7. ✅ Verified `pnpm build && pnpm test` passes with skipped tests noted
 
 ---
 

@@ -1136,6 +1136,10 @@ export class ExecutionTree implements TreeContext {
           this.computeExprCost(expr.left, visited),
           this.computeExprCost(expr.right, visited),
         );
+      case "array":
+        return this.computeExprCost(expr.source, visited);
+      case "pipe":
+        return this.computeExprCost(expr.source, visited);
     }
   }
 

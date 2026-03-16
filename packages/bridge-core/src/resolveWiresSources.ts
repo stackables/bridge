@@ -65,6 +65,20 @@ export function evaluateExpression(
 
     case "or":
       return evaluateOr(ctx, expr, pullChain);
+
+    case "array":
+      // Array expressions are handled at a higher level (ExecutionTree).
+      // If we reach here, it means the engine hasn't been updated yet.
+      throw new Error(
+        "Array expressions are not yet supported in evaluateExpression",
+      );
+
+    case "pipe":
+      // Pipe expressions are handled at a higher level (ExecutionTree).
+      // If we reach here, it means the engine hasn't been updated yet.
+      throw new Error(
+        "Pipe expressions are not yet supported in evaluateExpression",
+      );
   }
 }
 
