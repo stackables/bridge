@@ -367,3 +367,87 @@ regressionTest("tool features: named pipe input field", {
     },
   },
 });
+
+// ── 9. Scope blocks in ToolDef ──────────────────────────────────────────────
+
+regressionTest("tool features: scope blocks in tool body", {
+  disable: ["compiled", "parser"],
+  bridge: bridge`
+    version 1.5
+
+    tool myApi from httpCall {
+      .headers {
+        .auth = "Bearer 123"
+        .contentType = "application/json"
+      }
+      .baseUrl = "https://api.example.com"
+    }
+
+    bridge Query.scopeTool {
+      with myApi as api
+      with input as i
+      with output as o
+
+      api.q <- i.q
+      o.result <- api.data
+    }
+  `,
+  scenarios: {
+    "Query.scopeTool": {
+      "scope block sets nested tool config": {
+        input: { q: "test" },
+        tools: {
+          httpCall: (p: any) => ({
+            data: `${p.q}:${p.headers.auth}:${p.headers.contentType}:${p.baseUrl}`,
+          }),
+        },
+        assertData: {
+          result: "test:Bearer 123:application/json:https://api.example.com",
+        },
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── 10. Nested scope blocks in ToolDef ──────────────────────────────────────
+
+regressionTest("tool features: nested scope blocks in tool body", {
+  disable: ["compiled", "parser"],
+  bridge: bridge`
+    version 1.5
+
+    tool myApi from httpCall {
+      .config {
+        .retry {
+          .attempts = 3
+          .delay = 1000
+        }
+        .timeout = 5000
+      }
+    }
+
+    bridge Query.nestedScope {
+      with myApi as api
+      with input as i
+      with output as o
+
+      api.url <- i.url
+      o.result <- api.data
+    }
+  `,
+  scenarios: {
+    "Query.nestedScope": {
+      "nested scope blocks build deep config": {
+        input: { url: "/test" },
+        tools: {
+          httpCall: (p: any) => ({
+            data: `${p.config.retry.attempts}:${p.config.retry.delay}:${p.config.timeout}`,
+          }),
+        },
+        assertData: { result: "3:1000:5000" },
+        assertTraces: 1,
+      },
+    },
+  },
+});

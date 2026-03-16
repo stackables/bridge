@@ -6490,6 +6490,116 @@ function buildBridgeBody(
     });
   }
 
+  // ── Helper: flatten scope blocks in tool self-wires ───────────────────
+
+  function flattenSelfWireScopeLines(
+    scopeLines: CstNode[],
+    spreadLines: CstNode[],
+    pathPrefix: string[],
+  ): void {
+    for (const spreadLine of spreadLines) {
+      const spreadLineNum = line(findFirstToken(spreadLine));
+      const sourceNode = sub(spreadLine, "spreadSource")!;
+      const { ref: fromRef, safe: spreadSafe } = buildSourceExprSafe(
+        sourceNode,
+        spreadLineNum,
+      );
+      wires.push(
+        withLoc(
+          {
+            to: {
+              module: SELF_MODULE,
+              type: bridgeType,
+              field: bridgeField,
+              path: pathPrefix,
+            },
+            sources: [
+              {
+                expr: {
+                  type: "ref",
+                  ref: fromRef,
+                  ...(spreadSafe ? { safe: true as const } : {}),
+                },
+              },
+            ],
+            spread: true as const,
+          },
+          locFromNode(spreadLine),
+        ),
+      );
+    }
+
+    for (const scopeLine of scopeLines) {
+      const sc = scopeLine.children;
+      const scopeLineLoc = locFromNode(scopeLine);
+      const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
+      const scopeSegs = parsePath(targetStr);
+      const fullPath = [...pathPrefix, ...scopeSegs];
+
+      const toRef: NodeRef = {
+        module: SELF_MODULE,
+        type: bridgeType,
+        field: bridgeField,
+        path: fullPath,
+      };
+
+      // Nested scope: .field { ... }
+      const nestedScopeLines = subs(scopeLine, "pathScopeLine");
+      const nestedSpreadLines = subs(scopeLine, "scopeSpreadLine");
+      if (
+        (nestedScopeLines.length > 0 || nestedSpreadLines.length > 0) &&
+        !sc.scopeEquals &&
+        !sc.scopeArrow
+      ) {
+        flattenSelfWireScopeLines(
+          nestedScopeLines,
+          nestedSpreadLines,
+          fullPath,
+        );
+        continue;
+      }
+
+      // Constant: .field = value
+      if (sc.scopeEquals) {
+        const value = extractBareValue(sub(scopeLine, "scopeValue")!);
+        wires.push(
+          withLoc(
+            { to: toRef, sources: [{ expr: { type: "literal", value } }] },
+            scopeLineLoc,
+          ),
+        );
+        continue;
+      }
+
+      // Pull wire: .field <- source
+      if (sc.scopeArrow) {
+        const scopeLineNum = line(findFirstToken(scopeLine));
+        const { ref: srcRef, safe: srcSafe } = buildSourceExprSafe(
+          sub(scopeLine, "scopeSource")!,
+          scopeLineNum,
+        );
+        wires.push(
+          withLoc(
+            {
+              to: toRef,
+              sources: [
+                {
+                  expr: {
+                    type: "ref",
+                    ref: srcRef,
+                    ...(srcSafe ? { safe: true as const } : {}),
+                  },
+                },
+              ],
+            },
+            scopeLineLoc,
+          ),
+        );
+        continue;
+      }
+    }
+  }
+
   // ── Step 4: Process tool self-wires (elementLine CST nodes) ───────────
 
   const selfWireNodes = options?.selfWireNodes;
@@ -6518,6 +6628,14 @@ function buildBridgeBody(
             elemLineLoc,
           ),
         );
+        continue;
+      }
+
+      // ── Scope block: .field { .sub <- ..., .sub = ... } ──
+      if (elemC.elemScopeBlock) {
+        const scopeLines = subs(elemLine, "elemScopeLine");
+        const spreadLines = subs(elemLine, "elemSpreadLine");
+        flattenSelfWireScopeLines(scopeLines, spreadLines, elemToPath);
         continue;
       }
 
