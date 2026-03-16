@@ -906,6 +906,7 @@ regressionTest("parity: const blocks", {
 // ── 10. String interpolation ────────────────────────────────────────────────
 
 regressionTest("parity: string interpolation", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -947,6 +948,7 @@ regressionTest("parity: string interpolation", {
 // ── 11. Expressions (math, comparison) ──────────────────────────────────────
 
 regressionTest("parity: expressions", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

@@ -14,6 +14,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("universal interpolation: fallback", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -70,8 +71,18 @@ regressionTest("universal interpolation: fallback", {
       "|| fallback inside array mapping": {
         input: {
           items: [
-            { id: "1", name: "Widget", customLabel: null, defaultLabel: "Widget (#1)" },
-            { id: "2", name: "Gadget", customLabel: "Custom", defaultLabel: "Gadget (#2)" },
+            {
+              id: "1",
+              name: "Widget",
+              customLabel: null,
+              defaultLabel: "Widget (#1)",
+            },
+            {
+              id: "2",
+              name: "Gadget",
+              customLabel: "Custom",
+              defaultLabel: "Gadget (#2)",
+            },
           ],
         },
         assertData: [{ label: "Widget (#1)" }, { label: "Custom" }],
@@ -87,6 +98,7 @@ regressionTest("universal interpolation: fallback", {
 });
 
 regressionTest("universal interpolation: ternary", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

@@ -5,6 +5,7 @@ import { bridge } from "@stackables/bridge";
 // ── Execution tests (regressionTest) ────────────────────────────────────────
 
 regressionTest("expressions: execution", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -164,6 +165,7 @@ regressionTest("expressions: execution", {
 // ── Operator precedence tests (regressionTest) ──────────────────────────────
 
 regressionTest("expressions: operator precedence", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -221,6 +223,7 @@ regressionTest("expressions: operator precedence", {
 // ── Safe flag propagation in expressions (regressionTest) ───────────────────
 
 regressionTest("safe flag propagation in expressions", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -329,6 +332,7 @@ regressionTest("safe flag propagation in expressions", {
 // ── String comparison and array mapping ─────────────────────────────────────
 
 regressionTest("expressions: string comparison and array mapping", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -394,6 +398,7 @@ regressionTest("expressions: string comparison and array mapping", {
 // ── Catch error fallback ────────────────────────────────────────────────────
 
 regressionTest("expressions: catch error fallback", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -426,6 +431,7 @@ regressionTest("expressions: catch error fallback", {
 // ── Boolean logic: and/or ───────────────────────────────────────────────────
 
 regressionTest("boolean logic: and/or end-to-end", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -469,6 +475,7 @@ regressionTest("boolean logic: and/or end-to-end", {
 // ── Parenthesized boolean expressions ───────────────────────────────────────
 
 regressionTest("parenthesized boolean expressions: end-to-end", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -526,6 +533,7 @@ regressionTest("parenthesized boolean expressions: end-to-end", {
 // ── condAnd / condOr with synchronous tools ─────────────────────────────────
 
 regressionTest("condAnd / condOr with synchronous tools", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -587,6 +595,7 @@ regressionTest("condAnd / condOr with synchronous tools", {
 // ── Safe flag on right operand expressions ──────────────────────────────────
 
 regressionTest("safe flag on right operand expressions", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -635,6 +644,7 @@ regressionTest("safe flag on right operand expressions", {
 // ── Short-circuit data correctness ──────────────────────────────────────────
 
 regressionTest("and/or short-circuit data correctness", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

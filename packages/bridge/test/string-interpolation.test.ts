@@ -5,6 +5,7 @@ import { bridge } from "@stackables/bridge";
 // ── String interpolation execution tests ────────────────────────────────────
 
 regressionTest("string interpolation", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

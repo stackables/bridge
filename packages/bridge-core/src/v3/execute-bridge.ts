@@ -144,16 +144,22 @@ function getPath(
 /**
  * Set a nested property on an object following a path array,
  * creating intermediate objects as needed.
+ *
+ * Empty path with a plain object merges into root. Empty path with
+ * any other value (array, primitive) stores under `__rootValue__`
+ * for the caller to extract.
  */
 function setPath(
   obj: Record<string, unknown>,
   path: string[],
   value: unknown,
 ): void {
-  // Empty path — merge value into root object
+  // Empty path — merge value into root object or store raw value
   if (path.length === 0) {
     if (value != null && typeof value === "object" && !Array.isArray(value)) {
       Object.assign(obj, value as Record<string, unknown>);
+    } else {
+      obj.__rootValue__ = value;
     }
     return;
   }
@@ -638,7 +644,10 @@ async function evaluateExprSafe(
 ): Promise<unknown> {
   try {
     const result = fn();
-    if (result != null && typeof (result as Promise<unknown>).then === "function") {
+    if (
+      result != null &&
+      typeof (result as Promise<unknown>).then === "function"
+    ) {
       return await (result as Promise<unknown>);
     }
     return result;
@@ -679,20 +688,28 @@ async function evaluateExpression(
       const left = expr.leftSafe
         ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
         : await evaluateExpression(expr.left, scope);
-      if (!left) return left;
-      return expr.rightSafe
-        ? evaluateExprSafe(() => evaluateExpression(expr.right, scope))
-        : evaluateExpression(expr.right, scope);
+      if (!left) return false;
+      if (expr.right.type === "literal" && expr.right.value === "true") {
+        return Boolean(left);
+      }
+      const right = expr.rightSafe
+        ? await evaluateExprSafe(() => evaluateExpression(expr.right, scope))
+        : await evaluateExpression(expr.right, scope);
+      return Boolean(right);
     }
 
     case "or": {
       const left = expr.leftSafe
         ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
         : await evaluateExpression(expr.left, scope);
-      if (left) return left;
-      return expr.rightSafe
-        ? evaluateExprSafe(() => evaluateExpression(expr.right, scope))
-        : evaluateExpression(expr.right, scope);
+      if (left) return true;
+      if (expr.right.type === "literal" && expr.right.value === "true") {
+        return Boolean(left);
+      }
+      const right = expr.rightSafe
+        ? await evaluateExprSafe(() => evaluateExpression(expr.right, scope))
+        : await evaluateExpression(expr.right, scope);
+      return Boolean(right);
     }
 
     case "control":
@@ -700,10 +717,45 @@ async function evaluateExpression(
         `Control flow "${expr.control.kind}" not implemented in v3 POC`,
       );
 
-    case "pipe":
-    case "binary":
+    case "binary": {
+      const left = await evaluateExpression(expr.left, scope);
+      const right = await evaluateExpression(expr.right, scope);
+      switch (expr.op) {
+        case "add":
+          return Number(left) + Number(right);
+        case "sub":
+          return Number(left) - Number(right);
+        case "mul":
+          return Number(left) * Number(right);
+        case "div":
+          return Number(left) / Number(right);
+        case "eq":
+          return left === right;
+        case "neq":
+          return left !== right;
+        case "gt":
+          return Number(left) > Number(right);
+        case "gte":
+          return Number(left) >= Number(right);
+        case "lt":
+          return Number(left) < Number(right);
+        case "lte":
+          return Number(left) <= Number(right);
+      }
+      break;
+    }
+
     case "unary":
-    case "concat":
+      return !(await evaluateExpression(expr.operand, scope));
+
+    case "concat": {
+      const parts = await Promise.all(
+        expr.parts.map((p) => evaluateExpression(p, scope)),
+      );
+      return parts.map((v) => (v == null ? "" : String(v))).join("");
+    }
+
+    case "pipe":
       throw new Error(
         `Expression type "${expr.type}" not implemented in v3 POC`,
       );
@@ -887,8 +939,12 @@ export async function executeBridge<T = unknown>(
     throw err;
   }
 
+  // Extract root value if a wire wrote to the output root with a non-object value
+  const data =
+    "__rootValue__" in output ? (output.__rootValue__ as T) : (output as T);
+
   return {
-    data: output as T,
+    data,
     traces: tracer?.traces ?? [],
     executionTraceId: 0n,
   };

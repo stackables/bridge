@@ -187,6 +187,119 @@ Files: `ExecutionTree.ts`, `scheduleTools.ts`, `resolveWires.ts`,
 
 ---
 
+## Phase 4b: V3 Scope-Based Pull Engine
+
+_Parallel with Phase 4. File: `bridge-core/src/v3/execute-bridge.ts`._
+
+A new execution engine built from scratch on the `body: Statement[]` IR.
+Pull-based and demand-driven: tools are only called when their output is
+first read. Runs alongside the existing v1 runtime — the regression harness
+tests both engines for behavioral parity.
+
+### Architecture
+
+- **`ExecutionScope`** — lexical scope chain with lazy tool call memoization
+- **`indexStatements()`** — walks `Statement[]` once, registers tool bindings,
+  tool input wires, output wires, and aliases (no evaluation)
+- **`resolveRequestedFields()`** — pulls only the output fields that were
+  requested (sparse fieldset support built-in)
+- **`evaluateSourceChain()`** — evaluates fallback gates (`||`, `??`) with
+  `catch` handler wrapping
+- **`evaluateExpression()`** — recursive expression evaluator for the full
+  Expression union
+- **`writeTarget()`** — routes writes to element scope (array body) vs root
+  scope (top-level output)
+
+### Migration Phases (feature by feature)
+
+Each phase implements a feature cluster, enables the corresponding regression
+tests for the v3 engine, then verifies 0 failures.
+
+#### V3-Phase 1: Error Handling — `?.` safe modifier + `catch` ✅ COMPLETE
+
+**Unlocks:** resilience.test.ts (partial), coalesce-cost.test.ts (partial),
+shared-parity.test.ts (catch fallbacks), chained.test.ts,
+bugfixes/fallback-bug.test.ts
+
+- `catch` on wire source chains (literal, ref, control flow)
+- `?.` rootSafe/pathSafe on NodeRef (safe path traversal)
+- `expr.safe` flag on ref expressions (swallows non-fatal errors → undefined)
+- `isFatalError` check (BridgePanicError, BridgeAbortError bypass catch/?.)
+- `leftSafe`/`rightSafe` on and/or expressions
+- Source chain gate semantics: `continue` (skip entry) not `break` (stop chain)
+- Trace recording on both successful and failed tool calls
+- Error trace attachment for harness/caller access
+
+#### V3-Phase 2: Binary + Unary + Concat Expressions ✅ COMPLETE
+
+**Unlocks:** expressions.test.ts (all 10 groups), string-interpolation.test.ts,
+interpolation-universal.test.ts, shared-parity.test.ts (expressions,
+string interpolation)
+
+- Binary: `add`, `sub`, `mul`, `div`, `eq`, `neq`, `gt`, `gte`, `lt`, `lte`
+- Unary: `not`
+- Concat: template string concatenation (null → empty string coercion)
+- `and`/`or` fixed to return boolean (not raw JS values) — matches v1 semantics
+- Root-level output replacement for array/primitive values (`__rootValue__`)
+
+#### V3-Phase 3: Pipe Expressions
+
+**Unlocks:** tool-features.test.ts (pipe tests), builtin-tools.test.ts,
+scheduling.test.ts, property-search.test.ts
+
+- `pipe` expression type — `tool:source` routing through declared tool handles
+
+#### V3-Phase 4: Control Flow
+
+**Unlocks:** control-flow.test.ts, shared-parity.test.ts (break/continue)
+
+- `throw` — raises BridgeRuntimeError
+- `panic` — raises BridgePanicError (fatal)
+- `break` / `continue` — array iteration control
+
+#### V3-Phase 5: ToolDef / Define / Extends / on error
+
+**Unlocks:** tool-features.test.ts (extends), resilience.test.ts (on error),
+shared-parity.test.ts (ToolDef, define), scope-and-edges.test.ts
+
+- ToolDef instruction processing (defaults, fn mapping, on error)
+- Define block inlining
+- Extends chain resolution
+- `on error` handler on tool invocation
+
+#### V3-Phase 6: Force Statements
+
+**Unlocks:** force-wire.test.ts, builtin-tools.test.ts (audit)
+
+- `force` — tool runs even if output not queried
+
+#### V3-Phase 7: Const Blocks
+
+**Unlocks:** resilience.test.ts (const in bridge), shared-parity.test.ts
+(const blocks)
+
+- `with const as c` — reading from document-level `const` declarations
+
+#### V3-Phase 8: Overdefinition / Multi-wire
+
+**Unlocks:** coalesce-cost.test.ts (overdefinition), shared-parity.test.ts
+(overdefinition)
+
+- Multiple wires to same target with cost-based prioritization
+- Nullish coalescing across wires
+
+#### V3-Phase 9: Advanced Features
+
+- Spread syntax (`... <- a`)
+- Native batching
+- Memoized loop tools
+- Error location tracking (BridgeRuntimeError wrapping)
+- Prototype pollution guards
+- Infinite loop protection
+- Context binding (`with context`)
+
+---
+
 ## Phase 5: Reimplement Serializer + Re-enable Parser Tests
 
 _Depends on Phase 4. Can run parallel with early Phase 6._
