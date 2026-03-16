@@ -924,6 +924,10 @@ function indexStatements(
  * Tool calls happen lazily when their output is read during source evaluation.
  *
  * If no specific fields are requested, all indexed output wires are resolved.
+ *
+ * All output wires are evaluated concurrently so that tool-referencing wires
+ * can start their tool calls before input-only wires that may panic. This
+ * matches v1 eager-evaluation semantics.
  */
 async function resolveRequestedFields(
   scope: ExecutionScope,
@@ -936,19 +940,40 @@ async function resolveRequestedFields(
       ? scope.collectMatchingOutputWires(requestedFields)
       : scope.allOutputFields().map((f) => scope.getOutputWire(f)!);
 
-  let firstError: unknown;
-
-  for (const wire of wires) {
-    try {
+  // Evaluate all wires concurrently — allows tool calls from later wires to
+  // start before earlier wires that might panic synchronously.
+  const settled = await Promise.allSettled(
+    wires.map(async (wire) => {
       const value = await evaluateSourceChain(wire, scope);
-      if (isLoopControlSignal(value)) return value;
+      if (isLoopControlSignal(value)) return { signal: value };
       writeTarget(wire.target, value, scope);
-    } catch (err) {
-      if (isFatalError(err)) throw err;
-      if (!firstError) firstError = err;
+      return undefined;
+    }),
+  );
+
+  // Process results: collect errors and signals, preserving wire order.
+  let fatalError: unknown;
+  let firstError: unknown;
+  let firstSignal:
+    | LoopControlSignal
+    | typeof BREAK_SYM
+    | typeof CONTINUE_SYM
+    | undefined;
+
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      if (isFatalError(result.reason)) {
+        if (!fatalError) fatalError = result.reason;
+      } else {
+        if (!firstError) firstError = result.reason;
+      }
+    } else if (result.value != null) {
+      if (!firstSignal) firstSignal = result.value.signal;
     }
   }
 
+  if (fatalError) throw fatalError;
+  if (firstSignal) return firstSignal;
   if (firstError) throw firstError;
 }
 
@@ -989,6 +1014,9 @@ async function applyCatchHandler(
 ): Promise<unknown> {
   if ("control" in c) {
     return applyControlFlow(c.control);
+  }
+  if ("expr" in c) {
+    return evaluateExpression(c.expr, scope);
   }
   if ("ref" in c) {
     return resolveRef(c.ref, scope);

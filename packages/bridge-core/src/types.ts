@@ -394,13 +394,14 @@ export interface WireSourceEntry {
 }
 
 /**
- * Catch handler for a wire — provides error recovery via a ref, literal, or
- * control flow instruction.
+ * Catch handler for a wire — provides error recovery via a ref, literal,
+ * control flow instruction, or a full expression (e.g. pipe chain).
  */
 export type WireCatch =
   | { ref: NodeRef; loc?: SourceLocation }
   | { value: JsonValue; loc?: SourceLocation }
-  | { control: ControlFlowInstruction; loc?: SourceLocation };
+  | { control: ControlFlowInstruction; loc?: SourceLocation }
+  | { expr: Expression; loc?: SourceLocation };
 
 /**
  * The shared right-hand side of any assignment — a fallback chain of source

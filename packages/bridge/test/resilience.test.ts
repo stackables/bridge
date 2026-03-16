@@ -605,7 +605,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
     "Query.catchPipeSource": {
       "api succeeds — catch not used": {
         input: {},
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         tools: {
           api: () => ({ result: "direct-value" }),
           fallbackApi: () => ({ backup: "unused" }),
@@ -617,7 +617,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
       },
       "catch pipes fallback through tool": {
         input: {},
-        disable: ["compiled", "parser", "v3"],
+        disable: ["compiled", "parser"],
         tools: {
           api: () => {
             throw new Error("api down");

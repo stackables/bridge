@@ -250,6 +250,14 @@ async function applyCatchHandler(
   if ("control" in c) {
     return applyControlFlowWithLoc(c.control, c.loc);
   }
+  if ("expr" in c) {
+    try {
+      return await evaluateExpression(ctx, c.expr, pullChain);
+    } catch (err: any) {
+      recordCatchErrorBit(ctx, bits);
+      throw err;
+    }
+  }
   if ("ref" in c) {
     try {
       return await ctx.pullSingle(c.ref, pullChain, c.loc);

@@ -133,8 +133,7 @@ regressionTest("panic control flow", {
       },
       "null name → basic panics, tool fields succeed": {
         input: { a: { name: "ok" } },
-        // v3 lazy evaluation: panic fires before tool-referencing wires run
-        disable: ["v3"],
+
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
           assert.equal(err.message, "fatal error");

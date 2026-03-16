@@ -1191,19 +1191,20 @@ export function buildBody(
         ...(loc ? { loc } : {}),
       };
     }
-    // Source ref
+    // Source ref (possibly a pipe expression)
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
-      const headNode = sub(srcNode, "head")!;
-      const { root, segments, rootSafe, segmentSafe } =
-        extractAddressPath(headNode);
-      const ref = resolveRef(root, segments, lineNum, iterScope);
+      const expr = buildSourceExpression(srcNode, lineNum, iterScope);
+      if (expr.type === "ref") {
+        // Simple ref — keep backward-compatible format
+        return {
+          ref: expr.ref,
+          ...(loc ? { loc } : {}),
+        };
+      }
+      // Complex expression (pipe chain, etc.) — use expr variant
       return {
-        ref: {
-          ...ref,
-          ...(rootSafe ? { rootSafe: true } : {}),
-          ...(segmentSafe ? { pathSafe: segmentSafe } : {}),
-        },
+        expr,
         ...(loc ? { loc } : {}),
       };
     }

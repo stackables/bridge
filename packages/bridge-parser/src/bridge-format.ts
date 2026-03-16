@@ -125,6 +125,22 @@ function serFallbacks(
     .join("");
 }
 
+/** Serialize a catch expression (pipe chain or ref) back to source text. */
+function serCatchExpr(
+  expr: Expression,
+  refFn: (ref: NodeRef) => string,
+): string {
+  if (expr.type === "ref") return refFn(expr.ref);
+  if (expr.type === "pipe") {
+    const sourceStr = serCatchExpr(expr.source, refFn);
+    const handle = expr.path
+      ? `${expr.handle}.${expr.path.join(".")}`
+      : expr.handle;
+    return `${handle}:${sourceStr}`;
+  }
+  return "null";
+}
+
 /** Serialize catch handler as ` catch <value>`. */
 function serCatch(
   w: Wire,
@@ -134,6 +150,7 @@ function serCatch(
   if (!w.catch) return "";
   if ("control" in w.catch)
     return ` catch ${serializeControl(w.catch.control)}`;
+  if ("expr" in w.catch) return ` catch ${serCatchExpr(w.catch.expr, refFn)}`;
   if ("ref" in w.catch) return ` catch ${refFn(w.catch.ref)}`;
   const v = w.catch.value;
   if (typeof v === "object" && v !== null) return ` catch ${JSON.stringify(v)}`;
