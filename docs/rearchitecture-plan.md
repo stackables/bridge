@@ -242,43 +242,60 @@ string interpolation)
 - `and`/`or` fixed to return boolean (not raw JS values) — matches v1 semantics
 - Root-level output replacement for array/primitive values (`__rootValue__`)
 
-#### V3-Phase 3: Pipe Expressions
+#### V3-Phase 3: Pipe Expressions ✅ COMPLETE
 
 **Unlocks:** tool-features.test.ts (pipe tests), builtin-tools.test.ts,
 scheduling.test.ts, property-search.test.ts
 
 - `pipe` expression type — `tool:source` routing through declared tool handles
+- Pipe source → `input.in` (default) or `input.<named>` path
+- ToolDef base wires + bridge wires merged into pipe input
+- Non-memoized — each pipe call is independent
+- Named pipe input field (`tool:source.fieldName`)
+- Pipe forking (multiple pipes from same source)
 
-#### V3-Phase 4: Control Flow
+#### V3-Phase 4: Control Flow ✅ COMPLETE
 
 **Unlocks:** control-flow.test.ts, shared-parity.test.ts (break/continue)
 
-- `throw` — raises BridgeRuntimeError
-- `panic` — raises BridgePanicError (fatal)
-- `break` / `continue` — array iteration control
+- `throw` — calls `applyControlFlow()` → raises Error
+- `panic` — calls `applyControlFlow()` → raises BridgePanicError (fatal)
+- `break` / `continue` — loop control signals returned as sentinel values
+- Multi-level `break N` / `continue N` — propagated across nested array boundaries
+- `resolveRequestedFields` per-wire error isolation (non-fatal caught, first re-thrown)
+- `evaluateArrayExpr` handles BREAK_SYM/CONTINUE_SYM/LoopControlSignal
+- `applyCatchHandler` delegates to `applyControlFlow()` for all catch control flows
+- Known limitation: panic trace count mismatch (lazy eval fires panic before tool wires)
 
-#### V3-Phase 5: ToolDef / Define / Extends / on error
+#### V3-Phase 5: ToolDef / Define / Extends / on error ✅ COMPLETE
 
 **Unlocks:** tool-features.test.ts (extends), resilience.test.ts (on error),
 shared-parity.test.ts (ToolDef, define), scope-and-edges.test.ts
 
 - ToolDef instruction processing (defaults, fn mapping, on error)
-- Define block inlining
-- Extends chain resolution
-- `on error` handler on tool invocation
+- Define block inlining with child scope creation
+- Extends chain resolution (walks ToolDef chain to root fn)
+- `on error` handler on tool invocation (literal value or context source)
+- Scope blocks in ToolDef body (`.headers { .auth <- ... }`)
+- Nested scope blocks in ToolDef body
 
-#### V3-Phase 6: Force Statements
+#### V3-Phase 6: Force Statements ✅ COMPLETE
 
 **Unlocks:** force-wire.test.ts, builtin-tools.test.ts (audit)
 
 - `force` — tool runs even if output not queried
+- Force statements collected during `indexStatements`
+- `executeForced()` eagerly schedules via `resolveToolResult`
+- Critical forces: awaited alongside output resolution via `Promise.all`
+- Fire-and-forget (`catch null`): errors silently swallowed
 
-#### V3-Phase 7: Const Blocks
+#### V3-Phase 7: Const Blocks ✅ COMPLETE
 
 **Unlocks:** resilience.test.ts (const in bridge), shared-parity.test.ts
 (const blocks)
 
 - `with const as c` — reading from document-level `const` declarations
+- Const values resolved via `resolveRef` scope chain
 
 #### V3-Phase 8: Overdefinition / Multi-wire
 
@@ -287,6 +304,7 @@ shared-parity.test.ts (ToolDef, define), scope-and-edges.test.ts
 
 - Multiple wires to same target with cost-based prioritization
 - Nullish coalescing across wires
+- Currently 8 scenarios disabled for v3 in coalesce-cost.test.ts
 
 #### V3-Phase 9: Advanced Features
 
@@ -297,6 +315,18 @@ shared-parity.test.ts (ToolDef, define), scope-and-edges.test.ts
 - Prototype pollution guards
 - Infinite loop protection
 - Context binding (`with context`)
+- AbortSignal propagation to tool context
+- Eager tool evaluation for trace count parity with v1
+
+#### V3 Remaining Disabled Scenarios
+
+These scenarios are individually disabled for v3 due to architectural
+differences (lazy vs eager evaluation):
+
+- `builtin-tools.test.ts` — 7 scenarios (trace count mismatches due to lazy eval)
+- `control-flow.test.ts` — 1 scenario (panic trace count), 1 group (AbortSignal)
+- `traces-on-errors.test.ts` — 2 scenarios (error trace ordering)
+- `resilience.test.ts` — 2 scenarios (overdefinition-related)
 
 ---
 

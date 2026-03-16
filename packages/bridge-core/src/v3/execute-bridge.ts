@@ -6,6 +6,7 @@ import type {
   ConstDef,
   DefineDef,
   Expression,
+  ForceStatement,
   HandleBinding,
   NodeRef,
   ScopeStatement,
@@ -19,7 +20,15 @@ import type {
 } from "../types.ts";
 import { SELF_MODULE } from "../types.ts";
 import { TraceCollector, resolveToolMeta } from "../tracing.ts";
-import { isFatalError } from "../tree-types.ts";
+import {
+  isFatalError,
+  applyControlFlow,
+  isLoopControlSignal,
+  decrementLoopControl,
+  BREAK_SYM,
+  CONTINUE_SYM,
+} from "../tree-types.ts";
+import type { LoopControlSignal } from "../tree-types.ts";
 import { UNSAFE_KEYS } from "../tree-utils.ts";
 import {
   std as bundledStd,
@@ -269,6 +278,9 @@ class ExecutionScope {
 
   /** Owned define modules — keyed by __define_<handle> prefix. */
   private readonly ownedDefines = new Set<string>();
+
+  /** Force statements collected during indexing. */
+  readonly forceStatements: ForceStatement[] = [];
 
   /** Define input wires indexed by "module:field" key. */
   private readonly defineInputWires = new Map<string, WireStatement[]>();
@@ -880,6 +892,9 @@ function indexStatements(
         }
         break;
       }
+      case "force":
+        scope.forceStatements.push(stmt);
+        break;
     }
   }
 }
@@ -894,7 +909,7 @@ function indexStatements(
 async function resolveRequestedFields(
   scope: ExecutionScope,
   requestedFields: string[],
-): Promise<void> {
+): Promise<LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM | void> {
   // If no specific fields, resolve all indexed output wires.
   // Otherwise, use prefix matching to find relevant wires.
   const wires =
@@ -902,10 +917,20 @@ async function resolveRequestedFields(
       ? scope.collectMatchingOutputWires(requestedFields)
       : scope.allOutputFields().map((f) => scope.getOutputWire(f)!);
 
+  let firstError: unknown;
+
   for (const wire of wires) {
-    const value = await evaluateSourceChain(wire, scope);
-    writeTarget(wire.target, value, scope);
+    try {
+      const value = await evaluateSourceChain(wire, scope);
+      if (isLoopControlSignal(value)) return value;
+      writeTarget(wire.target, value, scope);
+    } catch (err) {
+      if (isFatalError(err)) throw err;
+      if (!firstError) firstError = err;
+    }
   }
+
+  if (firstError) throw firstError;
 }
 
 /**
@@ -944,17 +969,38 @@ async function applyCatchHandler(
   scope: ExecutionScope,
 ): Promise<unknown> {
   if ("control" in c) {
-    if (c.control.kind === "throw") throw new Error(c.control.message);
-    // panic, continue, break — import would be needed for full support
-    throw new Error(
-      `Control flow "${c.control.kind}" in catch not yet implemented in v3`,
-    );
+    return applyControlFlow(c.control);
   }
   if ("ref" in c) {
     return resolveRef(c.ref, scope);
   }
   // Literal value
   return c.value;
+}
+
+/**
+ * Eagerly schedule force tool calls.
+ *
+ * Returns an array of promises for critical (non-catch) force statements.
+ * Fire-and-forget forces (`catch null`) have errors silently swallowed.
+ */
+function executeForced(scope: ExecutionScope): Promise<unknown>[] {
+  const critical: Promise<unknown>[] = [];
+
+  for (const stmt of scope.forceStatements) {
+    const promise = scope.resolveToolResult(
+      stmt.module,
+      stmt.field,
+      stmt.instance,
+    );
+    if (stmt.catchError) {
+      promise.catch(() => {});
+    } else {
+      critical.push(promise);
+    }
+  }
+
+  return critical;
 }
 
 /**
@@ -1035,9 +1081,7 @@ async function evaluateExpression(
     }
 
     case "control":
-      throw new Error(
-        `Control flow "${expr.control.kind}" not implemented in v3 POC`,
-      );
+      return applyControlFlow(expr.control);
 
     case "binary": {
       const left = await evaluateExpression(expr.left, scope);
@@ -1095,12 +1139,19 @@ async function evaluateExpression(
 async function evaluateArrayExpr(
   expr: Extract<Expression, { type: "array" }>,
   scope: ExecutionScope,
-): Promise<unknown[] | null> {
+): Promise<
+  unknown[] | LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM | null
+> {
   const sourceValue = await evaluateExpression(expr.source, scope);
   if (sourceValue == null) return null;
   if (!Array.isArray(sourceValue)) return [];
 
   const results: unknown[] = [];
+  let propagate:
+    | LoopControlSignal
+    | typeof BREAK_SYM
+    | typeof CONTINUE_SYM
+    | undefined;
 
   for (const element of sourceValue) {
     const elementOutput: Record<string, unknown> = {};
@@ -1114,11 +1165,21 @@ async function evaluateArrayExpr(
 
     // Index then pull — child scope may declare its own tools
     indexStatements(expr.body, childScope);
-    await resolveRequestedFields(childScope, []);
+    const signal = await resolveRequestedFields(childScope, []);
+
+    if (isLoopControlSignal(signal)) {
+      if (signal === CONTINUE_SYM) continue;
+      if (signal === BREAK_SYM) break;
+      // Multi-level: consume one boundary, propagate rest
+      propagate = decrementLoopControl(signal);
+      if (signal.__bridgeControl === "break") break;
+      continue; // "continue" kind → skip this element
+    }
 
     results.push(elementOutput);
   }
 
+  if (propagate) return propagate;
   return results;
 }
 
@@ -1388,9 +1449,16 @@ export async function executeBridge<T = unknown>(
 
   // Index: register tool bindings, tool input wires, and output wires
   indexStatements(bridge.body, rootScope);
+
+  // Schedule force statements — run eagerly alongside output resolution
+  const forcePromises = executeForced(rootScope);
+
   // Pull: resolve requested output fields — tool calls happen lazily on demand
   try {
-    await resolveRequestedFields(rootScope, options.requestedFields ?? []);
+    await Promise.all([
+      resolveRequestedFields(rootScope, options.requestedFields ?? []),
+      ...forcePromises,
+    ]);
   } catch (err) {
     // Attach collected traces to error for harness/caller access
     if (tracer) {

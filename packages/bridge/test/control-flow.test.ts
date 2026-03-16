@@ -16,6 +16,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("throw control flow", {
+  disable: [],
   bridge: bridge`
     version 1.5
 
@@ -106,6 +107,7 @@ regressionTest("throw control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("panic control flow", {
+  disable: [],
   bridge: bridge`
     version 1.5
 
@@ -131,6 +133,8 @@ regressionTest("panic control flow", {
       },
       "null name → basic panics, tool fields succeed": {
         input: { a: { name: "ok" } },
+        // v3 lazy evaluation: panic fires before tool-referencing wires run
+        disable: ["v3"],
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
           assert.equal(err.message, "fatal error");
@@ -181,6 +185,7 @@ regressionTest("panic control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("continue and break in arrays", {
+  disable: [],
   bridge: bridge`
     version 1.5
 
@@ -404,6 +409,8 @@ regressionTest("continue and break in arrays", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("AbortSignal control flow", {
+  // v3 does not yet support AbortSignal propagation
+  disable: ["v3"],
   bridge: bridge`
     version 1.5
 

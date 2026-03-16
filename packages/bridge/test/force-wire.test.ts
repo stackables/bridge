@@ -6,6 +6,7 @@ import { bridge } from "@stackables/bridge";
 // ── Force statement: regression tests ───────────────────────────────────────
 
 regressionTest("force statement: end-to-end execution", {
+  disable: [],
   bridge: bridge`
     version 1.5
 
@@ -86,6 +87,7 @@ regressionTest("force statement: end-to-end execution", {
 // ── Fire-and-forget: force with catch null ──────────────────────────────────
 
 regressionTest("force with catch null (fire-and-forget)", {
+  disable: [],
   bridge: bridge`
     version 1.5
 
