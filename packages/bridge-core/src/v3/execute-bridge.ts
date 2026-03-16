@@ -10,10 +10,12 @@ import type {
   ToolDef,
   ToolMap,
   WireAliasStatement,
+  WireCatch,
   WireStatement,
 } from "../types.ts";
 import { SELF_MODULE } from "../types.ts";
 import { TraceCollector } from "../tracing.ts";
+import { isFatalError } from "../tree-types.ts";
 import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
@@ -117,12 +119,24 @@ function bindingOwnerKey(name: string): string {
 /**
  * Read a nested property from an object following a path array.
  * Returns undefined if any segment is missing.
+ *
+ * When `rootSafe` or `pathSafe` flags are provided, null/undefined at
+ * safe-flagged segments returns undefined instead of propagating.
  */
-function getPath(obj: unknown, path: string[]): unknown {
+function getPath(
+  obj: unknown,
+  path: string[],
+  rootSafe?: boolean,
+  pathSafe?: boolean[],
+): unknown {
   let current: unknown = obj;
-  for (const segment of path) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[segment];
+  for (let i = 0; i < path.length; i++) {
+    if (current == null || typeof current !== "object") {
+      const safe = pathSafe?.[i] ?? (i === 0 ? (rootSafe ?? false) : false);
+      if (safe) return undefined;
+      return undefined; // path traversal naturally returns undefined
+    }
+    current = (current as Record<string, unknown>)[path[i]!];
   }
   return current;
 }
@@ -136,6 +150,13 @@ function setPath(
   path: string[],
   value: unknown,
 ): void {
+  // Empty path — merge value into root object
+  if (path.length === 0) {
+    if (value != null && typeof value === "object" && !Array.isArray(value)) {
+      Object.assign(obj, value as Record<string, unknown>);
+    }
+    return;
+  }
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i]!;
@@ -402,23 +423,42 @@ class ExecutionScope {
       if (!fn) throw new Error(`Tool function "${toolName}" not registered`);
 
       const startMs = performance.now();
-      const result = await fn(input, { logger: this.engine.logger });
-      const durationMs = performance.now() - startMs;
+      try {
+        const result = await fn(input, { logger: this.engine.logger });
+        const durationMs = performance.now() - startMs;
 
-      if (this.engine.tracer) {
-        this.engine.tracer.record(
-          this.engine.tracer.entry({
-            tool: toolName,
-            fn: toolName,
-            input,
-            output: result,
-            durationMs,
-            startedAt: this.engine.tracer.now() - durationMs,
-          }),
-        );
+        if (this.engine.tracer) {
+          this.engine.tracer.record(
+            this.engine.tracer.entry({
+              tool: toolName,
+              fn: toolName,
+              input,
+              output: result,
+              durationMs,
+              startedAt: this.engine.tracer.now() - durationMs,
+            }),
+          );
+        }
+
+        return result;
+      } catch (err) {
+        const durationMs = performance.now() - startMs;
+
+        if (this.engine.tracer) {
+          this.engine.tracer.record(
+            this.engine.tracer.entry({
+              tool: toolName,
+              fn: toolName,
+              input,
+              error: (err as Error).message,
+              durationMs,
+              startedAt: this.engine.tracer.now() - durationMs,
+            }),
+          );
+        }
+
+        throw err;
       }
-
-      return result;
     })();
 
     this.toolResults.set(key, promise);
@@ -542,20 +582,70 @@ async function resolveRequestedFields(
 
 /**
  * Evaluate a source chain (fallback gates: ||, ??).
+ * Wraps with catch handler if present.
  */
 async function evaluateSourceChain(
   chain: SourceChain,
   scope: ExecutionScope,
 ): Promise<unknown> {
-  let value: unknown;
+  try {
+    let value: unknown;
 
-  for (const entry of chain.sources) {
-    if (entry.gate === "falsy" && value) break;
-    if (entry.gate === "nullish" && value != null) break;
-    value = await evaluateExpression(entry.expr, scope);
+    for (const entry of chain.sources) {
+      if (entry.gate === "falsy" && value) continue;
+      if (entry.gate === "nullish" && value != null) continue;
+      value = await evaluateExpression(entry.expr, scope);
+    }
+
+    return value;
+  } catch (err) {
+    if (isFatalError(err)) throw err;
+    if (chain.catch) {
+      return applyCatchHandler(chain.catch, scope);
+    }
+    throw err;
   }
+}
 
-  return value;
+/**
+ * Apply a catch handler — returns a literal, resolves a ref, or
+ * executes control flow (throw/panic/continue/break).
+ */
+async function applyCatchHandler(
+  c: WireCatch,
+  scope: ExecutionScope,
+): Promise<unknown> {
+  if ("control" in c) {
+    if (c.control.kind === "throw") throw new Error(c.control.message);
+    // panic, continue, break — import would be needed for full support
+    throw new Error(
+      `Control flow "${c.control.kind}" in catch not yet implemented in v3`,
+    );
+  }
+  if ("ref" in c) {
+    return resolveRef(c.ref, scope);
+  }
+  // Literal value
+  return c.value;
+}
+
+/**
+ * Evaluate an expression safely — swallows non-fatal errors and returns undefined.
+ * Fatal errors (panic, abort) always propagate.
+ */
+async function evaluateExprSafe(
+  fn: () => unknown | Promise<unknown>,
+): Promise<unknown> {
+  try {
+    const result = fn();
+    if (result != null && typeof (result as Promise<unknown>).then === "function") {
+      return await (result as Promise<unknown>);
+    }
+    return result;
+  } catch (err) {
+    if (isFatalError(err)) throw err;
+    return undefined;
+  }
 }
 
 /**
@@ -567,6 +657,9 @@ async function evaluateExpression(
 ): Promise<unknown> {
   switch (expr.type) {
     case "ref":
+      if (expr.safe) {
+        return evaluateExprSafe(() => resolveRef(expr.ref, scope));
+      }
       return resolveRef(expr.ref, scope);
 
     case "literal":
@@ -583,13 +676,23 @@ async function evaluateExpression(
     }
 
     case "and": {
-      const left = await evaluateExpression(expr.left, scope);
-      return left ? evaluateExpression(expr.right, scope) : left;
+      const left = expr.leftSafe
+        ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
+        : await evaluateExpression(expr.left, scope);
+      if (!left) return left;
+      return expr.rightSafe
+        ? evaluateExprSafe(() => evaluateExpression(expr.right, scope))
+        : evaluateExpression(expr.right, scope);
     }
 
     case "or": {
-      const left = await evaluateExpression(expr.left, scope);
-      return left ? left : evaluateExpression(expr.right, scope);
+      const left = expr.leftSafe
+        ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
+        : await evaluateExpression(expr.left, scope);
+      if (left) return left;
+      return expr.rightSafe
+        ? evaluateExprSafe(() => evaluateExpression(expr.right, scope))
+        : evaluateExpression(expr.right, scope);
     }
 
     case "control":
@@ -657,7 +760,7 @@ async function resolveRef(
   if (ref.element) {
     const depth = ref.elementDepth ?? 0;
     const elementData = scope.getElement(depth);
-    return getPath(elementData, ref.path);
+    return getPath(elementData, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
   // Alias reference — lazy evaluation with caching
@@ -666,12 +769,12 @@ async function resolveRef(
       ref.field,
       evaluateSourceChain,
     );
-    return getPath(aliasResult, ref.path);
+    return getPath(aliasResult, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
   // Self-module input reference — reading from input args
   if (ref.module === SELF_MODULE && ref.instance == null) {
-    return getPath(scope.selfInput, ref.path);
+    return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
   // Tool reference — reading from a tool's output (triggers lazy call)
@@ -680,7 +783,7 @@ async function resolveRef(
     ref.field,
     ref.instance,
   );
-  return getPath(toolResult, ref.path);
+  return getPath(toolResult, ref.path, ref.rootSafe, ref.pathSafe);
 }
 
 /**
@@ -774,7 +877,15 @@ export async function executeBridge<T = unknown>(
   // Index: register tool bindings, tool input wires, and output wires
   indexStatements(bridge.body, rootScope);
   // Pull: resolve requested output fields — tool calls happen lazily on demand
-  await resolveRequestedFields(rootScope, options.requestedFields ?? []);
+  try {
+    await resolveRequestedFields(rootScope, options.requestedFields ?? []);
+  } catch (err) {
+    // Attach collected traces to error for harness/caller access
+    if (tracer) {
+      (err as { traces?: ToolTrace[] }).traces = tracer.traces;
+    }
+    throw err;
+  }
 
   return {
     data: output as T,

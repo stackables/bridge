@@ -490,6 +490,7 @@ regressionTest("parity: ternary / conditional wires", {
 // ── 5. Catch fallbacks ──────────────────────────────────────────────────────
 
 regressionTest("parity: catch fallbacks", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

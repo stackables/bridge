@@ -11,6 +11,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("chained providers", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

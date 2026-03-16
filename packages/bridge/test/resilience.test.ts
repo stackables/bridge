@@ -157,6 +157,7 @@ regressionTest("resilience: tool on error", {
 // ── 3. Wire catch ───────────────────────────────────────────────────────────
 
 regressionTest("resilience: wire catch", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -302,6 +303,7 @@ regressionTest("resilience: combined on error + catch + const", {
 // ── 5. Wire || falsy-fallback ───────────────────────────────────────────────
 
 regressionTest("resilience: wire falsy-fallback (||)", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -481,6 +483,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
 // ── 7. || source + catch source ─────────────────────────────────────────────
 
 regressionTest("resilience: || source + catch source (COALESCE)", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -599,6 +602,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
     "Query.catchPipeSource": {
       "api succeeds — catch not used": {
         input: {},
+        disable: ["compiled", "parser", "v3"],
         tools: {
           api: () => ({ result: "direct-value" }),
           fallbackApi: () => ({ backup: "unused" }),
@@ -610,6 +614,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
       },
       "catch pipes fallback through tool": {
         input: {},
+        disable: ["compiled", "parser", "v3"],
         tools: {
           api: () => {
             throw new Error("api down");

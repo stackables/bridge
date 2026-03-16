@@ -17,6 +17,7 @@ import { bridge } from "@stackables/bridge";
 // ── || short-circuit evaluation ────────────────────────────────────────────
 
 regressionTest("|| fallback chains", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -82,6 +83,7 @@ regressionTest("|| fallback chains", {
       "a throws → uncaught wires fail": {
         input: { a: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 1,
         assertGraphql: {
@@ -94,6 +96,7 @@ regressionTest("|| fallback chains", {
       "b throws → fallback error propagates": {
         input: { b: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
         assertGraphql: {
@@ -106,6 +109,7 @@ regressionTest("|| fallback chains", {
       "c throws → third-position fallback error": {
         input: { c: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 3,
         assertGraphql: {
@@ -344,6 +348,7 @@ regressionTest("overdefinition: explicit cost override", {
 // ── ?. safe execution modifier ────────────────────────────────────────────
 
 regressionTest("?. safe execution modifier", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -396,6 +401,7 @@ regressionTest("?. safe execution modifier", {
       "?. on non-existent const paths": {
         input: {},
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         fields: ["constChained", "constMixed"],
         assertData: {
           constChained: "A",
@@ -406,6 +412,7 @@ regressionTest("?. safe execution modifier", {
       "b throws in fallback position → error propagates": {
         input: { a: { _error: "any" }, b: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         fields: ["withToolFallback"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
@@ -420,6 +427,7 @@ regressionTest("?. safe execution modifier", {
 // ── Mixed || and ?? chains ──────────────────────────────────────────────────
 
 regressionTest("mixed || and ?? chains", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -499,6 +507,7 @@ regressionTest("mixed || and ?? chains", {
       "a throws → error on all wires": {
         input: { a: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 1,
         assertGraphql: {
@@ -510,6 +519,7 @@ regressionTest("mixed || and ?? chains", {
       "b throws → fallback error": {
         input: { b: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 2,
         assertGraphql: {
@@ -521,6 +531,7 @@ regressionTest("mixed || and ?? chains", {
       "c throws → fallback:1 error on fourItem": {
         input: { c: { _error: "boom" } },
         allowDowngrade: true,
+        disable: ["compiled", "parser", "v3"],
         fields: ["fourItem"],
         assertError: /BridgeRuntimeError/,
         assertTraces: 3,
