@@ -12,7 +12,8 @@ function omitLoc(value: unknown): unknown {
         key === "loc" ||
         key.endsWith("Loc") ||
         key === "source" ||
-        key === "filename"
+        key === "filename" ||
+        key === "body"
       ) {
         continue;
       }

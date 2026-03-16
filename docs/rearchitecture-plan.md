@@ -155,7 +155,19 @@ directly from Chevrotain CST nodes, separate from the legacy `buildBridgeBody()`
 _Depends on Phase 3. Most critical phase._
 
 Files: `ExecutionTree.ts`, `scheduleTools.ts`, `resolveWires.ts`,
-`resolveWiresSources.ts`, `materializeShadows.ts`.
+`resolveWiresSources.ts`, `materializeShadows.ts`, `parser.ts`.
+
+### Completed
+
+- ✅ **Expression evaluators** in `resolveWiresSources.ts`:
+  - `evaluateBinary` — all 10 BinaryOp cases (add/sub/mul/div/eq/neq/gt/gte/lt/lte)
+  - `evaluateUnary` — not operator
+  - `evaluateConcat` — template string concatenation
+- ✅ **WireCatch.value → JsonValue** — proper JSON literal support (not string fallback)
+- ✅ **Hook ast-builder into parser** — `buildBody()` called in `buildBridge`,
+  `buildToolDef`, `buildDefineDef`; `body: Statement[]` populated alongside legacy `wires`
+
+### Remaining
 
 1. **Scope chain**: `ScopeFrame { handles, wires, parent? }` — tool lookup
    walks frames upward (shadowing semantics)

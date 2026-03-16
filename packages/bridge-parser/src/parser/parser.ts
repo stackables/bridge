@@ -85,6 +85,7 @@ import type {
   WireSourceEntry,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
+import { buildBody } from "./ast-builder.ts";
 
 // ── Reserved-word guards (mirroring the regex parser) ──────────────────────
 
@@ -3144,6 +3145,18 @@ function buildToolDef(
     }
   }
 
+  // Build nested Statement[] body alongside legacy wires
+  const bodyResult = buildBody(
+    bodyLines,
+    "Tools",
+    toolName,
+    previousInstructions,
+    {
+      forbiddenHandleKinds: new Set(["input", "output"]),
+      selfWireNodes,
+    },
+  );
+
   return {
     kind: "tool",
     name: toolName,
@@ -3153,6 +3166,7 @@ function buildToolDef(
     wires,
     ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
     ...(onError ? { onError } : {}),
+    body: bodyResult.body,
   };
 }
 
@@ -3167,6 +3181,9 @@ function buildDefineDef(node: CstNode): DefineDef {
   const { handles, wires, arrayIterators, pipeHandles, forces } =
     buildBridgeBody(bodyLines, "Define", name, [], lineNum);
 
+  // Build nested Statement[] body alongside legacy wires
+  const bodyResult = buildBody(bodyLines, "Define", name, []);
+
   return {
     kind: "define",
     name,
@@ -3175,6 +3192,7 @@ function buildDefineDef(node: CstNode): DefineDef {
     ...(Object.keys(arrayIterators).length > 0 ? { arrayIterators } : {}),
     ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
     ...(forces.length > 0 ? { forces } : {}),
+    body: bodyResult.body,
   };
 }
 
@@ -3273,6 +3291,14 @@ function buildBridge(
     );
   }
 
+  // Build nested Statement[] body alongside legacy wires
+  const bodyResult = buildBody(
+    bodyLines,
+    typeName,
+    fieldName,
+    previousInstructions,
+  );
+
   const instructions: Instruction[] = [];
   instructions.push({
     kind: "bridge",
@@ -3284,6 +3310,7 @@ function buildBridge(
       Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
     pipeHandles: pipeHandles.length > 0 ? pipeHandles : undefined,
     forces: forces.length > 0 ? forces : undefined,
+    body: bodyResult.body,
   });
   return instructions;
 }

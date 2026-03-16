@@ -81,19 +81,13 @@ export function evaluateExpression(
       );
 
     case "binary":
-      throw new Error(
-        "Binary expressions are not yet supported in evaluateExpression",
-      );
+      return evaluateBinary(ctx, expr, pullChain);
 
     case "unary":
-      throw new Error(
-        "Unary expressions are not yet supported in evaluateExpression",
-      );
+      return evaluateUnary(ctx, expr, pullChain);
 
     case "concat":
-      throw new Error(
-        "Concat expressions are not yet supported in evaluateExpression",
-      );
+      return evaluateConcat(ctx, expr, pullChain);
   }
 }
 
@@ -359,6 +353,57 @@ async function evaluateOr(
     pullChain,
   );
   return Boolean(rightVal);
+}
+
+async function evaluateBinary(
+  ctx: TreeContext,
+  expr: Extract<Expression, { type: "binary" }>,
+  pullChain?: Set<string>,
+): Promise<unknown> {
+  const left = await evaluateExpression(ctx, expr.left, pullChain);
+  const right = await evaluateExpression(ctx, expr.right, pullChain);
+  switch (expr.op) {
+    case "add":
+      return Number(left) + Number(right);
+    case "sub":
+      return Number(left) - Number(right);
+    case "mul":
+      return Number(left) * Number(right);
+    case "div":
+      return Number(left) / Number(right);
+    case "eq":
+      return left === right;
+    case "neq":
+      return left !== right;
+    case "gt":
+      return Number(left) > Number(right);
+    case "gte":
+      return Number(left) >= Number(right);
+    case "lt":
+      return Number(left) < Number(right);
+    case "lte":
+      return Number(left) <= Number(right);
+  }
+}
+
+async function evaluateUnary(
+  ctx: TreeContext,
+  expr: Extract<Expression, { type: "unary" }>,
+  pullChain?: Set<string>,
+): Promise<boolean> {
+  const val = await evaluateExpression(ctx, expr.operand, pullChain);
+  return !val;
+}
+
+async function evaluateConcat(
+  ctx: TreeContext,
+  expr: Extract<Expression, { type: "concat" }>,
+  pullChain?: Set<string>,
+): Promise<string> {
+  const parts = await Promise.all(
+    expr.parts.map((p) => evaluateExpression(ctx, p, pullChain)),
+  );
+  return parts.map((v) => (v == null ? "" : String(v))).join("");
 }
 
 /**
