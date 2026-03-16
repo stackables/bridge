@@ -1,0 +1,174 @@
+(* ================================================================= *)
+(* BRIDGE LANGUAGE V1.5 (ISO/IEC 14977 COMPLIANT)                    *)
+(* ================================================================= *)
+(* --- 1. TOP LEVEL BLOCKS --- *)
+program
+    = "version 1.5", { const
+    | bridge
+    | define
+    | tool };
+
+const
+    = "const", identifier, "=", json;
+
+bridge
+    = "bridge", identifier, "{", { statement }, "}";
+
+define
+    = "define", identifier, "{", { statement }, "}";
+
+tool
+    = "tool", identifier, "from", identifier, "{", { statement }, [ "on error", "=", json ], "}";
+
+(* --- 2. STATEMENTS & SCOPE --- *)
+(* ONE unified statement list for everything *)
+statement
+    = with
+    | wire
+    | wire_alias
+    | scope;
+
+with
+    = "with", identifier, [ "as", identifier ], [ "memoize" ];
+
+(* ONE scope rule *)
+scope
+    = target, "{", { statement }, "}";
+
+(* ONE wire rule *)
+wire
+    = target, ( routing
+    | "=", json );
+
+(* ONE alias rule *)
+wire_alias
+    = "alias", identifier, routing;
+
+(* --- 3. SHARED PATHS & ROUTING --- *)
+(* The parser accepts leading dots everywhere. 
+   The compiler will reject them if they are at the root. *)
+target
+    = [ "." ], identifier, { ".", identifier };
+
+routing
+    = "<-", expression, { ( "||"
+    | "??" ), expression }, [ "catch", expression ];
+
+(* --- 4. EXPRESSIONS & REFERENCES --- *)
+ref
+    = identifier, [ [ "?" ], ".", identifier ], { [ "?" ], ".", identifier };
+
+expression
+    = base_expression, [ "?", expression, ":", expression ];
+
+base_expression
+    = json
+    | ref, "[]", "as", identifier, "{", { statement }, "}"
+    | ref
+    | ( "throw"
+    | "panic" ), [ string ]
+    | ( "continue"
+    | "break" ), [ integer ];
+
+(* --- 4. EMBEDDED JSON (RFC 8259) --- *)
+json
+    = object
+    | array
+    | string
+    | number
+    | "true"
+    | "false"
+    | "null";
+
+object
+    = "{", [ string, ":", json, { ",", string, ":", json } ], "}";
+
+array
+    = "[", [ json, { ",", json } ], "]";
+
+(* --- 5. LEXICAL RULES (TOKENS) --- *)
+(* Identifiers map to your names, sources, fields, and iterators *)
+identifier
+    = letter, { letter
+    | digit
+    | "_" };
+
+string
+    = '"', { character - '"' }, '"'
+    | "'", { character - "'" }, "'";
+
+number
+    = [ "-" ], integer, [ ".", integer ];
+
+integer
+    = digit, { digit };
+
+letter
+    = "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z"
+    | "A"
+    | "B"
+    | "C"
+    | "D"
+    | "E"
+    | "F"
+    | "G"
+    | "H"
+    | "I"
+    | "J"
+    | "K"
+    | "L"
+    | "M"
+    | "N"
+    | "O"
+    | "P"
+    | "Q"
+    | "R"
+    | "S"
+    | "T"
+    | "U"
+    | "V"
+    | "W"
+    | "X"
+    | "Y"
+    | "Z"
+    | "_";
+
+digit
+    = "0"
+    | "1"
+    | "2"
+    | "3"
+    | "4"
+    | "5"
+    | "6"
+    | "7"
+    | "8"
+    | "9";
+
+character
+    = ? any valid unicode character ?;

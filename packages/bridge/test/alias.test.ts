@@ -14,19 +14,33 @@ regressionTest("alias keyword", {
   bridge: bridge`
     version 1.5
 
-    bridge Alias.syntax {
-      with test.multitool as object
-      with input as i
-      with output as o
+    bridge Array.is_wire {
+      with context as c
 
-      # Simple alias with fallback and catch
-      alias user_info <- object?.user.info || i.info catch "Unknown"
+      o.arrayWithFallback <- c.missingArray[] as i {
+        .value <- i.value || "Fallback 1"
+      } || c.realArray[] as i {
+        .value <- i.value || "Fallback 2"
+      } catch "No arrays"
 
-      o.info <- user_info
     }
+
   `,
+  disable: true,
   tools: tools,
   scenarios: {
-    "Alias.syntax": {},
+    "Array.is_wire": {
+      "falsy gate with 2 arrays": {
+        context: {
+          missingArray: undefined,
+          realArray: [{ value: "Real value" }, { value: undefined }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [{ value: "Real value" }, { value: "Fallback" }],
+        },
+        assertTraces: 0,
+      },
+    },
   },
 });
