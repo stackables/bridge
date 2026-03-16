@@ -1482,7 +1482,23 @@ export function buildBody(
       }
 
       let binding: HandleBinding;
-      if (lastDot !== -1) {
+      const defineDef = previousInstructions.find(
+        (inst): inst is DefineDef =>
+          inst.kind === "define" && inst.name === name,
+      );
+      if (defineDef) {
+        if (memoize) {
+          throw new Error(
+            `Line ${elemLineNum}: memoize is only valid for tool references`,
+          );
+        }
+        binding = { handle, kind: "define", name };
+        handleRes.set(handle, {
+          module: `__define_${handle}`,
+          type: bridgeType,
+          field: bridgeField,
+        });
+      } else if (lastDot !== -1) {
         const modulePart = name.substring(0, lastDot);
         const fieldPart = name.substring(lastDot + 1);
         const key = `${modulePart}:${fieldPart}`;

@@ -1,5 +1,6 @@
 import type { ToolTrace, TraceLevel } from "../tracing.ts";
 import type { Logger } from "../tree-types.ts";
+import type { SourceLocation } from "@stackables/bridge-types";
 import type {
   Bridge,
   BridgeDocument,
@@ -11,6 +12,7 @@ import type {
   NodeRef,
   ScopeStatement,
   SourceChain,
+  SpreadStatement,
   Statement,
   ToolDef,
   ToolMap,
@@ -19,19 +21,30 @@ import type {
   WireStatement,
 } from "../types.ts";
 import { SELF_MODULE } from "../types.ts";
-import { TraceCollector, resolveToolMeta } from "../tracing.ts";
+import {
+  TraceCollector,
+  resolveToolMeta,
+  logToolSuccess,
+  logToolError,
+  type EffectiveToolLog,
+} from "../tracing.ts";
 import {
   BridgeAbortError,
+  BridgePanicError,
   isFatalError,
+  isPromise,
   applyControlFlow,
   isLoopControlSignal,
   decrementLoopControl,
   wrapBridgeRuntimeError,
   BREAK_SYM,
   CONTINUE_SYM,
+  MAX_EXECUTION_DEPTH,
 } from "../tree-types.ts";
 import type { LoopControlSignal } from "../tree-types.ts";
 import { UNSAFE_KEYS } from "../tree-utils.ts";
+import { raceTimeout } from "../utils.ts";
+import { attachBridgeErrorDocumentContext } from "../formatBridgeError.ts";
 import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
@@ -111,9 +124,14 @@ export type ExecuteBridgeResult<T = unknown> = {
 
 // ── Scope-based pull engine (v3) ────────────────────────────────────────────
 
+/** Shared empty pull path — avoids allocating a new Set on every entry point. */
+const EMPTY_PULL_PATH: ReadonlySet<string> = new Set<string>();
+
 /** Unique key for a tool instance trunk. */
 function toolKey(module: string, field: string, instance?: number): string {
-  return instance ? `${module}:${field}:${instance}` : `${module}:${field}`;
+  return instance
+    ? `${module}:Tools:${field}:${instance}`
+    : `${module}:Tools:${field}`;
 }
 
 /** Ownership key for a tool (module:field, no instance). */
@@ -150,16 +168,29 @@ function getPath(
     const segment = path[i]!;
     if (UNSAFE_KEYS.has(segment))
       throw new Error(`Unsafe property traversal: ${segment}`);
-    if (current == null || typeof current !== "object") {
+    if (current == null) {
       const safe = pathSafe?.[i] ?? (i === 0 ? (rootSafe ?? false) : false);
       if (safe) {
         current = undefined;
         continue;
       }
-      // Strict path: simulate JS property access to get TypeError on null
-      return (current as Record<string, unknown>)[segment];
+      // Throws TypeError: Cannot read properties of null/undefined
+      return (current as unknown as Record<string, unknown>)[segment];
     }
-    current = (current as Record<string, unknown>)[segment];
+    const isPrimitive =
+      typeof current !== "object" && typeof current !== "function";
+    const next = (current as Record<string, unknown>)[segment];
+    if (isPrimitive && next === undefined) {
+      const safe = pathSafe?.[i] ?? (i === 0 ? (rootSafe ?? false) : false);
+      if (safe) {
+        current = undefined;
+        continue;
+      }
+      throw new TypeError(
+        `Cannot read properties of ${String(current)} (reading '${segment}')`,
+      );
+    }
+    current = next;
   }
   return current;
 }
@@ -266,8 +297,15 @@ class ExecutionScope {
   /** Element data stack for array iteration nesting. */
   private readonly elementData: unknown[] = [];
 
-  /** Output wires (self-module and element) indexed by dot-joined target path. */
-  private readonly outputWires = new Map<string, WireStatement>();
+  /** Output wires (self-module and element) indexed by dot-joined target path.
+   *  Multiple wires to the same path are stored as an array for overdefinition. */
+  private readonly outputWires = new Map<string, WireStatement[]>();
+
+  /** Spread statements collected during indexing, with optional path prefix for scope blocks. */
+  private readonly spreadStatements: {
+    stmt: SpreadStatement;
+    pathPrefix: string[];
+  }[] = [];
 
   /** Alias statements indexed by name — evaluated lazily on first read. */
   private readonly aliases = new Map<string, WireAliasStatement>();
@@ -290,21 +328,32 @@ class ExecutionScope {
   /** When true, this scope acts as a root for output writes (define scopes). */
   private isRootScope = false;
 
+  /** Depth counter for array nesting — used for infinite loop protection. */
+  private readonly depth: number;
+
+  /** Set of tool owner keys that have memoize enabled. */
+  private readonly memoizedToolKeys = new Set<string>();
+
   constructor(
     parent: ExecutionScope | null,
     selfInput: Record<string, unknown>,
     output: Record<string, unknown>,
     engine: EngineContext,
+    depth = 0,
   ) {
     this.parent = parent;
     this.selfInput = selfInput;
     this.output = output;
     this.engine = engine;
+    this.depth = depth;
   }
 
   /** Register that this scope owns a tool declared via `with`. */
-  declareToolBinding(name: string): void {
+  declareToolBinding(name: string, memoize?: true): void {
     this.ownedTools.add(bindingOwnerKey(name));
+    if (memoize) {
+      this.memoizedToolKeys.add(bindingOwnerKey(name));
+    }
   }
 
   /** Register that this scope owns a define block declared via `with`. */
@@ -343,7 +392,7 @@ class ExecutionScope {
     const dot = toolName.lastIndexOf(".");
     const module = dot === -1 ? SELF_MODULE : toolName.substring(0, dot);
     const field = dot === -1 ? toolName : toolName.substring(dot + 1);
-    const prefix = `${module}:${field}`;
+    const prefix = `${module}:Tools:${field}`;
     const result: WireStatement[] = [];
     for (const [key, wires] of this.toolInputWires) {
       if (key === prefix || key.startsWith(prefix + ":")) {
@@ -368,14 +417,30 @@ class ExecutionScope {
     wires.push(wire);
   }
 
-  /** Index an output wire (self-module or element) by its target path. */
+  /** Index an output wire (self-module or element) by its target path.
+   *  Multiple wires to the same path are collected for overdefinition. */
   addOutputWire(wire: WireStatement): void {
     const key = wire.target.path.join(".");
-    this.outputWires.set(key, wire);
+    let wires = this.outputWires.get(key);
+    if (!wires) {
+      wires = [];
+      this.outputWires.set(key, wires);
+    }
+    wires.push(wire);
   }
 
-  /** Get an output wire by field path key. */
-  getOutputWire(field: string): WireStatement | undefined {
+  /** Add a spread statement with an optional path prefix for scope blocks. */
+  addSpread(stmt: SpreadStatement, pathPrefix: string[] = []): void {
+    this.spreadStatements.push({ stmt, pathPrefix });
+  }
+
+  /** Get all spread statements with their path prefixes. */
+  getSpreads(): { stmt: SpreadStatement; pathPrefix: string[] }[] {
+    return this.spreadStatements;
+  }
+
+  /** Get output wires by field path key. Returns array (may have multiple for overdefinition). */
+  getOutputWires(field: string): WireStatement[] | undefined {
     return this.outputWires.get(field);
   }
 
@@ -385,25 +450,48 @@ class ExecutionScope {
   }
 
   /**
-   * Collect all output wires matching the requested fields via prefix matching.
-   * - Requesting "profile" matches wires "profile", "profile.name", "profile.age"
-   * - Requesting "profile.name" matches wire "profile" (parent provides the object)
+   * Collect all output wire groups matching the requested fields via prefix matching.
+   * Returns arrays of wires (one array per matched path, for overdefinition).
    */
-  collectMatchingOutputWires(requestedFields: string[]): WireStatement[] {
+  collectMatchingOutputWireGroups(
+    requestedFields: string[],
+  ): WireStatement[][] {
+    // Bare "*" means all fields — skip filtering
+    if (requestedFields.includes("*")) {
+      return this.allOutputFields().map((f) => this.getOutputWires(f)!);
+    }
+
     const matched = new Set<string>();
-    const result: WireStatement[] = [];
+    const result: WireStatement[][] = [];
 
     for (const field of requestedFields) {
-      for (const [key, wire] of this.outputWires) {
+      for (const [key, wires] of this.outputWires) {
         if (matched.has(key)) continue;
-        // Exact match, or prefix match in either direction
+
+        // Root key "" always matches — it IS the entire output
+        if (key === "") {
+          matched.add(key);
+          result.push(wires);
+          continue;
+        }
+
+        // Trailing wildcard: "legs.*" matches "legs.duration", "legs.distance"
+        if (field.endsWith(".*")) {
+          const prefix = field.slice(0, -2);
+          if (key === prefix || key.startsWith(prefix + ".")) {
+            matched.add(key);
+            result.push(wires);
+            continue;
+          }
+        }
+
         if (
           key === field ||
           key.startsWith(field + ".") ||
           field.startsWith(key + ".")
         ) {
           matched.add(key);
-          result.push(wire);
+          result.push(wires);
         }
       }
     }
@@ -422,22 +510,39 @@ class ExecutionScope {
    */
   resolveAlias(
     name: string,
-    evaluator: (chain: SourceChain, scope: ExecutionScope) => Promise<unknown>,
+    evaluator: (
+      chain: SourceChain,
+      scope: ExecutionScope,
+      requestedFields: undefined,
+      pullPath: ReadonlySet<string>,
+    ) => Promise<unknown>,
+    pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
   ): Promise<unknown> {
-    // Check local cache
+    const aliasKey = `alias:${name}`;
+
+    // 1. Cycle check first
+    if (pullPath.has(aliasKey)) {
+      throw new BridgePanicError(
+        `Circular dependency detected in alias "${name}"`,
+      );
+    }
+
+    // 2. Cache check second
     if (this.aliasResults.has(name)) return this.aliasResults.get(name)!;
 
     // Do I have this alias?
     const alias = this.aliases.get(name);
     if (alias) {
-      const promise = evaluator(alias, this);
+      // 3. Branch the path
+      const nextPath = new Set(pullPath).add(aliasKey);
+      const promise = evaluator(alias, this, undefined, nextPath);
       this.aliasResults.set(name, promise);
       return promise;
     }
 
     // Delegate to parent
     if (this.parent) {
-      return this.parent.resolveAlias(name, evaluator);
+      return this.parent.resolveAlias(name, evaluator, pullPath);
     }
 
     throw new Error(`Alias "${name}" not found in any scope`);
@@ -471,25 +576,53 @@ class ExecutionScope {
    * (declared via `with`). Tool calls are lazy — the tool function is
    * only invoked when its output is first read, at which point its
    * input wires are evaluated on demand.
+   *
+   * Cycle detection: tracks active pull keys to detect circular deps.
    */
   async resolveToolResult(
     module: string,
     field: string,
     instance: number | undefined,
+    bridgeLoc?: SourceLocation,
+    pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
   ): Promise<unknown> {
     const key = toolKey(module, field, instance);
 
-    // Check local memoization cache
-    if (this.toolResults.has(key)) return this.toolResults.get(key)!;
+    // Cycle detection — must happen before the cache check.
+    // If this key is already in our pull path, we have a circular dependency.
+    if (pullPath.has(key)) {
+      const err = new BridgePanicError(
+        `Circular dependency detected: "${key}" depends on itself`,
+      );
+      if (bridgeLoc)
+        (err as unknown as { bridgeLoc: SourceLocation }).bridgeLoc = bridgeLoc;
+      throw err;
+    }
 
     // Does this scope own the tool?
-    if (this.ownedTools.has(toolOwnerKey(module, field))) {
-      return this.callTool(key, module, field);
+    const ownerKey = toolOwnerKey(module, field);
+    if (this.ownedTools.has(ownerKey)) {
+      // Check local memoization cache
+      if (this.toolResults.has(key)) return this.toolResults.get(key)!;
+
+      // Branch the path for this tool's input evaluation
+      const nextPath = new Set(pullPath);
+      nextPath.add(key);
+      return this.callTool(key, module, field, bridgeLoc, nextPath);
     }
+
+    // Check local memoization cache for non-owned (delegated) results
+    if (this.toolResults.has(key)) return this.toolResults.get(key)!;
 
     // Delegate to parent scope (lexical chain traversal)
     if (this.parent) {
-      return this.parent.resolveToolResult(module, field, instance);
+      return this.parent.resolveToolResult(
+        module,
+        field,
+        instance,
+        bridgeLoc,
+        pullPath,
+      );
     }
 
     throw new Error(`Tool "${module}.${field}" not found in any scope`);
@@ -499,12 +632,15 @@ class ExecutionScope {
    * Lazily call a tool — evaluates input wires on demand, invokes the
    * tool function, and caches the result.
    *
-   * Supports ToolDef resolution (extends chain, base wires, onError).
+   * Supports ToolDef resolution, memoization, sync validation,
+   * batching, timeouts, and bridgeLoc error attachment.
    */
   private callTool(
     key: string,
     module: string,
     field: string,
+    bridgeLoc: SourceLocation | undefined,
+    pullPath: ReadonlySet<string>,
   ): Promise<unknown> {
     const promise = (async () => {
       const toolName = module === SELF_MODULE ? field : `${module}.${field}`;
@@ -518,33 +654,151 @@ class ExecutionScope {
       const fnName = toolDef?.fn ?? toolName;
       const fn = lookupToolFn(this.engine.tools, fnName);
       if (!fn) throw new Error(`No tool found for "${fnName}"`);
-      const { doTrace } = resolveToolMeta(fn);
+      const {
+        doTrace,
+        sync: isSyncTool,
+        batch: batchMeta,
+        log: toolLog,
+      } = resolveToolMeta(fn);
 
-      // Build input: ToolDef base wires first, then bridge wires override
+      // Build input: ToolDef base wires first, then bridge wires override.
+      // pullPath already contains this key — any re-entrant resolveToolResult
+      // for the same key will detect the cycle.
       const input: Record<string, unknown> = {};
 
       if (toolDef?.body) {
-        await evaluateToolDefBody(toolDef.body, input, this);
+        await evaluateToolDefBody(toolDef.body, input, this, pullPath);
       }
 
       const wires = this.toolInputWires.get(key) ?? [];
-      for (const wire of wires) {
-        const value = await evaluateSourceChain(wire, this);
-        setPath(input, wire.target.path, value);
-      }
+      await Promise.all(
+        wires.map(async (wire) => {
+          const value = await evaluateSourceChain(
+            wire,
+            this,
+            undefined,
+            pullPath,
+          );
+          setPath(input, wire.target.path, value);
+        }),
+      );
 
       // Short-circuit if externally aborted
       if (this.engine.signal?.aborted) throw new BridgeAbortError();
 
-      const toolContext = {
-        logger: this.engine.logger,
-        signal: this.engine.signal,
-      };
-      const startMs = performance.now();
-      try {
-        const result = await fn(input, toolContext);
-        const durationMs = performance.now() - startMs;
+      // Memoize check — if this tool is memoized, check cache by input hash
+      // Use `key` (includes instance) so different handles for the same tool
+      // maintain isolated caches.
+      const ownerKey = toolOwnerKey(module, field);
+      const isMemoized = this.memoizedToolKeys.has(ownerKey);
+      if (isMemoized) {
+        const cacheKey = stableMemoizeKey(input);
+        let toolCache = this.engine.toolMemoCache.get(key);
+        if (!toolCache) {
+          toolCache = new Map();
+          this.engine.toolMemoCache.set(key, toolCache);
+        }
+        const cached = toolCache.get(cacheKey);
+        if (cached !== undefined) return cached;
 
+        // Not cached — call and cache result
+        const resultPromise = this.invokeToolFn(
+          fn,
+          input,
+          toolName,
+          fnName,
+          isSyncTool,
+          batchMeta,
+          doTrace,
+          toolLog,
+          bridgeLoc,
+        );
+        toolCache.set(cacheKey, resultPromise);
+        return resultPromise;
+      }
+
+      return this.invokeToolFn(
+        fn,
+        input,
+        toolName,
+        fnName,
+        isSyncTool,
+        batchMeta,
+        doTrace,
+        toolLog,
+        bridgeLoc,
+      );
+    })();
+
+    this.toolResults.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Invoke a tool function with tracing, timeout, sync validation,
+   * batching, and error handling.
+   */
+  private async invokeToolFn(
+    fn: (...args: unknown[]) => unknown,
+    input: Record<string, unknown>,
+    toolName: string,
+    fnName: string,
+    isSyncTool: boolean,
+    batchMeta: { maxBatchSize?: number } | undefined,
+    doTrace: boolean,
+    toolLog: EffectiveToolLog,
+    bridgeLoc?: SourceLocation,
+  ): Promise<unknown> {
+    const toolContext = {
+      logger: this.engine.logger,
+      signal: this.engine.signal,
+    };
+    const startMs = performance.now();
+    const timeoutMs = this.engine.toolTimeoutMs;
+    try {
+      let result: unknown;
+
+      if (batchMeta) {
+        // Batched tool call — queue and flush on microtask
+        // Tracing and logging are done in flushBatchedToolQueue, not here.
+        result = await callBatchedTool(
+          this.engine,
+          fn,
+          input,
+          toolName,
+          fnName,
+          batchMeta,
+          doTrace,
+          toolLog,
+        );
+      } else {
+        result = fn(input, toolContext);
+
+        // Sync tool validation
+        if (isSyncTool) {
+          if (isPromise(result)) {
+            throw new Error(
+              `Tool "${fnName}" declared {sync:true} but returned a Promise`,
+            );
+          }
+        } else if (isPromise(result)) {
+          // Apply timeout if configured
+          if (timeoutMs > 0) {
+            result = await raceTimeout(
+              result as Promise<unknown>,
+              timeoutMs,
+              toolName,
+            );
+          } else {
+            result = await result;
+          }
+        }
+      }
+
+      const durationMs = performance.now() - startMs;
+
+      // Batch calls have their own tracing/logging in flushBatchedToolQueue
+      if (!batchMeta) {
         if (this.engine.tracer && doTrace) {
           this.engine.tracer.record(
             this.engine.tracer.entry({
@@ -557,20 +811,29 @@ class ExecutionScope {
             }),
           );
         }
+        logToolSuccess(
+          this.engine.logger,
+          toolLog.execution,
+          toolName,
+          fnName,
+          durationMs,
+        );
+      }
 
-        return result;
-      } catch (err) {
-        // Normalize platform AbortError to BridgeAbortError
-        if (
-          this.engine.signal?.aborted &&
-          err instanceof DOMException &&
-          err.name === "AbortError"
-        ) {
-          throw new BridgeAbortError();
-        }
+      return result;
+    } catch (err) {
+      // Normalize platform AbortError to BridgeAbortError
+      if (
+        this.engine.signal?.aborted &&
+        err instanceof DOMException &&
+        err.name === "AbortError"
+      ) {
+        throw new BridgeAbortError();
+      }
 
-        const durationMs = performance.now() - startMs;
+      const durationMs = performance.now() - startMs;
 
+      if (!batchMeta) {
         if (this.engine.tracer && doTrace) {
           this.engine.tracer.record(
             this.engine.tracer.entry({
@@ -583,30 +846,40 @@ class ExecutionScope {
             }),
           );
         }
+        logToolError(
+          this.engine.logger,
+          toolLog.errors,
+          toolName,
+          fnName,
+          err as Error,
+        );
+      }
 
-        if (isFatalError(err)) throw err;
+      if (isFatalError(err)) throw err;
 
-        if (toolDef?.onError) {
-          if ("value" in toolDef.onError)
-            return JSON.parse(toolDef.onError.value);
-          // source-based onError — resolve from ToolDef handles
-          if ("source" in toolDef.onError) {
-            const parts = toolDef.onError.source.split(".");
-            const src = parts[0]!;
-            const path = parts.slice(1);
-            const handle = toolDef.handles.find((h) => h.handle === src);
-            if (handle?.kind === "context") {
-              return getPath(this.engine.context, path);
-            }
+      const toolDef = resolveToolDefByName(
+        this.engine.instructions,
+        toolName,
+        this.engine.toolDefCache,
+      );
+      if (toolDef?.onError) {
+        if ("value" in toolDef.onError)
+          return JSON.parse(toolDef.onError.value);
+        // source-based onError — resolve from ToolDef handles
+        if ("source" in toolDef.onError) {
+          const parts = toolDef.onError.source.split(".");
+          const src = parts[0]!;
+          const path = parts.slice(1);
+          const handle = toolDef.handles.find((h) => h.handle === src);
+          if (handle?.kind === "context") {
+            return getPath(this.engine.context, path);
           }
         }
-
-        throw err;
       }
-    })();
 
-    this.toolResults.set(key, promise);
-    return promise;
+      // Attach bridgeLoc to error for source location reporting
+      throw wrapBridgeRuntimeError(err, { bridgeLoc });
+    }
   }
 
   /**
@@ -617,20 +890,30 @@ class ExecutionScope {
     module: string,
     field: string,
     instance: number | undefined,
+    pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
   ): Promise<unknown> {
     const key = `${module}:${field}`;
 
-    // Check memoization
+    // 1. Cycle check first
+    if (pullPath.has(key)) {
+      throw new BridgePanicError(
+        `Circular dependency detected in define "${module}"`,
+      );
+    }
+
+    // 2. Cache check second
     if (this.toolResults.has(key)) return this.toolResults.get(key)!;
 
     // Check ownership
     if (this.ownedDefines.has(module)) {
-      return this.executeDefine(key, module);
+      // 3. Branch the path
+      const nextPath = new Set(pullPath).add(key);
+      return this.executeDefine(key, module, nextPath);
     }
 
     // Delegate to parent
     if (this.parent) {
-      return this.parent.resolveDefine(module, field, instance);
+      return this.parent.resolveDefine(module, field, instance, pullPath);
     }
 
     throw new Error(`Define "${module}" not found in any scope`);
@@ -640,7 +923,11 @@ class ExecutionScope {
    * Execute a define block — build input from bridge wires, create
    * child scope with define body, pull output.
    */
-  private executeDefine(key: string, module: string): Promise<unknown> {
+  private executeDefine(
+    key: string,
+    module: string,
+    pullPath: ReadonlySet<string>,
+  ): Promise<unknown> {
     const promise = (async () => {
       // Map from handle alias to define name via handle bindings
       const handle = module.substring("__define_".length);
@@ -656,10 +943,17 @@ class ExecutionScope {
       // Collect bridge wires targeting this define (input wires)
       const inputWires = this.defineInputWires.get(key) ?? [];
       const defineInput: Record<string, unknown> = {};
-      for (const wire of inputWires) {
-        const value = await evaluateSourceChain(wire, this);
-        setPath(defineInput, wire.target.path, value);
-      }
+      await Promise.all(
+        inputWires.map(async (wire) => {
+          const value = await evaluateSourceChain(
+            wire,
+            this,
+            undefined,
+            pullPath,
+          );
+          setPath(defineInput, wire.target.path, value);
+        }),
+      );
 
       // Create child scope with define input as selfInput
       const defineOutput: Record<string, unknown> = {};
@@ -673,7 +967,7 @@ class ExecutionScope {
 
       // Index define body and pull output
       indexStatements(defineDef.body, defineScope);
-      await resolveRequestedFields(defineScope, []);
+      await resolveRequestedFields(defineScope, [], pullPath);
 
       return "__rootValue__" in defineOutput
         ? defineOutput.__rootValue__
@@ -696,6 +990,53 @@ interface EngineContext {
   readonly tracer?: TraceCollector;
   readonly signal?: AbortSignal;
   readonly toolDefCache: Map<string, ToolDef | null>;
+  readonly toolTimeoutMs: number;
+  /** Memoize caches — shared across all scopes. Keyed by owner tool key → input hash → result. */
+  readonly toolMemoCache: Map<string, Map<string, Promise<unknown>>>;
+  /** Batch queues — shared across all scopes. Keyed by fn reference. */
+  readonly toolBatchQueues: Map<
+    (...args: unknown[]) => unknown,
+    BatchToolQueue
+  >;
+  /** Maximum nesting depth for array mappings / shadow scopes. */
+  readonly maxDepth: number;
+}
+
+/** Pending batched tool call. */
+type PendingBatchToolCall = {
+  input: Record<string, unknown>;
+  resolve: (value: unknown) => void;
+  reject: (err: unknown) => void;
+};
+
+/** Queue for collecting same-tick batched calls. */
+type BatchToolQueue = {
+  items: PendingBatchToolCall[];
+  scheduled: boolean;
+  toolName: string;
+  fnName: string;
+  maxBatchSize?: number;
+  doTrace: boolean;
+  log: EffectiveToolLog;
+};
+
+/**
+ * Build a deterministic cache key from an arbitrary value.
+ * Used for memoize deduplication.
+ */
+function stableMemoizeKey(value: unknown): string {
+  if (value === undefined) return "u";
+  if (value === null) return "n";
+  if (typeof value === "boolean") return value ? "T" : "F";
+  if (typeof value === "number") return `d:${value}`;
+  if (typeof value === "string") return `s:${value}`;
+  if (typeof value === "bigint") return `B:${value}`;
+  if (Array.isArray(value)) return `[${value.map(stableMemoizeKey).join(",")}]`;
+  if (typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys.map((k) => `${k}:${stableMemoizeKey((value as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return String(value);
 }
 
 // ── ToolDef resolution ──────────────────────────────────────────────────────
@@ -766,6 +1107,7 @@ async function evaluateToolDefBody(
   body: Statement[],
   input: Record<string, unknown>,
   callerScope: ExecutionScope,
+  pullPath: ReadonlySet<string>,
 ): Promise<void> {
   // Create a temporary scope for ToolDef body — inner tools are owned here
   const toolDefScope = new ExecutionScope(
@@ -793,14 +1135,26 @@ async function evaluateToolDefBody(
   }
 
   // Evaluate wires targeting the tool itself (no instance = tool config)
-  for (const stmt of body) {
-    if (stmt.kind === "wire" && stmt.target.instance == null) {
-      const value = await evaluateSourceChain(stmt, toolDefScope);
-      setPath(input, stmt.target.path, value);
-    } else if (stmt.kind === "scope") {
-      await evaluateToolDefScope(stmt, input, toolDefScope);
-    }
-  }
+  const configStmts = body.filter(
+    (stmt): stmt is WireStatement | ScopeStatement =>
+      (stmt.kind === "wire" && stmt.target.instance == null) ||
+      stmt.kind === "scope",
+  );
+  await Promise.all(
+    configStmts.map(async (stmt) => {
+      if (stmt.kind === "wire") {
+        const value = await evaluateSourceChain(
+          stmt,
+          toolDefScope,
+          undefined,
+          pullPath,
+        );
+        setPath(input, stmt.target.path, value);
+      } else {
+        await evaluateToolDefScope(stmt, input, toolDefScope, pullPath);
+      }
+    }),
+  );
 }
 
 /** Recursively evaluate scope blocks inside ToolDef bodies. */
@@ -808,22 +1162,181 @@ async function evaluateToolDefScope(
   scope: ScopeStatement,
   input: Record<string, unknown>,
   toolDefScope: ExecutionScope,
+  pullPath: ReadonlySet<string>,
 ): Promise<void> {
   const prefix = scope.target.path;
-  for (const inner of scope.body) {
-    if (inner.kind === "wire" && inner.target.instance == null) {
-      const value = await evaluateSourceChain(inner, toolDefScope);
-      setPath(input, [...prefix, ...inner.target.path], value);
-    } else if (inner.kind === "scope") {
-      // Nest the inner scope under the current prefix
-      const nested: ScopeStatement = {
-        ...inner,
-        target: {
-          ...inner.target,
-          path: [...prefix, ...inner.target.path],
-        },
-      };
-      await evaluateToolDefScope(nested, input, toolDefScope);
+  await Promise.all(
+    scope.body.map(async (inner) => {
+      if (inner.kind === "wire" && inner.target.instance == null) {
+        const value = await evaluateSourceChain(
+          inner,
+          toolDefScope,
+          undefined,
+          pullPath,
+        );
+        setPath(input, [...prefix, ...inner.target.path], value);
+      } else if (inner.kind === "scope") {
+        const nested: ScopeStatement = {
+          ...inner,
+          target: {
+            ...inner.target,
+            path: [...prefix, ...inner.target.path],
+          },
+        };
+        await evaluateToolDefScope(nested, input, toolDefScope, pullPath);
+      }
+    }),
+  );
+}
+
+// ── Batched tool calls ──────────────────────────────────────────────────────
+
+/**
+ * Queue a batched tool call — collects calls within the same microtask tick
+ * and flushes them as a single array call to the tool function.
+ */
+function callBatchedTool(
+  engine: EngineContext,
+  fn: (...args: unknown[]) => unknown,
+  input: Record<string, unknown>,
+  toolName: string,
+  fnName: string,
+  batchMeta: { maxBatchSize?: number },
+  doTrace: boolean,
+  log: EffectiveToolLog,
+): Promise<unknown> {
+  let queue = engine.toolBatchQueues.get(fn);
+  if (!queue) {
+    queue = {
+      items: [],
+      scheduled: false,
+      toolName,
+      fnName,
+      maxBatchSize: batchMeta.maxBatchSize,
+      doTrace,
+      log,
+    };
+    engine.toolBatchQueues.set(fn, queue);
+  }
+
+  return new Promise<unknown>((resolve, reject) => {
+    queue.items.push({ input, resolve, reject });
+
+    if (!queue.scheduled) {
+      queue.scheduled = true;
+      queueMicrotask(() => flushBatchedToolQueue(engine, fn, queue));
+    }
+  });
+}
+
+/**
+ * Flush a batched tool queue — calls the tool with an array of inputs,
+ * distributes results back to individual callers.
+ */
+async function flushBatchedToolQueue(
+  engine: EngineContext,
+  fn: (...args: unknown[]) => unknown,
+  queue: BatchToolQueue,
+): Promise<void> {
+  const items = queue.items.splice(0);
+  queue.scheduled = false;
+
+  const tracer = engine.tracer;
+
+  // Chunk by maxBatchSize if configured
+  const maxSize = queue.maxBatchSize ?? items.length;
+  for (let offset = 0; offset < items.length; offset += maxSize) {
+    const chunk = items.slice(offset, offset + maxSize);
+    const batchInput = chunk.map((c) => c.input);
+
+    const toolContext = {
+      logger: engine.logger,
+      signal: engine.signal,
+    };
+
+    const startMs = tracer?.now();
+    const wallStart = performance.now();
+
+    try {
+      let result = fn(batchInput, toolContext) as
+        | unknown[]
+        | Promise<unknown[]>;
+      if (isPromise(result)) {
+        if (engine.toolTimeoutMs > 0) {
+          result = await raceTimeout(
+            result as Promise<unknown[]>,
+            engine.toolTimeoutMs,
+            queue.toolName,
+          );
+        } else {
+          result = await (result as Promise<unknown[]>);
+        }
+      }
+
+      const durationMs = performance.now() - wallStart;
+
+      // Record a single trace entry for the entire batch
+      if (tracer && startMs != null && queue.doTrace) {
+        tracer.record(
+          tracer.entry({
+            tool: queue.toolName,
+            fn: queue.fnName,
+            input: batchInput,
+            output: result,
+            durationMs,
+            startedAt: startMs,
+          }),
+        );
+      }
+      logToolSuccess(
+        engine.logger,
+        queue.log.execution,
+        queue.toolName,
+        queue.fnName,
+        durationMs,
+      );
+
+      if (!Array.isArray(result) || result.length !== chunk.length) {
+        const err = new Error(
+          `Batch tool "${queue.fnName}" returned ${Array.isArray(result) ? result.length : typeof result} items, expected ${chunk.length}`,
+        );
+        for (const item of chunk) item.reject(err);
+        continue;
+      }
+
+      for (let i = 0; i < chunk.length; i++) {
+        const value = result[i];
+        if (value instanceof Error) {
+          chunk[i]!.reject(value);
+        } else {
+          chunk[i]!.resolve(value);
+        }
+      }
+    } catch (err) {
+      const durationMs = performance.now() - wallStart;
+
+      // Record error trace for the batch
+      if (tracer && startMs != null && queue.doTrace) {
+        tracer.record(
+          tracer.entry({
+            tool: queue.toolName,
+            fn: queue.fnName,
+            input: batchInput,
+            error: (err as Error).message,
+            durationMs,
+            startedAt: startMs,
+          }),
+        );
+      }
+      logToolError(
+        engine.logger,
+        queue.log.errors,
+        queue.toolName,
+        queue.fnName,
+        err as Error,
+      );
+
+      for (const item of chunk) item.reject(err);
     }
   }
 }
@@ -843,11 +1356,14 @@ function indexStatements(
     switch (stmt.kind) {
       case "with":
         if (stmt.binding.kind === "tool") {
-          scope.declareToolBinding(stmt.binding.name);
+          scope.declareToolBinding(stmt.binding.name, stmt.binding.memoize);
         } else if (stmt.binding.kind === "define") {
           scope.declareDefineBinding(stmt.binding.handle);
         }
         scope.registerHandle(stmt.binding);
+        break;
+      case "spread":
+        scope.addSpread(stmt, scopeCtx?.pathPrefix ?? []);
         break;
       case "wire": {
         const target = stmt.target;
@@ -919,37 +1435,141 @@ function indexStatements(
 }
 
 /**
+ * Compute sub-requestedFields for a wire target.
+ *
+ * Given a wire at `wireKey` and the parent's `requestedFields`, returns the
+ * fields that should be forwarded to array expressions within the wire.
+ * - Root wire (key ""): all requestedFields pass through unchanged
+ * - Exact match: empty array (unrestricted — resolve all sub-fields)
+ * - Prefix match: strip the wire key prefix
+ */
+function computeSubRequestedFields(
+  wireKey: string,
+  requestedFields: string[],
+): string[] {
+  if (wireKey === "") return requestedFields;
+
+  const subFields: string[] = [];
+  for (const field of requestedFields) {
+    if (field === wireKey) return []; // Exact match → unrestricted
+    if (field.startsWith(wireKey + ".")) {
+      subFields.push(field.slice(wireKey.length + 1));
+    }
+    // Handle wildcard: "legs.*" for wireKey "legs" → sub-field "*"
+    if (field.endsWith(".*") && wireKey === field.slice(0, -2)) {
+      return []; // Wildcard on this exact level → unrestricted
+    }
+  }
+  return subFields;
+}
+
+/**
  * Demand-driven pull — resolve only the requested output fields.
  * Evaluates output wires from the index (not by walking the AST).
  * Tool calls happen lazily when their output is read during source evaluation.
  *
  * If no specific fields are requested, all indexed output wires are resolved.
  *
- * All output wires are evaluated concurrently so that tool-referencing wires
- * can start their tool calls before input-only wires that may panic. This
- * matches v1 eager-evaluation semantics.
+ * All output wire groups are evaluated concurrently so that tool-referencing
+ * wires can start their tool calls before input-only wires that may panic.
+ * This matches v1 eager-evaluation semantics.
+ *
+ * Supports overdefinition: when multiple wires target the same output path,
+ * they are ordered by cost (cheapest first) and evaluated with null-coalescing
+ * — the first non-null result wins.
  */
 async function resolveRequestedFields(
   scope: ExecutionScope,
   requestedFields: string[],
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM | void> {
-  // If no specific fields, resolve all indexed output wires.
-  // Otherwise, use prefix matching to find relevant wires.
-  const wires =
+  // Get wire groups — each group is an array of wires targeting the same path
+  const wireGroups: WireStatement[][] =
     requestedFields.length > 0
-      ? scope.collectMatchingOutputWires(requestedFields)
-      : scope.allOutputFields().map((f) => scope.getOutputWire(f)!);
+      ? scope.collectMatchingOutputWireGroups(requestedFields)
+      : scope.allOutputFields().map((f) => scope.getOutputWires(f)!);
 
-  // Evaluate all wires concurrently — allows tool calls from later wires to
-  // start before earlier wires that might panic synchronously.
+  // Evaluate all wire groups concurrently
   type Signal = LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM;
 
   const settled = await Promise.allSettled(
-    wires.map(async (wire): Promise<Signal | undefined> => {
-      const value = await evaluateSourceChain(wire, scope);
-      if (isLoopControlSignal(value)) return value;
-      writeTarget(wire.target, value, scope);
+    wireGroups.map(async (wires): Promise<Signal | undefined> => {
+      // Order overdefined wires by cost (cheapest first)
+      const ordered =
+        wires.length > 1 ? orderOverdefinedWires(wires, scope.engine) : wires;
+
+      // Compute sub-requestedFields for array expressions within this wire.
+      // Strip the wire's target path prefix from the parent requestedFields.
+      let subFields: string[] | undefined;
+      if (requestedFields.length > 0) {
+        const wireKey = ordered[0]!.target.path.join(".");
+        subFields = computeSubRequestedFields(wireKey, requestedFields);
+      }
+
+      // Null-coalescing across overdefined wires
+      let value: unknown;
+      let lastError: unknown;
+      for (const wire of ordered) {
+        try {
+          value = await evaluateSourceChain(wire, scope, subFields, pullPath);
+          if (isLoopControlSignal(value)) return value;
+          if (value != null) break; // First non-null wins
+        } catch (err) {
+          if (isFatalError(err)) throw err;
+          lastError = err;
+          // Continue to next wire — maybe a cheaper fallback succeeds
+        }
+      }
+
+      // If all wires returned null and there was an error, throw it
+      if (value == null && lastError) throw lastError;
+
+      writeTarget(ordered[0]!.target, value, scope);
       return undefined;
+    }),
+  );
+
+  // Evaluate spread statements concurrently — merge source objects into output
+  await Promise.all(
+    scope.getSpreads().map(async ({ stmt: spread, pathPrefix }) => {
+      try {
+        const spreadValue = await evaluateSourceChain(
+          spread,
+          scope,
+          undefined,
+          pullPath,
+        );
+        if (
+          spreadValue != null &&
+          typeof spreadValue === "object" &&
+          !Array.isArray(spreadValue)
+        ) {
+          // Spreads always target the root output (self-module output)
+          const targetOutput = scope.root().output;
+          if (pathPrefix.length > 0) {
+            // Spread inside a scope block — navigate to the nested object and merge
+            let nested: Record<string, unknown> = targetOutput;
+            for (const segment of pathPrefix) {
+              if (UNSAFE_KEYS.has(segment))
+                throw new Error(`Unsafe assignment key: ${segment}`);
+              if (
+                nested[segment] == null ||
+                typeof nested[segment] !== "object" ||
+                Array.isArray(nested[segment])
+              ) {
+                nested[segment] = {};
+              }
+              nested = nested[segment] as Record<string, unknown>;
+            }
+            Object.assign(nested, spreadValue as Record<string, unknown>);
+          } else {
+            Object.assign(targetOutput, spreadValue as Record<string, unknown>);
+          }
+        }
+      } catch (err) {
+        if (isFatalError(err)) throw err;
+        throw err;
+      }
     }),
   );
 
@@ -976,28 +1596,142 @@ async function resolveRequestedFields(
 }
 
 /**
+ * Order overdefined wires by cost — cheapest source first.
+ * Input/context/const/element refs are "free" (cost 0), tool refs are expensive.
+ * Same-cost wires preserve authored order.
+ */
+function orderOverdefinedWires(
+  wires: WireStatement[],
+  engine: EngineContext,
+): WireStatement[] {
+  const ranked = wires.map((wire, index) => ({
+    wire,
+    index,
+    cost: computeExprCost(wire.sources[0]!.expr, engine, new Set()),
+  }));
+  ranked.sort((left, right) => {
+    if (left.cost !== right.cost) return left.cost - right.cost;
+    return left.index - right.index; // stable: preserve source order
+  });
+  return ranked.map((entry) => entry.wire);
+}
+
+/**
+ * Compute the optimistic cost of an expression for overdefinition ordering.
+ * - literals/control → 0
+ * - input/context/const/element refs → 0
+ * - tool refs → 2 (or sync tool → 1, or meta.cost if set)
+ * - ternary/and/or → max of branches
+ */
+function computeExprCost(
+  expr: Expression,
+  engine: EngineContext,
+  visited: Set<string>,
+): number {
+  switch (expr.type) {
+    case "literal":
+    case "control":
+      return 0;
+    case "ref": {
+      const ref = expr.ref;
+      if (ref.element) return 0;
+      if (ref.type === "Context" || ref.type === "Const") return 0;
+      if (ref.module === SELF_MODULE && ref.type === "__local") return 0;
+      if (ref.module === SELF_MODULE && ref.instance == null) return 0; // input ref
+      // Tool ref — look up metadata
+      const toolName =
+        ref.module === SELF_MODULE ? ref.field : `${ref.module}.${ref.field}`;
+      const key = toolName;
+      if (visited.has(key)) return Infinity;
+      visited.add(key);
+      const fn = lookupToolFn(engine.tools, toolName);
+      if (fn) {
+        const meta = (fn as unknown as Record<string, unknown>).bridge as
+          | Record<string, unknown>
+          | undefined;
+        if (meta?.cost != null) return meta.cost as number;
+        return meta?.sync ? 1 : 2;
+      }
+      return 2;
+    }
+    case "ternary":
+      return Math.max(
+        computeExprCost(expr.cond, engine, visited),
+        computeExprCost(expr.then, engine, visited),
+        computeExprCost(expr.else, engine, visited),
+      );
+    case "and":
+    case "or":
+      return Math.max(
+        computeExprCost(expr.left, engine, visited),
+        computeExprCost(expr.right, engine, visited),
+      );
+    case "array":
+    case "pipe":
+      return computeExprCost(expr.source, engine, visited);
+    case "binary":
+      return Math.max(
+        computeExprCost(expr.left, engine, visited),
+        computeExprCost(expr.right, engine, visited),
+      );
+    case "unary":
+      return computeExprCost(expr.operand, engine, visited);
+    case "concat": {
+      let max = 0;
+      for (const part of expr.parts) {
+        max = Math.max(max, computeExprCost(part, engine, visited));
+      }
+      return max;
+    }
+  }
+}
+
+/**
  * Evaluate a source chain (fallback gates: ||, ??).
- * Wraps with catch handler if present.
+ * Wraps with catch handler if present. Attaches bridgeLoc on error.
  */
 async function evaluateSourceChain(
   chain: SourceChain,
   scope: ExecutionScope,
+  requestedFields?: string[],
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
+  let lastEntryLoc: SourceLocation | undefined;
+  let firstExprLoc: SourceLocation | undefined;
   try {
     let value: unknown;
 
     for (const entry of chain.sources) {
       if (entry.gate === "falsy" && value) continue;
       if (entry.gate === "nullish" && value != null) continue;
-      value = await evaluateExpression(entry.expr, scope);
+      lastEntryLoc = entry.loc;
+      if (!firstExprLoc) firstExprLoc = entry.expr.loc;
+      value = await evaluateExpression(
+        entry.expr,
+        scope,
+        requestedFields,
+        pullPath,
+      );
     }
 
     return value;
   } catch (err) {
-    if (isFatalError(err)) throw err;
-    if (chain.catch) {
-      return applyCatchHandler(chain.catch, scope);
+    if (isFatalError(err)) {
+      // Attach bridgeLoc to fatal errors (panic) so they carry source location
+      const fatLoc =
+        firstExprLoc ?? lastEntryLoc ?? (chain as { loc?: SourceLocation }).loc;
+      if (fatLoc && !(err as { bridgeLoc?: SourceLocation }).bridgeLoc) {
+        (err as { bridgeLoc?: SourceLocation }).bridgeLoc = fatLoc;
+      }
+      throw err;
     }
+    if (chain.catch) {
+      return applyCatchHandler(chain.catch, scope, pullPath);
+    }
+    // Use the first source entry's expression loc (start of source chain)
+    const loc =
+      firstExprLoc ?? lastEntryLoc ?? (chain as { loc?: SourceLocation }).loc;
+    if (loc) throw wrapBridgeRuntimeError(err, { bridgeLoc: loc });
     throw err;
   }
 }
@@ -1009,15 +1743,16 @@ async function evaluateSourceChain(
 async function applyCatchHandler(
   c: WireCatch,
   scope: ExecutionScope,
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
   if ("control" in c) {
     return applyControlFlow(c.control);
   }
   if ("expr" in c) {
-    return evaluateExpression(c.expr, scope);
+    return evaluateExpression(c.expr, scope, undefined, pullPath);
   }
   if ("ref" in c) {
-    return resolveRef(c.ref, scope);
+    return resolveRef(c.ref, scope, undefined, pullPath);
   }
   // Literal value
   return c.value;
@@ -1037,6 +1772,8 @@ function executeForced(scope: ExecutionScope): Promise<unknown>[] {
       stmt.module,
       stmt.field,
       stmt.instance,
+      undefined,
+      EMPTY_PULL_PATH,
     );
     if (stmt.catchError) {
       promise.catch(() => {});
@@ -1076,61 +1813,100 @@ async function evaluateExprSafe(
 async function evaluateExpression(
   expr: Expression,
   scope: ExecutionScope,
+  requestedFields?: string[],
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
   switch (expr.type) {
     case "ref":
       if (expr.safe) {
-        return evaluateExprSafe(() => resolveRef(expr.ref, scope));
+        return evaluateExprSafe(() =>
+          resolveRef(expr.ref, scope, expr.refLoc ?? expr.loc, pullPath),
+        );
       }
-      return resolveRef(expr.ref, scope);
+      return resolveRef(expr.ref, scope, expr.refLoc ?? expr.loc, pullPath);
 
     case "literal":
       return expr.value;
 
     case "array":
-      return evaluateArrayExpr(expr, scope);
+      return evaluateArrayExpr(expr, scope, requestedFields, pullPath);
 
     case "ternary": {
-      const cond = await evaluateExpression(expr.cond, scope);
-      return cond
-        ? evaluateExpression(expr.then, scope)
-        : evaluateExpression(expr.else, scope);
+      let cond: unknown;
+      try {
+        cond = await evaluateExpression(expr.cond, scope, undefined, pullPath);
+      } catch (err) {
+        if (isFatalError(err)) throw err;
+        const loc = expr.condLoc ?? expr.cond.loc ?? expr.loc;
+        if (loc) throw wrapBridgeRuntimeError(err, { bridgeLoc: loc });
+        throw err;
+      }
+      const branch = cond ? expr.then : expr.else;
+      try {
+        return await evaluateExpression(branch, scope, undefined, pullPath);
+      } catch (err) {
+        if (isFatalError(err)) throw err;
+        const loc = branch.loc ?? expr.loc;
+        if (loc) throw wrapBridgeRuntimeError(err, { bridgeLoc: loc });
+        throw err;
+      }
     }
 
     case "and": {
       const left = expr.leftSafe
-        ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
-        : await evaluateExpression(expr.left, scope);
+        ? await evaluateExprSafe(() =>
+            evaluateExpression(expr.left, scope, undefined, pullPath),
+          )
+        : await evaluateExpression(expr.left, scope, undefined, pullPath);
       if (!left) return false;
       if (expr.right.type === "literal" && expr.right.value === "true") {
         return Boolean(left);
       }
       const right = expr.rightSafe
-        ? await evaluateExprSafe(() => evaluateExpression(expr.right, scope))
-        : await evaluateExpression(expr.right, scope);
+        ? await evaluateExprSafe(() =>
+            evaluateExpression(expr.right, scope, undefined, pullPath),
+          )
+        : await evaluateExpression(expr.right, scope, undefined, pullPath);
       return Boolean(right);
     }
 
     case "or": {
       const left = expr.leftSafe
-        ? await evaluateExprSafe(() => evaluateExpression(expr.left, scope))
-        : await evaluateExpression(expr.left, scope);
+        ? await evaluateExprSafe(() =>
+            evaluateExpression(expr.left, scope, undefined, pullPath),
+          )
+        : await evaluateExpression(expr.left, scope, undefined, pullPath);
       if (left) return true;
       if (expr.right.type === "literal" && expr.right.value === "true") {
         return Boolean(left);
       }
       const right = expr.rightSafe
-        ? await evaluateExprSafe(() => evaluateExpression(expr.right, scope))
-        : await evaluateExpression(expr.right, scope);
+        ? await evaluateExprSafe(() =>
+            evaluateExpression(expr.right, scope, undefined, pullPath),
+          )
+        : await evaluateExpression(expr.right, scope, undefined, pullPath);
       return Boolean(right);
     }
 
-    case "control":
-      return applyControlFlow(expr.control);
+    case "control": {
+      try {
+        return applyControlFlow(expr.control);
+      } catch (err) {
+        if (isFatalError(err)) {
+          if (expr.loc && !(err as { bridgeLoc?: SourceLocation }).bridgeLoc) {
+            (err as { bridgeLoc?: SourceLocation }).bridgeLoc = expr.loc;
+          }
+          throw err;
+        }
+        throw wrapBridgeRuntimeError(err, { bridgeLoc: expr.loc });
+      }
+    }
 
     case "binary": {
-      const left = await evaluateExpression(expr.left, scope);
-      const right = await evaluateExpression(expr.right, scope);
+      const [left, right] = await Promise.all([
+        evaluateExpression(expr.left, scope, undefined, pullPath),
+        evaluateExpression(expr.right, scope, undefined, pullPath),
+      ]);
       switch (expr.op) {
         case "add":
           return Number(left) + Number(right);
@@ -1157,17 +1933,24 @@ async function evaluateExpression(
     }
 
     case "unary":
-      return !(await evaluateExpression(expr.operand, scope));
+      return !(await evaluateExpression(
+        expr.operand,
+        scope,
+        undefined,
+        pullPath,
+      ));
 
     case "concat": {
       const parts = await Promise.all(
-        expr.parts.map((p) => evaluateExpression(p, scope)),
+        expr.parts.map((p) =>
+          evaluateExpression(p, scope, undefined, pullPath),
+        ),
       );
       return parts.map((v) => (v == null ? "" : String(v))).join("");
     }
 
     case "pipe":
-      return evaluatePipeExpression(expr, scope);
+      return evaluatePipeExpression(expr, scope, pullPath);
 
     default:
       throw new Error(`Unknown expression type: ${(expr as Expression).type}`);
@@ -1184,33 +1967,64 @@ async function evaluateExpression(
 async function evaluateArrayExpr(
   expr: Extract<Expression, { type: "array" }>,
   scope: ExecutionScope,
+  requestedFields?: string[],
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<
   unknown[] | LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM | null
 > {
-  const sourceValue = await evaluateExpression(expr.source, scope);
+  const sourceValue = await evaluateExpression(
+    expr.source,
+    scope,
+    undefined,
+    pullPath,
+  );
   if (sourceValue == null) return null;
   if (!Array.isArray(sourceValue)) return [];
 
+  // Depth protection — prevent infinite nesting
+  const childDepth = scope["depth"] + 1;
+  if (childDepth > scope.engine.maxDepth) {
+    throw new BridgePanicError(
+      `Maximum execution depth exceeded (${childDepth}). Check for infinite recursion or circular array mappings.`,
+    );
+  }
+
   const results: unknown[] = [];
+
+  // Launch all loop body evaluations concurrently so that batched tool calls
+  // accumulate within the same microtask tick before the batch queue flushes.
+  const settled = await Promise.allSettled(
+    sourceValue.map(async (element) => {
+      const elementOutput: Record<string, unknown> = {};
+      const childScope = new ExecutionScope(
+        scope,
+        scope.selfInput,
+        elementOutput,
+        scope.engine,
+        childDepth,
+      );
+      childScope.pushElement(element);
+
+      // Index then pull — child scope may declare its own tools
+      indexStatements(expr.body, childScope);
+      const signal = await resolveRequestedFields(
+        childScope,
+        requestedFields ?? [],
+        pullPath,
+      );
+      return { elementOutput, signal };
+    }),
+  );
+
   let propagate:
     | LoopControlSignal
     | typeof BREAK_SYM
     | typeof CONTINUE_SYM
     | undefined;
 
-  for (const element of sourceValue) {
-    const elementOutput: Record<string, unknown> = {};
-    const childScope = new ExecutionScope(
-      scope,
-      scope.selfInput,
-      elementOutput,
-      scope.engine,
-    );
-    childScope.pushElement(element);
-
-    // Index then pull — child scope may declare its own tools
-    indexStatements(expr.body, childScope);
-    const signal = await resolveRequestedFields(childScope, []);
+  for (const result of settled) {
+    if (result.status === "rejected") throw result.reason;
+    const { elementOutput, signal } = result.value;
 
     if (isLoopControlSignal(signal)) {
       if (signal === CONTINUE_SYM) continue;
@@ -1238,11 +2052,29 @@ async function evaluateArrayExpr(
 async function evaluatePipeExpression(
   expr: Extract<Expression, { type: "pipe" }>,
   scope: ExecutionScope,
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
-  // 1. Evaluate source
-  const sourceValue = await evaluateExpression(expr.source, scope);
+  const pipeKey = `pipe:${expr.handle}`;
 
-  // 2. Look up handle binding
+  // 1. Cycle check
+  if (pullPath.has(pipeKey)) {
+    throw new BridgePanicError(
+      `Circular dependency detected in pipe "${expr.handle}"`,
+    );
+  }
+
+  // 2. Branch the path
+  const nextPath = new Set(pullPath).add(pipeKey);
+
+  // 3. Evaluate source (use original pullPath — source is outside the pipe)
+  const sourceValue = await evaluateExpression(
+    expr.source,
+    scope,
+    undefined,
+    pullPath,
+  );
+
+  // 4. Look up handle binding
   const binding = scope.getHandleBinding(expr.handle);
   if (!binding)
     throw new Error(`Pipe handle "${expr.handle}" not found in scope`);
@@ -1252,7 +2084,7 @@ async function evaluatePipeExpression(
       `Pipe handle "${expr.handle}" must reference a tool, got "${binding.kind}"`,
     );
 
-  // 3. Resolve ToolDef
+  // 5. Resolve ToolDef
   const toolName = binding.name;
   const toolDef = resolveToolDefByName(
     scope.engine.instructions,
@@ -1264,20 +2096,22 @@ async function evaluatePipeExpression(
   if (!fn) throw new Error(`No tool found for "${fnName}"`);
   const { doTrace } = resolveToolMeta(fn);
 
-  // 4. Build input
+  // 6. Build input
   const input: Record<string, unknown> = {};
 
-  // 4a. ToolDef body wires (base configuration)
+  // 6a. ToolDef body wires (base configuration)
   if (toolDef?.body) {
-    await evaluateToolDefBody(toolDef.body, input, scope);
+    await evaluateToolDefBody(toolDef.body, input, scope, nextPath);
   }
 
-  // 4b. Bridge wires for this tool (non-pipe input wires)
+  // 6b. Bridge wires for this tool (non-pipe input wires)
   const bridgeWires = scope.collectToolInputWiresFor(toolName);
-  for (const wire of bridgeWires) {
-    const value = await evaluateSourceChain(wire, scope);
-    setPath(input, wire.target.path, value);
-  }
+  await Promise.all(
+    bridgeWires.map(async (wire) => {
+      const value = await evaluateSourceChain(wire, scope, undefined, nextPath);
+      setPath(input, wire.target.path, value);
+    }),
+  );
 
   // 4c. Pipe source → "in" or named field
   const pipePath = expr.path && expr.path.length > 0 ? expr.path : ["in"];
@@ -1290,9 +2124,21 @@ async function evaluatePipeExpression(
     logger: scope.engine.logger,
     signal: scope.engine.signal,
   };
+  const timeoutMs = scope.engine.toolTimeoutMs;
   const startMs = performance.now();
   try {
-    const result = await fn(input, toolContext);
+    let result: unknown = fn(input, toolContext);
+    if (isPromise(result)) {
+      if (timeoutMs > 0) {
+        result = await raceTimeout(
+          result as Promise<unknown>,
+          timeoutMs,
+          toolName,
+        );
+      } else {
+        result = await result;
+      }
+    }
     const durationMs = performance.now() - startMs;
 
     if (scope.engine.tracer && doTrace) {
@@ -1349,6 +2195,8 @@ async function evaluatePipeExpression(
 async function resolveRef(
   ref: NodeRef,
   scope: ExecutionScope,
+  bridgeLoc?: SourceLocation,
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
   // Element reference — reading from array iterator binding
   if (ref.element) {
@@ -1362,6 +2210,7 @@ async function resolveRef(
     const aliasResult = await scope.resolveAlias(
       ref.field,
       evaluateSourceChain,
+      pullPath,
     );
     return getPath(aliasResult, ref.path, ref.rootSafe, ref.pathSafe);
   }
@@ -1382,6 +2231,7 @@ async function resolveRef(
       ref.module,
       ref.field,
       ref.instance,
+      pullPath,
     );
     return getPath(result, ref.path, ref.rootSafe, ref.pathSafe);
   }
@@ -1396,6 +2246,8 @@ async function resolveRef(
     ref.module,
     ref.field,
     ref.instance,
+    bridgeLoc,
+    pullPath,
   );
   return getPath(toolResult, ref.path, ref.rootSafe, ref.pathSafe);
 }
@@ -1502,6 +2354,10 @@ export async function executeBridge<T = unknown>(
     tracer,
     signal: options.signal,
     toolDefCache: new Map(),
+    toolTimeoutMs: options.toolTimeoutMs ?? 15_000,
+    toolMemoCache: new Map(),
+    toolBatchQueues: new Map(),
+    maxDepth: options.maxDepth ?? MAX_EXECUTION_DEPTH,
   };
 
   // Create root scope and execute
@@ -1526,7 +2382,7 @@ export async function executeBridge<T = unknown>(
       if (tracer) {
         (err as { traces?: ToolTrace[] }).traces = tracer.traces;
       }
-      throw err;
+      throw attachBridgeErrorDocumentContext(err, doc);
     }
     // Wrap non-fatal errors in BridgeRuntimeError with traces
     const wrapped = wrapBridgeRuntimeError(err);
@@ -1534,7 +2390,7 @@ export async function executeBridge<T = unknown>(
       wrapped.traces = tracer.traces;
     }
     wrapped.executionTraceId = 0n;
-    throw wrapped;
+    throw attachBridgeErrorDocumentContext(wrapped, doc);
   }
 
   // Extract root value if a wire wrote to the output root with a non-object value
