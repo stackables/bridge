@@ -9,6 +9,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("strict scope rules - valid behavior", {
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 

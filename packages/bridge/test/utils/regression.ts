@@ -22,7 +22,10 @@ import {
   type BridgeDocument,
 } from "../../src/index.ts";
 import { bridgeTransform, getBridgeTraces } from "@stackables/bridge-graphql";
-import { executeBridge as executeRuntime } from "@stackables/bridge-core";
+import {
+  executeBridge as executeRuntime,
+  executeBridgeV3,
+} from "@stackables/bridge-core";
 import {
   executeBridge as executeCompiled,
   type ExecuteBridgeOptions,
@@ -827,8 +830,8 @@ function synthesizeSelectedGraphQLData(
  * Lets assertions branch on engine or inspect wall-clock timing.
  */
 export type AssertContext = {
-  /** Which engine is running: "runtime" | "compiled" | "graphql". */
-  engine: "runtime" | "compiled" | "graphql";
+  /** Which engine is running: "runtime" | "compiled" | "graphql" | "v3". */
+  engine: "runtime" | "compiled" | "graphql" | "v3";
   /** High-resolution timestamp (ms) captured just before execution started. */
   startMs: number;
 };
@@ -857,10 +860,13 @@ export type Scenario = {
   assertLogs?: RegExp | ((logs: LogEntry[], ctx: AssertContext) => void);
   assertTraces: number | ((traces: ToolTrace[], ctx: AssertContext) => void);
   /**
-   * Temporarily disable specific test aspects for this scenario.
-   * The test is still defined (not removed) but will be skipped.
+   * Disable specific engines for this scenario.
+   *
+   * - `true` — skip this scenario entirely
+   * - explicit array — only listed engines are disabled; unlisted ones run
+   * - omitted — defaults apply (compiled, parser, v3 are off)
    */
-  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[];
 };
 
 export type RegressionTest = {
@@ -869,7 +875,14 @@ export type RegressionTest = {
   context?: Record<string, any>;
   /** Tool-level timeout in ms (default: 5 000). */
   toolTimeoutMs?: number;
-  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
+  /**
+   * Disable specific engines for all scenarios in this test.
+   *
+   * - `true` — skip this test entirely
+   * - explicit array — only listed engines are disabled; unlisted ones run
+   * - omitted — defaults apply (compiled, parser, v3 are off)
+   */
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[];
   scenarios: Record<string, Record<string, Scenario>>;
 };
 
@@ -878,6 +891,7 @@ export type RegressionTest = {
 const engines = [
   { name: "runtime", execute: executeRuntime },
   { name: "compiled", execute: executeCompiled },
+  { name: "v3", execute: executeBridgeV3 as typeof executeRuntime },
 ] as const;
 
 function assertDataExpectation(
@@ -1099,16 +1113,19 @@ export function assertGraphqlExpectation(
 // ── Harness ─────────────────────────────────────────────────────────────────
 
 function isDisabled(
-  disable: true | ("runtime" | "compiled" | "graphql" | "parser")[] | undefined,
-  check: "runtime" | "compiled" | "graphql" | "parser",
+  disable:
+    | true
+    | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[]
+    | undefined,
+  check: "runtime" | "compiled" | "graphql" | "parser" | "v3",
 ): boolean {
-  if (["compiled", "parser"].includes(check)) {
-    return true;
-  }
+  if (disable === true) return true;
 
-  return (
-    disable === true || (Array.isArray(disable) && disable.includes(check))
-  );
+  // Explicit array: trust exactly what the user listed
+  if (Array.isArray(disable)) return disable.includes(check);
+
+  // Not set: defaults — compiled, parser, v3 are off
+  return ["compiled", "parser", "v3"].includes(check);
 }
 
 export function regressionTest(name: string, data: RegressionTest) {
@@ -1147,8 +1164,7 @@ export function regressionTest(name: string, data: RegressionTest) {
         }> = [];
         let pendingRuntimeTests = scenarioNames.filter(
           (name) =>
-            !isDisabled(data.disable, "runtime") &&
-            !isDisabled(scenarios[name]!.disable, "runtime"),
+            !isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
         ).length;
         let resolveRuntimeCollection!: () => void;
 
@@ -1177,10 +1193,10 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             for (const { name: engineName, execute } of engines) {
               test(engineName, async (t) => {
-                if (
-                  isDisabled(data.disable, engineName) ||
-                  isDisabled(scenario.disable, engineName)
-                ) {
+                // Scenario-level disable overrides test-level when set;
+                // otherwise test-level (or defaults) apply.
+                const effectiveDisable = scenario.disable ?? data.disable;
+                if (isDisabled(effectiveDisable, engineName)) {
                   t.skip("disabled");
                   return;
                 }
@@ -1325,11 +1341,9 @@ export function regressionTest(name: string, data: RegressionTest) {
           (name) => !scenarios[name]!.assertError,
         );
 
-        const allGraphqlDisabled =
-          isDisabled(data.disable, "graphql") ||
-          scenarioNames.every((name) =>
-            isDisabled(scenarios[name]!.disable, "graphql"),
-          );
+        const allGraphqlDisabled = scenarioNames.every((name) =>
+          isDisabled(scenarios[name]!.disable ?? data.disable, "graphql"),
+        );
 
         if (scenarioNames.length > 0) {
           describe("graphql replay", () => {
@@ -1413,10 +1427,7 @@ export function regressionTest(name: string, data: RegressionTest) {
             for (const scenarioName of scenarioNames) {
               test(scenarioName, async (t) => {
                 const scenario = scenarios[scenarioName]!;
-                if (
-                  isDisabled(data.disable, "graphql") ||
-                  isDisabled(scenario.disable, "graphql")
-                ) {
+                if (isDisabled(scenario.disable ?? data.disable, "graphql")) {
                   t.skip("disabled");
                   return;
                 }
@@ -1577,11 +1588,9 @@ export function regressionTest(name: string, data: RegressionTest) {
 
         // After all scenarios for this operation, verify traversal coverage
         test("traversal coverage", async (t) => {
-          const allRuntimeDisabled =
-            isDisabled(data.disable, "runtime") ||
-            scenarioNames.every((name) =>
-              isDisabled(scenarios[name]!.disable, "runtime"),
-            );
+          const allRuntimeDisabled = scenarioNames.every((name) =>
+            isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
+          );
           if (allRuntimeDisabled) {
             t.skip("all scenarios have runtime disabled");
             return;

@@ -124,3 +124,7 @@ export {
   matchesRequestedFields,
   filterOutputFields,
 } from "./requested-fields.ts";
+
+// ── V3 scope-based engine (POC) ─────────────────────────────────────────────
+
+export { executeBridge as executeBridgeV3 } from "./v3/execute-bridge.ts";
