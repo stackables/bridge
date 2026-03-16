@@ -1073,6 +1073,10 @@ export function buildBody(
       const jsonStr = reconstructJson((c.objectLit as CstNode[])[0]);
       return { type: "literal", value: JSON.parse(jsonStr) as JsonValue, loc };
     }
+    if (c.arrayLit) {
+      const jsonStr = reconstructJson((c.arrayLit as CstNode[])[0]);
+      return { type: "literal", value: JSON.parse(jsonStr) as JsonValue, loc };
+    }
     if (c.sourceAlt) {
       return buildSourceExpression(
         (c.sourceAlt as CstNode[])[0],
@@ -1175,6 +1179,13 @@ export function buildBody(
     if (c.nullLit) return { value: null, ...(loc ? { loc } : {}) };
     if (c.objectLit) {
       const jsonStr = reconstructJson((c.objectLit as CstNode[])[0]);
+      return {
+        value: JSON.parse(jsonStr) as JsonValue,
+        ...(loc ? { loc } : {}),
+      };
+    }
+    if (c.arrayLit) {
+      const jsonStr = reconstructJson((c.arrayLit as CstNode[])[0]);
       return {
         value: JSON.parse(jsonStr) as JsonValue,
         ...(loc ? { loc } : {}),

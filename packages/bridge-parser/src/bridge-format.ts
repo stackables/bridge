@@ -114,7 +114,12 @@ function serFallbacks(
       const e = s.expr;
       if (e.type === "control") return ` ${op} ${serializeControl(e.control)}`;
       if (e.type === "ref") return ` ${op} ${refFn(e.ref)}`;
-      if (e.type === "literal") return ` ${op} ${valFn(e.value as string)}`;
+      if (e.type === "literal") {
+        const v = e.value;
+        if (typeof v === "object" && v !== null)
+          return ` ${op} ${JSON.stringify(v)}`;
+        return ` ${op} ${valFn(v as string)}`;
+      }
       return "";
     })
     .join("");
@@ -130,7 +135,9 @@ function serCatch(
   if ("control" in w.catch)
     return ` catch ${serializeControl(w.catch.control)}`;
   if ("ref" in w.catch) return ` catch ${refFn(w.catch.ref)}`;
-  return ` catch ${valFn(w.catch.value as string)}`;
+  const v = w.catch.value;
+  if (typeof v === "object" && v !== null) return ` catch ${JSON.stringify(v)}`;
+  return ` catch ${valFn(v as string)}`;
 }
 
 // ── Serializer ───────────────────────────────────────────────────────────────
@@ -2494,12 +2501,35 @@ function serializeBridgeBlock(bridge: Bridge): string {
     }
   }
 
-  // Force statements
-  if (bridge.forces) {
-    for (const f of bridge.forces) {
-      lines.push(
-        f.catchError ? `force ${f.handle} catch null` : `force ${f.handle}`,
-      );
+  // Force statements — respect body ordering when available
+  if (bridge.forces && bridge.forces.length > 0) {
+    if (bridge.body) {
+      // Use body ordering to interleave force statements among wire lines
+      let wireCount = 0;
+      const insertions: Array<{ afterWire: number; line: string }> = [];
+      for (const stmt of bridge.body) {
+        if (stmt.kind === "force") {
+          const line = stmt.catchError
+            ? `force ${stmt.handle} catch null`
+            : `force ${stmt.handle}`;
+          insertions.push({ afterWire: wireCount, line });
+        } else if (stmt.kind !== "with") {
+          wireCount++;
+        }
+      }
+      // Insert in reverse order to preserve indices
+      const totalWireLines = lines.length - wireBodyStart;
+      for (let i = insertions.length - 1; i >= 0; i--) {
+        const ins = insertions[i]!;
+        const pos = wireBodyStart + Math.min(ins.afterWire, totalWireLines);
+        lines.splice(pos, 0, ins.line);
+      }
+    } else {
+      for (const f of bridge.forces) {
+        lines.push(
+          f.catchError ? `force ${f.handle} catch null` : `force ${f.handle}`,
+        );
+      }
     }
   }
 

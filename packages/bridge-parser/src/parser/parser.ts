@@ -883,6 +883,9 @@ class BridgeParser extends CstParser {
       {
         ALT: () => this.SUBRULE(this.jsonInlineObject, { LABEL: "objectLit" }),
       },
+      {
+        ALT: () => this.SUBRULE(this.jsonInlineArray, { LABEL: "arrayLit" }),
+      },
       { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceAlt" }) },
     ]);
   });
@@ -1239,14 +1242,31 @@ class BridgeParser extends CstParser {
         { ALT: () => this.CONSUME(FalseLiteral) },
         { ALT: () => this.CONSUME(NullLiteral) },
         { ALT: () => this.CONSUME(Identifier) },
-        { ALT: () => this.CONSUME(LSquare) },
-        { ALT: () => this.CONSUME(RSquare) },
         { ALT: () => this.CONSUME(Dot) },
         { ALT: () => this.CONSUME(Equals) },
         { ALT: () => this.SUBRULE(this.jsonInlineObject) },
+        { ALT: () => this.SUBRULE(this.jsonInlineArray) },
       ]);
     });
     this.CONSUME(RCurly);
+  });
+
+  /** Inline JSON array — used in coalesce alternatives */
+  public jsonInlineArray = this.RULE("jsonInlineArray", () => {
+    this.CONSUME(LSquare);
+    this.MANY(() => {
+      this.OR([
+        { ALT: () => this.CONSUME(StringLiteral) },
+        { ALT: () => this.CONSUME(NumberLiteral) },
+        { ALT: () => this.CONSUME(Comma) },
+        { ALT: () => this.CONSUME(TrueLiteral) },
+        { ALT: () => this.CONSUME(FalseLiteral) },
+        { ALT: () => this.CONSUME(NullLiteral) },
+        { ALT: () => this.SUBRULE(this.jsonInlineObject) },
+        { ALT: () => this.SUBRULE(this.jsonInlineArray) },
+      ]);
+    });
+    this.CONSUME(RSquare);
   });
 }
 
@@ -4417,6 +4437,8 @@ function buildBridgeBody(
     if (c.nullLit) return { literal: "null" };
     if (c.objectLit)
       return { literal: reconstructJson((c.objectLit as CstNode[])[0]) };
+    if (c.arrayLit)
+      return { literal: reconstructJson((c.arrayLit as CstNode[])[0]) };
     if (c.sourceAlt) {
       const srcNode = (c.sourceAlt as CstNode[])[0];
       return { sourceRef: buildSourceExpr(srcNode, lineNum, iterScope) };
