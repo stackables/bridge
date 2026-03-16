@@ -1,5 +1,14 @@
 import type { SourceLocation } from "@stackables/bridge-types";
 
+/** Standard JSON primitive type — the result of JSON.parse(). */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
 /**
  * Structured node reference — identifies a specific data point in the execution graph.
  *
@@ -221,9 +230,15 @@ export type Expression =
       loc?: SourceLocation;
     }
   | {
-      /** JSON-encoded constant: "\"hello\"", "42", "true", "null" */
+      /**
+       * A fully parsed, ready-to-use literal value.
+       *
+       * The AST builder runs JSON.parse() once during compilation.
+       * Legacy path (flat Wire[]): value is still a JSON-encoded string.
+       * New path (Statement[]): value is the parsed JsonValue.
+       */
       type: "literal";
-      value: string;
+      value: JsonValue;
       loc?: SourceLocation;
     }
   | {
@@ -298,7 +313,63 @@ export type Expression =
       /** Input path within the tool (e.g. `dv.dividend:source` → ["dividend"]) */
       path?: string[];
       loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Binary operator expression — arithmetic or comparison.
+       *
+       * Replaces the legacy desugaring that created synthetic tool forks
+       * (e.g. `Tools.add`, `Tools.eq`) for operators like `+`, `==`.
+       */
+      type: "binary";
+      op: BinaryOp;
+      left: Expression;
+      right: Expression;
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Unary operator expression — logical NOT.
+       *
+       * Replaces the legacy `Tools.not` synthetic fork.
+       */
+      type: "unary";
+      op: "not";
+      operand: Expression;
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * String template concatenation — joins parts into a single string.
+       *
+       * Replaces the legacy `Tools.concat` synthetic fork with indexed
+       * `parts.0`, `parts.1` inputs.
+       *
+       * Result: `{ value: string }` (matches internal.concat return shape).
+       */
+      type: "concat";
+      parts: Expression[];
+      loc?: SourceLocation;
     };
+
+/**
+ * Binary operator names for arithmetic and comparison expressions.
+ *
+ * Matches the internal tool function names:
+ * - Arithmetic: add (+), sub (-), mul (*), div (/)
+ * - Comparison: eq (==), neq (!=), gt (>), gte (>=), lt (<), lte (<=)
+ */
+export type BinaryOp =
+  | "add"
+  | "sub"
+  | "mul"
+  | "div"
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte";
 
 /**
  * One entry in the wire's ordered fallback chain.

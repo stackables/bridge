@@ -31,7 +31,8 @@ const isAndW = (w: Wire): boolean => w.sources[0]?.expr.type === "and";
 const isOrW = (w: Wire): boolean => w.sources[0]?.expr.type === "or";
 
 const wRef = (w: Wire): NodeRef => (w.sources[0].expr as RefExpr).ref;
-const wVal = (w: Wire): string => (w.sources[0].expr as LitExpr).value;
+const wVal = (w: Wire): string =>
+  (w.sources[0].expr as LitExpr).value as string;
 const wSafe = (w: Wire): true | undefined => {
   const e = w.sources[0].expr;
   return e.type === "ref" ? e.safe : undefined;
@@ -39,7 +40,7 @@ const wSafe = (w: Wire): true | undefined => {
 const wTern = (w: Wire): TernExpr => w.sources[0].expr as TernExpr;
 const wAndOr = (w: Wire): AndOrExpr => w.sources[0].expr as AndOrExpr;
 const eRef = (e: Expression): NodeRef => (e as RefExpr).ref;
-const eVal = (e: Expression): string => (e as LitExpr).value;
+const eVal = (e: Expression): string => (e as LitExpr).value as string;
 
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.
@@ -113,7 +114,7 @@ function serFallbacks(
       const e = s.expr;
       if (e.type === "control") return ` ${op} ${serializeControl(e.control)}`;
       if (e.type === "ref") return ` ${op} ${refFn(e.ref)}`;
-      if (e.type === "literal") return ` ${op} ${valFn(e.value)}`;
+      if (e.type === "literal") return ` ${op} ${valFn(e.value as string)}`;
       return "";
     })
     .join("");

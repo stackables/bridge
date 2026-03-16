@@ -61,6 +61,7 @@ export type { Logger } from "./tree-types.ts";
 
 export { SELF_MODULE } from "./types.ts";
 export type {
+  BinaryOp,
   Bridge,
   BridgeDocument,
   BatchToolCallFn,
@@ -73,6 +74,7 @@ export type {
   ForceStatement,
   HandleBinding,
   Instruction,
+  JsonValue,
   NodeRef,
   ScopeStatement,
   SourceLocation,

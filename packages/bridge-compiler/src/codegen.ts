@@ -72,7 +72,7 @@ function wRef(w: Wire): NodeRef {
 }
 /** Primary source literal value (for constant wires). */
 function wVal(w: Wire): string {
-  return (w.sources[0]!.expr as LitExpr).value;
+  return (w.sources[0]!.expr as LitExpr).value as string;
 }
 /** Safe flag on a pull wire's ref expression. */
 function wSafe(w: Wire): true | undefined {
@@ -96,7 +96,7 @@ function eRef(e: Expression): NodeRef {
 }
 /** Value from an expression (for literal-type expressions). */
 function eVal(e: Expression): string {
-  return (e as LitExpr).value;
+  return (e as LitExpr).value as string;
 }
 
 /** Whether a wire has a catch handler. */
@@ -1676,7 +1676,7 @@ class CodegenContext {
               forkExprs,
             )
           : tern.then.type === "literal"
-            ? emitCoerced((tern.then as LitExpr).value)
+            ? emitCoerced((tern.then as LitExpr).value as string)
             : "undefined";
       const elseExpr =
         tern.else.type === "ref"
@@ -1686,7 +1686,7 @@ class CodegenContext {
               forkExprs,
             )
           : tern.else.type === "literal"
-            ? emitCoerced((tern.else as LitExpr).value)
+            ? emitCoerced((tern.else as LitExpr).value as string)
             : "undefined";
       const expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       if (path.length > 1) {
@@ -2893,6 +2893,20 @@ class CodegenContext {
         return this.computeExprCost(expr.source, visited);
       case "pipe":
         return this.computeExprCost(expr.source, visited);
+      case "binary":
+        return Math.max(
+          this.computeExprCost(expr.left, visited),
+          this.computeExprCost(expr.right, visited),
+        );
+      case "unary":
+        return this.computeExprCost(expr.operand, visited);
+      case "concat": {
+        let max = 0;
+        for (const part of expr.parts) {
+          max = Math.max(max, this.computeExprCost(part, visited));
+        }
+        return max;
+      }
     }
   }
 
@@ -3198,7 +3212,7 @@ class CodegenContext {
               wTern(w).thenLoc,
             )
           : (wTern(w).then as LitExpr).value !== undefined
-            ? emitCoerced((wTern(w).then as LitExpr).value)
+            ? emitCoerced((wTern(w).then as LitExpr).value as string)
             : "undefined";
       const elseExpr =
         (wTern(w).else as RefExpr).ref !== undefined
@@ -3207,7 +3221,7 @@ class CodegenContext {
               wTern(w).elseLoc,
             )
           : (wTern(w).else as LitExpr).value !== undefined
-            ? emitCoerced((wTern(w).else as LitExpr).value)
+            ? emitCoerced((wTern(w).else as LitExpr).value as string)
             : "undefined";
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;
       expr = this.applyFallbacks(w, expr);
@@ -3376,16 +3390,16 @@ class CodegenContext {
           }
           return this.wrapExprWithLoc(this.refToExpr(ref), loc);
         }
-        return val !== undefined ? emitCoerced(val) : "undefined";
+        return val !== undefined ? emitCoerced(val as string) : "undefined";
       };
       const thenExpr = resolveBranch(
         (wTern(w).then as RefExpr).ref,
-        (wTern(w).then as LitExpr).value,
+        (wTern(w).then as LitExpr).value as string | undefined,
         wTern(w).thenLoc,
       );
       const elseExpr = resolveBranch(
         (wTern(w).else as RefExpr).ref,
-        (wTern(w).else as LitExpr).value,
+        (wTern(w).else as LitExpr).value as string | undefined,
         wTern(w).elseLoc,
       );
       let expr = `(${condExpr} ? ${thenExpr} : ${elseExpr})`;

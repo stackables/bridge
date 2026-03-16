@@ -104,6 +104,18 @@ function collectExprRefs(expr: Expression, refs: NodeRef[]): void {
     case "pipe":
       collectExprRefs(expr.source, refs);
       break;
+    case "binary":
+      collectExprRefs(expr.left, refs);
+      collectExprRefs(expr.right, refs);
+      break;
+    case "unary":
+      collectExprRefs(expr.operand, refs);
+      break;
+    case "concat":
+      for (const part of expr.parts) {
+        collectExprRefs(part, refs);
+      }
+      break;
     // literal, control — no refs
   }
 }

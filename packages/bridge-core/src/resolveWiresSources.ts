@@ -79,6 +79,21 @@ export function evaluateExpression(
       throw new Error(
         "Pipe expressions are not yet supported in evaluateExpression",
       );
+
+    case "binary":
+      throw new Error(
+        "Binary expressions are not yet supported in evaluateExpression",
+      );
+
+    case "unary":
+      throw new Error(
+        "Unary expressions are not yet supported in evaluateExpression",
+      );
+
+    case "concat":
+      throw new Error(
+        "Concat expressions are not yet supported in evaluateExpression",
+      );
   }
 }
 

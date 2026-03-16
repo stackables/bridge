@@ -57,34 +57,58 @@ _No dependencies. Single commit._
 
 ---
 
-## Phase 2: Define New IR Data Structures
+## Phase 2: Define New IR Data Structures ✅ COMPLETE
 
-_Depends on Phase 1. Changes only `bridge-core/src/types.ts`._
+_Depends on Phase 1. Changes `bridge-core/src/types.ts` + `index.ts`._
 
-### New types to add:
+### Types added:
 
 ```typescript
+// Shared RHS — the evaluation chain reused by wire and alias statements
+interface SourceChain {
+  sources: WireSourceEntry[];
+  catch?: WireCatch;
+}
+
 // Scope-aware statement — the building block of nested bridge bodies
 type Statement =
-  | WireStatement // target <- expression chain
-  | WireAliasStatement // alias name <- expression chain
+  | WireStatement // target <- expression chain (SourceChain & { target })
+  | WireAliasStatement // alias name <- expression chain (SourceChain & { name })
+  | SpreadStatement // ... <- expression chain (SourceChain, inherits scope target)
   | WithStatement // with <name> [as <handle>] [memoize]
   | ScopeStatement // target { Statement[] }
   | ForceStatement; // force handle [catch null]
 
-// Array mapping as a first-class expression
-// Added to the Expression union:
-//   { type: "array"; source: Expression; iteratorName: string; body: Statement[] }
+// New expression variants added to Expression union:
+// { type: "array"; source: Expression; iteratorName: string; body: Statement[] }
+// { type: "pipe"; source: Expression; handle: string; path?: string[] }
+// { type: "binary"; op: BinaryOp; left: Expression; right: Expression }
+// { type: "unary"; op: "not"; operand: Expression }
+// { type: "concat"; parts: Expression[] }
+// BinaryOp = "add" | "sub" | "mul" | "div" | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
 ```
 
 ### Modifications to existing types (transition period):
 
-- **`Bridge`**: Add `body?: Statement[]` alongside existing `wires`. When `body`
-  is present, consumers should prefer it. `wires`, `arrayIterators`, `forces`
-  become legacy and are removed after migration.
-- **`ToolDef`**: Add `body?: Statement[]` alongside existing `wires`.
-- **`DefineDef`**: Add `body?: Statement[]` alongside existing `wires`.
-- **`Expression`**: Add `| { type: "array"; ... }` variant to the union.
+- ✅ **`Bridge`**: Added `body?: Statement[]` alongside existing `wires`.
+  `wires`, `arrayIterators`, `forces`, `pipeHandles` marked `@deprecated`.
+- ✅ **`ToolDef`**: Added `body?: Statement[]` alongside existing `wires`.
+  `pipeHandles` marked `@deprecated`.
+- ✅ **`DefineDef`**: Added `body?: Statement[]` alongside existing `wires`.
+  `arrayIterators`, `pipeHandles` marked `@deprecated`.
+- ✅ **`Expression`**: Added `"array"`, `"pipe"`, `"binary"`, `"unary"`, `"concat"` variants.
+  Binary/unary/concat replace the legacy desugaring that created synthetic tool
+  forks (`Tools.add`, `Tools.eq`, `Tools.not`, `Tools.concat`) for built-in operators.
+- ✅ **`BinaryOp`**: New type alias — `"add" | "sub" | "mul" | "div" | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"`.
+- ✅ **`WireStatement`**: Flattened — uses `SourceChain & { target: NodeRef }`,
+  no longer wraps `Wire`.
+- ✅ **`WireAliasStatement`**: Uses `SourceChain & { name }`.
+- ✅ **`SpreadStatement`**: New — `SourceChain & { kind: "spread" }`, no target
+  (inherits enclosing scope).
+- ✅ **`SourceChain`**: Extracted shared `sources + catch` interface.
+- ✅ All exhaustive Expression switches updated for `"array"`, `"pipe"`,
+  `"binary"`, `"unary"`, `"concat"` cases.
+- ✅ Exported `SourceChain`, `SpreadStatement`, `BinaryOp` from index.ts.
 
 ### Design constraints:
 
@@ -92,7 +116,7 @@ type Statement =
   pulls lazily for values
 - Each `ScopeStatement` and `ArrayExpression.body` creates a new scope layer
 - Scope lookup is lexical: inner shadowing, fallthrough to parent for missing handles
-- `Wire` type itself stays — wrapped in `WireStatement` in the tree
+- Legacy `Wire` type stays for backward compat with old engine path
 
 ---
 

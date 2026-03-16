@@ -54,7 +54,7 @@ export function pathEquals(a: string[], b: string[]): boolean {
  * value. See packages/bridge-core/performance.md (#6).
  */
 const constantCache = new Map<string, unknown>();
-export function coerceConstant(raw: string): unknown {
+export function coerceConstant(raw: string | unknown): unknown {
   if (typeof raw !== "string") return raw;
   const cached = constantCache.get(raw);
   if (cached !== undefined) return cached;

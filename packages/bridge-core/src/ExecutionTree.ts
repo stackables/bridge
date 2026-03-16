@@ -1140,6 +1140,20 @@ export class ExecutionTree implements TreeContext {
         return this.computeExprCost(expr.source, visited);
       case "pipe":
         return this.computeExprCost(expr.source, visited);
+      case "binary":
+        return Math.max(
+          this.computeExprCost(expr.left, visited),
+          this.computeExprCost(expr.right, visited),
+        );
+      case "unary":
+        return this.computeExprCost(expr.operand, visited);
+      case "concat": {
+        let max = 0;
+        for (const part of expr.parts) {
+          max = Math.max(max, this.computeExprCost(part, visited));
+        }
+        return max;
+      }
     }
   }
 
