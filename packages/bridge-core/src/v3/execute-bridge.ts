@@ -690,15 +690,31 @@ class ExecutionScope {
       }
 
       const wires = this.toolInputWires.get(key) ?? [];
+      const wireGroups = groupWiresByPath(wires);
       await Promise.all(
-        wires.map(async (wire) => {
-          const value = await evaluateSourceChain(
-            wire,
-            this,
-            undefined,
-            pullPath,
-          );
-          setPath(input, wire.target.path, value);
+        wireGroups.map(async (group) => {
+          const ordered =
+            group.length > 1
+              ? orderOverdefinedWires(group, this.engine)
+              : group;
+          let lastError: unknown;
+          for (const wire of ordered) {
+            try {
+              const value = await evaluateSourceChain(
+                wire,
+                this,
+                undefined,
+                pullPath,
+              );
+              setPath(input, wire.target.path, value);
+              if (value != null) return; // short-circuit: non-nullish wins
+              lastError = undefined; // reset — wire succeeded (null)
+            } catch (err) {
+              if (isFatalError(err) || isLoopControlSignal(err)) throw err;
+              lastError = err;
+            }
+          }
+          if (lastError) throw lastError;
         }),
       );
 
@@ -1023,14 +1039,36 @@ class ExecutionScope {
       );
       defineScope.isRootScope = true;
 
-      // Register each input wire as a lazy factory so it only fires when
-      // the define body actually reads that selfInput field.
+      // Register each input wire (or group of overdefined wires) as a lazy
+      // factory so it only fires when the define body reads that field.
       const parentScope = this;
-      for (const wire of inputWires) {
-        const pathKey = wire.target.path.join(".");
-        defineScope.registerLazyInput(pathKey, () =>
-          evaluateSourceChain(wire, parentScope, undefined, pullPath),
-        );
+      const wireGroups = groupWiresByPath(inputWires);
+      for (const group of wireGroups) {
+        const pathKey = group[0]!.target.path.join(".");
+        const ordered =
+          group.length > 1
+            ? orderOverdefinedWires(group, parentScope.engine)
+            : group;
+        defineScope.registerLazyInput(pathKey, async () => {
+          let lastError: unknown;
+          for (const wire of ordered) {
+            try {
+              const value = await evaluateSourceChain(
+                wire,
+                parentScope,
+                undefined,
+                pullPath,
+              );
+              if (value != null) return value; // short-circuit: non-nullish wins
+              lastError = undefined; // reset — wire succeeded (null)
+            } catch (err) {
+              if (isFatalError(err) || isLoopControlSignal(err)) throw err;
+              lastError = err;
+            }
+          }
+          if (lastError) throw lastError;
+          return undefined;
+        });
       }
 
       // Index define body and pull output.
@@ -1702,6 +1740,24 @@ async function resolveRequestedFields(
 }
 
 /**
+ * Group a flat array of wires by their target path.
+ * Used to detect overdefinition and apply short-circuit evaluation.
+ */
+function groupWiresByPath(wires: WireStatement[]): WireStatement[][] {
+  const groups = new Map<string, WireStatement[]>();
+  for (const wire of wires) {
+    const pathKey = wire.target.path.join(".");
+    let group = groups.get(pathKey);
+    if (!group) {
+      group = [];
+      groups.set(pathKey, group);
+    }
+    group.push(wire);
+  }
+  return Array.from(groups.values());
+}
+
+/**
  * Order overdefined wires by cost — cheapest source first.
  * Input/context/const/element refs are "free" (cost 0), tool refs are expensive.
  * Same-cost wires preserve authored order.
@@ -2314,10 +2370,29 @@ async function evaluatePipeExpression(
 
   // 6b. Bridge wires for this tool (non-pipe input wires)
   const bridgeWires = scope.collectToolInputWiresFor(toolName);
+  const bridgeWireGroups = groupWiresByPath(bridgeWires);
   await Promise.all(
-    bridgeWires.map(async (wire) => {
-      const value = await evaluateSourceChain(wire, scope, undefined, nextPath);
-      setPath(input, wire.target.path, value);
+    bridgeWireGroups.map(async (group) => {
+      const ordered =
+        group.length > 1 ? orderOverdefinedWires(group, scope.engine) : group;
+      let lastError: unknown;
+      for (const wire of ordered) {
+        try {
+          const value = await evaluateSourceChain(
+            wire,
+            scope,
+            undefined,
+            nextPath,
+          );
+          setPath(input, wire.target.path, value);
+          if (value != null) return; // short-circuit: non-nullish wins
+          lastError = undefined; // reset — wire succeeded (null)
+        } catch (err) {
+          if (isFatalError(err) || isLoopControlSignal(err)) throw err;
+          lastError = err;
+        }
+      }
+      if (lastError) throw lastError;
     }),
   );
 
