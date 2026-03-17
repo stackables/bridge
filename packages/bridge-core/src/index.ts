@@ -13,11 +13,11 @@ export { bridge } from "./tag.ts";
 
 // ── Runtime engine ──────────────────────────────────────────────────────────
 
-export { executeBridge } from "./execute-bridge.ts";
+export { executeBridge } from "./v3/execute-bridge.ts";
 export type {
   ExecuteBridgeOptions,
   ExecuteBridgeResult,
-} from "./execute-bridge.ts";
+} from "./v3/execute-bridge.ts";
 
 // ── Version check ───────────────────────────────────────────────────────────
 
@@ -125,7 +125,3 @@ export {
   matchesRequestedFields,
   filterOutputFields,
 } from "./requested-fields.ts";
-
-// ── V3 scope-based engine (POC) ─────────────────────────────────────────────
-
-export { executeBridge as executeBridgeV3 } from "./v3/execute-bridge.ts";

@@ -5,7 +5,7 @@ import {
   enumerateTraversalIds,
   buildTraversalManifest,
   decodeExecutionTrace,
-  executeBridgeV3 as executeBridge,
+  executeBridge,
 } from "@stackables/bridge-core";
 import type {
   Bridge,

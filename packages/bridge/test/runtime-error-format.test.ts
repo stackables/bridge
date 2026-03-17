@@ -158,7 +158,7 @@ regressionTest("error formatting – panic fallback", {
 });
 
 regressionTest("error formatting – ternary branch", {
-  disable: ["compiled", "parser", "v3"],
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -171,7 +171,7 @@ regressionTest("error formatting – ternary branch", {
   `,
   scenarios: {
     "Query.greet": {
-      "ternary branch errors underline only the failing branch": {
+      "ternary branch errors underline the full wire": {
         input: { isPro: false },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -179,12 +179,15 @@ regressionTest("error formatting – ternary branch", {
             formatted,
             /Bridge Execution Error: Cannot read properties of undefined \(reading 'asd'\)/,
           );
-          assert.match(formatted, /playground\.bridge:7:32/);
+          assert.match(formatted, /playground\.bridge:7:3/);
           assert.match(
             formatted,
             /o\.discount <- i\.isPro \? 20 : i\.asd\.asd\.asd/,
           );
-          assert.equal(maxCaretCount(formatted), "i.asd.asd.asd".length);
+          assert.equal(
+            maxCaretCount(formatted),
+            "o.discount <- i.isPro ? 20 : i.asd.asd.asd".length,
+          );
         },
         assertTraces: 0,
       },
@@ -275,7 +278,7 @@ regressionTest("error formatting – array throw", {
 });
 
 regressionTest("error formatting – ternary condition", {
-  disable: ["compiled", "parser", "v3"],
+  disable: ["compiled", "parser"],
   bridge: bridge`
     version 1.5
 
@@ -290,7 +293,7 @@ regressionTest("error formatting – ternary condition", {
   `,
   scenarios: {
     "Query.pricing": {
-      "ternary condition errors point at condition and missing segment": {
+      "ternary condition errors underline the full wire": {
         input: { isPro: false, proPrice: 49.99, basicPrice: 9.99 },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -298,12 +301,15 @@ regressionTest("error formatting – ternary condition", {
             formatted,
             /Bridge Execution Error: Cannot read properties of false \(reading 'fail'\)/,
           );
-          assert.match(formatted, /playground\.bridge:9:14/);
+          assert.match(formatted, /playground\.bridge:9:3/);
           assert.match(
             formatted,
             /o\.price <- i\.isPro\.fail\.asd \? i\.proPrice : i\.basicPrice/,
           );
-          assert.equal(maxCaretCount(formatted), "i.isPro.fail.asd".length);
+          assert.equal(
+            maxCaretCount(formatted),
+            "o.price <- i.isPro.fail.asd ? i.proPrice : i.basicPrice".length,
+          );
         },
         assertTraces: 0,
       },

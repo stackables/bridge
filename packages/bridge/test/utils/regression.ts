@@ -22,10 +22,7 @@ import {
   type BridgeDocument,
 } from "../../src/index.ts";
 import { bridgeTransform, getBridgeTraces } from "@stackables/bridge-graphql";
-import {
-  executeBridge as executeRuntime,
-  executeBridgeV3,
-} from "@stackables/bridge-core";
+import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import {
   executeBridge as executeCompiled,
   type ExecuteBridgeOptions,
@@ -830,8 +827,8 @@ function synthesizeSelectedGraphQLData(
  * Lets assertions branch on engine or inspect wall-clock timing.
  */
 export type AssertContext = {
-  /** Which engine is running: "runtime" | "compiled" | "graphql" | "v3". */
-  engine: "runtime" | "compiled" | "graphql" | "v3";
+  /** Which engine is running: "runtime" | "compiled" | "graphql". */
+  engine: "runtime" | "compiled" | "graphql";
   /** High-resolution timestamp (ms) captured just before execution started. */
   startMs: number;
 };
@@ -864,9 +861,9 @@ export type Scenario = {
    *
    * - `true` — skip this scenario entirely
    * - explicit array — only listed engines are disabled; unlisted ones run
-   * - omitted — defaults apply (compiled, parser, v3 are off)
+   * - omitted — defaults apply (compiled, parser are off)
    */
-  disable?: true | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[];
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
 };
 
 export type RegressionTest = {
@@ -880,9 +877,9 @@ export type RegressionTest = {
    *
    * - `true` — skip this test entirely
    * - explicit array — only listed engines are disabled; unlisted ones run
-   * - omitted — defaults apply (compiled, parser, v3 are off)
+   * - omitted — defaults apply (compiled, parser are off)
    */
-  disable?: true | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[];
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
   scenarios: Record<string, Record<string, Scenario>>;
 };
 
@@ -891,7 +888,6 @@ export type RegressionTest = {
 const engines = [
   { name: "runtime", execute: executeRuntime },
   { name: "compiled", execute: executeCompiled },
-  { name: "v3", execute: executeBridgeV3 as typeof executeRuntime },
 ] as const;
 
 function assertDataExpectation(
@@ -1113,11 +1109,8 @@ export function assertGraphqlExpectation(
 // ── Harness ─────────────────────────────────────────────────────────────────
 
 function isDisabled(
-  disable:
-    | true
-    | ("runtime" | "compiled" | "graphql" | "parser" | "v3")[]
-    | undefined,
-  check: "runtime" | "compiled" | "graphql" | "parser" | "v3",
+  disable: true | ("runtime" | "compiled" | "graphql" | "parser")[] | undefined,
+  check: "runtime" | "compiled" | "graphql" | "parser",
 ): boolean {
   if (disable === true) return true;
 
@@ -1175,28 +1168,11 @@ export function regressionTest(name: string, data: RegressionTest) {
           }
         });
 
-        let pendingV3Tests = scenarioNames.filter(
-          (name) => !isDisabled(scenarios[name]!.disable ?? data.disable, "v3"),
-        ).length;
-        let resolveV3Collection!: () => void;
-
-        const v3CollectionDone = new Promise<void>((resolve) => {
-          resolveV3Collection = resolve;
-          if (pendingV3Tests === 0) {
-            resolve();
-          }
-        });
-
         afterEach((t) => {
           if (t.name === "runtime") {
             pendingRuntimeTests -= 1;
             if (pendingRuntimeTests === 0) {
               resolveRuntimeCollection();
-            }
-          } else if (t.name === "v3") {
-            pendingV3Tests -= 1;
-            if (pendingV3Tests === 0) {
-              resolveV3Collection();
             }
           }
         });
@@ -1262,18 +1238,15 @@ export function regressionTest(name: string, data: RegressionTest) {
                       scenarioName,
                       output: resultData,
                     });
-                  }
-
-                  if (scenario.assertError) {
-                    assert.fail("Expected an error but execution succeeded");
-                  }
-
-                  // Accumulate v3 trace coverage
-                  if (engineName === "v3") {
+                    // Accumulate runtime trace coverage
                     traceMasks.set(
                       operation,
                       (traceMasks.get(operation) ?? 0n) | executionTraceId,
                     );
+                  }
+
+                  if (scenario.assertError) {
+                    assert.fail("Expected an error but execution succeeded");
                   }
 
                   assertDataExpectation(
@@ -1302,7 +1275,10 @@ export function regressionTest(name: string, data: RegressionTest) {
                       assertCtx,
                     );
                     // Accumulate trace from errors too
-                    if (engineName === "v3" && e.executionTraceId != null) {
+                    if (
+                      engineName === "runtime" &&
+                      e.executionTraceId != null
+                    ) {
                       traceMasks.set(
                         operation,
                         (traceMasks.get(operation) ?? 0n) |
@@ -1600,16 +1576,16 @@ export function regressionTest(name: string, data: RegressionTest) {
 
         // After all scenarios for this operation, verify traversal coverage
         test("traversal coverage", async (t) => {
-          const allV3Disabled = scenarioNames.every((name) =>
-            isDisabled(scenarios[name]!.disable ?? data.disable, "v3"),
+          const allRuntimeDisabled = scenarioNames.every((name) =>
+            isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
           );
-          if (allV3Disabled) {
-            t.skip("all scenarios have v3 disabled");
+          if (allRuntimeDisabled) {
+            t.skip("all scenarios have runtime disabled");
             return;
           }
 
-          // Wait for all v3 scenario tests to finish populating traceMasks
-          await v3CollectionDone;
+          // Wait for all runtime scenario tests to finish populating traceMasks
+          await runtimeCollectionDone;
 
           const [type, field] = operation.split(".") as [string, string];
           const bridge = document.instructions.find(
