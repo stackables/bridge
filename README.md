@@ -6,6 +6,8 @@
 
 **A declarative dataflow language and execution engine.**
 
+Documentation at: https://bridge.sdk42.com/
+
 The Bridge replaces imperative orchestration code with static `.bridge` files. Instead of writing complex `async/await` logic, manual `Promise.all` wrappers, and custom data mappers, you simply define **what** data you need and **where** it comes from.
 
 The Bridge engine parses your wiring diagram, builds a dependency graph, and executes it - automatically handling parallelization, fallbacks, and data reshaping.
