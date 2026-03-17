@@ -13,11 +13,11 @@ export { bridge } from "./tag.ts";
 
 // ── Runtime engine ──────────────────────────────────────────────────────────
 
-export { executeBridge } from "./v3/execute-bridge.ts";
+export { executeBridge } from "./execute-bridge.ts";
 export type {
   ExecuteBridgeOptions,
   ExecuteBridgeResult,
-} from "./v3/execute-bridge.ts";
+} from "./execute-bridge.ts";
 
 // ── Version check ───────────────────────────────────────────────────────────
 

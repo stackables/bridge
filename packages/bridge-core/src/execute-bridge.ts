@@ -1,5 +1,5 @@
-import type { ToolTrace, TraceLevel } from "../tracing.ts";
-import type { Logger } from "../tree-types.ts";
+import type { ToolTrace, TraceLevel } from "./tracing.ts";
+import type { Logger } from "./tree-types.ts";
 import type { SourceLocation } from "@stackables/bridge-types";
 import type {
   Bridge,
@@ -20,15 +20,15 @@ import type {
   WireCatch,
   WireSourceEntry,
   WireStatement,
-} from "../types.ts";
-import { SELF_MODULE } from "../types.ts";
+} from "./types.ts";
+import { SELF_MODULE } from "./types.ts";
 import {
   TraceCollector,
   resolveToolMeta,
   logToolSuccess,
   logToolError,
   type EffectiveToolLog,
-} from "../tracing.ts";
+} from "./tracing.ts";
 import {
   BridgeAbortError,
   BridgePanicError,
@@ -41,18 +41,18 @@ import {
   BREAK_SYM,
   CONTINUE_SYM,
   MAX_EXECUTION_DEPTH,
-} from "../tree-types.ts";
-import type { LoopControlSignal } from "../tree-types.ts";
-import { UNSAFE_KEYS } from "../tree-utils.ts";
-import { raceTimeout } from "../utils.ts";
-import { attachBridgeErrorDocumentContext } from "../formatBridgeError.ts";
+} from "./tree-types.ts";
+import type { LoopControlSignal } from "./tree-types.ts";
+import { UNSAFE_KEYS } from "./tree-utils.ts";
+import { raceTimeout } from "./utils.ts";
+import { attachBridgeErrorDocumentContext } from "./formatBridgeError.ts";
 import {
   std as bundledStd,
   STD_VERSION as BUNDLED_STD_VERSION,
 } from "@stackables/bridge-stdlib";
-import { resolveStd } from "../version-check.ts";
-import { buildBodyTraversalMaps } from "../enumerate-traversals.ts";
-import type { TraceWireBits } from "../enumerate-traversals.ts";
+import { resolveStd } from "./version-check.ts";
+import { buildBodyTraversalMaps } from "./enumerate-traversals.ts";
+import type { TraceWireBits } from "./enumerate-traversals.ts";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge document (from `parseBridge` or `parseBridgeDiagnostics`). */
