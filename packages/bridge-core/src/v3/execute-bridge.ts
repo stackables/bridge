@@ -995,7 +995,7 @@ class ExecutionScope {
     if (!cached) {
       cached = factory().then((value) => {
         // Hydrate selfInput so subsequent getPath reads work
-        setPath(this.selfInput, pathKey.split("."), value);
+        setPath(this.selfInput, pathKey ? pathKey.split(".") : [], value);
         return value;
       });
       this.lazyInputCache.set(pathKey, cached);
@@ -2549,15 +2549,14 @@ async function resolveRef(
       await lazyExact;
       return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
     }
-    // Check if a parent path has a lazy wire (e.g. reading "a.b" when "a" is lazy)
-    if (ref.path.length > 1) {
-      for (let len = ref.path.length - 1; len >= 1; len--) {
-        const parentKey = ref.path.slice(0, len).join(".");
-        const lazyParent = scope.resolveLazyInput(parentKey);
-        if (lazyParent !== undefined) {
-          await lazyParent;
-          return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
-        }
+    // Check if a parent path has a lazy wire (e.g. reading "a.b" when "a" is
+    // lazy, or reading "a" when the whole input "" is lazy — passthrough bridges)
+    for (let len = ref.path.length - 1; len >= 0; len--) {
+      const parentKey = ref.path.slice(0, len).join(".");
+      const lazyParent = scope.resolveLazyInput(parentKey);
+      if (lazyParent !== undefined) {
+        await lazyParent;
+        return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
       }
     }
     return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
