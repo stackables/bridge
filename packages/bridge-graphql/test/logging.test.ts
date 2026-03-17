@@ -121,9 +121,8 @@ describe("logging: basics", () => {
     assert.equal(result.data.lookup.label, "X");
   });
 
-  test("logger.warn is called when accessing a named field on an array result", async () => {
+  test("accessing a named field on an array result does not warn", async () => {
     // Bridge accesses .firstName on items[] (an array) without using array mapping.
-    // This should trigger the array-access warning path.
     const arrayBridge = bridge`
       version 1.5
       bridge Query.lookup {
@@ -154,9 +153,11 @@ describe("logging: basics", () => {
     const executor = buildHTTPExecutor({ fetch: yoga.fetch as any });
     await executor({ document: parse(`{ lookup(q: "x") { label } }`) });
 
-    assert.ok(
-      warnMessages.some((m) => m.includes("firstName") && m.includes("array")),
-      `expected a warn message about array field access, got: ${JSON.stringify(warnMessages)}`,
+    // Standalone mode does not emit compatibility warnings
+    assert.equal(
+      warnMessages.length,
+      0,
+      `expected no warn messages, got: ${JSON.stringify(warnMessages)}`,
     );
   });
 });

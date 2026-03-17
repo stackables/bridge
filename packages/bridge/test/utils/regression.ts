@@ -1475,6 +1475,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                     signalMapper: (ctx) => ctx.__bridgeSignal,
                     toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                     trace: "full",
+                    partialSuccess: true,
                   },
                 );
                 const source = buildGraphQLOperationSource(

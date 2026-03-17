@@ -116,6 +116,18 @@ export type ExecuteBridgeOptions = {
    * Omit or pass an empty array to resolve all fields (the default).
    */
   requestedFields?: string[];
+  /**
+   * Enable partial success (Error Sentinels).
+   *
+   * When `true`, non-fatal errors on individual output fields are planted as
+   * `Error` sentinels in the output tree rather than thrown.  A GraphQL
+   * resolver higher in the stack can intercept them to deliver per-field
+   * errors while sibling fields still resolve successfully.
+   *
+   * When `false` (default), the first non-fatal error is re-thrown and
+   * surfaces as a single top-level field error.
+   */
+  partialSuccess?: boolean;
 };
 
 export type ExecuteBridgeResult<T = unknown> = {
@@ -327,6 +339,15 @@ class ExecutionScope {
 
   /** Define input wires indexed by "module:field" key. */
   private readonly defineInputWires = new Map<string, WireStatement[]>();
+
+  /**
+   * Lazy-input factories for define scopes: keyed by dot-joined selfInput path.
+   * When a selfInput reference is read, the factory is called once and the
+   * result promise is cached, enabling lazy input wire evaluation so only
+   * the wires needed for requested output fields are actually executed.
+   */
+  private lazyInputFactories?: Map<string, () => Promise<unknown>>;
+  private lazyInputCache?: Map<string, Promise<unknown>>;
 
   /** When true, this scope acts as a root for output writes (define scopes). */
   private isRootScope = false;
@@ -656,15 +677,10 @@ class ExecutionScope {
       );
       const fnName = toolDef?.fn ?? toolName;
       const fn = lookupToolFn(this.engine.tools, fnName);
-      if (!fn) throw new Error(`No tool found for "${fnName}"`);
-      const {
-        doTrace,
-        sync: isSyncTool,
-        batch: batchMeta,
-        log: toolLog,
-      } = resolveToolMeta(fn);
 
       // Build input: ToolDef base wires first, then bridge wires override.
+      // Evaluated before the "fn not found" check so that tool-input wire
+      // traversal bits are recorded even when the tool function is missing.
       // pullPath already contains this key — any re-entrant resolveToolResult
       // for the same key will detect the cycle.
       const input: Record<string, unknown> = {};
@@ -685,6 +701,14 @@ class ExecutionScope {
           setPath(input, wire.target.path, value);
         }),
       );
+
+      if (!fn) throw new Error(`No tool found for "${fnName}"`);
+      const {
+        doTrace,
+        sync: isSyncTool,
+        batch: batchMeta,
+        log: toolLog,
+      } = resolveToolMeta(fn);
 
       // Short-circuit if externally aborted
       if (this.engine.signal?.aborted) throw new BridgeAbortError();
@@ -888,12 +912,18 @@ class ExecutionScope {
   /**
    * Resolve a define block result via scope chain.
    * Creates a child scope, indexes define body, and pulls output.
+   *
+   * @param subFields - Optional field filter; when non-empty, only the listed
+   *   output fields (and their transitive deps) are resolved in the define
+   *   scope, enabling lazy evaluation when the caller only needs a subset.
+   *   Ignored on cache hits — the first-call's field set wins.
    */
   async resolveDefine(
     module: string,
     field: string,
     instance: number | undefined,
     pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
+    subFields?: string[],
   ): Promise<unknown> {
     const key = `${module}:${field}`;
 
@@ -911,15 +941,50 @@ class ExecutionScope {
     if (this.ownedDefines.has(module)) {
       // 3. Branch the path
       const nextPath = new Set(pullPath).add(key);
-      return this.executeDefine(key, module, nextPath);
+      return this.executeDefine(key, module, nextPath, subFields);
     }
 
     // Delegate to parent
     if (this.parent) {
-      return this.parent.resolveDefine(module, field, instance, pullPath);
+      return this.parent.resolveDefine(
+        module,
+        field,
+        instance,
+        pullPath,
+        subFields,
+      );
     }
 
     throw new Error(`Define "${module}" not found in any scope`);
+  }
+
+  /**
+   * Register a lazy input factory for this define scope.
+   * Called by `executeDefine` so input wires are only evaluated on demand.
+   */
+  registerLazyInput(pathKey: string, factory: () => Promise<unknown>): void {
+    if (!this.lazyInputFactories) this.lazyInputFactories = new Map();
+    this.lazyInputFactories.set(pathKey, factory);
+  }
+
+  /**
+   * Resolve a lazy selfInput value, computing the wire on first access and
+   * caching the result (memoized lazy evaluation).
+   */
+  resolveLazyInput(pathKey: string): Promise<unknown> | undefined {
+    const factory = this.lazyInputFactories?.get(pathKey);
+    if (!factory) return undefined;
+    if (!this.lazyInputCache) this.lazyInputCache = new Map();
+    let cached = this.lazyInputCache.get(pathKey);
+    if (!cached) {
+      cached = factory().then((value) => {
+        // Hydrate selfInput so subsequent getPath reads work
+        setPath(this.selfInput, pathKey.split("."), value);
+        return value;
+      });
+      this.lazyInputCache.set(pathKey, cached);
+    }
+    return cached;
   }
 
   /**
@@ -930,6 +995,7 @@ class ExecutionScope {
     key: string,
     module: string,
     pullPath: ReadonlySet<string>,
+    subFields?: string[],
   ): Promise<unknown> {
     const promise = (async () => {
       // Map from handle alias to define name via handle bindings
@@ -943,22 +1009,11 @@ class ExecutionScope {
       if (!defineDef?.body)
         throw new Error(`Define "${defineName}" not found or has no body`);
 
-      // Collect bridge wires targeting this define (input wires)
+      // Collect bridge wires targeting this define (input wires).
+      // Register them as lazy factories — they will only be evaluated when the
+      // define scope actually reads from selfInput for the corresponding path.
       const inputWires = this.defineInputWires.get(key) ?? [];
       const defineInput: Record<string, unknown> = {};
-      await Promise.all(
-        inputWires.map(async (wire) => {
-          const value = await evaluateSourceChain(
-            wire,
-            this,
-            undefined,
-            pullPath,
-          );
-          setPath(defineInput, wire.target.path, value);
-        }),
-      );
-
-      // Create child scope with define input as selfInput
       const defineOutput: Record<string, unknown> = {};
       const defineScope = new ExecutionScope(
         this,
@@ -968,9 +1023,21 @@ class ExecutionScope {
       );
       defineScope.isRootScope = true;
 
-      // Index define body and pull output
+      // Register each input wire as a lazy factory so it only fires when
+      // the define body actually reads that selfInput field.
+      const parentScope = this;
+      for (const wire of inputWires) {
+        const pathKey = wire.target.path.join(".");
+        defineScope.registerLazyInput(pathKey, () =>
+          evaluateSourceChain(wire, parentScope, undefined, pullPath),
+        );
+      }
+
+      // Index define body and pull output.
+      // Use caller-supplied subFields to enable lazy evaluation when only a
+      // subset of the define's output fields are actually needed.
       indexStatements(defineDef.body, defineScope);
-      await resolveRequestedFields(defineScope, [], pullPath);
+      await resolveRequestedFields(defineScope, subFields ?? [], pullPath);
 
       return "__rootValue__" in defineOutput
         ? defineOutput.__rootValue__
@@ -1003,6 +1070,8 @@ interface EngineContext {
   >;
   /** Maximum nesting depth for array mappings / shadow scopes. */
   readonly maxDepth: number;
+  /** Whether non-fatal errors are planted as sentinels instead of thrown. */
+  readonly partialSuccess: boolean;
   /** Trace bits map — keyed by sources array reference for O(1) lookup. */
   readonly traceBits: Map<WireSourceEntry[], TraceWireBits> | undefined;
   /** Empty-array bits map — keyed by ArrayExpression reference. */
@@ -1531,14 +1600,32 @@ async function resolveRequestedFields(
           if (isLoopControlSignal(value)) return value;
           if (value != null) break; // First non-null wins
         } catch (err) {
-          if (isFatalError(err)) throw err;
+          // With partialSuccess, even fatal errors are scoped to the field —
+          // they become per-field Error Sentinels instead of killing the whole
+          // execution. Without partialSuccess, fatal errors always propagate.
+          if (isFatalError(err) && !scope.engine.partialSuccess) throw err;
           lastError = err;
           // Continue to next wire — maybe a cheaper fallback succeeds
         }
       }
 
-      // If all wires returned null and there was an error, throw it
-      if (value == null && lastError) throw lastError;
+      // THE FIX: If all wires returned null/undefined and there was an error,
+      // plant the error as an Error Sentinel in the output tree instead of
+      // throwing. This allows GraphQL to deliver partial success — the field
+      // becomes null with an error entry, while sibling fields still resolve.
+      if (value == null && lastError) {
+        if (scope.engine.partialSuccess) {
+          writeTarget(
+            ordered[0]!.target,
+            lastError instanceof Error
+              ? lastError
+              : new Error(String(lastError)),
+            scope,
+          );
+          return undefined;
+        }
+        throw lastError;
+      }
 
       writeTarget(ordered[0]!.target, value, scope);
       return undefined;
@@ -1599,6 +1686,9 @@ async function resolveRequestedFields(
       if (isFatalError(result.reason)) {
         if (!fatalError) fatalError = result.reason;
       } else {
+        // Collect non-fatal errors. With partialSuccess, evaluation errors
+        // become sentinels (no rejection), so only unplantable writeTarget
+        // failures reach here — those should always surface.
         if (!firstError) firstError = result.reason;
       }
     } else if (result.value != null) {
@@ -1914,10 +2004,22 @@ async function evaluateExpression(
     case "ref":
       if (expr.safe) {
         return evaluateExprSafe(() =>
-          resolveRef(expr.ref, scope, expr.refLoc ?? expr.loc, pullPath),
+          resolveRef(
+            expr.ref,
+            scope,
+            expr.refLoc ?? expr.loc,
+            pullPath,
+            requestedFields,
+          ),
         );
       }
-      return resolveRef(expr.ref, scope, expr.refLoc ?? expr.loc, pullPath);
+      return resolveRef(
+        expr.ref,
+        scope,
+        expr.refLoc ?? expr.loc,
+        pullPath,
+        requestedFields,
+      );
 
     case "literal":
       return expr.value;
@@ -2303,6 +2405,7 @@ async function resolveRef(
   scope: ExecutionScope,
   bridgeLoc?: SourceLocation,
   pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
+  requestedFields?: string[],
 ): Promise<unknown> {
   // Element reference — reading from array iterator binding
   if (ref.element) {
@@ -2333,17 +2436,55 @@ async function resolveRef(
 
   // Define reference — resolve define subgraph
   if (ref.module.startsWith("__define_")) {
+    // Thread requestedFields as subFields so the define scope can skip tools
+    // that feed fields the caller doesn't need (lazy define evaluation).
+    //
+    // When ref.path is non-empty we are reading a specific output field of the
+    // define (e.g. `en.enriched`). The define only needs to resolve that one
+    // field — pass it as the subfield. We must NOT forward the caller's
+    // requestedFields here because those describe sub-fields of the define's
+    // eventual output value, not output field names within the define block
+    // itself.
+    //
+    // When ref.path is empty we are reading the define's entire output (or a
+    // caller-specified subset). Forward the caller's requestedFields directly
+    // so the define can skip unneeded output wires.
+    const defineSubFields =
+      ref.path.length > 0
+        ? [ref.path[0]!]
+        : requestedFields && requestedFields.length > 0
+          ? requestedFields
+          : undefined;
     const result = await scope.resolveDefine(
       ref.module,
       ref.field,
       ref.instance,
       pullPath,
+      defineSubFields,
     );
     return getPath(result, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
-  // Self-module input reference — reading from input args
+  // Self-module input reference — reading from input args.
+  // For define scopes with lazy input wires, resolve on first access.
   if (ref.module === SELF_MODULE && ref.instance == null) {
+    const pathKey = ref.path.join(".");
+    const lazyExact = scope.resolveLazyInput(pathKey);
+    if (lazyExact !== undefined) {
+      await lazyExact;
+      return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
+    }
+    // Check if a parent path has a lazy wire (e.g. reading "a.b" when "a" is lazy)
+    if (ref.path.length > 1) {
+      for (let len = ref.path.length - 1; len >= 1; len--) {
+        const parentKey = ref.path.slice(0, len).join(".");
+        const lazyParent = scope.resolveLazyInput(parentKey);
+        if (lazyParent !== undefined) {
+          await lazyParent;
+          return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
+        }
+      }
+    }
     return getPath(scope.selfInput, ref.path, ref.rootSafe, ref.pathSafe);
   }
 
@@ -2468,6 +2609,7 @@ export async function executeBridge<T = unknown>(
     toolMemoCache: new Map(),
     toolBatchQueues: new Map(),
     maxDepth: options.maxDepth ?? MAX_EXECUTION_DEPTH,
+    partialSuccess: options.partialSuccess ?? false,
     traceBits: chainBitsMap,
     emptyArrayBits,
     traceMask,

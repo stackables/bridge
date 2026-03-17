@@ -1,23 +1,18 @@
 import { MapperKind, mapSchema } from "@graphql-tools/utils";
 import {
-  GraphQLList,
-  GraphQLNonNull,
   type GraphQLSchema,
   type GraphQLResolveInfo,
   type SelectionNode,
   Kind,
   defaultFieldResolver,
   getNamedType,
-  isScalarType,
+  isObjectType,
 } from "graphql";
 import {
-  ExecutionTree,
-  TraceCollector,
   executeBridge as executeBridgeDefault,
   formatBridgeError,
   resolveStd,
   checkHandleVersions,
-  isLoopControlSignal,
   type Logger,
   type ToolTrace,
   type TraceLevel,
@@ -29,11 +24,6 @@ import {
   STD_VERSION as BUNDLED_STD_VERSION,
 } from "@stackables/bridge-stdlib";
 import type { Bridge, BridgeDocument, ToolMap } from "@stackables/bridge-core";
-import { SELF_MODULE } from "@stackables/bridge-core";
-import {
-  assertBridgeGraphQLCompatible,
-  BridgeGraphQLIncompatibleError,
-} from "./bridge-asserts.ts";
 
 export type { Logger };
 export { BridgeGraphQLIncompatibleError } from "./bridge-asserts.ts";
@@ -68,6 +58,21 @@ function collectRequestedFields(info: GraphQLResolveInfo): string[] {
     walk(fieldNode.selectionSet.selections, "");
   }
   return paths;
+}
+
+/**
+ * Recursively scan a value for Error Sentinel objects planted by the engine.
+ * Returns the first Error found, or null if none.
+ */
+function findErrorSentinel(data: unknown): Error | null {
+  if (data instanceof Error) return data;
+  if (data != null && typeof data === "object" && !Array.isArray(data)) {
+    for (const v of Object.values(data)) {
+      const found = findErrorSentinel(v);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 const noop = () => {};
@@ -131,12 +136,7 @@ export type BridgeOptions = {
    */
   signalMapper?: (context: any) => AbortSignal | undefined;
   /**
-   * Override the standalone execution function.
-   *
-   * When provided, **all** bridge operations are executed through this function
-   * instead of the field-by-field GraphQL resolver. Operations that are
-   * incompatible with GraphQL execution (e.g. nested multilevel `break` /
-   * `continue`) also use this function as an automatic fallback.
+   * Override the execution function.
    *
    * This allows plugging in the AOT compiler as the execution engine:
    * ```ts
@@ -148,6 +148,16 @@ export type BridgeOptions = {
   executeBridge?: (
     options: ExecuteBridgeOptions,
   ) => Promise<ExecuteBridgeResult>;
+  /**
+   * Enable partial success (Error Sentinels).
+   *
+   * When `true`, non-fatal errors on individual output fields are delivered as
+   * per-field GraphQL errors while sibling fields still resolve successfully.
+   * The affected field becomes `null` and an entry appears in the `errors` array.
+   *
+   * When `false` (default), any error causes the entire root field to fail.
+   */
+  partialSuccess?: boolean;
 };
 
 /** Document can be a static BridgeDocument or a function that selects per-request */
@@ -165,358 +175,121 @@ export function bridgeTransform(
   const traceLevel = options?.trace ?? "off";
   const logger = options?.logger ?? defaultLogger;
   const executeBridgeFn = options?.executeBridge ?? executeBridgeDefault;
-  // When an explicit executeBridge is provided, all operations use standalone mode.
-  const forceStandalone = !!options?.executeBridge;
+  const partialSuccess = options?.partialSuccess ?? false;
 
-  // Cache for standalone-op detection on dynamic documents (keyed by doc instance).
-  const standaloneOpsCache = new WeakMap<BridgeDocument, Set<string>>();
+  // Detect actual root type names from the schema (handles custom root types
+  // like `schema { query: Chained }` in addition to the standard names).
+  const rootTypeNames = new Set<string>(
+    [
+      schema.getQueryType()?.name,
+      schema.getMutationType()?.name,
+      schema.getSubscriptionType()?.name,
+    ].filter((n): n is string => n != null),
+  );
 
   return mapSchema(schema, {
     [MapperKind.OBJECT_FIELD]: (fieldConfig, fieldName, typeName) => {
-      let array = false;
-      if (fieldConfig.type instanceof GraphQLNonNull) {
-        if (fieldConfig.type.ofType instanceof GraphQLList) {
-          array = true;
-        }
-      }
-      if (fieldConfig.type instanceof GraphQLList) {
-        array = true;
-      }
-
-      // Detect scalar return types (e.g. JSON, JSONObject) — GraphQL won't
-      // call sub-field resolvers for scalars, so the engine must eagerly
-      // materialise the full output object instead of returning itself.
-      const scalar = isScalarType(getNamedType(fieldConfig.type));
-
-      const trunk = { module: SELF_MODULE, type: typeName, field: fieldName };
       const { resolve = defaultFieldResolver } = fieldConfig;
-
-      // For static documents (or forceStandalone), the standalone decision is fully
-      // known at setup time — precompute it as a plain boolean so the resolver just
-      // reads a variable. For dynamic documents (document is a function) the actual
-      // doc instance isn't available until request time; detectForDynamic() handles
-      // that path with a per-doc-instance WeakMap cache.
-      function precomputeStandalone() {
-        if (forceStandalone) return true;
-        if (typeof document === "function") return null; // deferred to request time
-        const bridge = document.instructions.find(
-          (i) =>
-            i.kind === "bridge" &&
-            (i as Bridge).type === typeName &&
-            (i as Bridge).field === fieldName,
-        ) as Bridge | undefined;
-        if (!bridge) return false;
-        try {
-          assertBridgeGraphQLCompatible(bridge);
-          return false;
-        } catch (e) {
-          if (e instanceof BridgeGraphQLIncompatibleError) {
-            logger.warn?.(
-              `${e.message} ` +
-                `Falling back to standalone execution mode. ` +
-                `In standalone mode errors affect the entire field result ` +
-                `rather than individual sub-fields.`,
-            );
-            return true;
-          }
-          throw e;
-        }
-      }
-
-      // Only used for dynamic documents (standalonePrecomputed === null).
-      function detectForDynamic(doc: BridgeDocument): boolean {
-        let ops = standaloneOpsCache.get(doc);
-        if (!ops) {
-          ops = new Set<string>();
-          for (const instr of doc.instructions) {
-            if (instr.kind !== "bridge") continue;
-            try {
-              assertBridgeGraphQLCompatible(instr as Bridge);
-            } catch (e) {
-              if (e instanceof BridgeGraphQLIncompatibleError) {
-                ops.add(e.operation);
-                logger.warn?.(
-                  `${e.message} ` +
-                    `Falling back to standalone execution mode. ` +
-                    `In standalone mode errors affect the entire field result ` +
-                    `rather than individual sub-fields.`,
-                );
-              } else {
-                throw e;
-              }
-            }
-          }
-          standaloneOpsCache.set(doc, ops);
-        }
-        return ops.has(`${typeName}.${fieldName}`);
-      }
-
-      // Standalone execution: runs the full bridge through executeBridge and
-      // returns the resolved data directly. GraphQL sub-field resolvers receive
-      // plain objects and fall through to the default field resolver.
-      // All errors surface as a single top-level field error rather than
-      // per-sub-field GraphQL errors.
-      async function resolveAsStandalone(
-        activeDoc: BridgeDocument,
-        bridgeContext: Record<string, unknown>,
-        args: Record<string, unknown>,
-        context: any,
-        info: GraphQLResolveInfo,
-      ): Promise<unknown> {
-        const requestedFields = collectRequestedFields(info);
-        const signal = options?.signalMapper?.(context);
-        try {
-          const { data, traces } = await executeBridgeFn({
-            document: activeDoc,
-            operation: `${typeName}.${fieldName}`,
-            input: args,
-            context: bridgeContext,
-            tools: userTools,
-            ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
-            logger,
-            ...(signal ? { signal } : {}),
-            ...(options?.toolTimeoutMs !== undefined
-              ? { toolTimeoutMs: options.toolTimeoutMs }
-              : {}),
-            ...(options?.maxDepth !== undefined
-              ? { maxDepth: options.maxDepth }
-              : {}),
-            ...(requestedFields.length > 0 ? { requestedFields } : {}),
-          });
-          if (traceLevel !== "off") {
-            context.__bridgeTracer = { traces };
-          }
-          return data;
-        } catch (err) {
-          throw new Error(
-            formatBridgeError(err, {
-              source: activeDoc.source,
-              filename: activeDoc.filename,
-            }),
-            { cause: err },
-          );
-        }
-      }
-
-      const standalonePrecomputed = precomputeStandalone();
+      const isRoot = rootTypeNames.has(typeName);
 
       return {
         ...fieldConfig,
-        resolve: async function (
-          source: ExecutionTree | undefined,
-          args,
-          context: any,
-          info,
-        ) {
-          // Start execution tree at query/mutation root
-          if (!source && !info.path.prev) {
-            const activeDoc =
-              typeof document === "function" ? document(context) : document;
+        resolve: async function (source, args, context: any, info) {
+          // Sub-field: intercept Error Sentinels planted by the bridge engine
+          // (only active when partialSuccess is enabled — sentinels are only
+          // planted when the engine was called with partialSuccess: true)
+          if (partialSuccess && source !== undefined) {
+            const value = (source as Record<string, unknown>)[info.fieldName];
+            if (value instanceof Error) throw value;
+          }
 
-            // Resolve which std to use: bundled, or a versioned namespace from tools
-            const { namespace: activeStd, version: activeStdVersion } =
-              resolveStd(
-                activeDoc.version,
-                bundledStd,
-                BUNDLED_STD_VERSION,
-                userTools,
-              );
+          // Non-root fields: delegate to the original resolver so that
+          // hand-coded sub-field resolvers are preserved and not overwritten.
+          if (!isRoot || source !== undefined) {
+            return resolve(source, args, context, info);
+          }
 
-            // std is always included; user tools merge on top (shallow)
-            // internal tools are injected automatically by ExecutionTree
-            const allTools: ToolMap = {
-              std: activeStd,
-              ...userTools,
-            };
+          // Root bridge field: run holistic standalone execution
+          const activeDoc =
+            typeof document === "function" ? document(context) : document;
 
-            // Verify all @version-tagged handles can be satisfied
-            checkHandleVersions(
-              activeDoc.instructions,
-              allTools,
-              activeStdVersion,
+          // Only intercept fields that have a matching bridge instruction.
+          // Fields without one fall through to the original resolver.
+          const hasBridge = activeDoc.instructions.some(
+            (i) =>
+              i.kind === "bridge" &&
+              (i as Bridge).type === typeName &&
+              (i as Bridge).field === fieldName,
+          );
+          if (!hasBridge) return resolve(source, args, context, info);
+
+          const { namespace: activeStd, version: activeStdVersion } =
+            resolveStd(
+              activeDoc.version,
+              bundledStd,
+              BUNDLED_STD_VERSION,
+              userTools,
             );
+          const allTools: ToolMap = { std: activeStd, ...userTools };
+          checkHandleVersions(
+            activeDoc.instructions,
+            allTools,
+            activeStdVersion,
+          );
 
-            // Only intercept fields that have a matching bridge instruction.
-            // Fields without one fall through to their original resolver,
-            // allowing hand-coded resolvers to coexist with bridge-powered ones.
-            const hasBridge = activeDoc.instructions.some(
-              (i) =>
-                i.kind === "bridge" &&
-                i.type === typeName &&
-                i.field === fieldName,
-            );
-            if (!hasBridge) {
-              return resolve(source, args, context, info);
+          const bridgeContext = contextMapper
+            ? contextMapper(context)
+            : (context ?? {});
+          const requestedFields = collectRequestedFields(info);
+          const signal = options?.signalMapper?.(context);
+
+          try {
+            const { data, traces } = await executeBridgeFn({
+              document: activeDoc,
+              operation: `${typeName}.${fieldName}`,
+              input: args ?? {},
+              context: bridgeContext,
+              tools: userTools,
+              ...(traceLevel !== "off" ? { trace: traceLevel } : {}),
+              logger,
+              ...(signal ? { signal } : {}),
+              ...(options?.toolTimeoutMs !== undefined
+                ? { toolTimeoutMs: options.toolTimeoutMs }
+                : {}),
+              ...(options?.maxDepth !== undefined
+                ? { maxDepth: options.maxDepth }
+                : {}),
+              ...(requestedFields.length > 0 ? { requestedFields } : {}),
+              partialSuccess,
+            });
+            if (traceLevel !== "off") context.__bridgeTracer = { traces };
+            // When partialSuccess is enabled and the return type is a scalar
+            // (e.g. JSONObject fallback), sub-field resolvers won't fire to
+            // re-throw Error Sentinels. Scan the data and surface the first
+            // one found as a root-field error so it reaches result.errors.
+            if (partialSuccess) {
+              const namedReturnType = getNamedType(info.returnType);
+              if (!isObjectType(namedReturnType)) {
+                const sentinel = findErrorSentinel(data);
+                if (sentinel) throw sentinel;
+              }
             }
-
-            const bridgeContext = contextMapper
-              ? contextMapper(context)
-              : (context ?? {});
-
-            // Standalone execution path — used when the operation is incompatible
-            // with field-by-field GraphQL resolution, or when an explicit
-            // executeBridge override has been provided.
-            if (standalonePrecomputed ?? detectForDynamic(activeDoc)) {
-              return resolveAsStandalone(
-                activeDoc,
-                bridgeContext,
-                args ?? {},
-                context,
-                info,
-              );
-            }
-
-            // GraphQL field-by-field execution path via ExecutionTree.
-            source = new ExecutionTree(
-              trunk,
-              activeDoc,
-              allTools,
-              bridgeContext,
-            );
-
-            source.logger = logger;
-            source.source = activeDoc.source;
-            source.filename = activeDoc.filename;
-            if (
-              options?.toolTimeoutMs !== undefined &&
-              Number.isFinite(options.toolTimeoutMs) &&
-              options.toolTimeoutMs >= 0
-            ) {
-              source.toolTimeoutMs = Math.floor(options.toolTimeoutMs);
-            }
-            if (
-              options?.maxDepth !== undefined &&
-              Number.isFinite(options.maxDepth) &&
-              options.maxDepth >= 0
-            ) {
-              source.maxDepth = Math.floor(options.maxDepth);
-            }
-
-            const signal = options?.signalMapper?.(context);
-            if (signal) {
-              source.signal = signal;
-            }
-
+            return data;
+          } catch (err) {
+            // Capture traces from the error before rethrowing so tracing
+            // plugins can still read them even when execution fails.
             if (traceLevel !== "off") {
-              source.tracer = new TraceCollector(traceLevel);
-              // Stash tracer on GQL context so the tracing plugin can read it
-              context.__bridgeTracer = source.tracer;
+              const errTraces = (err as { traces?: ToolTrace[] })?.traces;
+              if (errTraces) context.__bridgeTracer = { traces: errTraces };
             }
+            throw new Error(
+              formatBridgeError(err, {
+                source: activeDoc.source,
+                filename: activeDoc.filename,
+              }),
+              { cause: err },
+            );
           }
-
-          if (
-            source instanceof ExecutionTree &&
-            args &&
-            Object.keys(args).length > 0
-          ) {
-            source.push(args);
-          }
-
-          // Kick off forced handles (force <handle>) at the root entry point
-          if (source instanceof ExecutionTree && !info.path.prev) {
-            // Ensure input state exists even with no args (prevents
-            // recursive scheduling of the input trunk → stack overflow).
-            if (!args || Object.keys(args).length === 0) {
-              source.push({});
-            }
-            const criticalForces = source.executeForced();
-            if (criticalForces.length > 0) {
-              source.setForcedExecution(
-                Promise.all(criticalForces).then(() => {}),
-              );
-            }
-          }
-
-          if (source instanceof ExecutionTree) {
-            let result;
-            try {
-              result = await source.response(info.path, array, scalar);
-            } catch (err) {
-              throw new Error(
-                formatBridgeError(err, {
-                  source: source.source,
-                  filename: source.filename,
-                }),
-                { cause: err },
-              );
-            }
-
-            // Safety net: loop control signals (break/continue) must never
-            // reach GraphQL resolvers.  Normally, bridges that use
-            // break/continue inside array element sub-fields fall back to
-            // standalone mode (via assertBridgeGraphQLCompatible), but if
-            // a signal leaks through, coerce it to null rather than
-            // crashing GraphQL serialisation with a Symbol value.
-            if (isLoopControlSignal(result)) {
-              result = null;
-            }
-
-            // Scalar return types (JSON, JSONObject, etc.) won't trigger
-            // sub-field resolvers, so if response() deferred resolution by
-            // returning the tree itself, eagerly materialise the output.
-            if (scalar) {
-              if (result instanceof ExecutionTree) {
-                try {
-                  const data = result.collectOutput();
-                  const forced = result.getForcedExecution();
-                  if (forced) await forced;
-                  return data;
-                } catch (err) {
-                  throw new Error(
-                    formatBridgeError(err, {
-                      source: result.source,
-                      filename: result.filename,
-                    }),
-                    { cause: err },
-                  );
-                }
-              }
-              if (Array.isArray(result) && result[0] instanceof ExecutionTree) {
-                try {
-                  const firstTree = result[0] as ExecutionTree;
-                  const forced = firstTree.getForcedExecution();
-                  const collected = await Promise.all(
-                    result.map((shadow: ExecutionTree) =>
-                      shadow.collectOutput(),
-                    ),
-                  );
-                  if (forced) await forced;
-                  return collected;
-                } catch (err) {
-                  throw new Error(
-                    formatBridgeError(err, {
-                      source: source.source,
-                      filename: source.filename,
-                    }),
-                    { cause: err },
-                  );
-                }
-              }
-            }
-
-            // At the leaf level (not root), race data pull with critical
-            // force promises so errors propagate into GraphQL `errors[]`
-            // while still allowing parallel execution.
-            if (info.path.prev && source.getForcedExecution()) {
-              try {
-                return await Promise.all([
-                  result,
-                  source.getForcedExecution(),
-                ]).then(([data]) => data);
-              } catch (err) {
-                throw new Error(
-                  formatBridgeError(err, {
-                    source: source.source,
-                    filename: source.filename,
-                  }),
-                  { cause: err },
-                );
-              }
-            }
-            return result;
-          }
-
-          return resolve(source, args, context, info);
         },
       };
     },
@@ -529,7 +302,10 @@ export function bridgeTransform(
  * disabled or no traces were recorded.
  */
 export function getBridgeTraces(context: any): ToolTrace[] {
-  return (context?.__bridgeTracer as TraceCollector | undefined)?.traces ?? [];
+  return (
+    (context?.__bridgeTracer as { traces: ToolTrace[] } | undefined)?.traces ??
+    []
+  );
 }
 
 /**
