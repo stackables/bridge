@@ -3140,7 +3140,7 @@ function buildToolDef(
   // Tool blocks reuse bridgeBodyLine for with-declarations and handle-targeted wires
   const bodyLines = subs(node, "bridgeBodyLine");
   const selfWireNodes = subs(node, "toolSelfWire");
-  const { handles, wires, pipeHandles } = buildBridgeBody(
+  const { handles } = buildBridgeBody(
     bodyLines,
     "Tools",
     toolName,
@@ -3183,8 +3183,6 @@ function buildToolDef(
     fn: isKnownTool ? undefined : source,
     extends: isKnownTool ? source : undefined,
     handles,
-    wires,
-    ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
     ...(onError ? { onError } : {}),
     body: bodyResult.body,
   };
@@ -3198,20 +3196,15 @@ function buildDefineDef(node: CstNode): DefineDef {
   assertNotReserved(name, lineNum, "define name");
 
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles, forces } =
-    buildBridgeBody(bodyLines, "Define", name, [], lineNum);
+  const { handles } = buildBridgeBody(bodyLines, "Define", name, [], lineNum);
 
-  // Build nested Statement[] body alongside legacy wires
+  // Build nested Statement[] body
   const bodyResult = buildBody(bodyLines, "Define", name, []);
 
   return {
     kind: "define",
     name,
     handles,
-    wires,
-    ...(Object.keys(arrayIterators).length > 0 ? { arrayIterators } : {}),
-    ...(pipeHandles.length > 0 ? { pipeHandles } : {}),
-    ...(forces.length > 0 ? { forces } : {}),
     body: bodyResult.body,
   };
 }
@@ -3253,65 +3246,15 @@ function buildBridge(
 
   // Full bridge block
   const bodyLines = subs(node, "bridgeBodyLine");
-  const { handles, wires, arrayIterators, pipeHandles, forces } =
-    buildBridgeBody(bodyLines, typeName, fieldName, previousInstructions, 0);
+  const { handles } = buildBridgeBody(
+    bodyLines,
+    typeName,
+    fieldName,
+    previousInstructions,
+    0,
+  );
 
-  // Inline define invocations
-  const instanceCounters = new Map<string, number>();
-  for (const hb of handles) {
-    if (hb.kind !== "tool") continue;
-    const name = hb.name;
-    const lastDot = name.lastIndexOf(".");
-    if (lastDot !== -1) {
-      const key = `${name.substring(0, lastDot)}:${name.substring(lastDot + 1)}`;
-      instanceCounters.set(key, (instanceCounters.get(key) ?? 0) + 1);
-    } else {
-      const key = `Tools:${name}`;
-      instanceCounters.set(key, (instanceCounters.get(key) ?? 0) + 1);
-    }
-  }
-
-  const nextForkSeqRef = {
-    value:
-      pipeHandles.length > 0
-        ? Math.max(
-            ...pipeHandles
-              .map((p) => {
-                const parts = p.key.split(":");
-                return parseInt(parts[parts.length - 1]) || 0;
-              })
-              .filter((n) => n >= 100000)
-              .map((n) => n - 100000 + 1),
-            0,
-          )
-        : 0,
-  };
-
-  for (const hb of handles) {
-    if (hb.kind !== "define") continue;
-    const def = previousInstructions.find(
-      (inst): inst is DefineDef =>
-        inst.kind === "define" && inst.name === hb.name,
-    );
-    if (!def) {
-      throw new Error(
-        `Define "${hb.name}" referenced by handle "${hb.handle}" not found`,
-      );
-    }
-    inlineDefine(
-      hb.handle,
-      def,
-      typeName,
-      fieldName,
-      wires,
-      pipeHandles,
-      handles,
-      instanceCounters,
-      nextForkSeqRef,
-    );
-  }
-
-  // Build nested Statement[] body alongside legacy wires
+  // Build nested Statement[] body
   const bodyResult = buildBody(
     bodyLines,
     typeName,
@@ -3325,11 +3268,6 @@ function buildBridge(
     type: typeName,
     field: fieldName,
     handles,
-    wires,
-    arrayIterators:
-      Object.keys(arrayIterators).length > 0 ? arrayIterators : undefined,
-    pipeHandles: pipeHandles.length > 0 ? pipeHandles : undefined,
-    forces: forces.length > 0 ? forces : undefined,
     body: bodyResult.body,
   });
   return instructions;
@@ -3353,10 +3291,6 @@ function buildBridgeBody(
   },
 ): {
   handles: HandleBinding[];
-  wires: Wire[];
-  arrayIterators: Record<string, string>;
-  pipeHandles: NonNullable<Bridge["pipeHandles"]>;
-  forces: NonNullable<Bridge["forces"]>;
   handleRes: Map<string, HandleResolution>;
 } {
   const handleRes = new Map<string, HandleResolution>();
@@ -3365,7 +3299,16 @@ function buildBridgeBody(
   const wires: Wire[] = [];
   const arrayIterators: Record<string, string> = {};
   let nextForkSeq = 0;
-  const pipeHandleEntries: NonNullable<Bridge["pipeHandles"]> = [];
+  const pipeHandleEntries: Array<{
+    key: string;
+    handle: string;
+    baseTrunk: {
+      module: string;
+      type: string;
+      field: string;
+      instance?: number;
+    };
+  }> = [];
 
   // ── Step 1: Process with-declarations ─────────────────────────────────
 
@@ -6489,7 +6432,14 @@ function buildBridgeBody(
 
   // ── Step 3: Collect force statements ──────────────────────────────────
 
-  const forces: NonNullable<Bridge["forces"]> = [];
+  const forces: Array<{
+    handle: string;
+    module: string;
+    type: string;
+    field: string;
+    instance?: number;
+    catchError?: true;
+  }> = [];
   for (const bodyLine of bodyLines) {
     const forceNode = (
       bodyLine.children.bridgeForce as CstNode[] | undefined
@@ -6923,253 +6873,6 @@ function buildBridgeBody(
 
   return {
     handles: handleBindings,
-    wires,
-    arrayIterators,
-    pipeHandles: pipeHandleEntries,
-    forces,
     handleRes,
   };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  inlineDefine (matching the regex parser)
-// ═══════════════════════════════════════════════════════════════════════════
-
-function inlineDefine(
-  defineHandle: string,
-  defineDef: DefineDef,
-  bridgeType: string,
-  bridgeField: string,
-  wires: Wire[],
-  pipeHandleEntries: NonNullable<Bridge["pipeHandles"]>,
-  handleBindings: HandleBinding[],
-  instanceCounters: Map<string, number>,
-  nextForkSeqRef: { value: number },
-): void {
-  const genericModule = `__define_${defineHandle}`;
-  const inModule = `__define_in_${defineHandle}`;
-  const outModule = `__define_out_${defineHandle}`;
-  const defType = "Define";
-  const defField = defineDef.name;
-
-  const defCounters = new Map<string, number>();
-  const trunkRemap = new Map<
-    string,
-    { module: string; type: string; field: string; instance: number }
-  >();
-
-  for (const hb of defineDef.handles) {
-    if (
-      hb.kind === "input" ||
-      hb.kind === "output" ||
-      hb.kind === "context" ||
-      hb.kind === "const"
-    )
-      continue;
-    if (hb.kind === "define") continue;
-    const name = hb.kind === "tool" ? hb.name : "";
-    if (!name) continue;
-
-    const lastDot = name.lastIndexOf(".");
-    let oldModule: string,
-      oldType: string,
-      oldField: string,
-      instanceKey: string,
-      bridgeKey: string;
-
-    if (lastDot !== -1) {
-      oldModule = name.substring(0, lastDot);
-      oldType = defType;
-      oldField = name.substring(lastDot + 1);
-      instanceKey = `${oldModule}:${oldField}`;
-      bridgeKey = instanceKey;
-    } else {
-      oldModule = SELF_MODULE;
-      oldType = "Tools";
-      oldField = name;
-      instanceKey = `Tools:${name}`;
-      bridgeKey = instanceKey;
-    }
-
-    const oldInstance = (defCounters.get(instanceKey) ?? 0) + 1;
-    defCounters.set(instanceKey, oldInstance);
-    const newInstance = (instanceCounters.get(bridgeKey) ?? 0) + 1;
-    instanceCounters.set(bridgeKey, newInstance);
-
-    const oldKey = `${oldModule}:${oldType}:${oldField}:${oldInstance}`;
-    trunkRemap.set(oldKey, {
-      module: oldModule,
-      type: oldModule === SELF_MODULE ? oldType : bridgeType,
-      field: oldField,
-      instance: newInstance,
-    });
-    handleBindings.push({
-      handle: `${defineHandle}$${hb.handle}`,
-      kind: "tool",
-      name,
-      ...(hb.memoize ? { memoize: true as const } : {}),
-      ...(hb.version ? { version: hb.version } : {}),
-    });
-  }
-
-  // Remap existing bridge wires pointing at the generic define module
-  function remapModuleInExpr(
-    expr: Expression,
-    fromModule: string,
-    toModule: string,
-  ): Expression {
-    if (expr.type === "ref" && expr.ref.module === fromModule) {
-      return { ...expr, ref: { ...expr.ref, module: toModule } };
-    }
-    if (expr.type === "ternary") {
-      return {
-        ...expr,
-        cond: remapModuleInExpr(expr.cond, fromModule, toModule),
-        then: remapModuleInExpr(expr.then, fromModule, toModule),
-        else: remapModuleInExpr(expr.else, fromModule, toModule),
-      };
-    }
-    if (expr.type === "and" || expr.type === "or") {
-      return {
-        ...expr,
-        left: remapModuleInExpr(expr.left, fromModule, toModule),
-        right: remapModuleInExpr(expr.right, fromModule, toModule),
-      };
-    }
-    return expr;
-  }
-
-  for (const wire of wires) {
-    if (wire.to.module === genericModule)
-      wire.to = { ...wire.to, module: inModule };
-    if (wire.sources) {
-      for (let i = 0; i < wire.sources.length; i++) {
-        wire.sources[i] = {
-          ...wire.sources[i],
-          expr: remapModuleInExpr(
-            wire.sources[i].expr,
-            genericModule,
-            outModule,
-          ),
-        };
-      }
-    }
-    if (
-      wire.catch &&
-      "ref" in wire.catch &&
-      wire.catch.ref.module === genericModule
-    )
-      wire.catch = {
-        ...wire.catch,
-        ref: { ...wire.catch.ref, module: outModule },
-      };
-  }
-
-  const forkOffset = nextForkSeqRef.value;
-  let maxDefForkSeq = 0;
-
-  function remapRef(ref: NodeRef, side: "from" | "to"): NodeRef {
-    if (
-      ref.module === SELF_MODULE &&
-      ref.type === defType &&
-      ref.field === defField
-    ) {
-      const targetModule = side === "from" ? inModule : outModule;
-      return {
-        ...ref,
-        module: targetModule,
-        type: bridgeType,
-        field: bridgeField,
-      };
-    }
-    const key = `${ref.module}:${ref.type}:${ref.field}:${ref.instance ?? ""}`;
-    const newTrunk = trunkRemap.get(key);
-    if (newTrunk)
-      return {
-        ...ref,
-        module: newTrunk.module,
-        type: newTrunk.type,
-        field: newTrunk.field,
-        instance: newTrunk.instance,
-      };
-    if (ref.instance != null && ref.instance >= 100000) {
-      const defSeq = ref.instance - 100000;
-      if (defSeq + 1 > maxDefForkSeq) maxDefForkSeq = defSeq + 1;
-      return { ...ref, instance: ref.instance + forkOffset };
-    }
-    return ref;
-  }
-
-  function remapExpr(expr: Expression, side: "from" | "to"): Expression {
-    if (expr.type === "ref") {
-      return { ...expr, ref: remapRef(expr.ref, side) };
-    }
-    if (expr.type === "ternary") {
-      return {
-        ...expr,
-        cond: remapExpr(expr.cond, "from"),
-        then: remapExpr(expr.then, "from"),
-        else: remapExpr(expr.else, "from"),
-      };
-    }
-    if (expr.type === "and" || expr.type === "or") {
-      return {
-        ...expr,
-        left: remapExpr(expr.left, "from"),
-        right: remapExpr(expr.right, "from"),
-      };
-    }
-    return expr;
-  }
-
-  for (const wire of defineDef.wires) {
-    const cloned: Wire = JSON.parse(JSON.stringify(wire));
-    cloned.to = remapRef(cloned.to, "to");
-    if (cloned.sources) {
-      cloned.sources = cloned.sources.map((s) => ({
-        ...s,
-        expr: remapExpr(s.expr, "from"),
-      }));
-    }
-    if (cloned.catch && "ref" in cloned.catch) {
-      cloned.catch = {
-        ...cloned.catch,
-        ref: remapRef(cloned.catch.ref, "from"),
-      };
-    }
-    wires.push(cloned);
-  }
-
-  nextForkSeqRef.value += maxDefForkSeq;
-
-  if (defineDef.pipeHandles) {
-    for (const ph of defineDef.pipeHandles) {
-      const parts = ph.key.split(":");
-      const phInstance = parseInt(parts[parts.length - 1]);
-      let newKey = ph.key;
-      if (phInstance >= 100000) {
-        const newInst = phInstance + forkOffset;
-        parts[parts.length - 1] = String(newInst);
-        newKey = parts.join(":");
-      }
-      const bt = ph.baseTrunk;
-      const btKey = `${bt.module}:${defType}:${bt.field}:${bt.instance ?? ""}`;
-      const newBt = trunkRemap.get(btKey);
-      const btKey2 = `${bt.module}:Tools:${bt.field}:${bt.instance ?? ""}`;
-      const newBt2 = trunkRemap.get(btKey2);
-      const resolvedBt = newBt ?? newBt2;
-      pipeHandleEntries.push({
-        key: newKey,
-        handle: `${defineHandle}$${ph.handle}`,
-        baseTrunk: resolvedBt
-          ? {
-              module: resolvedBt.module,
-              type: resolvedBt.type,
-              field: resolvedBt.field,
-              instance: resolvedBt.instance,
-            }
-          : ph.baseTrunk,
-      });
-    }
-  }
 }

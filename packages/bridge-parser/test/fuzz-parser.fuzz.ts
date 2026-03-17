@@ -8,6 +8,7 @@ import {
   prettyPrintToSource,
 } from "../src/index.ts";
 import type { BridgeDocument } from "@stackables/bridge-core";
+import { flatWires } from "./utils/parse-test-utils.ts";
 
 // ── Token-soup arbitrary ────────────────────────────────────────────────────
 // Generates strings composed of a weighted mix of Bridge-like tokens and noise.
@@ -255,8 +256,8 @@ describe("parser fuzz — serializer round-trip", () => {
             assert.equal(rt.kind, orig.kind, "instruction kind must match");
             if (orig.kind === "bridge" && rt.kind === "bridge") {
               assert.equal(
-                rt.wires.length,
-                orig.wires.length,
+                flatWires(rt.body).length,
+                flatWires(orig.body).length,
                 "wire count must match",
               );
             }

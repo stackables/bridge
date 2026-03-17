@@ -70,43 +70,13 @@ export type Bridge = {
   field: string;
   /** Declared data sources and their wire handles */
   handles: HandleBinding[];
-  /** Connection wires (legacy flat representation — use `body` for nested IR) */
-  wires: Wire[];
-  /** Nested statement tree — the new scoped IR.
-   *  When present, consumers should prefer this over `wires`/`arrayIterators`/`forces`. */
-  body?: Statement[];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
   /**
    * When set, this bridge was declared with the passthrough shorthand:
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
-  /** Handles to eagerly evaluate (e.g. side-effect tools).
-   *  Critical by default — a forced handle that throws aborts the bridge.
-   *  Add `catchError: true` (written as `force <handle> ?? null`) to
-   *  swallow the error for fire-and-forget side-effects.
-   *  @deprecated — use ForceStatement in `body` instead. */
-  forces?: Array<{
-    handle: string;
-    module: string;
-    type: string;
-    field: string;
-    instance?: number;
-    /** When true, errors from this forced handle are silently caught (`?? null`). */
-    catchError?: true;
-  }>;
-  /** @deprecated — use ArrayExpression in `body` wire sources instead. */
-  arrayIterators?: Record<string, string>;
-  /** @deprecated — use PipeExpression in `body` wire sources instead. */
-  pipeHandles?: Array<{
-    key: string;
-    handle: string;
-    baseTrunk: {
-      module: string;
-      type: string;
-      field: string;
-      instance?: number;
-    };
-  }>;
 };
 
 /**
@@ -156,13 +126,8 @@ export type ToolDef = {
   /** Declared handles — same as Bridge/Define handles (tools, context, const, etc.)
    *  Tools cannot declare `input` or `output` handles. */
   handles: HandleBinding[];
-  /** Connection wires (legacy flat representation — use `body` for nested IR) */
-  wires: Wire[];
-  /** Nested statement tree — the new scoped IR.
-   *  When present, consumers should prefer this over `wires`. */
-  body?: Statement[];
-  /** @deprecated — use PipeExpression in `body` wire sources instead. */
-  pipeHandles?: Bridge["pipeHandles"];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
   /** Error fallback for the tool call — replaces the result when the tool throws. */
   onError?: { value: string } | { source: string };
 };
@@ -598,14 +563,7 @@ export type DefineDef = {
   name: string;
   /** Declared handles (tools, input, output, etc.) */
   handles: HandleBinding[];
-  /** Connection wires (legacy flat representation — use `body` for nested IR) */
-  wires: Wire[];
-  /** Nested statement tree — the new scoped IR.
-   *  When present, consumers should prefer this over `wires`/`arrayIterators`. */
-  body?: Statement[];
-  /** @deprecated — use ArrayExpression in `body` wire sources instead. */
-  arrayIterators?: Record<string, string>;
-  /** @deprecated — use PipeExpression in `body` wire sources instead. */
-  pipeHandles?: Bridge["pipeHandles"];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
 };
 /* c8 ignore stop */

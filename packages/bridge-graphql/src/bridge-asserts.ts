@@ -1,4 +1,4 @@
-import type { Bridge } from "@stackables/bridge-core";
+import type { Bridge, Statement, Expression } from "@stackables/bridge-core";
 
 /**
  * Thrown when a bridge operation cannot be executed correctly using the
@@ -23,6 +23,143 @@ export class BridgeGraphQLIncompatibleError extends Error {
 }
 
 /**
+ * Check whether an expression tree contains break/continue control flow.
+ */
+function exprHasLoopControl(expr: Expression): boolean {
+  switch (expr.type) {
+    case "control":
+      return expr.control.kind === "break" || expr.control.kind === "continue";
+    case "ternary":
+      return (
+        exprHasLoopControl(expr.cond) ||
+        exprHasLoopControl(expr.then) ||
+        exprHasLoopControl(expr.else)
+      );
+    case "and":
+    case "or":
+    case "binary":
+      return exprHasLoopControl(expr.left) || exprHasLoopControl(expr.right);
+    case "unary":
+      return exprHasLoopControl(expr.operand);
+    case "pipe":
+      return exprHasLoopControl(expr.source);
+    case "concat":
+      return expr.parts.some(exprHasLoopControl);
+    case "array":
+      return exprHasLoopControl(expr.source);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Walk statements inside an array body to find break/continue in
+ * element sub-field wires. Returns the offending path or undefined.
+ */
+function findLoopControlInArrayBody(body: Statement[]): string | undefined {
+  for (const stmt of body) {
+    switch (stmt.kind) {
+      case "wire": {
+        const hasControl =
+          stmt.sources.some((s) => exprHasLoopControl(s.expr)) ||
+          (stmt.catch &&
+            "control" in stmt.catch &&
+            (stmt.catch.control.kind === "break" ||
+              stmt.catch.control.kind === "continue"));
+        if (hasControl) {
+          return stmt.target.path.join(".");
+        }
+        break;
+      }
+      case "alias": {
+        const hasControl = stmt.sources.some((s) => exprHasLoopControl(s.expr));
+        if (hasControl) return stmt.name;
+        break;
+      }
+      case "scope": {
+        const found = findLoopControlInArrayBody(stmt.body);
+        if (found) return found;
+        break;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Walk a statement tree and check for break/continue inside array element
+ * sub-field wires (which are incompatible with field-by-field GraphQL).
+ */
+function checkBodyForArrayLoopControl(
+  statements: Statement[],
+  op: string,
+): void {
+  for (const stmt of statements) {
+    switch (stmt.kind) {
+      case "wire": {
+        // Check for array expressions in sources
+        for (const source of stmt.sources) {
+          checkExprForArrayLoopControl(source.expr, op);
+        }
+        break;
+      }
+      case "alias": {
+        for (const source of stmt.sources) {
+          checkExprForArrayLoopControl(source.expr, op);
+        }
+        break;
+      }
+      case "scope":
+        checkBodyForArrayLoopControl(stmt.body, op);
+        break;
+    }
+  }
+}
+
+function checkExprForArrayLoopControl(expr: Expression, op: string): void {
+  switch (expr.type) {
+    case "array": {
+      const path = findLoopControlInArrayBody(expr.body);
+      if (path !== undefined) {
+        throw new BridgeGraphQLIncompatibleError(
+          op,
+          `[bridge] ${op}: 'break' / 'continue' inside an array element ` +
+            `sub-field (path: ${path}) is not supported in field-by-field ` +
+            `GraphQL execution.`,
+        );
+      }
+      // Recurse into the array body for nested arrays
+      checkBodyForArrayLoopControl(expr.body, op);
+      // Recurse into the array source expression
+      checkExprForArrayLoopControl(expr.source, op);
+      break;
+    }
+    case "ternary":
+      checkExprForArrayLoopControl(expr.cond, op);
+      checkExprForArrayLoopControl(expr.then, op);
+      checkExprForArrayLoopControl(expr.else, op);
+      break;
+    case "and":
+    case "or":
+    case "binary":
+      checkExprForArrayLoopControl(expr.left, op);
+      checkExprForArrayLoopControl(expr.right, op);
+      break;
+    case "unary":
+      checkExprForArrayLoopControl(expr.operand, op);
+      break;
+    case "pipe":
+      checkExprForArrayLoopControl(expr.source, op);
+      break;
+    case "concat":
+      for (const part of expr.parts) {
+        checkExprForArrayLoopControl(part, op);
+      }
+      break;
+  }
+}
+
+/**
  * Assert that a bridge operation is compatible with field-by-field GraphQL
  * execution. Throws {@link BridgeGraphQLIncompatibleError} for each detected
  * incompatibility.
@@ -37,49 +174,9 @@ export class BridgeGraphQLIncompatibleError extends Error {
  *   resolves array elements field-by-field through independent resolver
  *   callbacks.  A control-flow signal emitted from a sub-field resolver
  *   cannot remove or skip the already-committed parent array element.
- *   Standalone mode uses `materializeShadows` which handles these correctly.
+ *   Standalone mode handles these correctly.
  */
 export function assertBridgeGraphQLCompatible(bridge: Bridge): void {
   const op = `${bridge.type}.${bridge.field}`;
-  const arrayPaths = new Set(Object.keys(bridge.arrayIterators ?? {}));
-
-  for (const wire of bridge.wires) {
-    // Check if this wire targets a sub-field inside an array element.
-    // Array iterators map output-path prefixes (e.g. "list" for o.list,
-    // "" for root o) to their iterator variable.  A wire whose to.path
-    // starts with one of those prefixes + at least one more segment is
-    // an element sub-field wire.
-    const toPath = wire.to.path;
-    const isElementSubfield =
-      (arrayPaths.has("") && toPath.length >= 1) ||
-      toPath.some(
-        (_, i) => i > 0 && arrayPaths.has(toPath.slice(0, i).join(".")),
-      );
-
-    if (!isElementSubfield) continue;
-
-    // Check sources for break/continue control flow in fallback gates
-    const hasControlFlowInSources = wire.sources.some(
-      (s) =>
-        s.expr.type === "control" &&
-        (s.expr.control.kind === "break" || s.expr.control.kind === "continue"),
-    );
-
-    // Check catch handler for break/continue control flow
-    const catchHasControlFlow =
-      wire.catch &&
-      "control" in wire.catch &&
-      (wire.catch.control.kind === "break" ||
-        wire.catch.control.kind === "continue");
-
-    if (hasControlFlowInSources || catchHasControlFlow) {
-      const path = wire.to.path.join(".");
-      throw new BridgeGraphQLIncompatibleError(
-        op,
-        `[bridge] ${op}: 'break' / 'continue' inside an array element ` +
-          `sub-field (path: ${path}) is not supported in field-by-field ` +
-          `GraphQL execution.`,
-      );
-    }
-  }
+  checkBodyForArrayLoopControl(bridge.body, op);
 }

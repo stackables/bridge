@@ -34,9 +34,8 @@ export {
 
 export { mergeBridgeDocuments } from "./merge-documents.ts";
 
-// ── Execution tree (advanced) ───────────────────────────────────────────────
+// ── Tracing & error formatting ──────────────────────────────────────────────
 
-export { ExecutionTree } from "./ExecutionTree.ts";
 export { TraceCollector, boundedClone } from "./tracing.ts";
 export type { ToolTrace, TraceLevel } from "./tracing.ts";
 export {
@@ -109,11 +108,9 @@ export {
 // ── Traversal enumeration ───────────────────────────────────────────────────
 
 export {
-  enumerateTraversalIds,
   buildTraversalManifest,
   buildBodyTraversalMaps,
   decodeExecutionTrace,
-  buildTraceBitsMap,
   buildEmptyArrayBitsMap,
 } from "./enumerate-traversals.ts";
 export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";

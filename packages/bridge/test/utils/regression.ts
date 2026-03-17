@@ -50,23 +50,15 @@ import {
   type GraphQLSchema,
   type TypeNode,
 } from "graphql";
-import type { Bridge } from "@stackables/bridge-core";
+import type { Bridge, Statement } from "@stackables/bridge-core";
 import { omitLoc } from "./parse-test-utils.ts";
 import { GraphQLSchemaObserver } from "./observed-schema/index.ts";
 
 // ── Round-trip normalisation ────────────────────────────────────────────────
 
-/** Strip locations and sort wire arrays so order differences don't fail. */
+/** Strip locations so structural differences don't fail. */
 function normalizeDoc(doc: unknown): unknown {
-  const stripped = omitLoc(doc) as any;
-  for (const instr of stripped?.instructions ?? []) {
-    if (Array.isArray(instr.wires)) {
-      instr.wires.sort((a: any, b: any) =>
-        JSON.stringify(a) < JSON.stringify(b) ? -1 : 1,
-      );
-    }
-  }
-  return stripped;
+  return omitLoc(doc);
 }
 
 // ── Log capture ─────────────────────────────────────────────────────────────
@@ -703,20 +695,28 @@ function getOperationOutputFieldOrder(
   const seen = new Set<string>();
   const orderedFields: string[] = [];
 
-  for (const wire of bridge.wires) {
-    if (
-      wire.to.module === SELF_MODULE &&
-      wire.to.type === type &&
-      wire.to.field === field &&
-      wire.to.path.length > 0
-    ) {
-      const topLevel = wire.to.path[0]!;
-      if (!seen.has(topLevel)) {
-        seen.add(topLevel);
-        orderedFields.push(topLevel);
+  function walkStatements(statements: Statement[]): void {
+    for (const stmt of statements) {
+      if (stmt.kind === "wire") {
+        if (
+          stmt.target.module === SELF_MODULE &&
+          stmt.target.type === type &&
+          stmt.target.field === field &&
+          stmt.target.path.length > 0
+        ) {
+          const topLevel = stmt.target.path[0]!;
+          if (!seen.has(topLevel)) {
+            seen.add(topLevel);
+            orderedFields.push(topLevel);
+          }
+        }
+      } else if (stmt.kind === "scope") {
+        walkStatements(stmt.body);
       }
     }
   }
+
+  walkStatements(bridge.body);
 
   return orderedFields;
 }

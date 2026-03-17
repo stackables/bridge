@@ -13,7 +13,10 @@ import type {
   Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatWires,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 /** Helper to extract the source ref from a Wire */
@@ -95,9 +98,9 @@ describe("parseBridge", () => {
       handle: "o",
       kind: "output",
     });
-    assert.equal(instr.wires.length, 2);
+    assert.equal(flatWires(instr.body).length, 2);
 
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
       to: {
         module: SELF_MODULE,
         type: "Query",
@@ -118,7 +121,7 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
       to: {
         module: "hereapi",
         type: "Query",
@@ -162,7 +165,7 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.handles.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
       to: {
         module: SELF_MODULE,
         type: "Tools",
@@ -185,7 +188,7 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
       to: {
         module: SELF_MODULE,
         type: "Query",
@@ -225,26 +228,24 @@ describe("parseBridge", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[0]!), {
+    assertDeepStrictEqualIgnoringLoc(sourceRef(flatWires(instr.body)[0]!), {
       module: "zillow",
       type: "Query",
       field: "find",
       instance: 1,
       path: ["properties", "0", "streetAddress"],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.to, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
       path: ["topPick", "address"],
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[1]!)?.path, [
-      "properties",
-      "0",
-      "location",
-      "city",
-    ]);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1]!.to.path, [
+    assertDeepStrictEqualIgnoringLoc(
+      sourceRef(flatWires(instr.body)[1]!)?.path,
+      ["properties", "0", "location", "city"],
+    );
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1]!.to.path, [
       "topPick",
       "city",
     ]);
@@ -268,34 +269,37 @@ describe("parseBridge", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.equal(instr.wires.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
-      to: {
-        module: SELF_MODULE,
-        type: "Query",
-        field: "search",
-        path: ["results"],
-      },
-      sources: [
-        {
-          expr: {
-            type: "ref",
-            ref: {
-              module: "provider",
-              type: "Query",
-              field: "list",
-              instance: 1,
-              path: ["items"],
-            },
-          },
-        },
-      ],
+    const allWires = flatWires(instr.body);
+    assert.equal(allWires.length, 3);
+    // First wire: array mapping to results
+    const resultsWire = allWires[0];
+    assertDeepStrictEqualIgnoringLoc(resultsWire.to, {
+      module: SELF_MODULE,
+      type: "Query",
+      field: "search",
+      path: ["results"],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
+    const arrayExpr = resultsWire.sources[0]!.expr;
+    assert.equal(arrayExpr.type, "array");
+    if (arrayExpr.type === "array") {
+      assert.equal(arrayExpr.iteratorName, "item");
+      assertDeepStrictEqualIgnoringLoc(arrayExpr.source, {
+        type: "ref",
+        ref: {
+          module: "provider",
+          type: "Query",
+          field: "list",
+          instance: 1,
+          path: ["items"],
+        },
+      });
+    }
+    assertDeepStrictEqualIgnoringLoc(allWires[1], {
       to: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "name"],
       },
       sources: [
@@ -313,11 +317,12 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[2], {
+    assertDeepStrictEqualIgnoringLoc(allWires[2], {
       to: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "lat"],
       },
       sources: [
@@ -355,17 +360,17 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.type, "Mutation");
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.to, {
       module: "sendgrid",
       type: "Mutation",
       field: "send",
       instance: 1,
       path: ["content"],
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[1]!)?.path, [
-      "headers",
-      "x-message-id",
-    ]);
+    assertDeepStrictEqualIgnoringLoc(
+      sourceRef(flatWires(instr.body)[1]!)?.path,
+      ["headers", "x-message-id"],
+    );
   });
 
   test("multiple bridges separated by ---", () => {
@@ -418,7 +423,7 @@ describe("parseBridge", () => {
       handle: "c",
       kind: "context",
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[0]!), {
+    assertDeepStrictEqualIgnoringLoc(sourceRef(flatWires(instr.body)[0]!), {
       module: SELF_MODULE,
       type: "Context",
       field: "context",
@@ -583,9 +588,26 @@ describe("serializeBridge", () => {
           { handle: "i", kind: "input" },
           { handle: "o", kind: "output" },
         ],
-        wires: [
+        body: [
           {
-            to: {
+            kind: "with" as const,
+            binding: {
+              handle: "sg",
+              kind: "tool" as const,
+              name: "sendgrid.send",
+            },
+          },
+          {
+            kind: "with" as const,
+            binding: { handle: "i", kind: "input" as const },
+          },
+          {
+            kind: "with" as const,
+            binding: { handle: "o", kind: "output" as const },
+          },
+          {
+            kind: "wire" as const,
+            target: {
               module: "sendgrid",
               type: "Mutation",
               field: "send",
@@ -595,7 +617,7 @@ describe("serializeBridge", () => {
             sources: [
               {
                 expr: {
-                  type: "ref",
+                  type: "ref" as const,
                   ref: {
                     module: SELF_MODULE,
                     type: "Mutation",
@@ -605,9 +627,10 @@ describe("serializeBridge", () => {
                 },
               },
             ],
-          } as Wire,
+          },
           {
-            to: {
+            kind: "wire" as const,
+            target: {
               module: SELF_MODULE,
               type: "Mutation",
               field: "sendEmail",
@@ -616,7 +639,7 @@ describe("serializeBridge", () => {
             sources: [
               {
                 expr: {
-                  type: "ref",
+                  type: "ref" as const,
                   ref: {
                     module: "sendgrid",
                     type: "Mutation",
@@ -627,7 +650,7 @@ describe("serializeBridge", () => {
                 },
               },
             ],
-          } as Wire,
+          },
         ],
       },
     ];
@@ -764,7 +787,7 @@ describe("parseBridge: tool blocks", () => {
     assertDeepStrictEqualIgnoringLoc(root.handles, [
       { kind: "context", handle: "context" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
         to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
         sources: [
@@ -802,7 +825,7 @@ describe("parseBridge: tool blocks", () => {
     const child = tools.find((t) => t.name === "hereapi.geocode")!;
     assert.equal(child.fn, undefined);
     assert.equal(child.extends, "hereapi");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
         to: {
           module: "_",
@@ -851,7 +874,7 @@ describe("parseBridge: tool blocks", () => {
     const root = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
         to: {
           module: "_",
@@ -899,7 +922,7 @@ describe("parseBridge: tool blocks", () => {
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
     )!;
     assert.equal(child.extends, "sendgrid");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
         to: {
           module: "_",
@@ -955,7 +978,7 @@ describe("parseBridge: tool blocks", () => {
       { kind: "context", handle: "context" },
       { kind: "tool", handle: "auth", name: "authService" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
+    assertDeepStrictEqualIgnoringLoc(flatWires(serviceB.body)[1], {
       to: {
         module: "_",
         type: "Tools",
@@ -982,11 +1005,9 @@ describe("parseBridge: tool blocks", () => {
 
 // ── Tool roundtrip ──────────────────────────────────────────────────────────
 
-describe(
-  "serializeBridge: tool roundtrip",
-  () => {
-    test("GET tool roundtrips", () => {
-      const input = bridge`
+describe("serializeBridge: tool roundtrip", () => {
+  test("GET tool roundtrips", () => {
+    const input = bridge`
       version 1.5
       tool hereapi from httpCall {
         with context
@@ -1010,15 +1031,15 @@ describe(
 
       }
     `;
-      const instructions = parseBridge(input);
-      assertDeepStrictEqualIgnoringLoc(
-        parseBridge(serializeBridge(instructions)),
-        instructions,
-      );
-    });
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
 
-    test("POST tool roundtrips", () => {
-      const input = bridge`
+  test("POST tool roundtrips", () => {
+    const input = bridge`
       version 1.5
       tool sendgrid from httpCall {
         with context
@@ -1042,15 +1063,15 @@ describe(
 
       }
     `;
-      const instructions = parseBridge(input);
-      assertDeepStrictEqualIgnoringLoc(
-        parseBridge(serializeBridge(instructions)),
-        instructions,
-      );
-    });
+    const instructions = parseBridge(input);
+    assertDeepStrictEqualIgnoringLoc(
+      parseBridge(serializeBridge(instructions)),
+      instructions,
+    );
+  });
 
-    test("serialized tool output is human-readable", () => {
-      const input = bridge`
+  test("serialized tool output is human-readable", () => {
+    const input = bridge`
       version 1.5
       tool hereapi from httpCall {
         with context
@@ -1071,16 +1092,15 @@ describe(
 
       }
     `;
-      const output = serializeBridge(parseBridge(input));
-      assert.ok(output.includes("tool hereapi from httpCall"));
-      assert.ok(output.includes("tool hereapi.geocode from hereapi"));
-      assert.ok(
-        output.includes('baseUrl = "https://geocode.search.hereapi.com/v1"'),
-      );
-      assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
-    });
-  },
-);
+    const output = serializeBridge(parseBridge(input));
+    assert.ok(output.includes("tool hereapi from httpCall"));
+    assert.ok(output.includes("tool hereapi.geocode from hereapi"));
+    assert.ok(
+      output.includes('baseUrl = "https://geocode.search.hereapi.com/v1"'),
+    );
+    assert.ok(output.includes("headers.apiKey <- context.hereapi.apiKey"));
+  });
+});
 
 // ── Parser robustness ───────────────────────────────────────────────────────
 
@@ -1251,7 +1271,7 @@ describe("parser robustness", () => {
       "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
     ).instructions.find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
-      instr.wires.filter(
+      flatWires(instr.body).filter(
         (w) =>
           w.sources[0]?.expr.type === "ref" && w.sources[0].expr.ref.element,
       ).length,
@@ -1270,7 +1290,9 @@ describe("parser robustness", () => {
         o.name <- i.username # copy the name across
       }
     `).instructions.find((inst) => inst.kind === "bridge") as Bridge;
-    const wire = instr.wires.find((w) => w.sources[0]?.expr.type === "ref")!;
+    const wire = flatWires(instr.body).find(
+      (w) => w.sources[0]?.expr.type === "ref",
+    )!;
     assert.equal(wire.to.path.join("."), "name");
     const expr = wire.sources[0]!.expr;
     assert.equal(
@@ -1287,7 +1309,7 @@ describe("parser robustness", () => {
         .url = "https://example.com/things#anchor"
       }
     `).instructions.find((inst) => inst.kind === "tool") as ToolDef;
-    const urlWire = tool.wires.find(
+    const urlWire = flatWires(tool.body).find(
       (w) =>
         w.sources[0]?.expr.type === "literal" && w.to.path.join(".") === "url",
     );
@@ -1474,11 +1496,9 @@ describe("version tags: parser produces version on HandleBinding", () => {
   });
 });
 
-describe(
-  "version tags: round-trip serialization",
-  () => {
-    test("bridge handle @version survives parse → serialize → parse", () => {
-      const src = bridge`
+describe("version tags: round-trip serialization", () => {
+  test("bridge handle @version survives parse → serialize → parse", () => {
+    const src = bridge`
       version 1.5
       bridge Query.test {
         with myCorp.utils@2.1 as utils
@@ -1487,39 +1507,39 @@ describe(
         o.val <- utils.result
       }
     `;
-      const instructions = parseBridge(src);
-      const serialized = serializeBridge(instructions);
-      assert.ok(
-        serialized.includes("myCorp.utils@2.1 as utils"),
-        `got: ${serialized}`,
-      );
-      // Re-parse and verify
-      const reparsed = parseBridge(serialized);
-      const instr = reparsed.instructions.find(
-        (i): i is Bridge => i.kind === "bridge",
-      )!;
-      const h = instr.handles.find(
-        (h) => h.kind === "tool" && h.handle === "utils",
-      );
-      assert.ok(h);
-      if (h?.kind === "tool") assert.equal(h.version, "2.1");
-    });
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.includes("myCorp.utils@2.1 as utils"),
+      `got: ${serialized}`,
+    );
+    // Re-parse and verify
+    const reparsed = parseBridge(serialized);
+    const instr = reparsed.instructions.find(
+      (i): i is Bridge => i.kind === "bridge",
+    )!;
+    const h = instr.handles.find(
+      (h) => h.kind === "tool" && h.handle === "utils",
+    );
+    assert.ok(h);
+    if (h?.kind === "tool") assert.equal(h.version, "2.1");
+  });
 
-    test("tool dep @version survives round-trip", () => {
-      const src = bridge`
+  test("tool dep @version survives round-trip", () => {
+    const src = bridge`
       version 1.5
       tool myApi from std.httpCall {
         with stripe@2.0 as pay
         .baseUrl = "https://api.example.com"
       }
     `;
-      const instructions = parseBridge(src);
-      const serialized = serializeBridge(instructions);
-      assert.ok(serialized.includes("stripe@2.0 as pay"), `got: ${serialized}`);
-    });
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("stripe@2.0 as pay"), `got: ${serialized}`);
+  });
 
-    test("unversioned handle stays unversioned in round-trip", () => {
-      const src = bridge`
+  test("unversioned handle stays unversioned in round-trip", () => {
+    const src = bridge`
       version 1.5
       bridge Query.test {
         with myCorp.utils
@@ -1527,62 +1547,53 @@ describe(
         o.val <- utils.result
       }
     `;
-      const instructions = parseBridge(src);
-      const serialized = serializeBridge(instructions);
-      assert.ok(
-        serialized.includes("with myCorp.utils\n"),
-        `got: ${serialized}`,
-      );
-      assert.ok(
-        !serialized.includes("@"),
-        `should have no @ sign: ${serialized}`,
-      );
-    });
-  },
-);
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(serialized.includes("with myCorp.utils\n"), `got: ${serialized}`);
+    assert.ok(
+      !serialized.includes("@"),
+      `should have no @ sign: ${serialized}`,
+    );
+  });
+});
 
-describe(
-  "version tags: VersionDecl in serializer",
-  () => {
-    test("serializer preserves declared version from VersionDecl", () => {
-      const src = bridge`
+describe("version tags: VersionDecl in serializer", () => {
+  test("serializer preserves declared version from VersionDecl", () => {
+    const src = bridge`
       version 1.7
       bridge Query.test {
         with output as o
         o.x = "ok"
       }
     `;
-      const instructions = parseBridge(src);
-      const serialized = serializeBridge(instructions);
-      assert.ok(
-        serialized.startsWith("version 1.7\n"),
-        `expected 'version 1.7' header, got: ${serialized.slice(0, 30)}`,
-      );
-    });
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.7\n"),
+      `expected 'version 1.7' header, got: ${serialized.slice(0, 30)}`,
+    );
+  });
 
-    test("version 1.5 round-trips correctly", () => {
-      const src = bridge`
+  test("version 1.5 round-trips correctly", () => {
+    const src = bridge`
       version 1.5
       bridge Query.test {
         with output as o
         o.x = "ok"
       }
     `;
-      const instructions = parseBridge(src);
-      const serialized = serializeBridge(instructions);
-      assert.ok(
-        serialized.startsWith("version 1.5\n"),
-        `expected 'version 1.5' header, got: ${serialized.slice(0, 30)}`,
-      );
-    });
-  },
-);
+    const instructions = parseBridge(src);
+    const serialized = serializeBridge(instructions);
+    assert.ok(
+      serialized.startsWith("version 1.5\n"),
+      `expected 'version 1.5' header, got: ${serialized.slice(0, 30)}`,
+    );
+  });
+});
 
-describe(
-  "serializeBridge string keyword quoting",
-  () => {
-    test("keeps reserved-word strings quoted in constant wires", () => {
-      const src = bridge`
+describe("serializeBridge string keyword quoting", () => {
+  test("keeps reserved-word strings quoted in constant wires", () => {
+    const src = bridge`
       version 1.5
       bridge Query.test {
         with input as i
@@ -1592,46 +1603,43 @@ describe(
       }
     `;
 
-      const serialized = serializeBridge(parseBridge(src));
-      assert.ok(serialized.includes('o.value = "const"'), serialized);
-      assert.doesNotThrow(() => parseBridge(serialized));
-    });
-  },
-);
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes('o.value = "const"'), serialized);
+    assert.doesNotThrow(() => parseBridge(serialized));
+  });
+});
 
-describe(
-  "parser diagnostics and serializer edge cases",
-  () => {
-    test("parseBridgeDiagnostics reports lexer errors with a range", () => {
-      const result = parseBridgeDiagnostics(
-        'version 1.5\nbridge Query.x {\n  with output as o\n  o.x = "ok"\n}\n§',
-      );
-      assert.ok(result.diagnostics.length > 0);
-      assert.equal(result.diagnostics[0]?.severity, "error");
-      assert.equal(result.diagnostics[0]?.range.start.line, 5);
-      assert.equal(result.diagnostics[0]?.range.start.character, 0);
-    });
+describe("parser diagnostics and serializer edge cases", () => {
+  test("parseBridgeDiagnostics reports lexer errors with a range", () => {
+    const result = parseBridgeDiagnostics(
+      'version 1.5\nbridge Query.x {\n  with output as o\n  o.x = "ok"\n}\n§',
+    );
+    assert.ok(result.diagnostics.length > 0);
+    assert.equal(result.diagnostics[0]?.severity, "error");
+    assert.equal(result.diagnostics[0]?.range.start.line, 5);
+    assert.equal(result.diagnostics[0]?.range.start.character, 0);
+  });
 
-    test("reserved source identifier is rejected as const name", () => {
-      assert.throws(
-        () => parseBridge('version 1.5\nconst input = "x"'),
-        /reserved source identifier.*const name/i,
-      );
-    });
+  test("reserved source identifier is rejected as const name", () => {
+    assert.throws(
+      () => parseBridge('version 1.5\nconst input = "x"'),
+      /reserved source identifier.*const name/i,
+    );
+  });
 
-    test("serializeBridge keeps passthrough shorthand", () => {
-      const src = "version 1.5\nbridge Query.upper with std.str.toUpperCase";
-      const serialized = serializeBridge(parseBridge(src));
-      assert.ok(
-        serialized.includes("bridge Query.upper with std.str.toUpperCase"),
-        serialized,
-      );
-    });
+  test("serializeBridge keeps passthrough shorthand", () => {
+    const src = "version 1.5\nbridge Query.upper with std.str.toUpperCase";
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(
+      serialized.includes("bridge Query.upper with std.str.toUpperCase"),
+      serialized,
+    );
+  });
 
-    test("define handles cannot be memoized at the invocation site", () => {
-      assert.throws(
-        () =>
-          parseBridge(bridge`
+  test("define handles cannot be memoized at the invocation site", () => {
+    assert.throws(
+      () =>
+        parseBridge(bridge`
           version 1.5
 
           define formatProfile {
@@ -1651,12 +1659,12 @@ describe(
             }
           }
         `),
-        /memoize|tool/i,
-      );
-    });
+      /memoize|tool/i,
+    );
+  });
 
-    test("serializeBridge uses compact default handle bindings", () => {
-      const src = bridge`
+  test("serializeBridge uses compact default handle bindings", () => {
+    const src = bridge`
       version 1.5
       bridge Query.defaults {
         with input
@@ -1666,10 +1674,9 @@ describe(
         output.value <- input.name
       }
     `;
-      const serialized = serializeBridge(parseBridge(src));
-      assert.ok(serialized.includes("  with input\n"), serialized);
-      assert.ok(serialized.includes("  with output\n"), serialized);
-      assert.ok(serialized.includes("  with const\n"), serialized);
-    });
-  },
-);
+    const serialized = serializeBridge(parseBridge(src));
+    assert.ok(serialized.includes("  with input\n"), serialized);
+    assert.ok(serialized.includes("  with output\n"), serialized);
+    assert.ok(serialized.includes("  with const\n"), serialized);
+  });
+});

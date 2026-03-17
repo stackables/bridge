@@ -253,16 +253,19 @@ export class BridgeLanguageService {
       if (closestInst.kind === "bridge") {
         if (word === closestInst.type || word === closestInst.field) {
           const hc = closestInst.handles.length;
-          const wc = closestInst.wires.length;
+          const wc = closestInst.body.length;
           return {
-            content: `**Bridge** \`${closestInst.type}.${closestInst.field}\`\n\n${hc} handle${hc !== 1 ? "s" : ""} · ${wc} wire${wc !== 1 ? "s" : ""}`,
+            content: `**Bridge** \`${closestInst.type}.${closestInst.field}\`\n\n${hc} handle${hc !== 1 ? "s" : ""} · ${wc} statement${wc !== 1 ? "s" : ""}`,
           };
         }
       }
 
       if (closestInst.kind === "define" && word === closestInst.name) {
+        const wireCount = closestInst.body.filter(
+          (s) => s.kind === "wire" || s.kind === "alias" || s.kind === "spread",
+        ).length;
         return {
-          content: `**Define** \`${closestInst.name}\`\n\nReusable subgraph (${closestInst.handles.length} handles · ${closestInst.wires.length} wires)`,
+          content: `**Define** \`${closestInst.name}\`\n\nReusable subgraph (${closestInst.handles.length} handle${closestInst.handles.length === 1 ? "" : "s"} · ${wireCount} wire${wireCount === 1 ? "" : "s"})`,
         };
       }
     }
@@ -279,9 +282,9 @@ export class BridgeLanguageService {
       ) {
         const fn = closestInst.fn ?? `extends ${closestInst.extends}`;
         const dc = closestInst.handles.length;
-        const wc = closestInst.wires.length;
+        const wc = closestInst.body.length;
         return {
-          content: `**Tool** \`${closestInst.name}\`\n\nFunction: \`${fn}\`\n\n${dc} dep${dc !== 1 ? "s" : ""} · ${wc} wire${wc !== 1 ? "s" : ""}`,
+          content: `**Tool** \`${closestInst.name}\`\n\nFunction: \`${fn}\`\n\n${dc} dep${dc !== 1 ? "s" : ""} · ${wc} statement${wc !== 1 ? "s" : ""}`,
         };
       }
     }

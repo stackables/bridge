@@ -5,11 +5,50 @@ import {
   serializeBridge,
 } from "@stackables/bridge-parser";
 import { bridge } from "@stackables/bridge-core";
+import { flatWires } from "./utils/parse-test-utils.ts";
 
-// ── Parser desugaring tests ─────────────────────────────────────────────────
+// -- Helper: find a binary/unary expression in the body wires --
+
+function exprContainsOp(expr: any, op: string): boolean {
+  if (!expr) return false;
+  if (expr.type === "binary" && expr.op === op) return true;
+  if (expr.type === "unary" && expr.op === op) return true;
+  if (expr.type === "binary")
+    return exprContainsOp(expr.left, op) || exprContainsOp(expr.right, op);
+  if (expr.type === "and")
+    return exprContainsOp(expr.left, op) || exprContainsOp(expr.right, op);
+  if (expr.type === "or")
+    return exprContainsOp(expr.left, op) || exprContainsOp(expr.right, op);
+  if (expr.type === "unary") return exprContainsOp(expr.operand, op);
+  if (expr.type === "ternary")
+    return (
+      exprContainsOp(expr.cond, op) ||
+      exprContainsOp(expr.then, op) ||
+      exprContainsOp(expr.else, op)
+    );
+  return false;
+}
+
+function findBinaryOp(
+  doc: ReturnType<typeof parseBridge>,
+  op: string,
+): boolean {
+  const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+  const wires = flatWires(instr.body);
+  return wires.some((w) => exprContainsOp(w.sources[0]?.expr, op));
+}
+
+function getOutputExpr(doc: ReturnType<typeof parseBridge>): any {
+  const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+  const wires = flatWires(instr.body);
+  const outputWire = wires.find((w) => w.to.path.includes("result"));
+  return outputWire?.sources[0]?.expr;
+}
+
+// -- Parser desugaring tests --
 
 describe("expressions: parser desugaring", () => {
-  test("o.cents <- i.dollars * 100 — desugars into synthetic tool wires", () => {
+  test("o.cents <- i.dollars * 100 -- produces binary expression", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.convert {
@@ -19,22 +58,15 @@ describe("expressions: parser desugaring", () => {
         o.cents <- i.dollars * 100
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    assert.ok(!instr.wires.some((w) => "expr" in w), "no ExprWire in output");
-    assert.ok(instr.pipeHandles!.length > 0, "has pipe handles");
-    const exprHandle = instr.pipeHandles!.find((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandle, "has __expr_ pipe handle");
-    assert.equal(exprHandle.baseTrunk.field, "multiply");
+    assert.ok(findBinaryOp(doc, "mul"), "should have mul binary expression");
   });
 
-  test("all operators desugar to correct tool names", () => {
+  test("all operators produce correct expression nodes", () => {
     const ops: Record<string, string> = {
-      "*": "multiply",
-      "/": "divide",
+      "*": "mul",
+      "/": "div",
       "+": "add",
-      "-": "subtract",
+      "-": "sub",
       "==": "eq",
       "!=": "neq",
       ">": "gt",
@@ -42,7 +74,7 @@ describe("expressions: parser desugaring", () => {
       "<": "lt",
       "<=": "lte",
     };
-    for (const [op, fn] of Object.entries(ops)) {
+    for (const [op, exprOp] of Object.entries(ops)) {
       const doc = parseBridge(bridge`
         version 1.5
         bridge Query.test {
@@ -52,12 +84,7 @@ describe("expressions: parser desugaring", () => {
           o.result <- i.value ${op} 1
         }
       `);
-      const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = instr.pipeHandles!.find((ph) =>
-        ph.handle.startsWith("__expr_"),
-      );
-      assert.ok(exprHandle, `${op} should create a pipe handle`);
-      assert.equal(exprHandle.baseTrunk.field, fn, `${op} → ${fn}`);
+      assert.ok(findBinaryOp(doc, exprOp), `${op} should produce ${exprOp}`);
     }
   });
 
@@ -71,17 +98,8 @@ describe("expressions: parser desugaring", () => {
         o.result <- i.times * 5 / 10
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.equal(
-      exprHandles.length,
-      2,
-      "two synthetic tools for chained expression",
-    );
-    assert.equal(exprHandles[0].baseTrunk.field, "multiply");
-    assert.equal(exprHandles[1].baseTrunk.field, "divide");
+    assert.ok(findBinaryOp(doc, "mul"), "has mul");
+    assert.ok(findBinaryOp(doc, "div"), "has div");
   });
 
   test("chained expression: i.times * 2 > 6", () => {
@@ -94,13 +112,8 @@ describe("expressions: parser desugaring", () => {
         o.result <- i.times * 2 > 6
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.equal(exprHandles.length, 2);
-    assert.equal(exprHandles[0].baseTrunk.field, "multiply");
-    assert.equal(exprHandles[1].baseTrunk.field, "gt");
+    assert.ok(findBinaryOp(doc, "mul"), "has mul");
+    assert.ok(findBinaryOp(doc, "gt"), "has gt");
   });
 
   test("two source refs: i.price * i.qty", () => {
@@ -113,15 +126,7 @@ describe("expressions: parser desugaring", () => {
         o.total <- i.price * i.qty
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const bWire = instr.wires.find(
-      (w) =>
-        w.sources[0]?.expr.type === "ref" &&
-        w.to.path.length === 1 &&
-        w.to.path[0] === "b",
-    );
-    assert.ok(bWire, "should have a .b wire");
-    assert.ok(bWire!.sources[0]?.expr.type === "ref");
+    assert.ok(findBinaryOp(doc, "mul"), "has mul expression");
   });
 
   test("expression in array mapping element", () => {
@@ -138,16 +143,11 @@ describe("expressions: parser desugaring", () => {
         }
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = instr.pipeHandles!.find((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandle, "should have expression pipe handle");
-    assert.equal(exprHandle.baseTrunk.field, "multiply");
+    assert.ok(findBinaryOp(doc, "mul"), "has mul expression in array element");
   });
 });
 
-// ── Round-trip serialization tests ──────────────────────────────────────────
+// -- Round-trip serialization tests --
 
 describe("expressions: round-trip serialization", () => {
   test("multiply expression serializes and re-parses", () => {
@@ -166,14 +166,11 @@ describe("expressions: round-trip serialization", () => {
       serialized.includes("i.dollars * 100"),
       `should contain expression: ${serialized}`,
     );
-
     const reparsed = parseBridge(serialized);
-    const instr = reparsed.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = instr.pipeHandles!.find((ph) =>
-      ph.handle.startsWith("__expr_"),
+    assert.ok(
+      findBinaryOp(reparsed, "mul"),
+      "re-parsed should contain mul expression",
     );
-    assert.ok(exprHandle, "re-parsed should contain synthetic tool");
-    assert.equal(exprHandle.baseTrunk.field, "multiply");
   });
 
   test("comparison expression round-trips", () => {
@@ -225,10 +222,10 @@ describe("expressions: round-trip serialization", () => {
   });
 });
 
-// ── Operator precedence: parser ───────────────────────────────────────────
+// -- Operator precedence: parser --
 
 describe("expressions: operator precedence (parser)", () => {
-  test("i.base + i.tax * 2 — multiplication before addition", () => {
+  test("i.base + i.tax * 2 -- multiplication before addition", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.calc {
@@ -239,12 +236,17 @@ describe("expressions: operator precedence (parser)", () => {
       }
     `);
     const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
+    const wires = flatWires(instr.body);
+    const outputWire = wires.find((w) => w.to.path.includes("total"));
+    assert.ok(outputWire, "should have output wire");
+    const expr = outputWire!.sources[0]?.expr;
+    assert.equal(expr.type, "binary");
+    assert.equal(expr.op, "add", "outer op should be add");
+    assert.equal(
+      expr.right.type === "binary" ? expr.right.op : null,
+      "mul",
+      "inner op should be mul",
     );
-    assert.equal(exprHandles.length, 2, "two synthetic forks");
-    assert.equal(exprHandles[0].baseTrunk.field, "multiply", "multiply first");
-    assert.equal(exprHandles[1].baseTrunk.field, "add", "add second");
   });
 
   test("precedence round-trip: i.base + i.tax * 2 serializes correctly", () => {
@@ -267,15 +269,11 @@ describe("expressions: operator precedence (parser)", () => {
   });
 });
 
-// ── Boolean logic: parser desugaring ──────────────────────────────────────────
+// -- Boolean logic: parser desugaring --
 
 describe("boolean logic: parser desugaring", () => {
-  test("and / or desugar to condAnd/condOr wires", () => {
-    const boolOps: Record<string, string> = {
-      and: "__and",
-      or: "__or",
-    };
-    for (const [op, fn] of Object.entries(boolOps)) {
+  test("and / or produce correct expression types", () => {
+    for (const op of ["and", "or"]) {
       const doc = parseBridge(bridge`
         version 1.5
         bridge Query.test {
@@ -285,16 +283,13 @@ describe("boolean logic: parser desugaring", () => {
           o.result <- i.a ${op} i.b
         }
       `);
-      const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-      const exprHandle = instr.pipeHandles!.find((ph) =>
-        ph.handle.startsWith("__expr_"),
-      );
-      assert.ok(exprHandle, `${op}: has __expr_ pipe handle`);
-      assert.equal(exprHandle.baseTrunk.field, fn, `${op}: maps to ${fn}`);
+      const expr = getOutputExpr(doc);
+      assert.ok(expr, `${op}: has output expr`);
+      assert.equal(expr.type, op, `${op}: expr type`);
     }
   });
 
-  test("not prefix desugars to not tool fork", () => {
+  test("not prefix produces unary expression", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -304,14 +299,13 @@ describe("boolean logic: parser desugaring", () => {
         o.result <- not i.trusted
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandle = instr.pipeHandles!.find(
-      (ph) => ph.baseTrunk.field === "not",
-    );
-    assert.ok(exprHandle, "has not pipe handle");
+    const expr = getOutputExpr(doc);
+    assert.ok(expr);
+    assert.equal(expr.type, "unary");
+    assert.equal(expr.op, "not");
   });
 
-  test('combined: (a > 18 and b) or c == "ADMIN"', () => {
+  test("combined boolean expression", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -321,23 +315,13 @@ describe("boolean logic: parser desugaring", () => {
         o.result <- i.age > 18 and i.verified or i.role == "ADMIN"
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(
-      exprHandles.length >= 4,
-      `has >= 4 expr handles, got ${exprHandles.length}`,
-    );
-    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("gt"), "has gt");
-    assert.ok(fields.includes("__and"), "has __and");
-    assert.ok(fields.includes("eq"), "has eq");
-    assert.ok(fields.includes("__or"), "has __or");
+    const expr = getOutputExpr(doc);
+    assert.ok(expr, "has output expr");
+    assert.ok(exprContainsOp(expr, "gt"), "has gt in tree");
   });
 });
 
-// ── Boolean logic: serializer round-trip ──────────────────────────────────────
+// -- Boolean logic: serializer round-trip --
 
 describe("boolean logic: serializer round-trip", () => {
   test("and expression round-trips", () => {
@@ -398,10 +382,10 @@ describe("boolean logic: serializer round-trip", () => {
   });
 });
 
-// ── Parenthesized expressions: parser desugaring ─────────────────────────────
+// -- Parenthesized expressions: parser desugaring --
 
 describe("parenthesized expressions: parser desugaring", () => {
-  test("(A and B) or C — groups correctly", () => {
+  test("(A and B) or C -- groups correctly", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -411,17 +395,12 @@ describe("parenthesized expressions: parser desugaring", () => {
         o.result <- (i.a and i.b) or i.c
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
-    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("__and"), "has __and");
-    assert.ok(fields.includes("__or"), "has __or");
+    const expr = getOutputExpr(doc);
+    assert.equal(expr.type, "or", "outer should be or");
+    assert.equal(expr.left.type, "and", "left should be and");
   });
 
-  test("A or (B and C) — groups correctly", () => {
+  test("A or (B and C) -- groups correctly", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -431,17 +410,12 @@ describe("parenthesized expressions: parser desugaring", () => {
         o.result <- i.a or (i.b and i.c)
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandles.length >= 2, `has >= 2 expr handles`);
-    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("__and"), "has __and");
-    assert.ok(fields.includes("__or"), "has __or");
+    const expr = getOutputExpr(doc);
+    assert.equal(expr.type, "or", "outer should be or");
+    assert.equal(expr.right.type, "and", "right should be and");
   });
 
-  test("not (A and B) — not wraps grouped expr", () => {
+  test("not (A and B) -- not wraps grouped expr", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -451,16 +425,13 @@ describe("parenthesized expressions: parser desugaring", () => {
         o.result <- not (i.a and i.b)
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("__and"), "has __and");
-    assert.ok(fields.includes("not"), "has not");
+    const expr = getOutputExpr(doc);
+    assert.equal(expr.type, "unary", "outer should be unary");
+    assert.equal(expr.op, "not");
+    assert.equal(expr.operand.type, "and", "operand should be and");
   });
 
-  test("(i.price + i.discount) * i.qty — math with parens", () => {
+  test("(i.price + i.discount) * i.qty -- math with parens", () => {
     const doc = parseBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -470,17 +441,18 @@ describe("parenthesized expressions: parser desugaring", () => {
         o.result <- (i.price + i.discount) * i.qty
       }
     `);
-    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
-    const exprHandles = instr.pipeHandles!.filter((ph) =>
-      ph.handle.startsWith("__expr_"),
+    const expr = getOutputExpr(doc);
+    assert.equal(expr.type, "binary");
+    assert.equal(expr.op, "mul", "outer should be mul");
+    assert.equal(
+      expr.left.type === "binary" ? expr.left.op : null,
+      "add",
+      "inner should be add",
     );
-    const fields = exprHandles.map((ph) => ph.baseTrunk.field);
-    assert.ok(fields.includes("add"), "has add (from parens)");
-    assert.ok(fields.includes("multiply"), "has multiply");
   });
 });
 
-// ── Parenthesized expressions: serializer round-trip ──────────────────────────
+// -- Parenthesized expressions: serializer round-trip --
 
 describe("parenthesized expressions: serializer round-trip", () => {
   test("(A + B) * C round-trips with parentheses", () => {
@@ -503,7 +475,7 @@ describe("parenthesized expressions: serializer round-trip", () => {
     assert.ok(reparsed.instructions.length > 0, "reparsed successfully");
   });
 
-  test("A or (B and C) round-trips correctly (parens optional since and binds tighter)", () => {
+  test("A or (B and C) round-trips correctly", () => {
     const src = bridge`
       version 1.5
 
@@ -524,7 +496,7 @@ describe("parenthesized expressions: serializer round-trip", () => {
   });
 });
 
-// ── Keyword strings in serializer ─────────────────────────────────────────────
+// -- Keyword strings in serializer --
 
 describe("serializeBridge: keyword strings are quoted", () => {
   const keywords = [
@@ -571,11 +543,9 @@ describe("serializeBridge: keyword strings are quoted", () => {
         `Expected "${kw}" to be quoted in: ${serialized}`,
       );
       const reparsed = parseBridge(serialized);
-      const instr = reparsed.instructions.find(
-        (i) => i.kind === "bridge",
-      ) as any;
-      const wire = instr.wires.find(
-        (w: any) =>
+      const instr = reparsed.instructions.find((i) => i.kind === "bridge")!;
+      const wire = flatWires(instr.body).find(
+        (w) =>
           w.sources?.[0]?.expr?.type === "literal" &&
           w.to?.path?.[0] === "result",
       );

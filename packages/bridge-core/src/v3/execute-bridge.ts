@@ -1202,7 +1202,6 @@ function resolveToolDefByName(
     name,
     fn: chain[0]!.fn,
     handles: [],
-    wires: [],
     body: [],
   };
 
@@ -1213,7 +1212,7 @@ function resolveToolDefByName(
       }
     }
     if (def.body) {
-      merged.body!.push(...def.body);
+      merged.body.push(...def.body);
     }
     if (def.onError) merged.onError = def.onError;
   }

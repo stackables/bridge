@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "@stackables/bridge-parser";
 import { bridge } from "@stackables/bridge-core";
+import { flatWires } from "./utils/parse-test-utils.ts";
 
 // ── Parser / desugaring tests for ternary syntax ──────────────────────────
 
@@ -17,7 +18,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire, "should have a conditional wire");
@@ -44,18 +45,18 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
     const expr = condWire.sources[0].expr;
     assert.equal(
       expr.then.type === "literal" ? expr.then.value : undefined,
-      '"premium"',
+      "premium",
     );
     assert.equal(
       expr.else.type === "literal" ? expr.else.value : undefined,
-      '"basic"',
+      "basic",
     );
   });
 
@@ -70,19 +71,16 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
     const expr = condWire.sources[0].expr;
     assert.equal(
       expr.then.type === "literal" ? expr.then.value : undefined,
-      "20",
+      20,
     );
-    assert.equal(
-      expr.else.type === "literal" ? expr.else.value : undefined,
-      "0",
-    );
+    assert.equal(expr.else.type === "literal" ? expr.else.value : undefined, 0);
   });
 
   test("boolean literal branches", () => {
@@ -96,18 +94,18 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
     const expr = condWire.sources[0].expr;
     assert.equal(
       expr.then.type === "literal" ? expr.then.value : undefined,
-      "true",
+      true,
     );
     assert.equal(
       expr.else.type === "literal" ? expr.else.value : undefined,
-      "false",
+      false,
     );
   });
 
@@ -122,7 +120,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
@@ -130,7 +128,7 @@ describe("ternary: parser", () => {
     assert.equal(expr.then.type, "ref");
     assert.equal(
       expr.else.type === "literal" ? expr.else.value : undefined,
-      "null",
+      null,
     );
   });
 
@@ -145,22 +143,16 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
     const expr = condWire.sources[0].expr;
-    assert.ok(
-      expr.cond.type === "ref" &&
-        expr.cond.ref.instance != null &&
-        expr.cond.ref.instance >= 100000,
-      "cond should be an expression fork result",
-    );
-    const exprHandle = instr.pipeHandles!.find((ph) =>
-      ph.handle.startsWith("__expr_"),
-    );
-    assert.ok(exprHandle, "should have expression fork");
-    assert.equal(exprHandle.baseTrunk.field, "gte");
+    // In body-based IR, >= becomes a binary expression node
+    assert.equal(expr.cond.type, "binary");
+    if (expr.cond.type === "binary") {
+      assert.equal(expr.cond.op, "gte");
+    }
   });
 
   test("|| literal fallback stored on conditional wire", () => {
@@ -174,7 +166,7 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
@@ -184,7 +176,7 @@ describe("ternary: parser", () => {
       condWire.sources[1].expr.type === "literal"
         ? condWire.sources[1].expr.value
         : undefined,
-      "0",
+      0,
     );
   });
 
@@ -199,11 +191,11 @@ describe("ternary: parser", () => {
       }
     `);
     const instr = doc.instructions.find((inst) => inst.kind === "bridge")!;
-    const condWire = instr.wires.find(
+    const condWire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.ok(condWire && condWire.sources[0].expr.type === "ternary");
     assert.ok(condWire.catch && "value" in condWire.catch);
-    assert.equal(condWire.catch.value, "-1");
+    assert.equal(condWire.catch.value, -1);
   });
 });

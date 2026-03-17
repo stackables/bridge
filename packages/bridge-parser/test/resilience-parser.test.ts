@@ -5,7 +5,10 @@ import {
   serializeBridge,
 } from "@stackables/bridge-parser";
 import type { Bridge, ConstDef, ToolDef } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatWires,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -289,11 +292,13 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find((w) => w.catch && "value" in w.catch);
+    const fbWire = flatWires(instr.body).find(
+      (w) => w.catch && "value" in w.catch,
+    );
     assert.ok(fbWire, "should have a wire with catch");
     assert.equal(
       "value" in fbWire!.catch! ? fbWire!.catch.value : undefined,
-      "0",
+      0,
     );
   });
 
@@ -311,11 +316,13 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find((w) => w.catch && "value" in w.catch);
+    const fbWire = flatWires(instr.body).find(
+      (w) => w.catch && "value" in w.catch,
+    );
     assert.ok(fbWire);
-    assert.equal(
+    assert.deepEqual(
       "value" in fbWire!.catch! ? fbWire!.catch.value : undefined,
-      `{"default":true}`,
+      { default: true },
     );
   });
 
@@ -333,11 +340,13 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find((w) => w.catch && "value" in w.catch);
+    const fbWire = flatWires(instr.body).find(
+      (w) => w.catch && "value" in w.catch,
+    );
     assert.ok(fbWire);
     assert.equal(
       "value" in fbWire!.catch! ? fbWire!.catch.value : undefined,
-      `"unknown"`,
+      "unknown",
     );
   });
 
@@ -355,11 +364,13 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find((w) => w.catch && "value" in w.catch);
+    const fbWire = flatWires(instr.body).find(
+      (w) => w.catch && "value" in w.catch,
+    );
     assert.ok(fbWire);
     assert.equal(
       "value" in fbWire!.catch! ? fbWire!.catch.value : undefined,
-      "null",
+      null,
     );
   });
 
@@ -377,11 +388,13 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    const fbWire = instr.wires.find((w) => w.catch && "value" in w.catch);
+    const fbWire = flatWires(instr.body).find(
+      (w) => w.catch && "value" in w.catch,
+    );
     assert.ok(fbWire, "should have pipe output wire with catch");
     assert.equal(
       "value" in fbWire!.catch! ? fbWire!.catch.value : undefined,
-      `"fallback"`,
+      "fallback",
     );
   });
 
@@ -400,7 +413,7 @@ describe("parseBridge: wire fallback (catch)", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    for (const w of instr.wires) {
+    for (const w of flatWires(instr.body)) {
       assert.equal(w.catch, undefined, "no catch on regular wire");
     }
   });
@@ -480,14 +493,14 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0]!;
+    const wire = flatWires(instr.body)[0]!;
     assert.equal(wire.sources.length, 2);
     assert.equal(wire.sources[1]!.gate, "falsy");
     assert.equal(
       wire.sources[1]!.expr.type === "literal"
         ? wire.sources[1]!.expr.value
         : undefined,
-      '"World"',
+      "World",
     );
     assert.equal(wire.catch, undefined);
   });
@@ -507,17 +520,17 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0]!;
+    const wire = flatWires(instr.body)[0]!;
     assert.equal(wire.sources.length, 2);
     assert.equal(wire.sources[1]!.gate, "falsy");
     assert.equal(
       wire.sources[1]!.expr.type === "literal"
         ? wire.sources[1]!.expr.value
         : undefined,
-      '"World"',
+      "World",
     );
     assert.ok(wire.catch && "value" in wire.catch);
-    assert.equal(wire.catch.value, '"Error"');
+    assert.equal(wire.catch.value, "Error");
   });
 
   test("wire with || JSON object literal", () => {
@@ -537,18 +550,18 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find(
+    const wire = flatWires(instr.body).find(
       (w) =>
         w.sources[0]?.expr.type === "ref" &&
         w.sources[0].expr.ref.path[0] === "data",
     )!;
     assert.equal(wire.sources.length, 2);
     assert.equal(wire.sources[1]!.gate, "falsy");
-    assert.equal(
+    assert.deepEqual(
       wire.sources[1]!.expr.type === "literal"
         ? wire.sources[1]!.expr.value
         : undefined,
-      '{"lat":0,"lon":0}',
+      { lat: 0, lon: 0 },
     );
   });
 
@@ -567,7 +580,7 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires[0]!;
+    const wire = flatWires(instr.body)[0]!;
     assert.equal(wire.sources.length, 1, "should have no fallback sources");
   });
 
@@ -587,11 +600,8 @@ describe("parseBridge: wire || falsy-fallback", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const terminalWire = instr.wires.find(
-      (w) =>
-        w.pipe &&
-        w.sources[0]?.expr.type === "ref" &&
-        w.sources[0].expr.ref.path.length === 0,
+    const terminalWire = flatWires(instr.body).find(
+      (w) => w.sources[0]?.expr.type === "pipe",
     )!;
     assert.equal(terminalWire.sources.length, 2);
     assert.equal(terminalWire.sources[1]!.gate, "falsy");
@@ -599,7 +609,7 @@ describe("parseBridge: wire || falsy-fallback", () => {
       terminalWire.sources[1]!.expr.type === "literal"
         ? terminalWire.sources[1]!.expr.value
         : undefined,
-      '"N/A"',
+      "N/A",
     );
   });
 });
@@ -681,7 +691,9 @@ describe("parseBridge: || source references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter((w) => w.to.path[0] === "label");
+    const labelWires = flatWires(instr.body).filter(
+      (w) => w.to.path[0] === "label",
+    );
     assert.equal(labelWires.length, 1, "should be one wire, not two");
     assert.ok(
       labelWires[0].sources.length >= 2,
@@ -714,7 +726,9 @@ describe("parseBridge: || source references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter((w) => w.to.path[0] === "label");
+    const labelWires = flatWires(instr.body).filter(
+      (w) => w.to.path[0] === "label",
+    );
     assert.equal(labelWires.length, 1);
     assert.ok(
       labelWires[0].sources.length >= 3,
@@ -727,7 +741,7 @@ describe("parseBridge: || source references", () => {
       labelWires[0].sources[2]!.expr.type === "literal"
         ? labelWires[0].sources[2]!.expr.value
         : undefined,
-      '"default"',
+      "default",
     );
   });
 });
@@ -754,7 +768,7 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find((w) => w.to.path[0] === "label")!;
+    const wire = flatWires(instr.body).find((w) => w.to.path[0] === "label")!;
     assert.ok(wire.catch && "ref" in wire.catch, "should have catch ref");
     assert.equal(
       wire.catch && "value" in wire.catch ? wire.catch.value : undefined,
@@ -784,12 +798,12 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = instr.wires.find((w) => !w.pipe && w.to.path[0] === "label")!;
-    assert.ok(wire.catch && "ref" in wire.catch, "should have catch ref");
-    assert.deepEqual(wire.catch.ref.path, []);
-    assert.ok(
-      instr.pipeHandles && instr.pipeHandles.length > 0,
-      "should have pipe forks",
+    const wire = flatWires(instr.body).find((w) => w.to.path[0] === "label")!;
+    assert.ok(wire.catch && "expr" in wire.catch, "should have catch expr");
+    assert.equal(
+      wire.catch.expr.type,
+      "pipe",
+      "catch should be a pipe expression",
     );
   });
 
@@ -812,7 +826,7 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const labelWires = instr.wires.filter(
+    const labelWires = flatWires(instr.body).filter(
       (w) => !w.pipe && w.to.path[0] === "label",
     );
     assert.equal(labelWires.length, 1);
@@ -827,7 +841,7 @@ describe("parseBridge: catch source/pipe references", () => {
       labelWires[0].sources[2]!.expr.type === "literal"
         ? labelWires[0].sources[2]!.expr.value
         : undefined,
-      '"default"',
+      "default",
     );
     assert.ok(
       labelWires[0].catch && "ref" in labelWires[0].catch,
