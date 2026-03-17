@@ -360,11 +360,12 @@ regressionTest("error formatting – coalesce fallback", {
             formatted,
             /Bridge Execution Error: Cannot read properties of undefined \(reading 'array'\)/,
           );
-          assert.match(formatted, /playground\.bridge:9:16/);
+          assert.match(formatted, /playground\.bridge:9:40/);
           assert.match(
             formatted,
             /o\.message <- i\.empty\.array\?\.error \?\? i\.empty\.array\.error/,
           );
+          assert.equal(maxCaretCount(formatted), "i.empty.array.error".length);
         },
         // engines may produce different trace counts depending on scheduling
         assertTraces: (t) => assert.ok(t.length >= 0),
@@ -380,6 +381,65 @@ regressionTest("error formatting – coalesce fallback", {
         assertData: { upper: "ADA", lower: "ada" },
         // engines may produce different trace counts depending on scheduling
         assertTraces: (t) => assert.ok(t.length >= 0),
+      },
+    },
+  },
+});
+
+regressionTest("error formatting – falsy fallback branch", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.searchTrains {
+      with input as i
+      with output as o
+
+      o.trainName <- i.journey.nmame || i.jomurney.category || "Walk"
+    }
+  `,
+  scenarios: {
+    "Query.searchTrains": {
+      "falsy fallback errors highlight the failing fallback branch": {
+        input: {
+          journey: {},
+        },
+        assertError: (err: any) => {
+          const formatted = formatBridgeError(err, { filename: FN });
+          assert.match(
+            formatted,
+            /Bridge Execution Error: Cannot read properties of undefined \(reading 'category'\)/,
+          );
+          assert.match(formatted, /playground\.bridge:7:37/);
+          assert.match(
+            formatted,
+            /o\.trainName <- i\.journey\.nmame \|\| i\.jomurney\.category \|\| "Walk"/,
+          );
+          assert.equal(maxCaretCount(formatted), "i.jomurney.category".length);
+        },
+        assertTraces: 0,
+      },
+      "truthy primary short-circuits the fallback": {
+        input: {
+          journey: { nmame: "IC 5" },
+        },
+        assertData: { trainName: "IC 5" },
+        assertTraces: 0,
+      },
+      "second fallback supplies the train name": {
+        input: {
+          journey: { nmame: "" },
+          jomurney: { category: "IC 3" },
+        },
+        assertData: { trainName: "IC 3" },
+        assertTraces: 0,
+      },
+      "literal fallback supplies the train name": {
+        input: {
+          journey: { nmame: "" },
+          jomurney: { category: "" },
+        },
+        assertData: { trainName: "Walk" },
+        assertTraces: 0,
       },
     },
   },

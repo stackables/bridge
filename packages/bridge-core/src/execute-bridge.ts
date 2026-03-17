@@ -1859,10 +1859,18 @@ async function evaluateSourceChain(
   pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
   const bits = scope.engine.traceBits?.get(chain.sources);
-  let lastEntryLoc: SourceLocation | undefined;
-  let firstExprLoc: SourceLocation | undefined;
   let activeSourceIndex = -1;
   let ternaryElsePath = false;
+
+  const getActiveSourceLoc = (): SourceLocation | undefined => {
+    const activeEntry =
+      activeSourceIndex >= 0 ? chain.sources[activeSourceIndex] : undefined;
+    return (
+      activeEntry?.expr.loc ??
+      activeEntry?.loc ??
+      (chain as { loc?: SourceLocation }).loc
+    );
+  };
 
   try {
     let value: unknown;
@@ -1871,8 +1879,6 @@ async function evaluateSourceChain(
       const entry = chain.sources[i]!;
       if (entry.gate === "falsy" && value) continue;
       if (entry.gate === "nullish" && value != null) continue;
-      lastEntryLoc = entry.loc;
-      if (!firstExprLoc) firstExprLoc = entry.expr.loc;
       activeSourceIndex = i;
 
       const expr = entry.expr;
@@ -1929,8 +1935,7 @@ async function evaluateSourceChain(
   } catch (err) {
     if (isFatalError(err)) {
       // Attach bridgeLoc to fatal errors (panic) so they carry source location
-      const fatLoc =
-        firstExprLoc ?? lastEntryLoc ?? (chain as { loc?: SourceLocation }).loc;
+      const fatLoc = getActiveSourceLoc();
       if (fatLoc && !(err as { bridgeLoc?: SourceLocation }).bridgeLoc) {
         (err as { bridgeLoc?: SourceLocation }).bridgeLoc = fatLoc;
       }
@@ -1967,9 +1972,7 @@ async function evaluateSourceChain(
         );
       }
     }
-    // Use the first source entry's expression loc (start of source chain)
-    const loc =
-      firstExprLoc ?? lastEntryLoc ?? (chain as { loc?: SourceLocation }).loc;
+    const loc = getActiveSourceLoc();
     if (loc) throw wrapBridgeRuntimeError(err, { bridgeLoc: loc });
     throw err;
   }
