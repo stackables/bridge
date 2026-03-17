@@ -1175,14 +1175,29 @@ export function regressionTest(name: string, data: RegressionTest) {
           }
         });
 
-        afterEach((t) => {
-          if (t.name !== "runtime") {
-            return;
-          }
+        let pendingV3Tests = scenarioNames.filter(
+          (name) => !isDisabled(scenarios[name]!.disable ?? data.disable, "v3"),
+        ).length;
+        let resolveV3Collection!: () => void;
 
-          pendingRuntimeTests -= 1;
-          if (pendingRuntimeTests === 0) {
-            resolveRuntimeCollection();
+        const v3CollectionDone = new Promise<void>((resolve) => {
+          resolveV3Collection = resolve;
+          if (pendingV3Tests === 0) {
+            resolve();
+          }
+        });
+
+        afterEach((t) => {
+          if (t.name === "runtime") {
+            pendingRuntimeTests -= 1;
+            if (pendingRuntimeTests === 0) {
+              resolveRuntimeCollection();
+            }
+          } else if (t.name === "v3") {
+            pendingV3Tests -= 1;
+            if (pendingV3Tests === 0) {
+              resolveV3Collection();
+            }
           }
         });
 
@@ -1253,8 +1268,8 @@ export function regressionTest(name: string, data: RegressionTest) {
                     assert.fail("Expected an error but execution succeeded");
                   }
 
-                  // Accumulate runtime trace coverage
-                  if (engineName === "runtime") {
+                  // Accumulate v3 trace coverage
+                  if (engineName === "v3") {
                     traceMasks.set(
                       operation,
                       (traceMasks.get(operation) ?? 0n) | executionTraceId,
@@ -1287,10 +1302,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                       assertCtx,
                     );
                     // Accumulate trace from errors too
-                    if (
-                      engineName === "runtime" &&
-                      e.executionTraceId != null
-                    ) {
+                    if (engineName === "v3" && e.executionTraceId != null) {
                       traceMasks.set(
                         operation,
                         (traceMasks.get(operation) ?? 0n) |
@@ -1588,16 +1600,16 @@ export function regressionTest(name: string, data: RegressionTest) {
 
         // After all scenarios for this operation, verify traversal coverage
         test("traversal coverage", async (t) => {
-          const allRuntimeDisabled = scenarioNames.every((name) =>
-            isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
+          const allV3Disabled = scenarioNames.every((name) =>
+            isDisabled(scenarios[name]!.disable ?? data.disable, "v3"),
           );
-          if (allRuntimeDisabled) {
-            t.skip("all scenarios have runtime disabled");
+          if (allV3Disabled) {
+            t.skip("all scenarios have v3 disabled");
             return;
           }
 
-          // Wait for all runtime scenario tests to finish populating traceMasks
-          await runtimeCollectionDone;
+          // Wait for all v3 scenario tests to finish populating traceMasks
+          await v3CollectionDone;
 
           const [type, field] = operation.split(".") as [string, string];
           const bridge = document.instructions.find(

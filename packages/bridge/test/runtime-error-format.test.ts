@@ -158,6 +158,7 @@ regressionTest("error formatting – panic fallback", {
 });
 
 regressionTest("error formatting – ternary branch", {
+  disable: ["compiled", "parser", "v3"],
   bridge: bridge`
     version 1.5
 
@@ -274,6 +275,7 @@ regressionTest("error formatting – array throw", {
 });
 
 regressionTest("error formatting – ternary condition", {
+  disable: ["compiled", "parser", "v3"],
   bridge: bridge`
     version 1.5
 

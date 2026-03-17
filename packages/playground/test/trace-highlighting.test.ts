@@ -51,8 +51,12 @@ bridge Query.test {
 }`);
 
     const manifest = buildTraversalManifest(bridge);
+    const thenEntry = manifest.find((entry) => entry.id === "name/then");
+    assert.ok(thenEntry, "expected then branch manifest entry");
     const activeIds = new Set(
-      decodeExecutionTrace(manifest, 1n << 0n).map((entry) => entry.id),
+      decodeExecutionTrace(manifest, 1n << BigInt(thenEntry.bitIndex)).map(
+        (entry) => entry.id,
+      ),
     );
     const elseEntry = manifest.find((entry) => entry.id === "name/else");
 

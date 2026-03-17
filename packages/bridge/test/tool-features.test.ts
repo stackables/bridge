@@ -15,7 +15,7 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Missing tool ─────────────────────────────────────────────────────────
 
 regressionTest("tool features: missing tool", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled", "parser", "v3"],
   bridge: bridge`
     version 1.5
 

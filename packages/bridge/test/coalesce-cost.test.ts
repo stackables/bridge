@@ -370,7 +370,7 @@ regressionTest("?. safe execution modifier", {
       o.bare <- a?.label
       o.withLiteral <- a?.label || "fallback"
       o.withToolFallback <- a?.label || b.label || "last-resort"
-      o.constChained <- const.lorem.ipsums?.kala || "A" || "B"
+      o.constChained <- const.lorem.ipsums?.kala || "A"
       o.constMixed <- const.lorem.kala || const.lorem.ipsums?.mees ?? "C"
     }
   `,

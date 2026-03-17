@@ -18,6 +18,7 @@ import type {
   ToolMap,
   WireAliasStatement,
   WireCatch,
+  WireSourceEntry,
   WireStatement,
 } from "../types.ts";
 import { SELF_MODULE } from "../types.ts";
@@ -50,6 +51,8 @@ import {
   STD_VERSION as BUNDLED_STD_VERSION,
 } from "@stackables/bridge-stdlib";
 import { resolveStd } from "../version-check.ts";
+import { buildBodyTraversalMaps } from "../enumerate-traversals.ts";
+import type { TraceWireBits } from "../enumerate-traversals.ts";
 
 export type ExecuteBridgeOptions = {
   /** Parsed bridge document (from `parseBridge` or `parseBridgeDiagnostics`). */
@@ -1000,6 +1003,19 @@ interface EngineContext {
   >;
   /** Maximum nesting depth for array mappings / shadow scopes. */
   readonly maxDepth: number;
+  /** Trace bits map — keyed by sources array reference for O(1) lookup. */
+  readonly traceBits: Map<WireSourceEntry[], TraceWireBits> | undefined;
+  /** Empty-array bits map — keyed by ArrayExpression reference. */
+  readonly emptyArrayBits: Map<Expression, number> | undefined;
+  /** Mutable trace bitmask accumulator. */
+  readonly traceMask: [bigint] | undefined;
+}
+
+/** Record a single trace bit in the engine's trace mask. */
+function recordTraceBit(engine: EngineContext, bit: number | undefined): void {
+  if (bit != null && engine.traceMask) {
+    engine.traceMask[0] |= 1n << BigInt(bit);
+  }
 }
 
 /** Pending batched tool call. */
@@ -1689,6 +1705,7 @@ function computeExprCost(
 /**
  * Evaluate a source chain (fallback gates: ||, ??).
  * Wraps with catch handler if present. Attaches bridgeLoc on error.
+ * Records execution trace bits when the engine has trace maps configured.
  */
 async function evaluateSourceChain(
   chain: SourceChain,
@@ -1696,22 +1713,71 @@ async function evaluateSourceChain(
   requestedFields?: string[],
   pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
 ): Promise<unknown> {
+  const bits = scope.engine.traceBits?.get(chain.sources);
   let lastEntryLoc: SourceLocation | undefined;
   let firstExprLoc: SourceLocation | undefined;
+  let activeSourceIndex = -1;
+  let ternaryElsePath = false;
+
   try {
     let value: unknown;
 
-    for (const entry of chain.sources) {
+    for (let i = 0; i < chain.sources.length; i++) {
+      const entry = chain.sources[i]!;
       if (entry.gate === "falsy" && value) continue;
       if (entry.gate === "nullish" && value != null) continue;
       lastEntryLoc = entry.loc;
       if (!firstExprLoc) firstExprLoc = entry.expr.loc;
-      value = await evaluateExpression(
-        entry.expr,
-        scope,
-        requestedFields,
-        pullPath,
-      );
+      activeSourceIndex = i;
+
+      const expr = entry.expr;
+
+      // Record the trace bit BEFORE evaluating so even if the expression
+      // throws, the path is marked as visited.
+      if (bits) {
+        if (i === 0 && expr.type === "ternary") {
+          // Ternary primary — defer bit recording until we know which branch
+        } else if (i === 0) {
+          recordTraceBit(scope.engine, bits.primary);
+        } else {
+          recordTraceBit(scope.engine, bits.fallbacks?.[i - 1]);
+        }
+      }
+
+      // Ternary primary — evaluate condition inline to record then/else bits
+      if (i === 0 && expr.type === "ternary" && bits) {
+        const cond = await evaluateExpression(
+          expr.cond,
+          scope,
+          undefined,
+          pullPath,
+        );
+        if (cond) {
+          recordTraceBit(scope.engine, bits.primary);
+          value = await evaluateExpression(
+            expr.then,
+            scope,
+            requestedFields,
+            pullPath,
+          );
+        } else {
+          ternaryElsePath = true;
+          recordTraceBit(scope.engine, bits.else);
+          value = await evaluateExpression(
+            expr.else,
+            scope,
+            requestedFields,
+            pullPath,
+          );
+        }
+      } else {
+        value = await evaluateExpression(
+          expr,
+          scope,
+          requestedFields,
+          pullPath,
+        );
+      }
     }
 
     return value;
@@ -1726,7 +1792,35 @@ async function evaluateSourceChain(
       throw err;
     }
     if (chain.catch) {
-      return applyCatchHandler(chain.catch, scope, pullPath);
+      // Record catch bit and delegate to catch handler
+      recordTraceBit(scope.engine, bits?.catch);
+      try {
+        return await applyCatchHandler(chain.catch, scope, pullPath);
+      } catch (catchErr) {
+        // Record catchError only for non-control-flow errors from the catch handler
+        if (
+          bits?.catchError != null &&
+          !isFatalError(catchErr) &&
+          catchErr !== BREAK_SYM &&
+          catchErr !== CONTINUE_SYM
+        ) {
+          recordTraceBit(scope.engine, bits.catchError);
+        }
+        throw catchErr;
+      }
+    }
+    // No catch — record error bit for the active source
+    if (bits) {
+      if (activeSourceIndex === 0 && ternaryElsePath) {
+        recordTraceBit(scope.engine, bits.elseError);
+      } else if (activeSourceIndex === 0) {
+        recordTraceBit(scope.engine, bits.primaryError);
+      } else if (activeSourceIndex > 0) {
+        recordTraceBit(
+          scope.engine,
+          bits.fallbackErrors?.[activeSourceIndex - 1],
+        );
+      }
     }
     // Use the first source entry's expression loc (start of source chain)
     const loc =
@@ -1978,8 +2072,20 @@ async function evaluateArrayExpr(
     undefined,
     pullPath,
   );
-  if (sourceValue == null) return null;
+  if (sourceValue == null) {
+    // Null/undefined source — record empty-array bit
+    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
+    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
+    return null;
+  }
   if (!Array.isArray(sourceValue)) return [];
+
+  // Empty array — record empty-array bit
+  if (sourceValue.length === 0) {
+    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
+    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
+    return [];
+  }
 
   // Depth protection — prevent infinite nesting
   const childDepth = scope["depth"] + 1;
@@ -2343,6 +2449,10 @@ export async function executeBridge<T = unknown>(
   const tracer =
     traceLevel !== "off" ? new TraceCollector(traceLevel) : undefined;
 
+  // Build execution trace maps for traversal tracking
+  const { chainBitsMap, emptyArrayBits } = buildBodyTraversalMaps(bridge);
+  const traceMask: [bigint] = [0n];
+
   // Create engine context
   const engine: EngineContext = {
     tools: allTools,
@@ -2358,6 +2468,9 @@ export async function executeBridge<T = unknown>(
     toolMemoCache: new Map(),
     toolBatchQueues: new Map(),
     maxDepth: options.maxDepth ?? MAX_EXECUTION_DEPTH,
+    traceBits: chainBitsMap,
+    emptyArrayBits,
+    traceMask,
   };
 
   // Create root scope and execute
@@ -2382,6 +2495,7 @@ export async function executeBridge<T = unknown>(
       if (tracer) {
         (err as { traces?: ToolTrace[] }).traces = tracer.traces;
       }
+      (err as { executionTraceId?: bigint }).executionTraceId = traceMask[0];
       throw attachBridgeErrorDocumentContext(err, doc);
     }
     // Wrap non-fatal errors in BridgeRuntimeError with traces
@@ -2389,7 +2503,7 @@ export async function executeBridge<T = unknown>(
     if (tracer) {
       wrapped.traces = tracer.traces;
     }
-    wrapped.executionTraceId = 0n;
+    wrapped.executionTraceId = traceMask[0];
     throw attachBridgeErrorDocumentContext(wrapped, doc);
   }
 
@@ -2400,6 +2514,6 @@ export async function executeBridge<T = unknown>(
   return {
     data,
     traces: tracer?.traces ?? [],
-    executionTraceId: 0n,
+    executionTraceId: traceMask[0],
   };
 }

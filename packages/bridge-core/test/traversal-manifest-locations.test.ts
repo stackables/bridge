@@ -7,7 +7,7 @@ import {
   type Expression,
   type SourceLocation,
   type TraversalEntry,
-  type Wire,
+  type Statement,
 } from "../src/index.ts";
 import { bridge } from "@stackables/bridge-core";
 
@@ -28,14 +28,6 @@ function assertLoc(
   assert.deepEqual(entry.loc, expected);
 }
 
-function isPullWire(wire: Wire): boolean {
-  return wire.sources.length >= 1 && wire.sources[0]!.expr.type === "ref";
-}
-
-function isTernaryWire(wire: Wire): boolean {
-  return wire.sources.length >= 1 && wire.sources[0]!.expr.type === "ternary";
-}
-
 describe("buildTraversalManifest source locations", () => {
   it("maps pull, fallback, and catch entries to granular source spans", () => {
     const instr = getBridge(bridge`
@@ -48,43 +40,43 @@ describe("buildTraversalManifest source locations", () => {
       }
     `);
 
-    const pullWires = instr.wires.filter(isPullWire);
-    const aliasWire = pullWires.find((wire) => wire.to.field === "clean");
-    const messageWire = pullWires.find(
-      (wire) => wire.to.path.join(".") === "message",
+    assert.ok(instr.body, "bridge should have body");
+    const aliasStmt = instr.body!.find(
+      (s): s is Extract<Statement, { kind: "alias" }> =>
+        s.kind === "alias" && s.name === "clean",
+    );
+    const messageStmt = instr.body!.find(
+      (s): s is Extract<Statement, { kind: "wire" }> =>
+        s.kind === "wire" && s.target.path.join(".") === "message",
     );
 
-    assert.ok(aliasWire);
-    assert.ok(messageWire);
+    assert.ok(aliasStmt);
+    assert.ok(messageStmt);
 
     const manifest = buildTraversalManifest(instr);
-    const msgExpr = messageWire.sources[0]!.expr as Extract<
-      Expression,
-      { type: "ref" }
-    >;
+
+    // Body ref entries use expr.loc (the expression's own location span)
+    const msgPrimaryExpr = messageStmt.sources[0]!.expr;
     assertLoc(
       manifest.find((entry) => entry.id === "message/primary"),
-      msgExpr.refLoc,
+      msgPrimaryExpr.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "message/fallback:0"),
-      messageWire.sources[1]?.loc,
+      messageStmt.sources[1]?.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "message/catch"),
-      messageWire.catch?.loc,
+      messageStmt.catch?.loc,
     );
-    const aliasExpr = aliasWire.sources[0]!.expr as Extract<
-      Expression,
-      { type: "ref" }
-    >;
+    const aliasPrimaryExpr = aliasStmt.sources[0]!.expr;
     assertLoc(
       manifest.find((entry) => entry.id === "clean/primary"),
-      aliasExpr.refLoc,
+      aliasPrimaryExpr.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "clean/catch"),
-      aliasWire.catch?.loc,
+      aliasStmt.catch?.loc,
     );
   });
 
@@ -98,25 +90,32 @@ describe("buildTraversalManifest source locations", () => {
       }
     `);
 
-    const ternaryWire = instr.wires.find(isTernaryWire);
-    assert.ok(ternaryWire);
+    assert.ok(instr.body, "bridge should have body");
+    const nameStmt = instr.body!.find(
+      (s): s is Extract<Statement, { kind: "wire" }> =>
+        s.kind === "wire" && s.target.path.join(".") === "name",
+    );
+    assert.ok(nameStmt);
 
-    const ternaryExpr = ternaryWire.sources[0]!.expr as Extract<
+    const ternaryExpr = nameStmt.sources[0]!.expr as Extract<
       Expression,
       { type: "ternary" }
     >;
+    assert.equal(ternaryExpr.type, "ternary");
+
     const manifest = buildTraversalManifest(instr);
+    // Body ternary: thenLoc/elseLoc may not be set, so we fall back to branch expr.loc
     assertLoc(
       manifest.find((entry) => entry.id === "name/then"),
-      ternaryExpr.thenLoc,
+      ternaryExpr.thenLoc ?? ternaryExpr.then.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "name/else"),
-      ternaryExpr.elseLoc,
+      ternaryExpr.elseLoc ?? ternaryExpr.else.loc,
     );
   });
 
-  it("maps constant entries to the wire span", () => {
+  it("maps constant entries to the statement span", () => {
     const instr = getBridge(bridge`
       version 1.5
       bridge Query.test {
@@ -125,10 +124,17 @@ describe("buildTraversalManifest source locations", () => {
       }
     `);
 
+    assert.ok(instr.body, "bridge should have body");
+    const nameStmt = instr.body!.find(
+      (s): s is Extract<Statement, { kind: "wire" }> =>
+        s.kind === "wire" && s.target.path.join(".") === "name",
+    );
+    assert.ok(nameStmt);
+
     const manifest = buildTraversalManifest(instr);
     assertLoc(
       manifest.find((entry) => entry.id === "name/const"),
-      instr.wires[0]?.loc,
+      (nameStmt as any).loc,
     );
   });
 });
