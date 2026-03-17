@@ -109,6 +109,7 @@ export {
 
 export {
   buildTraversalManifest,
+  buildTraversalManifest as enumerateTraversalIds,
   buildBodyTraversalMaps,
   decodeExecutionTrace,
   buildEmptyArrayBitsMap,
