@@ -150,7 +150,7 @@ directly from Chevrotain CST nodes, separate from the legacy `buildBridgeBody()`
 
 ---
 
-## Phase 4: Update Execution Engine
+## Phase 4: Update Execution Engine ✅ COMPLETE (v1 superseded by v3)
 
 _Depends on Phase 3. Most critical phase._
 
@@ -174,20 +174,23 @@ Files: `ExecutionTree.ts`, `scheduleTools.ts`, `resolveWires.ts`,
     refactored to use O(1) index lookups
   - `sameTrunk` and `pathEquals` no longer imported in ExecutionTree.ts
 
-### Remaining
+### Remaining (v1 engine — superseded by Phase 4b)
 
-1. **Scope chain**: `ScopeFrame { handles, wires, parent? }` — tool lookup
-   walks frames upward (shadowing semantics)
-2. **Array execution**: `ArrayExpression` evaluated → shadow tree per element
-   with nested `body: Statement[]` and iterator binding
-3. **Define inlining**: Inline as nested `Statement[]` blocks
-4. **`schedule()`/`pullSingle()`**: Scope-aware resolution
+These items were planned for the v1 `ExecutionTree` engine but are now
+superseded by the v3 pull engine (Phase 4b) which implements all of them
+from scratch on the `body: Statement[]` IR. The v1 engine continues to
+operate on the legacy `Wire[]` IR and will be removed in Phase 7.
 
-**Gate:** All behavioral `regressionTest` suites must pass.
+1. ~~**Scope chain**~~ → v3 `ExecutionScope` with parent pointer chain
+2. ~~**Array execution**~~ → v3 `evaluateArrayExpr()` with per-element scope
+3. ~~**Define inlining**~~ → v3 `executeDefine()` with lazy factories
+4. ~~**`schedule()`/`pullSingle()`**~~ → v3 `resolveRequestedFields()` with sparse fieldsets
+
+**Gate:** All behavioral `regressionTest` suites must pass. ✅ PASSING
 
 ---
 
-## Phase 4b: V3 Scope-Based Pull Engine
+## Phase 4b: V3 Scope-Based Pull Engine ✅ COMPLETE
 
 _Parallel with Phase 4. File: `bridge-core/src/v3/execute-bridge.ts`._
 
@@ -310,22 +313,26 @@ coalesce-cost.test.ts (error propagation), builtin-tools.test.ts (error propagat
 - Fix: const `pathSafe` array sliced alongside path in `resolveConst`
 - Safe navigation (`?.`) on non-existent const paths now works correctly
 
-#### V3-Phase 9: Overdefinition / Multi-wire
+#### V3-Phase 9: Overdefinition / Multi-wire ✅ COMPLETE
 
 **Unlocks:** coalesce-cost.test.ts (overdefinition), shared-parity.test.ts
 (overdefinition)
 
-- Multiple wires to same target with cost-based prioritization
-- Nullish coalescing across wires
+- `groupWiresByPath()` groups wires by `target.path.join(".")` for overdefinition detection
+- `orderOverdefinedWires()` sorts by `computeExprCost` (0=literal/input, 1=sync, 2=async)
+- `callTool`, `executeDefine`, `evaluatePipeExpression` all patched with grouped wire logic
+- Sequential evaluation within groups with `value != null` short-circuit
+- `lastError` tracking — rethrown if all wires in group fail
+- Regression test: `test/bugfixes/overdef-input-race.test.ts`
 
-#### V3-Phase 10: Advanced Features
+#### V3-Phase 10: Advanced Features ✅ COMPLETE
 
-- Spread syntax (`... <- a`)
-- Native batching
-- Memoized loop tools
-- Error location tracking (bridgeLoc on BridgeRuntimeError)
-- Prototype pollution guards
-- Infinite loop protection
+- ✅ Spread syntax (`... <- a`) — `addSpread()` / `getSpreads()` in ExecutionScope
+- ✅ Native batching — batch tool call support in `callTool`
+- ✅ Memoized loop tools — `memoizedToolKeys` + cache check in `resolveToolResult`
+- ✅ Error location tracking — `bridgeLoc` on `BridgeRuntimeError`
+- ✅ Prototype pollution guards — `UNSAFE_KEYS` in `getPath`/`setPath`
+- ✅ Infinite loop protection — depth tracking in `ExecutionScope` constructor
 - ✅ Catch pipe source — `WireCatch` extended with `{ expr: Expression }` variant;
   `buildCatch` in ast-builder uses `buildSourceExpression` for pipe chains;
   `applyCatchHandler` in v3 engine evaluates full expressions;
@@ -333,12 +340,7 @@ coalesce-cost.test.ts (error propagation), builtin-tools.test.ts (error propagat
 
 #### V3 Remaining Disabled Scenarios
 
-All previously v3-disabled scenarios are now resolved:
-
-- ✅ `control-flow.test.ts` — panic ordering fixed via concurrent wire evaluation
-- ✅ `resilience.test.ts` — catch pipe source fixed via `WireCatch { expr }` variant
-- Remaining: 1 scenario with `disable: true` (alias.test.ts — parser limitation:
-  array mapping inside coalesce alternative)
+All v3 feature phases are complete. Remaining disabled items:\n\n- `disable: true` — alias.test.ts (parser limitation: array mapping inside coalesce alternative)\n- `disable: [\"compiled\", \"parser\"]` — default for ~100+ regression tests (parser roundtrip\n disabled until Phase 5 serializer rewrite; compiler disabled until Phase 6)
 
 ---
 
@@ -346,12 +348,67 @@ All previously v3-disabled scenarios are now resolved:
 
 _Depends on Phase 4. Can run parallel with early Phase 6._
 
-1. Rewrite `bridge-format.ts` to walk `Statement[]` tree
-2. Update `bridge-printer.ts` for new AST shape
-3. Update `bridge-lint.ts` to walk `Statement[]`
-4. Re-enable parser roundtrip tests (with updated fixtures)
-5. Re-enable `execution-tree.test.ts`, `resolve-wires.test.ts`,
-   `enumerate-traversals.test.ts` with updated assertions
+### Goal
+
+Add a **new `serializeBody()` function** that serializes the `body: Statement[]`
+IR directly to Bridge source text. The existing `serializeBridgeBlock()` does
+complex reverse-engineering (detecting pipe forks, expression forks, concat
+forks, array scope reconstruction from flat wires) — none of that is needed
+when walking the structured IR.
+
+### Approach
+
+The new serializer will be in-file next to the existing one. `serializeBridgeBlock()`
+and `serializeDefineBlock()` gain a `body` fast-path: when `bridge.body` (or
+`def.body`) is present, delegate to the new `serializeBody()` function.
+Fall through to the legacy path when `body` is absent (backward compat).
+
+The existing serializer and all its helpers stay intact — they're still used by
+the legacy path and by `serializeToolBlock()` (tool blocks don't have `body` in
+the same way).
+
+### Implementation Steps
+
+1. **`serializeBody(stmts, indent, handleMap)`** — recursive walker:
+   - `WireStatement` → `target <- serExprChain(sources) [catch handler]`
+   - `WireAliasStatement` → `alias name <- serExprChain(sources)`
+   - `SpreadStatement` → `... <- serExprChain(sources)`
+   - `WithStatement` → `with name [as handle] [memoize]`
+   - `ScopeStatement` → `target { serializeBody(body, indent+1) }`
+   - `ForceStatement` → `force handle [catch null]`
+
+2. **`serExprChain(sources, catch)`** — source chain serializer:
+   - Walk `WireSourceEntry[]` with gate operators (`||`, `??`)
+   - `serExpression(expr)` for each entry
+
+3. **`serExpression(expr)`** — recursive expression serializer:
+   - `ref` → handle-resolved reference with safe navigation (`?.`)
+   - `literal` → formatted value
+   - `ternary` → `if cond then a else b`
+   - `and`/`or` → `left and right` / `left or right`
+   - `control` → `throw "msg"` / `panic "msg"` / `break` / `continue`
+   - `array` → `source[] as iter { body }`
+   - `pipe` → `handle:source`
+   - `binary` → `left op right` (with precedence parens)
+   - `unary` → `not operand`
+   - `concat` → `"text{ref}text"` template string
+
+4. **Fast-path in `serializeBridgeBlock()` and `serializeDefineBlock()`**
+
+5. **Re-enable parser roundtrip** — change `isDisabled()` default to only
+   disable `"compiled"`, or change individual tests from
+   `disable: ["compiled", "parser"]` to `disable: ["compiled"]`
+
+6. **Verify** — `pnpm build && pnpm lint && pnpm test`
+
+### Notes
+
+- `serializeToolBlock()` stays unchanged — tool blocks use a different
+  shape (instructions with `.path = /foo` syntax, not statements)
+- Handle resolution: `serExpression` needs a handle map to convert `NodeRef`
+  module+type+field back to the user-facing handle alias. Can reuse
+  `buildHandleMap()` or the `WithStatement` bindings from the `body` itself.
+- Precedence for binary ops: `* /` > `+ -` > `== != > >= < <=` > `and` > `or`
 
 ---
 

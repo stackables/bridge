@@ -3,7 +3,7 @@ import { tools } from "./utils/bridge-tools.ts";
 import { bridge } from "@stackables/bridge";
 
 regressionTest("tool self-wire runtime", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

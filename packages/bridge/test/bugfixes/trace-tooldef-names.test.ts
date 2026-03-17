@@ -43,7 +43,7 @@ function assertTraceShape(traces: ToolTrace[]) {
 // ── 1. ToolDef-backed tool: tool vs fn fields ───────────────────────────────
 
 regressionTest("trace: ToolDef name preserved in trace", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 
@@ -89,7 +89,7 @@ regressionTest("trace: ToolDef name preserved in trace", {
 // ── 2. Multiple ToolDefs from same function are distinguishable ─────────────
 
 regressionTest("trace: multiple ToolDefs from same fn are distinguishable", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 
@@ -154,7 +154,7 @@ regressionTest("trace: multiple ToolDefs from same fn are distinguishable", {
 // ── 3. Plain tool (no ToolDef) — tool and fn are identical ──────────────────
 
 regressionTest("trace: plain tool has matching tool and fn fields", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 
@@ -188,7 +188,7 @@ regressionTest("trace: plain tool has matching tool and fn fields", {
 // ── 4. ToolDef used in define block ─────────────────────────────────────────
 
 regressionTest("trace: ToolDef in define block preserves name", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 
@@ -243,7 +243,7 @@ regressionTest("trace: ToolDef in define block preserves name", {
 // ── 5. Same tool referenced from two define blocks ──────────────────────────
 
 regressionTest("trace: same tool in two defines produces correct names", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 

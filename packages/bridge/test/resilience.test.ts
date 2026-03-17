@@ -12,7 +12,7 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Const in bridge ──────────────────────────────────────────────────────
 
 regressionTest("resilience: const in bridge", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -49,7 +49,7 @@ regressionTest("resilience: const in bridge", {
 // ── 2. Tool on error ────────────────────────────────────────────────────────
 
 regressionTest("resilience: tool on error", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -159,7 +159,7 @@ regressionTest("resilience: tool on error", {
 // ── 3. Wire catch ───────────────────────────────────────────────────────────
 
 regressionTest("resilience: wire catch", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -240,7 +240,7 @@ regressionTest("resilience: wire catch", {
 // ── 4. Combined: on error + catch + const ───────────────────────────────────
 
 regressionTest("resilience: combined on error + catch + const", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -306,7 +306,7 @@ regressionTest("resilience: combined on error + catch + const", {
 // ── 5. Wire || falsy-fallback ───────────────────────────────────────────────
 
 regressionTest("resilience: wire falsy-fallback (||)", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -486,7 +486,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
 // ── 7. || source + catch source ─────────────────────────────────────────────
 
 regressionTest("resilience: || source + catch source (COALESCE)", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -605,7 +605,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
     "Query.catchPipeSource": {
       "api succeeds — catch not used": {
         input: {},
-        disable: ["compiled", "parser"],
+        disable: ["compiled"],
         tools: {
           api: () => ({ result: "direct-value" }),
           fallbackApi: () => ({ backup: "unused" }),
@@ -617,7 +617,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
       },
       "catch pipes fallback through tool": {
         input: {},
-        disable: ["compiled", "parser"],
+        disable: ["compiled"],
         tools: {
           api: () => {
             throw new Error("api down");

@@ -9,7 +9,7 @@ import { bridge } from "@stackables/bridge";
 
 describe("builtin tools", () => {
   regressionTest("string builtins", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.format {
@@ -85,7 +85,7 @@ describe("builtin tools", () => {
   // ── Custom tools alongside std ──────────────────────────────────────────
 
   regressionTest("custom tools alongside std", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.process {
@@ -115,7 +115,7 @@ describe("builtin tools", () => {
   // ── Array filter ────────────────────────────────────────────────────────
 
   regressionTest("array filter", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.admins {
@@ -177,7 +177,7 @@ describe("builtin tools", () => {
   // ── Array find ──────────────────────────────────────────────────────────
 
   regressionTest("array find", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.findUser {
@@ -242,7 +242,7 @@ describe("builtin tools", () => {
   // ── Array first ─────────────────────────────────────────────────────────
 
   regressionTest("array first", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.first {
@@ -283,7 +283,7 @@ describe("builtin tools", () => {
   // ── Array first strict mode ─────────────────────────────────────────────
 
   regressionTest("array first strict mode", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       tool pf from std.arr.first {
@@ -317,7 +317,7 @@ describe("builtin tools", () => {
   // ── toArray ─────────────────────────────────────────────────────────────
 
   regressionTest("toArray", {
-    disable: ["compiled", "parser"],
+    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.normalize {

@@ -65,7 +65,7 @@ function assertSequential(traces: ToolTrace[], before: string, after: string) {
 // after geocode, formatGreeting runs independently in parallel.
 
 regressionTest("scheduling: diamond dependency dedup", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -125,7 +125,7 @@ regressionTest("scheduling: diamond dependency dedup", {
 // timing (two 60ms calls completing in ~60ms, not 120ms).
 
 regressionTest("scheduling: pipe forks run independently", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -159,7 +159,7 @@ regressionTest("scheduling: pipe forks run independently", {
 // Execution: i.text → toUpper → normalize (right-to-left)
 
 regressionTest("scheduling: chained pipes execute right-to-left", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -193,7 +193,7 @@ regressionTest("scheduling: chained pipes execute right-to-left", {
 // The tool should be called the minimum number of times necessary.
 
 regressionTest("scheduling: shared tool dedup across pipe and direct", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

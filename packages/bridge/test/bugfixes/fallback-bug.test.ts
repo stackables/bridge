@@ -15,7 +15,7 @@ import { tools } from "../utils/bridge-tools.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("string interpolation || fallback priority", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: `
     version 1.5
 

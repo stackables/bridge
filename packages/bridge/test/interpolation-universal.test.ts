@@ -14,7 +14,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("universal interpolation: fallback", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -98,7 +98,7 @@ regressionTest("universal interpolation: fallback", {
 });
 
 regressionTest("universal interpolation: ternary", {
-  disable: ["compiled", "parser"],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
