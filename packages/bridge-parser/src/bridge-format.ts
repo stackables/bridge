@@ -31,37 +31,6 @@ export function parseBridge(
 
 const BRIDGE_VERSION = "1.5";
 
-const RESERVED_BARE_VALUE_KEYWORDS = new Set([
-  // Declaration keywords
-  "version",
-  "bridge",
-  "tool",
-  "define",
-  "with",
-  "input",
-  "output",
-  "context",
-  "const",
-  "from",
-  "as",
-  "alias",
-  "on",
-  "error",
-  "force",
-  "catch",
-  // Control flow
-  "continue",
-  "break",
-  "throw",
-  "panic",
-  "if",
-  "pipe",
-  // Boolean/logic operators
-  "and",
-  "or",
-  "not",
-]);
-
 /** Serialize a ControlFlowInstruction to its textual form. */
 function serializeControl(ctrl: ControlFlowInstruction): string {
   if (ctrl.kind === "throw") return `throw ${JSON.stringify(ctrl.message)}`;
