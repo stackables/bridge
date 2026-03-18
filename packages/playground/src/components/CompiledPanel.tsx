@@ -1,14 +1,7 @@
 import { useMemo } from "react";
-import { Editor } from "./Editor";
 import type { BridgeOperation } from "../engine";
 import { compileOperation } from "../engine";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { Editor } from "./Editor";
 
 type Props = {
   bridge: string;
@@ -20,9 +13,7 @@ type Props = {
 
 export function CompiledPanel({
   bridge,
-  operations,
   selectedOperation,
-  onOperationChange,
   autoHeight = false,
 }: Props) {
   const compiledCode = useMemo(
