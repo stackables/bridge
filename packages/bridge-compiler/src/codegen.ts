@@ -75,15 +75,62 @@ function jsStr(s: string): string {
  * Compile a NodeRef path access into JS property access.
  * e.g. ref with path ["data", "items"] → `.data.items`
  * Handles rootSafe (?.) and pathSafe per-segment.
+ *
+ * Bridge `?.` has segment-local semantics: `a?.b.c` means "if a is nullish,
+ * substitute undefined for .b, then access .c normally (may throw)".
+ * JS `?.` short-circuits the entire chain instead, so when a safe segment
+ * is followed by a non-safe segment we must generate a __getPath helper call.
+ *
+ * When `baseExpr` is provided and mixed safe/non-safe is detected, returns
+ * a complete expression `__getPath(base, [...], [...])` instead of a suffix.
+ * Otherwise returns a property-access suffix string.
  */
-function emitPath(ref: NodeRef, startIdx = 0, forceRootSafe = false): string {
+function emitPath(
+  ref: NodeRef,
+  startIdx = 0,
+  forceRootSafe = false,
+  baseExpr?: string,
+): string {
+  const pathSlice = ref.path.slice(startIdx);
+  if (pathSlice.length === 0) return "";
+
+  // Build per-segment safe flags
+  const safes = pathSlice.map((_, i) => {
+    const idx = i + startIdx;
+    return !!(
+      ref.pathSafe?.[idx] ||
+      (idx === 0 && (ref.rootSafe || forceRootSafe))
+    );
+  });
+
+  // Detect safe→non-safe transition
+  let hasMixedSafe = false;
+  for (let i = 0; i < pathSlice.length - 1; i++) {
+    if (safes[i]) {
+      for (let j = i + 1; j < pathSlice.length; j++) {
+        if (!safes[j]) {
+          hasMixedSafe = true;
+          break;
+        }
+      }
+      if (hasMixedSafe) break;
+    }
+  }
+
+  if (hasMixedSafe && baseExpr) {
+    // Use __getPath helper for Bridge's segment-local safe navigation
+    const segs = pathSlice.map((s) => jsStr(s)).join(", ");
+    const flags = safes.join(", ");
+    return `__getPath(${baseExpr}, [${segs}], [${flags}])`;
+  }
+
+  // Standard path emission
   let code = "";
   for (let i = startIdx; i < ref.path.length; i++) {
     const seg = ref.path[i]!;
     const safe =
       ref.pathSafe?.[i] || (i === 0 && (ref.rootSafe || forceRootSafe));
     code += safe ? "?." : ".";
-    // Use bracket notation for non-identifier segments
     if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(seg)) {
       code += seg;
     } else {
@@ -279,6 +326,7 @@ class CodegenContext {
     this.emit("const __trace = __opts?.__trace;");
     this.emitMemoHelper();
     this.emitPipeHelper();
+    this.emitGetPathHelper();
     this.emitConsts();
     this.emitToolLookups(rootScope);
     this.emit("let __output = {};");
@@ -372,6 +420,32 @@ class CodegenContext {
     this.emit("");
   }
 
+  /**
+   * Emit __getPath helper for Bridge's segment-local safe navigation.
+   * Matches runtime getPath semantics: ?. only makes the immediately
+   * following segment safe; subsequent non-safe segments throw normally.
+   */
+  private emitGetPathHelper() {
+    this.emit("function __getPath(__obj, __segs, __safe) {");
+    this.pushIndent();
+    this.emit("let __c = __obj;");
+    this.emit("for (let __i = 0; __i < __segs.length; __i++) {");
+    this.pushIndent();
+    this.emit("if (__c == null) {");
+    this.pushIndent();
+    this.emit("if (__safe[__i]) { __c = undefined; continue; }");
+    this.emit("return __c[__segs[__i]];");
+    this.popIndent();
+    this.emit("}");
+    this.emit("__c = __c[__segs[__i]];");
+    this.popIndent();
+    this.emit("}");
+    this.emit("return __c;");
+    this.popIndent();
+    this.emit("}");
+    this.emit("");
+  }
+
   private emitConsts() {
     if (this.constDefs.size === 0) return;
     this.emit("const __consts = {");
@@ -406,28 +480,22 @@ class CodegenContext {
       }
     }
 
+    // Collect tool handles declared in this body's `with` statements
+    const localToolHandles = new Set<string>();
+    for (const stmt of body) {
+      if (stmt.kind === "with" && stmt.binding.kind === "tool") {
+        localToolHandles.add(stmt.binding.handle);
+      }
+    }
+
     // Build a map of tool handles → input wires for memoized tool getters
     const toolInputs = this.collectToolInputs(body, scope);
 
-    // Ensure tools with ToolDef bodies always get a getter (even with no bridge input wires)
-    for (const h of this.bridge.handles) {
-      if (h.kind === "tool" && !toolInputs.has(h.handle)) {
-        const toolDef = this.resolveToolDef(h.name);
-        if (toolDef && toolDef.body.length > 0) {
-          toolInputs.set(h.handle, []);
-        }
-      }
-    }
-    // Also check with-bindings in the body (from inner scopes)
-    for (const stmt of body) {
-      if (stmt.kind === "with" && stmt.binding.kind === "tool") {
-        const h = stmt.binding;
-        if (!toolInputs.has(h.handle)) {
-          const toolDef = this.resolveToolDef(h.name);
-          if (toolDef && toolDef.body.length > 0) {
-            toolInputs.set(h.handle, []);
-          }
-        }
+    // Ensure ALL local tool handles get memoized getters for tracing & memoization,
+    // even when they have no bridge input wires or ToolDef body.
+    for (const handle of localToolHandles) {
+      if (!toolInputs.has(handle)) {
+        toolInputs.set(handle, []);
       }
     }
 
@@ -450,11 +518,14 @@ class CodegenContext {
 
     // Second pass: compile wires, scopes, force statements.
     // Batch consecutive output wires for parallel execution via Promise.all.
+    // Force statements are deferred until after output wires (matching runtime
+    // semantics where force runs concurrently with output resolution).
     let pendingWires: {
       valueExpr: string;
       targetExpr: string;
       isRoot: boolean;
     }[] = [];
+    const deferredForces: ForceStatement[] = [];
     const flushPending = () => {
       if (pendingWires.length === 0) return;
       this.emitParallelAssignments(
@@ -525,7 +596,13 @@ class CodegenContext {
               stmt.sources[0]!.expr.type === "array";
             if (isArrayWire) {
               flushPending();
-              this.compileWire(stmt, scope, outputVar, pathPrefix);
+              this.compileWire(
+                stmt,
+                scope,
+                outputVar,
+                pathPrefix,
+                absolutePrefix,
+              );
             } else {
               const target = stmt.target;
               const targetExpr = this.compileTargetRef(
@@ -563,8 +640,8 @@ class CodegenContext {
           this.compileSpread(stmt, scope, outputVar);
           break;
         case "force":
-          flushPending();
-          this.compileForce(stmt, scope);
+          // Defer force statements until after output wires
+          deferredForces.push(stmt);
           break;
         case "with":
           // Already handled in first pass
@@ -572,6 +649,11 @@ class CodegenContext {
       }
     }
     flushPending();
+
+    // Emit deferred force statements after all output wires
+    for (const stmt of deferredForces) {
+      this.compileForce(stmt, scope);
+    }
   }
 
   private registerWithBinding(stmt: WithStatement, scope: ScopeChain) {
@@ -1397,6 +1479,7 @@ class CodegenContext {
     scope: ScopeChain,
     outputVar: string,
     pathPrefix: string[],
+    absolutePrefix: string[] = [],
   ) {
     const target = wire.target;
 
@@ -1420,10 +1503,14 @@ class CodegenContext {
 
     // Special handling for array source expressions (e.g. i.list[] as item { ... })
     if (wire.sources.length === 1 && wire.sources[0]!.expr.type === "array") {
+      // Compute absolute prefix for array element body:
+      // inner fields are at absolutePrefix + target.path (e.g. ["legs"])
+      const arrayAbsPrefix = [...absolutePrefix, ...pathPrefix, ...target.path];
       this.compileArrayAssignment(
         wire.sources[0]!.expr as Extract<Expression, { type: "array" }>,
         targetExpr,
         scope,
+        arrayAbsPrefix,
       );
       return;
     }
@@ -1980,6 +2067,21 @@ class CodegenContext {
     }
   }
 
+  /**
+   * Combine a base expression with a path, using __getPath for mixed safe paths.
+   */
+  private emitAccessPath(
+    base: string,
+    ref: NodeRef,
+    startIdx = 0,
+    forceRootSafe = false,
+  ): string {
+    const pathStr = emitPath(ref, startIdx, forceRootSafe, base);
+    // If emitPath returned a __getPath call (full expression), use it directly
+    if (pathStr.startsWith("__getPath(")) return pathStr;
+    return `${base}${pathStr}`;
+  }
+
   private compileRefExpr(ref: NodeRef, scope: ScopeChain): string {
     // Element references (array iteration) — must resolve BEFORE self-module
     // because element refs share the same module/type/field as self-module refs.
@@ -1987,7 +2089,7 @@ class CodegenContext {
       const depth = ref.elementDepth ?? 0;
       const stackIdx = this.iteratorStack.length - 1 - depth;
       if (stackIdx >= 0) {
-        return `${this.iteratorStack[stackIdx]!.iterVar}${emitPath(ref)}`;
+        return this.emitAccessPath(this.iteratorStack[stackIdx]!.iterVar, ref);
       }
     }
 
@@ -1995,7 +2097,7 @@ class CodegenContext {
     if (ref.module === "__local" || ref.type === "__local") {
       const binding = scope.get(ref.field);
       if (binding) {
-        return `${binding.jsExpr}${emitPath(ref)}`;
+        return this.emitAccessPath(binding.jsExpr, ref);
       }
     }
 
@@ -2005,17 +2107,17 @@ class CodegenContext {
       ref.type === this.bridge.type &&
       ref.field === this.bridge.field
     ) {
-      return `input${emitPath(ref)}`;
+      return this.emitAccessPath("input", ref);
     }
 
     // Context references
     if (ref.module === SELF_MODULE && ref.type === "Context") {
-      return `context${emitPath(ref)}`;
+      return this.emitAccessPath("context", ref);
     }
 
     // Const references
     if (ref.module === SELF_MODULE && ref.type === "Const") {
-      return `__consts${emitPath(ref)}`;
+      return this.emitAccessPath("__consts", ref);
     }
 
     // Define-type references — inside a define body, source refs to the define
@@ -2023,7 +2125,7 @@ class CodegenContext {
     if (ref.module === SELF_MODULE && ref.type === "Define") {
       const marker = scope.get("__defineInput_" + ref.field);
       if (marker) {
-        return `${marker.jsExpr}${emitPath(ref)}`;
+        return this.emitAccessPath(marker.jsExpr, ref);
       }
     }
 
@@ -2036,9 +2138,12 @@ class CodegenContext {
       scope.get(refToolName) ?? scope.findTool(refToolName, ref.instance);
     if (scopeBinding?.kind === "tool") {
       if (ref.rootSafe) {
-        return `(await ${scopeBinding.jsExpr}().catch(() => undefined))${emitPath(ref)}`;
+        return this.emitAccessPath(
+          `(await ${scopeBinding.jsExpr}().catch(() => undefined))`,
+          ref,
+        );
       }
-      return `(await ${scopeBinding.jsExpr}())${emitPath(ref)}`;
+      return this.emitAccessPath(`(await ${scopeBinding.jsExpr}())`, ref);
     }
 
     const handle = this.findSourceHandle(ref, scope);
@@ -2047,12 +2152,15 @@ class CodegenContext {
       if (binding?.kind === "tool") {
         if (ref.rootSafe) {
           // Error suppression via ?. — swallow tool errors → undefined
-          return `(await ${binding.jsExpr}().catch(() => undefined))${emitPath(ref)}`;
+          return this.emitAccessPath(
+            `(await ${binding.jsExpr}().catch(() => undefined))`,
+            ref,
+          );
         }
-        return `(await ${binding.jsExpr}())${emitPath(ref)}`;
+        return this.emitAccessPath(`(await ${binding.jsExpr}())`, ref);
       }
       if (binding) {
-        return `${binding.jsExpr}${emitPath(ref)}`;
+        return this.emitAccessPath(binding.jsExpr, ref);
       }
     }
 
@@ -2061,7 +2169,7 @@ class CodegenContext {
       const defineHandle = ref.module.substring("__define_".length);
       const defineBinding = scope.get(defineHandle);
       if (defineBinding?.kind === "define") {
-        return `(await ${defineBinding.jsExpr}())${emitPath(ref)}`;
+        return this.emitAccessPath(`(await ${defineBinding.jsExpr}())`, ref);
       }
     }
 
@@ -2069,9 +2177,12 @@ class CodegenContext {
     const toolKey =
       ref.module === SELF_MODULE ? ref.field : `${ref.module}.${ref.field}`;
     if (ref.rootSafe) {
-      return `(await tools[${jsStr(toolKey)}]().catch(() => undefined))${emitPath(ref)}`;
+      return this.emitAccessPath(
+        `(await tools[${jsStr(toolKey)}]().catch(() => undefined))`,
+        ref,
+      );
     }
-    return `(await tools[${jsStr(toolKey)}]())${emitPath(ref)}`;
+    return this.emitAccessPath(`(await tools[${jsStr(toolKey)}]())`, ref);
   }
 
   private findSourceHandle(
@@ -2111,23 +2222,33 @@ class CodegenContext {
 
   /**
    * Compile an array mapping expression as a wire assignment.
-   * Emits: targetExpr = await Promise.all((source ?? []).map(async (el) => { ... }))
+   * Uses a for-loop to support continue/break control flow sentinels.
    */
   private compileArrayAssignment(
     expr: Extract<Expression, { type: "array" }>,
     targetExpr: string,
     scope: ScopeChain,
+    absolutePrefix: string[] = [],
   ) {
     const depth = this.arrayDepthCounter++;
     const iterVar = `__el_${depth}`;
     const outVar = `__elOut_${depth}`;
+    const resultVar = `__result_${depth}`;
+    const arrVar = `__arr_${depth}`;
 
     // Compile the source iterable expression
     const sourceExpr = this.compileExpression(expr.source, scope);
 
-    this.emit(
-      `${targetExpr} = await Promise.all((${sourceExpr} ?? []).map(async (${iterVar}) => {`,
-    );
+    // Preserve null/undefined source — only map when array-like
+    this.emit(`const ${arrVar} = ${sourceExpr};`);
+    this.emit(`if (${arrVar} == null) {`);
+    this.pushIndent();
+    this.emit(`${targetExpr} = ${arrVar};`);
+    this.popIndent();
+    this.emit(`} else {`);
+    this.pushIndent();
+    this.emit(`const ${resultVar} = [];`);
+    this.emit(`for (const ${iterVar} of ${arrVar}) {`);
     this.pushIndent();
     this.emit(`const ${outVar} = {};`);
 
@@ -2142,13 +2263,23 @@ class CodegenContext {
     this.iteratorStack.push({ iterVar, outVar });
 
     // Compile body using the child scope with element output as outputVar
-    this.compileBody(expr.body, childScope, outVar);
+    this.compileBody(expr.body, childScope, outVar, [], absolutePrefix);
 
     this.iteratorStack.pop();
 
-    this.emit(`return ${outVar};`);
+    // Check for control flow sentinels in output fields
+    this.emit(
+      `if (Object.values(${outVar}).some(__v => __v === Symbol.for("BRIDGE_BREAK"))) break;`,
+    );
+    this.emit(
+      `if (Object.values(${outVar}).some(__v => __v === Symbol.for("BRIDGE_CONTINUE"))) continue;`,
+    );
+    this.emit(`${resultVar}.push(${outVar});`);
     this.popIndent();
-    this.emit(`}));`);
+    this.emit(`}`);
+    this.emit(`${targetExpr} = ${resultVar};`);
+    this.popIndent();
+    this.emit(`}`);
   }
 
   private compileArrayExpr(
@@ -2345,6 +2476,10 @@ class CodegenContext {
         return `(() => { throw new Error(${jsStr(ctrl.message ?? "")}); })()`;
       case "panic":
         return `(() => { throw new (__opts?.__BridgePanicError ?? Error)(${jsStr(ctrl.message ?? "")}); })()`;
+      case "continue":
+        return `Symbol.for("BRIDGE_CONTINUE")`;
+      case "break":
+        return `Symbol.for("BRIDGE_BREAK")`;
       default:
         return "undefined";
     }

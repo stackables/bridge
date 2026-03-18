@@ -12,7 +12,6 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Pull wires + constants ───────────────────────────────────────────────
 
 regressionTest("parity: pull wires + constants", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -173,7 +172,6 @@ regressionTest("parity: pull wires + constants", {
 // ── 2. Fallback operators (??, ||) ──────────────────────────────────────────
 
 regressionTest("parity: fallback operators", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -257,7 +255,6 @@ regressionTest("parity: fallback operators", {
           backup: () => ({ val: "from-backup" }),
         },
         assertData: { value: "from-backup" },
-        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -275,7 +272,6 @@ regressionTest("parity: fallback operators", {
 // ── 3. Array mapping ────────────────────────────────────────────────────────
 
 regressionTest("parity: array mapping", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -415,7 +411,6 @@ regressionTest("parity: array mapping", {
 // ── 4. Ternary / conditional wires ──────────────────────────────────────────
 
 regressionTest("parity: ternary / conditional wires", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -494,7 +489,6 @@ regressionTest("parity: ternary / conditional wires", {
 // ── 5. Catch fallbacks ──────────────────────────────────────────────────────
 
 regressionTest("parity: catch fallbacks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -596,7 +590,6 @@ regressionTest("parity: catch fallbacks", {
 // ── 6. Force statements ─────────────────────────────────────────────────────
 
 regressionTest("parity: force statements", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -680,7 +673,6 @@ regressionTest("parity: force statements", {
 // ── 7. ToolDef support ──────────────────────────────────────────────────────
 
 regressionTest("parity: ToolDef support", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -833,7 +825,6 @@ regressionTest("parity: ToolDef support", {
 // ── 8. Tool context injection ───────────────────────────────────────────────
 
 regressionTest("parity: tool context injection", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -866,7 +857,6 @@ regressionTest("parity: tool context injection", {
 // ── 9. Const blocks ─────────────────────────────────────────────────────────
 
 regressionTest("parity: const blocks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -914,7 +904,6 @@ regressionTest("parity: const blocks", {
 // ── 10. String interpolation ────────────────────────────────────────────────
 
 regressionTest("parity: string interpolation", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -956,7 +945,6 @@ regressionTest("parity: string interpolation", {
 // ── 11. Expressions (math, comparison) ──────────────────────────────────────
 
 regressionTest("parity: expressions", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -995,7 +983,6 @@ regressionTest("parity: expressions", {
 // ── 12. Nested scope blocks ─────────────────────────────────────────────────
 
 regressionTest("parity: nested scope blocks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1037,7 +1024,6 @@ regressionTest("parity: nested scope blocks", {
 // ── 13. Nested arrays ───────────────────────────────────────────────────────
 
 regressionTest("parity: nested arrays", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1125,7 +1111,6 @@ regressionTest("parity: nested arrays", {
 // ── 14. Pipe operators ──────────────────────────────────────────────────────
 
 regressionTest("parity: pipe operators", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1249,7 +1234,6 @@ regressionTest("parity: define blocks", {
 // ── 16. Alias declarations ──────────────────────────────────────────────────
 
 regressionTest("parity: alias declarations", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1277,7 +1261,6 @@ regressionTest("parity: alias declarations", {
           api: async () => ({ result: { data: { name: "hello" } } }),
         },
         assertData: { value: "hello" },
-        allowDowngrade: true,
         assertTraces: 1,
       },
     },
@@ -1297,7 +1280,6 @@ regressionTest("parity: alias declarations", {
 // ── 17. Overdefinition ──────────────────────────────────────────────────────
 
 regressionTest("parity: overdefinition", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1378,7 +1360,6 @@ regressionTest("parity: overdefinition", {
           svcB: async () => ({ label: "from-B" }),
         },
         assertData: { label: "from-A" },
-        allowDowngrade: true,
         assertTraces: 1,
       },
       "second tool used when first returns undefined": {
@@ -1388,7 +1369,6 @@ regressionTest("parity: overdefinition", {
           svcB: async () => ({ label: "from-B" }),
         },
         assertData: { label: "from-B" },
-        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -1398,7 +1378,6 @@ regressionTest("parity: overdefinition", {
 // ── 18. Break/continue in array mapping ─────────────────────────────────────
 
 regressionTest("parity: break/continue in array mapping", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1594,7 +1573,6 @@ regressionTest("parity: break/continue in array mapping", {
 // ── 19. Sparse fieldsets (requestedFields) ──────────────────────────────────
 
 regressionTest("parity: sparse fieldsets — basic", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1689,7 +1667,6 @@ regressionTest("parity: sparse fieldsets — basic", {
 });
 
 regressionTest("parity: sparse fieldsets — wildcard and chains", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1768,7 +1745,6 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["fromA"],
         assertData: { fromA: 20 },
-        allowDowngrade: true,
         assertTraces: 1,
       },
       "A||B→C: requesting only fromB skips A, calls B and fallback C": {
@@ -1782,7 +1758,6 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
         },
         fields: ["fromB"],
         assertData: { fromB: 25 },
-        allowDowngrade: true,
         assertTraces: 2,
       },
     },
@@ -1790,7 +1765,6 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
 });
 
 regressionTest("parity: sparse fieldsets — nested and array paths", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -2081,7 +2055,6 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
 });
 
 regressionTest("parity: sparse fieldsets — non-array object selection", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
