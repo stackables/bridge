@@ -133,6 +133,23 @@ class ScopeChain {
     return this.bindings.get(handle) ?? this.parent?.get(handle);
   }
 
+  /** Find a tool binding by tool name (not handle name), with instance matching. */
+  findTool(
+    toolName: string,
+    instance: number | undefined,
+  ): ScopeBinding | undefined {
+    let instanceCount = 0;
+    for (const [, binding] of this.bindings) {
+      if (binding.kind === "tool" && binding.toolName === toolName) {
+        instanceCount++;
+        if (!instance || instanceCount === instance) {
+          return binding;
+        }
+      }
+    }
+    return this.parent?.findTool(toolName, instance);
+  }
+
   child(): ScopeChain {
     return new ScopeChain(this);
   }
@@ -433,7 +450,11 @@ class CodegenContext {
 
     // Second pass: compile wires, scopes, force statements.
     // Batch consecutive output wires for parallel execution via Promise.all.
-    let pendingWires: { valueExpr: string; targetExpr: string; isRoot: boolean }[] = [];
+    let pendingWires: {
+      valueExpr: string;
+      targetExpr: string;
+      isRoot: boolean;
+    }[] = [];
     const flushPending = () => {
       if (pendingWires.length === 0) return;
       this.emitParallelAssignments(
@@ -717,6 +738,12 @@ class CodegenContext {
       this.emit("const __defOutput = {};");
       const defScope = scope.child();
 
+      // Register marker for Define-type refs so compileRefExpr can resolve them
+      defScope.set("__defineInput_" + defineName, {
+        kind: "input",
+        jsExpr: "__defInput",
+      });
+
       // Register define body handles
       for (const stmt of defineDef.body) {
         if (stmt.kind === "with") {
@@ -738,8 +765,7 @@ class CodegenContext {
               defScope.set(h.handle, { kind: "const", jsExpr: "__consts" });
               break;
             case "tool": {
-              const toolId =
-                safeId(h.handle) + "_" + this.toolGetterCount++;
+              const toolId = safeId(h.handle) + "_" + this.toolGetterCount++;
               defScope.set(h.handle, {
                 kind: "tool",
                 jsExpr: `__toolFn_${toolId}`,
@@ -749,9 +775,7 @@ class CodegenContext {
               // Resolve fn through ToolDef extends chain
               const innerToolDef = this.resolveToolDef(h.name);
               const fnName = innerToolDef?.fn ?? h.name;
-              this.emit(
-                `const __toolFn_${toolId} = tools[${jsStr(fnName)}];`,
-              );
+              this.emit(`const __toolFn_${toolId} = tools[${jsStr(fnName)}];`);
               break;
             }
             case "define":
@@ -799,7 +823,11 @@ class CodegenContext {
     for (const stmt of body) {
       if (stmt.kind === "wire") {
         // Skip tool input wires (handled by tool getters)
-        const handleName = this.findDefineTargetHandle(stmt.target, scope, body);
+        const handleName = this.findDefineTargetHandle(
+          stmt.target,
+          scope,
+          body,
+        );
         if (handleName) {
           const binding = scope.get(handleName);
           if (binding?.kind === "tool") continue;
@@ -915,10 +943,7 @@ class CodegenContext {
     //
     // For self-module tools, target.type is "Tools" (from the parser).
     // For module-scoped tools, target.module !== SELF_MODULE.
-    if (
-      target.module === SELF_MODULE &&
-      target.type !== "Tools"
-    ) {
+    if (target.module === SELF_MODULE && target.type !== "Tools") {
       return undefined;
     }
 
@@ -1125,7 +1150,10 @@ class CodegenContext {
           const path = parts.slice(1);
           const handle = toolDef.handles.find((h) => h.handle === src);
           if (handle?.kind === "context") {
-            const pathExpr = path.length > 0 ? path.map((p) => `?.[${jsStr(p)}]`).join("") : "";
+            const pathExpr =
+              path.length > 0
+                ? path.map((p) => `?.[${jsStr(p)}]`).join("")
+                : "";
             this.emit(`__result = context${pathExpr};`);
           } else {
             this.emit("throw __err;");
@@ -1179,7 +1207,8 @@ class CodegenContext {
           const innerHandle = stmt.binding.handle;
           const innerDef = this.resolveToolDef(innerName);
           const innerFn = innerDef?.fn ?? innerName;
-          const innerId = safeId(innerHandle) + "_inner_" + this.toolGetterCount++;
+          const innerId =
+            safeId(innerHandle) + "_inner_" + this.toolGetterCount++;
           const innerGetterName = `__get_${innerId}`;
 
           // Emit inner tool getter
@@ -1197,14 +1226,23 @@ class CodegenContext {
             }
             for (const is of innerDef.body) {
               if (is.kind === "wire" && is.target.instance == null) {
-                const value = this.compileSourceChain(is.sources, is.catch, innerDefScope);
+                const value = this.compileSourceChain(
+                  is.sources,
+                  is.catch,
+                  innerDefScope,
+                );
                 if (is.target.path.length === 0) {
                   this.emit(`Object.assign(__innerInput, ${value});`);
                 } else {
                   this.emitSetPath("__innerInput", is.target.path, value);
                 }
               } else if (is.kind === "scope") {
-                this.emitToolDefScopeInner(is, innerDefScope, [], "__innerInput");
+                this.emitToolDefScopeInner(
+                  is,
+                  innerDefScope,
+                  [],
+                  "__innerInput",
+                );
               }
             }
           }
@@ -1218,7 +1256,11 @@ class CodegenContext {
                   ? stmt2.target.field
                   : `${stmt2.target.module}.${stmt2.target.field}`;
               if (targetName === innerName) {
-                const value = this.compileSourceChain(stmt2.sources, stmt2.catch, defScope);
+                const value = this.compileSourceChain(
+                  stmt2.sources,
+                  stmt2.catch,
+                  defScope,
+                );
                 if (stmt2.target.path.length === 0) {
                   this.emit(`Object.assign(__innerInput, ${value});`);
                 } else {
@@ -1233,7 +1275,9 @@ class CodegenContext {
           if (innerDef?.onError && "value" in innerDef.onError) {
             this.emit(`try {`);
             this.pushIndent();
-            this.emit(`return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`);
+            this.emit(
+              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`,
+            );
             this.popIndent();
             this.emit(`} catch (__err) {`);
             this.pushIndent();
@@ -1241,7 +1285,9 @@ class CodegenContext {
             this.popIndent();
             this.emit("}");
           } else {
-            this.emit(`return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`);
+            this.emit(
+              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`,
+            );
           }
           this.popIndent();
           this.emit("});");
@@ -1315,7 +1361,11 @@ class CodegenContext {
     const path = [...prefix, ...stmt.target.path];
     for (const inner of stmt.body) {
       if (inner.kind === "wire" && inner.target.instance == null) {
-        const value = this.compileSourceChain(inner.sources, inner.catch, scope);
+        const value = this.compileSourceChain(
+          inner.sources,
+          inner.catch,
+          scope,
+        );
         const fullPath = [...path, ...inner.target.path];
         this.emitSetPath(targetVar, fullPath, value);
       } else if (inner.kind === "scope") {
@@ -1825,9 +1875,7 @@ class CodegenContext {
     if (asyncItems.length > 1) {
       const batchId = this.parallelBatchCount++;
       const varNames = asyncItems.map((_, i) => `__p${batchId}_${i}`);
-      this.emit(
-        `const [${varNames.join(", ")}] = await Promise.all([`,
-      );
+      this.emit(`const [${varNames.join(", ")}] = await Promise.all([`);
       this.pushIndent();
       for (const it of asyncItems) {
         this.emit(`(async () => ${it.expr})(),`);
@@ -1970,13 +2018,22 @@ class CodegenContext {
       return `__consts${emitPath(ref)}`;
     }
 
+    // Define-type references — inside a define body, source refs to the define
+    // itself resolve to the define's input (e.g., {type: "Define", field: "userProfile"})
+    if (ref.module === SELF_MODULE && ref.type === "Define") {
+      const marker = scope.get("__defineInput_" + ref.field);
+      if (marker) {
+        return `${marker.jsExpr}${emitPath(ref)}`;
+      }
+    }
+
     // Tool references — resolve through scope chain first, then bridge handles
     const refToolName =
       ref.module === SELF_MODULE ? ref.field : `${ref.module}.${ref.field}`;
-
-    // Check scope chain for tool bindings (handles inner tool refs in ToolDef bodies)
-    // Scope bindings are set by handle name, so check common handle patterns
-    const scopeBinding = scope.get(refToolName);
+    // Check scope chain for tool bindings (handles inner tool refs in ToolDef bodies
+    // and define bodies where handle name differs from tool name)
+    const scopeBinding =
+      scope.get(refToolName) ?? scope.findTool(refToolName, ref.instance);
     if (scopeBinding?.kind === "tool") {
       if (ref.rootSafe) {
         return `(await ${scopeBinding.jsExpr}().catch(() => undefined))${emitPath(ref)}`;
@@ -2128,8 +2185,7 @@ class CodegenContext {
     const toolFnExpr = `tools[${jsStr(fnName)}]`;
 
     // Check if this tool has ToolDef defaults or bridge input wires
-    const hasToolDefDefaults =
-      toolDef && toolDef.body.length > 0;
+    const hasToolDefDefaults = toolDef && toolDef.body.length > 0;
 
     // Check for bridge-level wires targeting this tool handle
     const hasBridgeWires = this.bridge.body.some(
@@ -2157,26 +2213,43 @@ class CodegenContext {
         if (stmt.kind === "with") {
           // Just register in scope — actual bindings come from parent
           if (stmt.binding.kind === "const") {
-            defScope.set(stmt.binding.handle, { kind: "const", jsExpr: "__consts" });
+            defScope.set(stmt.binding.handle, {
+              kind: "const",
+              jsExpr: "__consts",
+            });
           } else if (stmt.binding.kind === "context") {
-            defScope.set(stmt.binding.handle, { kind: "context", jsExpr: "context" });
+            defScope.set(stmt.binding.handle, {
+              kind: "context",
+              jsExpr: "context",
+            });
           }
         }
       }
       for (const stmt of toolDef.body) {
         if (stmt.kind === "wire" && stmt.target.instance == null) {
-          const value = this.compileSourceChain(stmt.sources, stmt.catch, defScope);
+          const value = this.compileSourceChain(
+            stmt.sources,
+            stmt.catch,
+            defScope,
+          );
           const path = stmt.target.path;
           if (path.length === 0) {
             parts.push(`  Object.assign(__pipeInput, ${value});`);
           } else {
             for (let i = 0; i < path.length - 1; i++) {
-              const pp = path.slice(0, i + 1).map((p) => `[${jsStr(p)}]`).join("");
+              const pp = path
+                .slice(0, i + 1)
+                .map((p) => `[${jsStr(p)}]`)
+                .join("");
               parts.push(`  __pipeInput${pp} ??= {};`);
             }
-            parts.push(`  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`);
+            parts.push(
+              `  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`,
+            );
           }
-          parts.push(`  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`);
+          parts.push(
+            `  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`,
+          );
         }
       }
     }
@@ -2192,20 +2265,32 @@ class CodegenContext {
         parts.push(`  Object.assign(__pipeInput, ${value});`);
       } else {
         for (let i = 0; i < path.length - 1; i++) {
-          const pp = path.slice(0, i + 1).map((p) => `[${jsStr(p)}]`).join("");
+          const pp = path
+            .slice(0, i + 1)
+            .map((p) => `[${jsStr(p)}]`)
+            .join("");
           parts.push(`  __pipeInput${pp} ??= {};`);
         }
-        parts.push(`  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`);
+        parts.push(
+          `  __pipeInput${path.map((p) => `[${jsStr(p)}]`).join("")} = ${value};`,
+        );
       }
     }
 
     // Pipe source overrides last
     for (let i = 0; i < pipePath.length - 1; i++) {
-      const pp = pipePath.slice(0, i + 1).map((p) => `[${jsStr(p)}]`).join("");
+      const pp = pipePath
+        .slice(0, i + 1)
+        .map((p) => `[${jsStr(p)}]`)
+        .join("");
       parts.push(`  __pipeInput${pp} ??= {};`);
     }
-    parts.push(`  __pipeInput${pipePath.map((p) => `[${jsStr(p)}]`).join("")} = ${sourceExpr};`);
-    parts.push(`  return __pipe(${toolFnExpr}, ${jsStr(toolName)}, __pipeInput);`);
+    parts.push(
+      `  __pipeInput${pipePath.map((p) => `[${jsStr(p)}]`).join("")} = ${sourceExpr};`,
+    );
+    parts.push(
+      `  return __pipe(${toolFnExpr}, ${jsStr(toolName)}, __pipeInput);`,
+    );
     parts.push("})())");
 
     return parts.join("\n");
