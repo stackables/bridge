@@ -71,6 +71,16 @@ function jsStr(s: string): string {
   return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 }
 
+/** Emit a JS object literal for a SourceLocation. */
+function jsLoc(loc: {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}): string {
+  return `{startLine:${loc.startLine},startColumn:${loc.startColumn},endLine:${loc.endLine},endColumn:${loc.endColumn}}`;
+}
+
 /**
  * Compile a NodeRef path access into JS property access.
  * e.g. ref with path ["data", "items"] → `.data.items`
@@ -124,16 +134,24 @@ function emitPath(
     return `__getPath(${baseExpr}, [${segs}], [${flags}])`;
   }
 
+  // Use __getPath for multi-segment paths to match runtime primitive-check semantics
+  if (pathSlice.length >= 2 && baseExpr) {
+    const segs = pathSlice.map((s) => jsStr(s)).join(", ");
+    const flags = safes.join(", ");
+    return `__getPath(${baseExpr}, [${segs}], [${flags}])`;
+  }
+
   // Standard path emission
   let code = "";
   for (let i = startIdx; i < ref.path.length; i++) {
     const seg = ref.path[i]!;
     const safe =
       ref.pathSafe?.[i] || (i === 0 && (ref.rootSafe || forceRootSafe));
-    code += safe ? "?." : ".";
     if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(seg)) {
+      code += safe ? "?." : ".";
       code += seg;
     } else {
+      code += safe ? "?." : "";
       code += `[${jsStr(seg)}]`;
     }
   }
@@ -324,6 +342,10 @@ class CodegenContext {
     // Emit preamble
     this.emit("// --- AOT compiled (lazy-getter pull-based) ---");
     this.emit("const __trace = __opts?.__trace;");
+    this.emit("const __wrapErr = __opts?.__wrapBridgeRuntimeError;");
+    this.emit(
+      "const __isFatal = (__e) => __e?.name === 'BridgePanicError' || __e?.name === 'BridgeAbortError';",
+    );
     this.emitMemoHelper();
     this.emitPipeHelper();
     this.emitGetPathHelper();
@@ -383,10 +405,12 @@ class CodegenContext {
   // ── Preamble ──────────────────────────────────────────────────────────
 
   private emitMemoHelper() {
-    this.emit("function __memoize(fn) {");
+    this.emit("function __memoize(fn, name) {");
     this.pushIndent();
-    this.emit("let cached;");
-    this.emit("return () => (cached ??= fn());");
+    this.emit("let cached; let active = false;");
+    this.emit(
+      "return () => { if (cached) return cached; if (active) throw new Error('Circular dependency detected: \"' + (name || '?') + '\" depends on itself'); active = true; return (cached = fn().finally(() => { active = false; })); };",
+    );
     this.popIndent();
     this.emit("}");
     this.emit("");
@@ -395,6 +419,9 @@ class CodegenContext {
   private emitPipeHelper() {
     this.emit("async function __pipe(__fn, __name, __fnName, __input) {");
     this.pushIndent();
+    this.emit(
+      "if (typeof __fn !== \"function\") throw new Error('No tool found for \"' + __fnName + '\"');",
+    );
     this.emit(
       "const __doTrace = __trace && (!__fn?.bridge || __fn.bridge.trace !== false);",
     );
@@ -437,7 +464,20 @@ class CodegenContext {
     this.emit("return __c[__segs[__i]];");
     this.popIndent();
     this.emit("}");
-    this.emit("__c = __c[__segs[__i]];");
+    // Match runtime: primitives where property access yields undefined must throw
+    this.emit(
+      'const __isPrim = typeof __c !== "object" && typeof __c !== "function";',
+    );
+    this.emit("const __next = __c[__segs[__i]];");
+    this.emit("if (__isPrim && __next === undefined) {");
+    this.pushIndent();
+    this.emit("if (__safe[__i]) { __c = undefined; continue; }");
+    this.emit(
+      "throw new TypeError(`Cannot read properties of ${String(__c)} (reading '${__segs[__i]}')`);",
+    );
+    this.popIndent();
+    this.emit("}");
+    this.emit("__c = __next;");
     this.popIndent();
     this.emit("}");
     this.emit("return __c;");
@@ -611,7 +651,7 @@ class CodegenContext {
                 outputVar,
                 pathPrefix,
               );
-              const valueExpr = this.compileSourceChain(
+              const valueExpr = this.compileSourceChainWithLoc(
                 stmt.sources,
                 stmt.catch,
                 scope,
@@ -791,6 +831,7 @@ class CodegenContext {
       const getterId = safeId(handleName) + "_def_" + this.toolGetterCount++;
       const getterName = `__get_${getterId}`;
 
+      const defineKey = `_:Define:${defineName}`;
       this.emit(`const ${getterName} = __memoize(async () => {`);
       this.pushIndent();
 
@@ -879,7 +920,7 @@ class CodegenContext {
 
       this.emit("return __defOutput;");
       this.popIndent();
-      this.emit("});");
+      this.emit(`}, ${jsStr(defineKey)});`);
 
       // Update the scope binding to use this getter
       binding.jsExpr = getterName;
@@ -924,7 +965,7 @@ class CodegenContext {
           scope,
           outputVar,
         );
-        const valueExpr = this.compileSourceChain(
+        const valueExpr = this.compileSourceChainWithLoc(
           stmt.sources,
           stmt.catch,
           scope,
@@ -1061,6 +1102,12 @@ class CodegenContext {
 
       const getterId = safeId(handleName) + "_" + this.toolGetterCount++;
       const getterName = `__get_${getterId}`;
+      const memoKey = this.toolNodeKey(handleName, binding);
+
+      // Update scope binding to getter BEFORE compiling body so self-references
+      // go through the memoized getter (enabling cycle detection).
+      binding.jsExpr = getterName;
+      binding.instanceKey = getterId;
 
       this.emit(`const ${getterName} = __memoize(async () => {`);
       this.pushIndent();
@@ -1097,13 +1144,13 @@ class CodegenContext {
           ranked.sort((a, b) =>
             a.cost !== b.cost ? a.cost - b.cost : a.index - b.index,
           );
-          rootExpr = this.compileSourceChain(
+          rootExpr = this.compileSourceChainWithLoc(
             ranked[0]!.stmt.sources,
             ranked[0]!.stmt.catch,
             scope,
           );
         } else {
-          rootExpr = this.compileSourceChain(
+          rootExpr = this.compileSourceChainWithLoc(
             rootStmts[0]!.sources,
             rootStmts[0]!.catch,
             scope,
@@ -1132,7 +1179,7 @@ class CodegenContext {
       const singleFields: { field: string; expr: string }[] = [];
       for (const { field, stmts } of fieldGroups) {
         if (stmts.length === 1) {
-          const valueExpr = this.compileSourceChain(
+          const valueExpr = this.compileSourceChainWithLoc(
             stmts[0]!.sources,
             stmts[0]!.catch,
             scope,
@@ -1151,7 +1198,7 @@ class CodegenContext {
 
           const errVar = `__ti_${safeId(field)}_err`;
 
-          const firstExpr = this.compileSourceChain(
+          const firstExpr = this.compileSourceChainWithLoc(
             ranked[0]!.stmt.sources,
             ranked[0]!.stmt.catch,
             scope,
@@ -1167,7 +1214,7 @@ class CodegenContext {
           }
 
           for (let i = 1; i < ranked.length; i++) {
-            const nextExpr = this.compileSourceChain(
+            const nextExpr = this.compileSourceChainWithLoc(
               ranked[i]!.stmt.sources,
               ranked[i]!.stmt.catch,
               scope,
@@ -1251,11 +1298,7 @@ class CodegenContext {
       this.emit("}");
       this.emit("return __result;");
       this.popIndent();
-      this.emit("});");
-
-      // Update the scope binding to use this getter
-      binding.jsExpr = getterName;
-      binding.instanceKey = getterId;
+      this.emit(`}, ${jsStr(memoKey)});`);
     }
   }
 
@@ -1295,6 +1338,7 @@ class CodegenContext {
           const innerGetterName = `__get_${innerId}`;
 
           // Emit inner tool getter
+          const innerNodeKey = `_:Tools:${innerName}`;
           this.emit(`const ${innerGetterName} = __memoize(async () => {`);
           this.pushIndent();
           this.emit("const __innerInput = {};");
@@ -1373,7 +1417,7 @@ class CodegenContext {
             );
           }
           this.popIndent();
-          this.emit("});");
+          this.emit(`}, ${jsStr(innerNodeKey)});`);
 
           // Register inner tool in scope
           defScope.set(innerHandle, {
@@ -1516,7 +1560,11 @@ class CodegenContext {
       return;
     }
 
-    const valueExpr = this.compileSourceChain(wire.sources, wire.catch, scope);
+    const valueExpr = this.compileSourceChainWithLoc(
+      wire.sources,
+      wire.catch,
+      scope,
+    );
 
     // Root output wire — spread into output object instead of reassigning
     if (
@@ -2010,6 +2058,78 @@ class CodegenContext {
     return expr;
   }
 
+  /**
+   * Compile a source chain expression that wraps errors with bridgeLoc.
+   *
+   * For single-source chains, wraps the expression with the source's loc.
+   * For multi-source (fallback) chains, compiles into a statement block that
+   * tracks which source was active when the error occurred.
+   *
+   * Returns an expression string (may be an async IIFE).
+   */
+  private compileSourceChainWithLoc(
+    sources: WireSourceEntry[],
+    wireCatch: WireCatch | undefined,
+    scope: ScopeChain,
+  ): string {
+    if (sources.length === 0) return "undefined";
+
+    // If no source has loc, fall back to the regular compilation
+    const hasLoc = sources.some((s) => s.expr.loc);
+    if (!hasLoc) {
+      return this.compileSourceChain(sources, wireCatch, scope);
+    }
+
+    // Single source — wrap with its loc
+    if (sources.length === 1) {
+      const expr = this.compileExpression(sources[0]!.expr, scope);
+      const loc = sources[0]!.expr.loc;
+      const locExpr = loc ? jsLoc(loc) : "undefined";
+
+      const fatalGuard = `if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${locExpr}; throw __e; }`;
+
+      if (wireCatch) {
+        const catchExpr = this.compileCatch(wireCatch, scope);
+        return `await (async () => { try { return ${expr}; } catch (__e) { ${fatalGuard} return ${catchExpr}; } })()`;
+      }
+
+      return `await (async () => { try { return ${expr}; } catch (__e) { ${fatalGuard} throw __wrapErr(__e, {bridgeLoc:${locExpr}}); } })()`;
+    }
+
+    // Multi-source fallback chain — build IIFE with per-entry loc tracking
+    const firstExpr = this.compileExpression(sources[0]!.expr, scope);
+    const firstLoc = sources[0]!.expr.loc;
+
+    const locDecl = `let __loc = ${firstLoc ? jsLoc(firstLoc) : "undefined"};`;
+
+    const tryParts: string[] = [];
+    tryParts.push(`let __v = ${firstExpr};`);
+
+    for (let i = 1; i < sources.length; i++) {
+      const src = sources[i]!;
+      const fbExpr = this.compileExpression(src.expr, scope);
+      const fbLoc = src.expr.loc;
+
+      const cond = src.gate === "nullish" ? "__v == null" : "!__v";
+      tryParts.push(`if (${cond}) {`);
+      if (fbLoc) tryParts.push(`  __loc = ${jsLoc(fbLoc)};`);
+      tryParts.push(`  __v = ${fbExpr};`);
+      tryParts.push(`}`);
+    }
+    tryParts.push(`return __v;`);
+
+    const tryBody = tryParts.join(" ");
+
+    const multiFatalGuard = `if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = __loc; throw __e; }`;
+
+    if (wireCatch) {
+      const catchExpr = this.compileCatch(wireCatch, scope);
+      return `await (async () => { ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} return ${catchExpr}; } })()`;
+    }
+
+    return `await (async () => { ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} throw __wrapErr(__e, {bridgeLoc:__loc}); } })()`;
+  }
+
   private compileCatch(wireCatch: WireCatch, scope: ScopeChain): string {
     if ("value" in wireCatch) {
       return JSON.stringify(wireCatch.value);
@@ -2031,6 +2151,11 @@ class CodegenContext {
   private compileExpression(expr: Expression, scope: ScopeChain): string {
     switch (expr.type) {
       case "ref":
+        if (expr.safe) {
+          // Match runtime catchSafe: swallow non-fatal errors, rethrow fatal (panic/abort)
+          const inner = this.compileRefExpr(expr.ref, scope);
+          return `await (async () => { try { return ${inner}; } catch (__e) { if (__isFatal(__e)) throw __e; return undefined; } })()`;
+        }
         return this.compileRefExpr(expr.ref, scope);
 
       case "literal":
@@ -2184,6 +2309,23 @@ class CodegenContext {
       );
     }
     return this.emitAccessPath(`(await tools[${jsStr(toolKey)}]())`, ref);
+  }
+
+  /**
+   * Compute the runtime-compatible node key for a tool getter.
+   * Format: `{module}:Tools:{name}:{instance}` matching the runtime's toolKey().
+   */
+  private toolNodeKey(handleName: string, binding: ScopeBinding): string {
+    const toolName = binding.toolName ?? handleName;
+    // Count instance by iterating handles with same tool name
+    let instance = 0;
+    for (const h of this.bridge.handles) {
+      if (h.kind === "tool" && h.name === toolName) {
+        instance++;
+        if (h.handle === handleName) break;
+      }
+    }
+    return `_:Tools:${toolName}:${instance || 1}`;
   }
 
   private findSourceHandle(

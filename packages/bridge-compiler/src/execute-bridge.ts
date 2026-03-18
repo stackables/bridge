@@ -112,6 +112,17 @@ type BridgeFn = (
     __BridgeAbortError?: new (...args: any[]) => Error;
     __BridgeTimeoutError?: new (...args: any[]) => Error;
     __BridgeRuntimeError?: new (...args: any[]) => Error;
+    __wrapBridgeRuntimeError?: (
+      err: unknown,
+      options?: {
+        bridgeLoc?: {
+          startLine: number;
+          startColumn: number;
+          endLine: number;
+          endColumn: number;
+        };
+      },
+    ) => Error;
   },
 ) => Promise<any>;
 
@@ -311,6 +322,7 @@ export async function executeBridge<T = unknown>(
     __BridgeAbortError: BridgeAbortError,
     __BridgeTimeoutError: BridgeTimeoutError,
     __BridgeRuntimeError: BridgeRuntimeError,
+    __wrapBridgeRuntimeError: wrapBridgeRuntimeError,
     __trace: tracer
       ? (
           toolDefName: string,
