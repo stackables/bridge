@@ -1776,7 +1776,6 @@ async function resolveRequestedFields(
         wires.length > 1 ? orderOverdefinedWires(wires, scope.engine) : wires;
 
       // Compute sub-requestedFields for array expressions within this wire.
-      // Strip the wire's target path prefix from the parent requestedFields.
       let subFields: string[] | undefined;
       if (requestedFields.length > 0) {
         const wireKey = ordered[0]!.target.path.join(".");
@@ -1790,21 +1789,13 @@ async function resolveRequestedFields(
         try {
           value = await evaluateSourceChain(wire, scope, subFields, pullPath);
           if (isLoopControlSignal(value)) return value;
-          if (value != null) break; // First non-null wins
+          if (value != null) break;
         } catch (err) {
-          // With partialSuccess, even fatal errors are scoped to the field —
-          // they become per-field Error Sentinels instead of killing the whole
-          // execution. Without partialSuccess, fatal errors always propagate.
           if (isFatalError(err) && !scope.engine.partialSuccess) throw err;
           lastError = err;
-          // Continue to next wire — maybe a cheaper fallback succeeds
         }
       }
 
-      // THE FIX: If all wires returned null/undefined and there was an error,
-      // plant the error as an Error Sentinel in the output tree instead of
-      // throwing. This allows GraphQL to deliver partial success — the field
-      // becomes null with an error entry, while sibling fields still resolve.
       if (value == null && lastError) {
         if (scope.engine.partialSuccess) {
           writeTarget(
@@ -1824,46 +1815,39 @@ async function resolveRequestedFields(
     }),
   );
 
-  // Evaluate spread statements concurrently — merge source objects into output
+  // Evaluate spread statements concurrently
   await Promise.all(
     scope.getSpreads().map(async ({ stmt: spread, pathPrefix }) => {
-      try {
-        const spreadValue = await evaluateSourceChain(
-          spread,
-          scope,
-          undefined,
-          pullPath,
-        );
-        if (
-          spreadValue != null &&
-          typeof spreadValue === "object" &&
-          !Array.isArray(spreadValue)
-        ) {
-          // Spreads always target the root output (self-module output)
-          const targetOutput = scope.root().output;
-          if (pathPrefix.length > 0) {
-            // Spread inside a scope block — navigate to the nested object and merge
-            let nested: Record<string, unknown> = targetOutput;
-            for (const segment of pathPrefix) {
-              if (UNSAFE_KEYS.has(segment))
-                throw new Error(`Unsafe assignment key: ${segment}`);
-              if (
-                nested[segment] == null ||
-                typeof nested[segment] !== "object" ||
-                Array.isArray(nested[segment])
-              ) {
-                nested[segment] = {};
-              }
-              nested = nested[segment] as Record<string, unknown>;
+      const spreadValue = await evaluateSourceChain(
+        spread,
+        scope,
+        undefined,
+        pullPath,
+      );
+      if (
+        spreadValue != null &&
+        typeof spreadValue === "object" &&
+        !Array.isArray(spreadValue)
+      ) {
+        const targetOutput = scope.root().output;
+        if (pathPrefix.length > 0) {
+          let nested: Record<string, unknown> = targetOutput;
+          for (const segment of pathPrefix) {
+            if (UNSAFE_KEYS.has(segment))
+              throw new Error(`Unsafe assignment key: ${segment}`);
+            if (
+              nested[segment] == null ||
+              typeof nested[segment] !== "object" ||
+              Array.isArray(nested[segment])
+            ) {
+              nested[segment] = {};
             }
-            Object.assign(nested, spreadValue as Record<string, unknown>);
-          } else {
-            Object.assign(targetOutput, spreadValue as Record<string, unknown>);
+            nested = nested[segment] as Record<string, unknown>;
           }
+          Object.assign(nested, spreadValue as Record<string, unknown>);
+        } else {
+          Object.assign(targetOutput, spreadValue as Record<string, unknown>);
         }
-      } catch (err) {
-        if (isFatalError(err)) throw err;
-        throw err;
       }
     }),
   );
@@ -1878,9 +1862,6 @@ async function resolveRequestedFields(
       if (isFatalError(result.reason)) {
         if (!fatalError) fatalError = result.reason;
       } else {
-        // Collect non-fatal errors. With partialSuccess, evaluation errors
-        // become sentinels (no rejection), so only unplantable writeTarget
-        // failures reach here — those should always surface.
         if (!firstError) firstError = result.reason;
       }
     } else if (result.value != null) {
@@ -2017,16 +1998,6 @@ async function evaluateSourceChain(
   let activeSourceIndex = -1;
   let ternaryElsePath = false;
 
-  const getActiveSourceLoc = (): SourceLocation | undefined => {
-    const activeEntry =
-      activeSourceIndex >= 0 ? chain.sources[activeSourceIndex] : undefined;
-    return (
-      activeEntry?.expr.loc ??
-      activeEntry?.loc ??
-      (chain as { loc?: SourceLocation }).loc
-    );
-  };
-
   try {
     let value: unknown;
 
@@ -2088,11 +2059,16 @@ async function evaluateSourceChain(
 
     return value;
   } catch (err) {
+    const activeEntry =
+      activeSourceIndex >= 0 ? chain.sources[activeSourceIndex] : undefined;
+    const errLoc =
+      activeEntry?.expr.loc ??
+      activeEntry?.loc ??
+      (chain as { loc?: SourceLocation }).loc;
+
     if (isFatalError(err)) {
-      // Attach bridgeLoc to fatal errors (panic) so they carry source location
-      const fatLoc = getActiveSourceLoc();
-      if (fatLoc && !(err as { bridgeLoc?: SourceLocation }).bridgeLoc) {
-        (err as { bridgeLoc?: SourceLocation }).bridgeLoc = fatLoc;
+      if (errLoc && !(err as { bridgeLoc?: SourceLocation }).bridgeLoc) {
+        (err as { bridgeLoc?: SourceLocation }).bridgeLoc = errLoc;
       }
       throw err;
     }
@@ -2127,8 +2103,7 @@ async function evaluateSourceChain(
         );
       }
     }
-    const loc = getActiveSourceLoc();
-    if (loc) throw wrapBridgeRuntimeError(err, { bridgeLoc: loc });
+    if (errLoc) throw wrapBridgeRuntimeError(err, { bridgeLoc: errLoc });
     throw err;
   }
 }
@@ -2186,22 +2161,9 @@ function executeForced(scope: ExecutionScope): Promise<unknown>[] {
  * Evaluate an expression safely — swallows non-fatal errors and returns undefined.
  * Fatal errors (panic, abort) always propagate.
  */
-async function evaluateExprSafe(
-  fn: () => unknown | Promise<unknown>,
-): Promise<unknown> {
-  try {
-    const result = fn();
-    if (
-      result != null &&
-      typeof (result as Promise<unknown>).then === "function"
-    ) {
-      return await (result as Promise<unknown>);
-    }
-    return result;
-  } catch (err) {
-    if (isFatalError(err)) throw err;
-    return undefined;
-  }
+function catchSafe(err: unknown): undefined {
+  if (isFatalError(err)) throw err;
+  return undefined;
 }
 
 /**
@@ -2216,15 +2178,13 @@ async function evaluateExpression(
   switch (expr.type) {
     case "ref":
       if (expr.safe) {
-        return evaluateExprSafe(() =>
-          resolveRef(
-            expr.ref,
-            scope,
-            expr.refLoc ?? expr.loc,
-            pullPath,
-            requestedFields,
-          ),
-        );
+        return resolveRef(
+          expr.ref,
+          scope,
+          expr.refLoc ?? expr.loc,
+          pullPath,
+          requestedFields,
+        ).catch(catchSafe);
       }
       return resolveRef(
         expr.ref,
@@ -2263,8 +2223,8 @@ async function evaluateExpression(
 
     case "and": {
       const left = expr.leftSafe
-        ? await evaluateExprSafe(() =>
-            evaluateExpression(expr.left, scope, undefined, pullPath),
+        ? await evaluateExpression(expr.left, scope, undefined, pullPath).catch(
+            catchSafe,
           )
         : await evaluateExpression(expr.left, scope, undefined, pullPath);
       if (!left) return false;
@@ -2272,17 +2232,20 @@ async function evaluateExpression(
         return Boolean(left);
       }
       const right = expr.rightSafe
-        ? await evaluateExprSafe(() =>
-            evaluateExpression(expr.right, scope, undefined, pullPath),
-          )
+        ? await evaluateExpression(
+            expr.right,
+            scope,
+            undefined,
+            pullPath,
+          ).catch(catchSafe)
         : await evaluateExpression(expr.right, scope, undefined, pullPath);
       return Boolean(right);
     }
 
     case "or": {
       const left = expr.leftSafe
-        ? await evaluateExprSafe(() =>
-            evaluateExpression(expr.left, scope, undefined, pullPath),
+        ? await evaluateExpression(expr.left, scope, undefined, pullPath).catch(
+            catchSafe,
           )
         : await evaluateExpression(expr.left, scope, undefined, pullPath);
       if (left) return true;
@@ -2290,9 +2253,12 @@ async function evaluateExpression(
         return Boolean(left);
       }
       const right = expr.rightSafe
-        ? await evaluateExprSafe(() =>
-            evaluateExpression(expr.right, scope, undefined, pullPath),
-          )
+        ? await evaluateExpression(
+            expr.right,
+            scope,
+            undefined,
+            pullPath,
+          ).catch(catchSafe)
         : await evaluateExpression(expr.right, scope, undefined, pullPath);
       return Boolean(right);
     }
@@ -2507,33 +2473,13 @@ async function evaluateArrayElement(
     },
   );
 
-  // Await all, collect errors and signals
-  const settled = await Promise.allSettled([
-    ...wirePromises,
-    ...spreadPromises,
-  ]);
-
-  let fatalError: unknown;
-  let firstError: unknown;
-  let firstSignal: AnySignal | undefined;
-
-  for (const res of settled) {
-    if (res.status === "rejected") {
-      if (isFatalError(res.reason)) {
-        if (!fatalError) fatalError = res.reason;
-      } else if (!firstError) {
-        firstError = res.reason;
-      }
-    } else if (res.value != null && !firstSignal) {
-      firstSignal = res.value as AnySignal;
-    }
-  }
-
-  if (fatalError) throw fatalError;
-  if (firstSignal) return { elementOutput, signal: firstSignal };
-  if (firstError) throw firstError;
-
-  return { elementOutput, signal: undefined };
+  // Await all — inner promises handle non-fatal errors internally
+  // (via writeTarget sentinels), so only fatal errors reject here.
+  const results = await Promise.all([...wirePromises, ...spreadPromises]);
+  const firstSignal = results.find(isLoopControlSignal) as
+    | AnySignal
+    | undefined;
+  return { elementOutput, signal: firstSignal };
 }
 
 // ── Main array expression evaluator ──────────────────────────────────────
@@ -2593,7 +2539,7 @@ async function evaluateArrayExpr(
       sourceValue.length,
     );
 
-    const settled = await Promise.allSettled(
+    const chunkResults = await Promise.all(
       sourceValue
         .slice(chunkStart, chunkEnd)
         .map((el) =>
@@ -2601,10 +2547,7 @@ async function evaluateArrayExpr(
         ),
     );
 
-    for (const result of settled) {
-      if (result.status === "rejected") throw result.reason;
-      const { elementOutput, signal } = result.value;
-
+    for (const { elementOutput, signal } of chunkResults) {
       if (isLoopControlSignal(signal)) {
         if (signal === CONTINUE_SYM) continue;
         if (signal === BREAK_SYM) break;
