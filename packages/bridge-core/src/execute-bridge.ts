@@ -2366,54 +2366,24 @@ async function evaluateExpression(
   }
 }
 
-/**
- * Evaluate an array mapping expression.
- *
- * Pre-computes the execution plan (wire matching, ordering, sub-fields)
- * once outside the loop, then processes elements in chunks to avoid
- * GC thrashing on large arrays.
- */
-async function evaluateArrayExpr(
+// ── Array execution plan ──────────────────────────────────────────────────
+
+/** Pre-computed execution plan for an array body, built once per array map. */
+interface ArrayExecutionPlan {
+  bodyIndex: StaticScopeIndex;
+  wireTasks: { ordered: WireStatement[]; subFields?: string[] }[];
+  spreads: { stmt: SpreadStatement; pathPrefix: string[] }[];
+}
+
+/** Analyse the static array body AST and build a reusable execution plan. */
+function buildArrayExecutionPlan(
   expr: Extract<Expression, { type: "array" }>,
   scope: ExecutionScope,
   requestedFields?: string[],
-  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
-): Promise<
-  unknown[] | LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM | null
-> {
-  const sourceValue = await evaluateExpression(
-    expr.source,
-    scope,
-    undefined,
-    pullPath,
-  );
-  if (sourceValue == null) {
-    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
-    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
-    return null;
-  }
-  if (!Array.isArray(sourceValue)) return [];
-
-  if (sourceValue.length === 0) {
-    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
-    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
-    return [];
-  }
-
-  // Depth protection — prevent infinite nesting
-  const childDepth = scope["depth"] + 1;
-  if (childDepth > scope.engine.maxDepth) {
-    throw new BridgePanicError(
-      `Maximum execution depth exceeded (${childDepth}). Check for infinite recursion or circular array mappings.`,
-    );
-  }
-
-  // ── 1. Build the static index ONCE ──────────────────────────────────────
+): ArrayExecutionPlan {
   const bodyIndex = buildStaticIndex(expr.body, scope);
 
-  // ── 2. Pre-compute the execution plan ONCE ──────────────────────────────
-  // Use a disposable scope to query the shared index for wire groups, ordering,
-  // and sub-fields. This avoids repeating O(W * R) string matching per element.
+  // Disposable scope — only used to query the shared index
   const planScope = new ExecutionScope(
     scope,
     scope.selfInput,
@@ -2428,7 +2398,7 @@ async function evaluateArrayExpr(
       ? planScope.collectMatchingOutputWireGroups(requestedFields)
       : planScope.allOutputFields().map((f) => planScope.getOutputWires(f)!);
 
-  const executionPlan = wireGroups.map((wires) => {
+  const wireTasks = wireGroups.map((wires) => {
     const ordered =
       wires.length > 1 ? orderOverdefinedWires(wires, scope.engine) : wires;
     let subFields: string[] | undefined;
@@ -2438,152 +2408,197 @@ async function evaluateArrayExpr(
     }
     return { ordered, subFields };
   });
-  const spreads = planScope.getSpreads();
 
-  // ── 3. Process elements in chunks to bound concurrent promises ──────────
+  return { bodyIndex, wireTasks, spreads: planScope.getSpreads() };
+}
+
+type AnySignal = LoopControlSignal | typeof BREAK_SYM | typeof CONTINUE_SYM;
+
+/** Execute a single array element against a pre-computed plan. */
+async function evaluateArrayElement(
+  element: unknown,
+  plan: ArrayExecutionPlan,
+  parentScope: ExecutionScope,
+  childDepth: number,
+  pullPath: ReadonlySet<string>,
+): Promise<{
+  elementOutput: Record<string, unknown>;
+  signal: AnySignal | undefined;
+}> {
+  const elementOutput: Record<string, unknown> = {};
+  const childScope = new ExecutionScope(
+    parentScope,
+    parentScope.selfInput,
+    elementOutput,
+    parentScope.engine,
+    childDepth,
+    plan.bodyIndex,
+  );
+  childScope.pushElement(element);
+
+  // Evaluate wires concurrently
+  const wirePromises = plan.wireTasks.map(async ({ ordered, subFields }) => {
+    let value: unknown;
+    let lastError: unknown;
+    for (const wire of ordered) {
+      try {
+        value = await evaluateSourceChain(
+          wire,
+          childScope,
+          subFields,
+          pullPath,
+        );
+        if (isLoopControlSignal(value)) return value;
+        if (value != null) break;
+      } catch (err) {
+        if (isFatalError(err) && !childScope.engine.partialSuccess) throw err;
+        lastError = err;
+      }
+    }
+    if (value == null && lastError) {
+      if (childScope.engine.partialSuccess) {
+        writeTarget(
+          ordered[0]!.target,
+          lastError instanceof Error ? lastError : new Error(String(lastError)),
+          childScope,
+        );
+        return undefined;
+      }
+      throw lastError;
+    }
+    writeTarget(ordered[0]!.target, value, childScope);
+    return undefined;
+  });
+
+  // Evaluate spreads concurrently
+  const spreadPromises = plan.spreads.map(
+    async ({ stmt: spread, pathPrefix }) => {
+      const spreadValue = await evaluateSourceChain(
+        spread,
+        childScope,
+        undefined,
+        pullPath,
+      );
+      if (
+        spreadValue != null &&
+        typeof spreadValue === "object" &&
+        !Array.isArray(spreadValue)
+      ) {
+        const targetOutput = childScope.root().output;
+        if (pathPrefix.length > 0) {
+          let nested: Record<string, unknown> = targetOutput;
+          for (const segment of pathPrefix) {
+            if (UNSAFE_KEYS.has(segment))
+              throw new Error(`Unsafe assignment key: ${segment}`);
+            if (
+              nested[segment] == null ||
+              typeof nested[segment] !== "object" ||
+              Array.isArray(nested[segment])
+            ) {
+              nested[segment] = {};
+            }
+            nested = nested[segment] as Record<string, unknown>;
+          }
+          Object.assign(nested, spreadValue as Record<string, unknown>);
+        } else {
+          Object.assign(targetOutput, spreadValue as Record<string, unknown>);
+        }
+      }
+    },
+  );
+
+  // Await all, collect errors and signals
+  const settled = await Promise.allSettled([
+    ...wirePromises,
+    ...spreadPromises,
+  ]);
+
+  let fatalError: unknown;
+  let firstError: unknown;
+  let firstSignal: AnySignal | undefined;
+
+  for (const res of settled) {
+    if (res.status === "rejected") {
+      if (isFatalError(res.reason)) {
+        if (!fatalError) fatalError = res.reason;
+      } else if (!firstError) {
+        firstError = res.reason;
+      }
+    } else if (res.value != null && !firstSignal) {
+      firstSignal = res.value as AnySignal;
+    }
+  }
+
+  if (fatalError) throw fatalError;
+  if (firstSignal) return { elementOutput, signal: firstSignal };
+  if (firstError) throw firstError;
+
+  return { elementOutput, signal: undefined };
+}
+
+// ── Main array expression evaluator ──────────────────────────────────────
+
+const ARRAY_CHUNK_SIZE = 2048;
+
+/**
+ * Evaluate an array mapping expression.
+ *
+ * Delegates static AST analysis to `buildArrayExecutionPlan` (once per array),
+ * element execution to `evaluateArrayElement` (once per element), and handles
+ * chunking and break/continue signal propagation here.
+ */
+async function evaluateArrayExpr(
+  expr: Extract<Expression, { type: "array" }>,
+  scope: ExecutionScope,
+  requestedFields?: string[],
+  pullPath: ReadonlySet<string> = EMPTY_PULL_PATH,
+): Promise<unknown[] | AnySignal | null> {
+  const sourceValue = await evaluateExpression(
+    expr.source,
+    scope,
+    undefined,
+    pullPath,
+  );
+
+  if (sourceValue == null) {
+    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
+    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
+    return null;
+  }
+  if (!Array.isArray(sourceValue)) return [];
+  if (sourceValue.length === 0) {
+    const emptyBit = scope.engine.emptyArrayBits?.get(expr);
+    if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
+    return [];
+  }
+
+  const childDepth = scope["depth"] + 1;
+  if (childDepth > scope.engine.maxDepth) {
+    throw new BridgePanicError(
+      `Maximum execution depth exceeded (${childDepth}). Check for infinite recursion or circular array mappings.`,
+    );
+  }
+
+  const plan = buildArrayExecutionPlan(expr, scope, requestedFields);
   const results: unknown[] = [];
-  let propagate:
-    | LoopControlSignal
-    | typeof BREAK_SYM
-    | typeof CONTINUE_SYM
-    | undefined;
-
-  const CHUNK_SIZE = 2048;
+  let propagate: AnySignal | undefined;
 
   for (
     let chunkStart = 0;
     chunkStart < sourceValue.length;
-    chunkStart += CHUNK_SIZE
+    chunkStart += ARRAY_CHUNK_SIZE
   ) {
-    const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, sourceValue.length);
+    const chunkEnd = Math.min(
+      chunkStart + ARRAY_CHUNK_SIZE,
+      sourceValue.length,
+    );
 
     const settled = await Promise.allSettled(
-      sourceValue.slice(chunkStart, chunkEnd).map(async (element) => {
-        const elementOutput: Record<string, unknown> = {};
-        const childScope = new ExecutionScope(
-          scope,
-          scope.selfInput,
-          elementOutput,
-          scope.engine,
-          childDepth,
-          bodyIndex,
-        );
-        childScope.pushElement(element);
-
-        // Evaluate pre-computed execution plan (bypassing resolveRequestedFields)
-        const groupPromises = executionPlan.map(
-          async ({ ordered, subFields }) => {
-            let value: unknown;
-            let lastError: unknown;
-            for (const wire of ordered) {
-              try {
-                value = await evaluateSourceChain(
-                  wire,
-                  childScope,
-                  subFields,
-                  pullPath,
-                );
-                if (isLoopControlSignal(value)) return value;
-                if (value != null) break;
-              } catch (err) {
-                if (isFatalError(err) && !childScope.engine.partialSuccess)
-                  throw err;
-                lastError = err;
-              }
-            }
-            if (value == null && lastError) {
-              if (childScope.engine.partialSuccess) {
-                writeTarget(
-                  ordered[0]!.target,
-                  lastError instanceof Error
-                    ? lastError
-                    : new Error(String(lastError)),
-                  childScope,
-                );
-                return undefined;
-              }
-              throw lastError;
-            }
-            writeTarget(ordered[0]!.target, value, childScope);
-            return undefined;
-          },
-        );
-
-        // Evaluate pre-computed spreads
-        const spreadPromises = spreads.map(
-          async ({ stmt: spread, pathPrefix }) => {
-            const spreadValue = await evaluateSourceChain(
-              spread,
-              childScope,
-              undefined,
-              pullPath,
-            );
-            if (
-              spreadValue != null &&
-              typeof spreadValue === "object" &&
-              !Array.isArray(spreadValue)
-            ) {
-              const targetOutput = childScope.root().output;
-              if (pathPrefix.length > 0) {
-                let nested: Record<string, unknown> = targetOutput;
-                for (const segment of pathPrefix) {
-                  if (UNSAFE_KEYS.has(segment))
-                    throw new Error(`Unsafe assignment key: ${segment}`);
-                  if (
-                    nested[segment] == null ||
-                    typeof nested[segment] !== "object" ||
-                    Array.isArray(nested[segment])
-                  ) {
-                    nested[segment] = {};
-                  }
-                  nested = nested[segment] as Record<string, unknown>;
-                }
-                Object.assign(nested, spreadValue as Record<string, unknown>);
-              } else {
-                Object.assign(
-                  targetOutput,
-                  spreadValue as Record<string, unknown>,
-                );
-              }
-            }
-          },
-        );
-
-        const innerSettled = await Promise.allSettled([
-          ...groupPromises,
-          ...spreadPromises,
-        ]);
-
-        let fatalError: unknown;
-        let firstError: unknown;
-        let firstSignal:
-          | LoopControlSignal
-          | typeof BREAK_SYM
-          | typeof CONTINUE_SYM
-          | undefined;
-
-        for (const res of innerSettled) {
-          if (res.status === "rejected") {
-            if (isFatalError(res.reason)) {
-              if (!fatalError) fatalError = res.reason;
-            } else {
-              if (!firstError) firstError = res.reason;
-            }
-          } else if (res.value != null) {
-            if (!firstSignal)
-              firstSignal = res.value as
-                | LoopControlSignal
-                | typeof BREAK_SYM
-                | typeof CONTINUE_SYM;
-          }
-        }
-
-        if (fatalError) throw fatalError;
-        if (firstSignal) return { elementOutput, signal: firstSignal };
-        if (firstError) throw firstError;
-
-        return { elementOutput, signal: undefined as typeof firstSignal };
-      }),
+      sourceValue
+        .slice(chunkStart, chunkEnd)
+        .map((el) =>
+          evaluateArrayElement(el, plan, scope, childDepth, pullPath),
+        ),
     );
 
     for (const result of settled) {
@@ -2593,7 +2608,7 @@ async function evaluateArrayExpr(
       if (isLoopControlSignal(signal)) {
         if (signal === CONTINUE_SYM) continue;
         if (signal === BREAK_SYM) break;
-        // Multi-level: consume one boundary, propagate rest
+        // Multi-level: consume one boundary, propagate remainder
         propagate = decrementLoopControl(signal);
         if (signal.__bridgeControl === "break") break;
         continue;
@@ -2602,7 +2617,6 @@ async function evaluateArrayExpr(
       results.push(elementOutput);
     }
 
-    // Break outer chunk loop if a break signal was caught
     if (
       propagate === BREAK_SYM ||
       (propagate &&
