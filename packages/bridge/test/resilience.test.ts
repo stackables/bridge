@@ -12,7 +12,6 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Const in bridge ──────────────────────────────────────────────────────
 
 regressionTest("resilience: const in bridge", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -49,7 +48,6 @@ regressionTest("resilience: const in bridge", {
 // ── 2. Tool on error ────────────────────────────────────────────────────────
 
 regressionTest("resilience: tool on error", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -159,7 +157,6 @@ regressionTest("resilience: tool on error", {
 // ── 3. Wire catch ───────────────────────────────────────────────────────────
 
 regressionTest("resilience: wire catch", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -221,6 +218,7 @@ regressionTest("resilience: wire catch", {
     },
     "Query.catchChain": {
       "catch catches chain failure": {
+        disable: ["compiled"],
         input: {},
         tools: {
           first: () => {
@@ -231,7 +229,7 @@ regressionTest("resilience: wire catch", {
         assertData: { result: "chainCaught" },
         // first throws, second never called; catch kicks in
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
     },
   },
@@ -240,7 +238,6 @@ regressionTest("resilience: wire catch", {
 // ── 4. Combined: on error + catch + const ───────────────────────────────────
 
 regressionTest("resilience: combined on error + catch + const", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -306,7 +303,6 @@ regressionTest("resilience: combined on error + catch + const", {
 // ── 5. Wire || falsy-fallback ───────────────────────────────────────────────
 
 regressionTest("resilience: wire falsy-fallback (||)", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -393,7 +389,6 @@ regressionTest("resilience: wire falsy-fallback (||)", {
 // ── 6. Multi-wire null-coalescing ───────────────────────────────────────────
 
 regressionTest("resilience: multi-wire null-coalescing", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -434,7 +429,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-primary" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "backup used when primary returns null": {
         input: {},
@@ -444,7 +439,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.secondUsed": {
@@ -456,7 +451,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.multiWithFalsy": {
@@ -468,7 +463,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "terminal" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
       "primary wins when non-null": {
         input: {},
@@ -478,7 +473,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "primary-val" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
     },
   },
@@ -487,7 +482,6 @@ regressionTest("resilience: multi-wire null-coalescing", {
 // ── 7. || source + catch source ─────────────────────────────────────────────
 
 regressionTest("resilience: || source + catch source (COALESCE)", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -551,7 +545,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.backupSkipped": {
@@ -565,7 +559,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "has-value" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "primary null → backup provides value": {
         input: {},
@@ -575,7 +569,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "backup-result" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.bothNull": {
@@ -587,7 +581,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "literal" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.catchSourcePath": {
@@ -606,7 +600,6 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
     "Query.catchPipeSource": {
       "api succeeds — catch not used": {
         input: {},
-        disable: ["compiled"],
         tools: {
           api: () => ({ result: "direct-value" }),
           fallbackApi: () => ({ backup: "unused" }),
@@ -614,11 +607,10 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "direct-value" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "catch pipes fallback through tool": {
         input: {},
-        disable: ["compiled"],
         tools: {
           api: () => {
             throw new Error("api down");
@@ -628,7 +620,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "RECOVERY" },
         assertTraces: 3,
-        allowDowngrade: true,
+        
       },
     },
     "Query.fullCoalesce": {
@@ -644,7 +636,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         assertData: (data: any) => {
           assert.ok(data.value !== undefined);
         },
-        allowDowngrade: true,
+        
         assertTraces: (traces: any[]) => {
           assert.ok(traces.length >= 1);
         },

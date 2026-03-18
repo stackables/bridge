@@ -22,7 +22,6 @@ const FN = "playground.bridge";
 // ── Engine-level error formatting ────────────────────────────────────────────
 
 regressionTest("error formatting – runtime errors", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -40,6 +39,7 @@ regressionTest("error formatting – runtime errors", {
   scenarios: {
     "Query.greet": {
       "formats runtime errors with bridge source location": {
+        disable: ["compiled"],
         input: { name: "Ada" },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -59,7 +59,6 @@ regressionTest("error formatting – runtime errors", {
 });
 
 regressionTest("error formatting – missing tool", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -74,6 +73,7 @@ regressionTest("error formatting – missing tool", {
   scenarios: {
     "Query.greet": {
       "formats missing tool errors with source location": {
+        disable: ["compiled"],
         input: { name: "Ada" },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -93,7 +93,6 @@ regressionTest("error formatting – missing tool", {
 });
 
 regressionTest("error formatting – throw fallback", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -113,6 +112,7 @@ regressionTest("error formatting – throw fallback", {
   scenarios: {
     "Query.greet": {
       "throw fallbacks underline only the throw clause": {
+        disable: ["compiled"],
         input: { name: "Ada" },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -132,7 +132,6 @@ regressionTest("error formatting – throw fallback", {
 });
 
 regressionTest("error formatting – panic fallback", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -146,6 +145,7 @@ regressionTest("error formatting – panic fallback", {
   scenarios: {
     "Query.greet": {
       "panic fallbacks underline only the panic clause": {
+        disable: ["compiled"],
         input: {},
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -162,7 +162,6 @@ regressionTest("error formatting – panic fallback", {
 });
 
 regressionTest("error formatting – ternary branch", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -176,6 +175,7 @@ regressionTest("error formatting – ternary branch", {
   scenarios: {
     "Query.greet": {
       "ternary branch errors underline the full wire": {
+        disable: ["compiled"],
         input: { isPro: false },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -205,7 +205,6 @@ regressionTest("error formatting – ternary branch", {
 });
 
 regressionTest("error formatting – array throw", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -225,6 +224,7 @@ regressionTest("error formatting – array throw", {
   scenarios: {
     "Query.processCatalog": {
       "array-mapped throw fallbacks retain source snippets": {
+        disable: ["compiled"],
         input: {
           catalog: [
             {
@@ -283,7 +283,6 @@ regressionTest("error formatting – array throw", {
 });
 
 regressionTest("error formatting – ternary condition", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -299,6 +298,7 @@ regressionTest("error formatting – ternary condition", {
   scenarios: {
     "Query.pricing": {
       "ternary condition errors underline the full wire": {
+        disable: ["compiled"],
         input: { isPro: false, proPrice: 49.99, basicPrice: 9.99 },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -341,7 +341,6 @@ regressionTest("error formatting – ternary condition", {
 });
 
 regressionTest("error formatting – coalesce fallback", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -359,6 +358,7 @@ regressionTest("error formatting – coalesce fallback", {
   scenarios: {
     "Query.greet": {
       "coalesce fallback errors highlight the failing fallback branch": {
+        disable: ["compiled"],
         input: { name: "Ada" },
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });
@@ -393,7 +393,6 @@ regressionTest("error formatting – coalesce fallback", {
 });
 
 regressionTest("error formatting – falsy fallback branch", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -407,6 +406,7 @@ regressionTest("error formatting – falsy fallback branch", {
   scenarios: {
     "Query.searchTrains": {
       "falsy fallback errors highlight the failing fallback branch": {
+        disable: ["compiled"],
         input: {
           journey: {},
         },
@@ -453,7 +453,6 @@ regressionTest("error formatting – falsy fallback branch", {
 });
 
 regressionTest("error formatting – tool input cycle", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -477,6 +476,7 @@ regressionTest("error formatting – tool input cycle", {
   scenarios: {
     "Query.location": {
       "tool input cycles retain the originating wire source location": {
+        disable: ["compiled"],
         input: {},
         assertError: (err: any) => {
           const formatted = formatBridgeError(err, { filename: FN });

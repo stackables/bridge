@@ -393,7 +393,7 @@ class CodegenContext {
   }
 
   private emitPipeHelper() {
-    this.emit("async function __pipe(__fn, __name, __input) {");
+    this.emit("async function __pipe(__fn, __name, __fnName, __input) {");
     this.pushIndent();
     this.emit(
       "const __doTrace = __trace && (!__fn?.bridge || __fn.bridge.trace !== false);",
@@ -403,14 +403,14 @@ class CodegenContext {
     this.pushIndent();
     this.emit("const __result = await __fn(__input, context);");
     this.emit(
-      "if (__doTrace) __trace(__name, __name, __start, performance.now(), __input, __result, null);",
+      "if (__doTrace) __trace(__name, __fnName, __start, performance.now(), __input, __result, null);",
     );
     this.emit("return __result;");
     this.popIndent();
     this.emit("} catch (__err) {");
     this.pushIndent();
     this.emit(
-      "if (__doTrace) __trace(__name, __name, __start, performance.now(), __input, null, __err);",
+      "if (__doTrace) __trace(__name, __fnName, __start, performance.now(), __input, null, __err);",
     );
     this.emit("throw __err;");
     this.popIndent();
@@ -1200,10 +1200,11 @@ class CodegenContext {
       const toolDef = binding.toolName
         ? this.resolveToolDef(binding.toolName)
         : undefined;
+      const fnName = toolDef?.fn ?? toolName;
 
       // Call tool with tracing support (respecting trace:false on tool metadata)
       this.emit(
-        `if (typeof ${toolFnExpr} !== 'function') throw new Error('Tool "${toolName}" not found');`,
+        `if (typeof ${toolFnExpr} !== 'function') throw new Error('No tool found for "${toolName}"');`,
       );
       this.emit(
         `const __doTrace = __trace && (!${toolFnExpr}?.bridge || ${toolFnExpr}.bridge.trace !== false);`,
@@ -1214,13 +1215,13 @@ class CodegenContext {
       this.pushIndent();
       this.emit(`__result = await ${toolFnExpr}(__toolInput, context);`);
       this.emit(
-        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(toolName)}, __start, performance.now(), __toolInput, __result, null);`,
+        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, __result, null);`,
       );
       this.popIndent();
       this.emit("} catch (__err) {");
       this.pushIndent();
       this.emit(
-        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(toolName)}, __start, performance.now(), __toolInput, null, __err);`,
+        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, null, __err);`,
       );
       // onError — return fallback instead of rethrowing
       if (toolDef?.onError) {
@@ -2039,10 +2040,10 @@ class CodegenContext {
         return `(${this.compileExpression(expr.cond, scope)} ? ${this.compileExpression(expr.then, scope)} : ${this.compileExpression(expr.else, scope)})`;
 
       case "and":
-        return `(${this.compileExpression(expr.left, scope)} && ${this.compileExpression(expr.right, scope)})`;
+        return this.compileAndOr(expr, scope, "and");
 
       case "or":
-        return `(${this.compileExpression(expr.left, scope)} || ${this.compileExpression(expr.right, scope)})`;
+        return this.compileAndOr(expr, scope, "or");
 
       case "control":
         return this.compileControlFlow(expr.control);
@@ -2268,16 +2269,32 @@ class CodegenContext {
     this.iteratorStack.pop();
 
     // Check for control flow sentinels in output fields
+    const sigVar = `__sig_${depth}`;
     this.emit(
-      `if (Object.values(${outVar}).some(__v => __v === Symbol.for("BRIDGE_BREAK"))) break;`,
+      `const ${sigVar} = Object.values(${outVar}).find(__v => __v === Symbol.for("BRIDGE_BREAK") || __v === Symbol.for("BRIDGE_CONTINUE") || (__v && typeof __v === 'object' && (__v.__bridgeControl === 'break' || __v.__bridgeControl === 'continue')));`,
+    );
+    this.emit(`if (${sigVar} != null) {`);
+    this.pushIndent();
+    // Single-level symbols: break/continue this loop directly
+    this.emit(`if (${sigVar} === Symbol.for("BRIDGE_BREAK")) break;`);
+    this.emit(`if (${sigVar} === Symbol.for("BRIDGE_CONTINUE")) { continue; }`);
+    // Multi-level: decrement and propagate as a value on the result array
+    this.emit(
+      `const __next = ${sigVar}.levels <= 2 ? (${sigVar}.__bridgeControl === 'break' ? Symbol.for("BRIDGE_BREAK") : Symbol.for("BRIDGE_CONTINUE")) : { __bridgeControl: ${sigVar}.__bridgeControl, levels: ${sigVar}.levels - 1 };`,
     );
     this.emit(
-      `if (Object.values(${outVar}).some(__v => __v === Symbol.for("BRIDGE_CONTINUE"))) continue;`,
+      `if (${sigVar}.__bridgeControl === 'break') { ${resultVar}.__propagate = __next; break; }`,
     );
+    this.emit(`${resultVar}.__propagate = __next; continue;`);
+    this.popIndent();
+    this.emit("}");
     this.emit(`${resultVar}.push(${outVar});`);
     this.popIndent();
     this.emit(`}`);
-    this.emit(`${targetExpr} = ${resultVar};`);
+    // If a multi-level signal was propagated, return it instead of the result
+    this.emit(
+      `if (${resultVar}.__propagate != null) { ${targetExpr} = ${resultVar}.__propagate; } else { ${targetExpr} = ${resultVar}; }`,
+    );
     this.popIndent();
     this.emit(`}`);
   }
@@ -2328,7 +2345,7 @@ class CodegenContext {
     if (!hasToolDefDefaults && !hasBridgeWires) {
       // Simple case — no ToolDef defaults or bridge wires, direct pipe call
       const inputObj = `{ ${pipePath.map((p) => `${jsStr(p)}: ${sourceExpr}`).join(", ")} }`;
-      return `(await __pipe(${toolFnExpr}, ${jsStr(toolName)}, ${inputObj}))`;
+      return `(await __pipe(${toolFnExpr}, ${jsStr(toolName)}, ${jsStr(fnName)}, ${inputObj}))`;
     }
 
     // Complex case — merge ToolDef defaults + pipe source
@@ -2420,10 +2437,63 @@ class CodegenContext {
       `  __pipeInput${pipePath.map((p) => `[${jsStr(p)}]`).join("")} = ${sourceExpr};`,
     );
     parts.push(
-      `  return __pipe(${toolFnExpr}, ${jsStr(toolName)}, __pipeInput);`,
+      `  return __pipe(${toolFnExpr}, ${jsStr(toolName)}, ${jsStr(fnName)}, __pipeInput);`,
     );
     parts.push("})())");
 
+    return parts.join("\n");
+  }
+
+  // ── And/Or expression ─────────────────────────────────────────────────
+
+  private compileAndOr(
+    expr: Extract<Expression, { type: "and" | "or" }>,
+    scope: ScopeChain,
+    kind: "and" | "or",
+  ): string {
+    const leftExpr = this.compileExpression(expr.left, scope);
+    const rightExpr = this.compileExpression(expr.right, scope);
+
+    // Fast path — no safe flags
+    if (!expr.leftSafe && !expr.rightSafe) {
+      // Bridge and/or return Boolean values, unlike JS && / ||
+      if (kind === "and") {
+        return `(${leftExpr} ? Boolean(${rightExpr}) : false)`;
+      }
+      return `(${leftExpr} ? true : Boolean(${rightExpr}))`;
+    }
+
+    // Safe flags present — emit async IIFE with try/catch
+    const __isFatal = `(__e?.name === 'BridgePanicError' || __e?.name === 'BridgeAbortError')`;
+    const parts: string[] = [];
+    parts.push("(await (async () => {");
+
+    if (expr.leftSafe) {
+      parts.push(
+        `  let __l; try { __l = ${leftExpr}; } catch (__e) { if (${__isFatal}) throw __e; __l = undefined; }`,
+      );
+    } else {
+      parts.push(`  const __l = ${leftExpr};`);
+    }
+
+    if (kind === "and") {
+      // and: if left falsy → false; else evaluate right
+      parts.push("  if (!__l) return false;");
+    } else {
+      // or: if left truthy → true; else evaluate right
+      parts.push("  if (__l) return true;");
+    }
+
+    if (expr.rightSafe) {
+      parts.push(
+        `  let __r; try { __r = ${rightExpr}; } catch (__e) { if (${__isFatal}) throw __e; __r = undefined; }`,
+      );
+      parts.push("  return Boolean(__r);");
+    } else {
+      parts.push(`  return Boolean(${rightExpr});`);
+    }
+
+    parts.push("})())");
     return parts.join("\n");
   }
 
@@ -2460,7 +2530,10 @@ class CodegenContext {
     expr: Extract<Expression, { type: "concat" }>,
     scope: ScopeChain,
   ): string {
-    const parts = expr.parts.map((p) => this.compileExpression(p, scope));
+    const parts = expr.parts.map(
+      (p) =>
+        `((__v) => __v == null ? "" : String(__v))(${this.compileExpression(p, scope)})`,
+    );
     return `(${parts.join(" + ")})`;
   }
 
@@ -2471,15 +2544,23 @@ class CodegenContext {
     message?: string;
     levels?: number;
   }): string {
+    const levels =
+      Number.isInteger(ctrl.levels) && (ctrl.levels as number) > 0
+        ? (ctrl.levels as number)
+        : 1;
     switch (ctrl.kind) {
       case "throw":
         return `(() => { throw new Error(${jsStr(ctrl.message ?? "")}); })()`;
       case "panic":
         return `(() => { throw new (__opts?.__BridgePanicError ?? Error)(${jsStr(ctrl.message ?? "")}); })()`;
       case "continue":
-        return `Symbol.for("BRIDGE_CONTINUE")`;
+        return levels <= 1
+          ? `Symbol.for("BRIDGE_CONTINUE")`
+          : `({ __bridgeControl: "continue", levels: ${levels} })`;
       case "break":
-        return `Symbol.for("BRIDGE_BREAK")`;
+        return levels <= 1
+          ? `Symbol.for("BRIDGE_BREAK")`
+          : `({ __bridgeControl: "break", levels: ${levels} })`;
       default:
         return "undefined";
     }

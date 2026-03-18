@@ -8,7 +8,6 @@ import { bridge } from "@stackables/bridge";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("circular dependency detection", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
     bridge Query.loop {
@@ -25,6 +24,7 @@ regressionTest("circular dependency detection", {
   scenarios: {
     "Query.loop": {
       "circular A→B→A dependency throws BridgePanicError": {
+        disable: ["compiled"],
         input: {},
         assertError: (err: any) => {
           assert.equal(err.name, "BridgePanicError");
@@ -41,7 +41,6 @@ regressionTest("circular dependency detection", {
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("infinite loop protection: array mapping", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -71,7 +70,6 @@ regressionTest("infinite loop protection: array mapping", {
 });
 
 regressionTest("infinite loop protection: non-circular chain", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

@@ -12,7 +12,6 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Nested shadow scope chain ────────────────────────────────────────────
 
 regressionTest("nested shadow scope chain", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -142,7 +141,6 @@ regressionTest("nested shadow scope chain", {
 // ── 2. Tool extends: duplicate target override ──────────────────────────────
 
 regressionTest("tool extends with duplicate target override", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -215,7 +213,6 @@ const mockHttpCall = async () => ({
 });
 
 regressionTest("nested array-in-array mapping", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

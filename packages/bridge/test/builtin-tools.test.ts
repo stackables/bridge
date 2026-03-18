@@ -10,7 +10,6 @@ import { assertRuntimeErrorAt } from "./utils/error-utils.ts";
 
 describe("builtin tools", () => {
   regressionTest("string builtins", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.format {
@@ -56,6 +55,7 @@ describe("builtin tools", () => {
           assertTraces: 4,
         },
         "missing std tool when namespace overridden": {
+          disable: ["compiled"],
           input: { text: "Hello" },
           tools: {
             std: { somethingElse: () => ({}) },
@@ -86,7 +86,6 @@ describe("builtin tools", () => {
   // ── Custom tools alongside std ──────────────────────────────────────────
 
   regressionTest("custom tools alongside std", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.process {
@@ -116,7 +115,6 @@ describe("builtin tools", () => {
   // ── Array filter ────────────────────────────────────────────────────────
 
   regressionTest("array filter", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.admins {
@@ -144,6 +142,7 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.admins": {
         "filters array by criteria": {
+          disable: ["compiled"],
           input: {},
           assertData: [
             { id: 1, name: "Alice" },
@@ -152,6 +151,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "empty when no matches": {
+          disable: ["compiled"],
           input: {},
           tools: {
             getUsers: async () => ({
@@ -162,6 +162,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
+          disable: ["compiled"],
           input: {},
           tools: {
             getUsers: async () => {
@@ -178,7 +179,6 @@ describe("builtin tools", () => {
   // ── Array find ──────────────────────────────────────────────────────────
 
   regressionTest("array find", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.findUser {
@@ -206,11 +206,13 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.findUser": {
         "finds object in array": {
+          disable: ["compiled"],
           input: { role: "editor" },
           assertData: { id: 2, name: "Bob", role: "editor" },
           assertTraces: 1,
         },
         "users source error propagates": {
+          disable: ["compiled"],
           input: { role: "editor" },
           tools: {
             getUsers: async () => {
@@ -221,6 +223,7 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "find tool failure propagates to projected fields": {
+          disable: ["compiled"],
           input: { role: "editor" },
           tools: {
             std: {
@@ -243,7 +246,6 @@ describe("builtin tools", () => {
   // ── Array first ─────────────────────────────────────────────────────────
 
   regressionTest("array first", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.first {
@@ -262,6 +264,7 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "first tool failure propagates": {
+          disable: ["compiled"],
           input: { items: ["a", "b"] },
           tools: {
             std: {
@@ -284,7 +287,6 @@ describe("builtin tools", () => {
   // ── Array first strict mode ─────────────────────────────────────────────
 
   regressionTest("array first strict mode", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       tool pf from std.arr.first {
@@ -318,7 +320,6 @@ describe("builtin tools", () => {
   // ── toArray ─────────────────────────────────────────────────────────────
 
   regressionTest("toArray", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.normalize {
@@ -376,7 +377,6 @@ describe("builtin tools", () => {
   // ── Audit with force ──────────────────────────────────────────────────────
 
   regressionTest("audit with force", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.search {
@@ -399,6 +399,7 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.search": {
         "forced audit logs via engine logger": {
+          disable: ["compiled"],
           input: { q: "bridge" },
           assertData: { title: "Result for bridge" },
           assertTraces: 1,
@@ -434,7 +435,6 @@ describe("builtin tools", () => {
   // ── Audit fire-and-forget ─────────────────────────────────────────────────
 
   regressionTest("audit fire-and-forget", {
-    disable: ["compiled"],
     bridge: bridge`
       version 1.5
       bridge Query.search {

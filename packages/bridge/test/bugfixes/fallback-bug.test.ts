@@ -15,7 +15,6 @@ import { tools } from "../utils/bridge-tools.ts";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("string interpolation || fallback priority", {
-  disable: ["compiled"],
   bridge: `
     version 1.5
 
@@ -43,7 +42,7 @@ regressionTest("string interpolation || fallback priority", {
           a: { displayName: "Alice (alice@test.com)" },
           name: "Alice",
         },
-        allowDowngrade: true,
+        
         assertData: {
           flat: "Alice (alice@test.com)",
           scoped: "Alice (alice@test.com)",
@@ -53,21 +52,21 @@ regressionTest("string interpolation || fallback priority", {
       },
       "a null → flat and scoped fall back to i.name": {
         input: { a: {}, name: "Alice" },
-        allowDowngrade: true,
+        
         fields: ["flat", "scoped"],
         assertData: { flat: "Alice", scoped: "Alice" },
         assertTraces: 1,
       },
       "a null → second tool fires in chained": {
         input: { a: {}, b: { displayName: "ALICE" } },
-        allowDowngrade: true,
+        
         fields: ["chained"],
         assertData: { chained: "ALICE" },
         assertTraces: 2,
       },
       "all sources null → literal fires on chained": {
         input: { a: {}, b: {} },
-        allowDowngrade: true,
+        
         fields: ["chained"],
         assertData: { chained: "test" },
         assertTraces: 2,

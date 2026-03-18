@@ -11,7 +11,6 @@ import { bridge } from "@stackables/bridge";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("prototype pollution – setNested guard", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -43,6 +42,7 @@ regressionTest("prototype pollution – setNested guard", {
   scenarios: {
     "Query.setProto": {
       "blocks __proto__ via bridge wire input path": {
+        disable: ["compiled"],
         input: { x: "hacked" },
         assertError: /Unsafe assignment key: __proto__/,
         assertTraces: 0,
@@ -50,6 +50,7 @@ regressionTest("prototype pollution – setNested guard", {
     },
     "Query.setConstructor": {
       "blocks constructor via bridge wire input path": {
+        disable: ["compiled"],
         input: { x: "hacked" },
         assertError: /Unsafe assignment key: constructor/,
         assertTraces: 0,
@@ -57,6 +58,7 @@ regressionTest("prototype pollution – setNested guard", {
     },
     "Query.setPrototype": {
       "blocks prototype via bridge wire input path": {
+        disable: ["compiled"],
         input: { x: "hacked" },
         assertError: /Unsafe assignment key: prototype/,
         assertTraces: 0,
@@ -66,7 +68,6 @@ regressionTest("prototype pollution – setNested guard", {
 });
 
 regressionTest("prototype pollution – pullSingle guard", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -86,6 +87,7 @@ regressionTest("prototype pollution – pullSingle guard", {
   scenarios: {
     "Query.pullProto": {
       "blocks __proto__ traversal on source ref": {
+        disable: ["compiled"],
         input: {},
         assertError: /Unsafe property traversal: __proto__/,
         // Runtime calls the tool (1 trace) then detects unsafe traversal;
@@ -95,6 +97,7 @@ regressionTest("prototype pollution – pullSingle guard", {
     },
     "Query.pullConstructor": {
       "blocks constructor traversal on source ref": {
+        disable: ["compiled"],
         input: {},
         assertError: /Unsafe property traversal: constructor/,
         // See pullProto comment — engine-dependent trace count.
@@ -105,7 +108,6 @@ regressionTest("prototype pollution – pullSingle guard", {
 });
 
 regressionTest("prototype pollution – tool lookup guard", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

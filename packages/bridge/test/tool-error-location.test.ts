@@ -18,7 +18,6 @@ import { assertRuntimeErrorAt } from "./utils/error-utils.ts";
 // ── Non-timeout tests ───────────────────────────────────────────────────────
 
 regressionTest("tool error location", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -77,6 +76,7 @@ regressionTest("tool error location", {
   scenarios: {
     "Query.basicError": {
       "tool error carries bridgeLoc": {
+        disable: ["compiled"],
         input: { _error: "Failed to fetch" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
@@ -89,6 +89,7 @@ regressionTest("tool error location", {
     },
     "Query.outputWire": {
       "tool error points at the output wire that pulls from it": {
+        disable: ["compiled"],
         input: { _error: "Failed to fetch" },
         assertError: assertRuntimeErrorAt("api.body"),
         // Error scenarios: the tool always throws so no traces are guaranteed
@@ -97,6 +98,7 @@ regressionTest("tool error location", {
     },
     "Query.chainError": {
       "tool error in chain points at the closest pulling wire": {
+        disable: ["compiled"],
         input: { _error: "Failed to fetch" },
         assertError: assertRuntimeErrorAt("api"),
 
@@ -106,6 +108,7 @@ regressionTest("tool error location", {
     },
     "Query.toolDefError": {
       "ToolDef-backed tool error carries bridgeLoc": {
+        disable: ["compiled"],
         input: { path: "/data" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
@@ -121,6 +124,7 @@ regressionTest("tool error location", {
     },
     "Query.syncError": {
       "sync tool error carries bridgeLoc": {
+        disable: ["compiled"],
         input: { _error: "Sync tool failed" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
@@ -137,7 +141,6 @@ regressionTest("tool error location", {
 // ── Timeout tests ───────────────────────────────────────────────────────────
 
 regressionTest("timeout error location", {
-  disable: ["compiled"],
   toolTimeoutMs: 200,
   bridge: bridge`
     version 1.5
@@ -168,6 +171,7 @@ regressionTest("timeout error location", {
   scenarios: {
     "Query.timeout": {
       "timeout error carries bridgeLoc of the pulling wire": {
+        disable: ["compiled"],
         input: { _delay: 500 },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
@@ -180,6 +184,7 @@ regressionTest("timeout error location", {
     },
     "Query.timeoutToolDef": {
       "ToolDef timeout error carries bridgeLoc": {
+        disable: ["compiled"],
         input: { path: "/data" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);

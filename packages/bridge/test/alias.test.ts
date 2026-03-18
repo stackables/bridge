@@ -30,11 +30,11 @@ regressionTest("alias keyword", {
     }
 
   `,
-  disable: ["compiled"],
   tools: tools,
   scenarios: {
     "Array.is_wire": {
       "primary tool array present — uses first mapping": {
+        allowDowngrade: true,
         context: {
           items: [{ value: "A" }, { value: undefined }],
           realArray: [{ value: "should not appear" }],
@@ -46,6 +46,7 @@ regressionTest("alias keyword", {
         assertTraces: 1,
       },
       "primary tool returns null — falls through to second array": {
+        allowDowngrade: true,
         context: {
           items: undefined,
           realArray: [{ value: "Real value" }, { value: undefined }],
@@ -57,6 +58,7 @@ regressionTest("alias keyword", {
         assertTraces: 1,
       },
       "primary is empty array — stays empty (truthy)": {
+        allowDowngrade: true,
         context: {
           items: [],
           realArray: [{ value: "B" }],
@@ -68,6 +70,7 @@ regressionTest("alias keyword", {
         assertTraces: 1,
       },
       "both null — result is null": {
+        allowDowngrade: true,
         context: {
           items: undefined,
           realArray: undefined,
@@ -79,6 +82,7 @@ regressionTest("alias keyword", {
         assertTraces: 1,
       },
       "tool errors — catch fires": {
+        allowDowngrade: true,
         context: {
           items: "will cause _error",
           realArray: undefined,

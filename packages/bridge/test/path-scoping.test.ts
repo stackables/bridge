@@ -16,7 +16,6 @@ import { bridge } from "@stackables/bridge";
 // ── 1. Scope block execution — constants ────────────────────────────────────
 
 regressionTest("path scoping: scope block constants", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -46,7 +45,6 @@ regressionTest("path scoping: scope block constants", {
 // ── 2. Scope block execution — pull wires ───────────────────────────────────
 
 regressionTest("path scoping: scope block pull wires", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -81,7 +79,6 @@ regressionTest("path scoping: scope block pull wires", {
 // ── 3. Scope block execution — nested scopes ────────────────────────────────
 
 regressionTest("path scoping: nested scope blocks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -122,7 +119,6 @@ regressionTest("path scoping: nested scope blocks", {
 // ── 4. Scope block on tool input ────────────────────────────────────────────
 
 regressionTest("path scoping: scope block on tool input", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -141,6 +137,7 @@ regressionTest("path scoping: scope block on tool input", {
   scenarios: {
     "Query.toolInputScope": {
       "scope block on tool input constructs nested input": {
+        disable: ["compiled"],
         input: { searchText: "hello" },
         tools: {
           api: (p: any) => {
@@ -158,7 +155,6 @@ regressionTest("path scoping: scope block on tool input", {
 // ── 5. Alias inside nested scope blocks ─────────────────────────────────────
 
 regressionTest("path scoping: alias inside nested scope", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -189,7 +185,7 @@ regressionTest("path scoping: alias inside nested scope", {
         assertData: {
           info: { title: "Article", author: "Alice", tags: ["a", "b"] },
         },
-        allowDowngrade: true,
+        
         assertTraces: 1,
       },
     },
@@ -199,7 +195,6 @@ regressionTest("path scoping: alias inside nested scope", {
 // ── 6. Array mapper scope blocks ────────────────────────────────────────────
 
 regressionTest("path scoping: array mapper scope blocks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -401,7 +396,6 @@ regressionTest("path scoping: array mapper scope blocks", {
 // ── 7. Spread syntax ────────────────────────────────────────────────────────
 
 regressionTest("path scoping: spread syntax", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -438,6 +432,7 @@ regressionTest("path scoping: spread syntax", {
   scenarios: {
     "Query.spreadBasic": {
       "top-level spread copies all tool fields": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ name: "Alice", age: 30 }),
@@ -448,6 +443,7 @@ regressionTest("path scoping: spread syntax", {
     },
     "Query.spreadWithConst": {
       "spread + constants combine correctly": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ data: { x: 1, y: 2 } }),
@@ -458,6 +454,7 @@ regressionTest("path scoping: spread syntax", {
     },
     "Query.spreadSubPath": {
       "spread with sub-path source": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ metadata: { author: "Bob", year: 2024 } }),

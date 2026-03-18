@@ -14,7 +14,6 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("universal interpolation: fallback", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -46,7 +45,7 @@ regressionTest("universal interpolation: fallback", {
           nickname: "Ally",
           src: { fallbackDisplay: "unused", fallbackLabel: "unused" },
         },
-        allowDowngrade: true,
+        
         assertData: { displayName: "alice@test.com", label: "Ally" },
         assertTraces: 0,
       },
@@ -59,7 +58,7 @@ regressionTest("universal interpolation: fallback", {
             fallbackLabel: "Jane Doe",
           },
         },
-        allowDowngrade: true,
+        
         assertData: {
           displayName: "Jane Doe (jane@test.com)",
           label: "Jane Doe",
@@ -98,7 +97,6 @@ regressionTest("universal interpolation: fallback", {
 });
 
 regressionTest("universal interpolation: ternary", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

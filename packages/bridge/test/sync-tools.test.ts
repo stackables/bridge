@@ -32,7 +32,6 @@ async function asyncTool(input: { q: string }) {
 // ── 1. Enforcement ──────────────────────────────────────────────────────────
 
 regressionTest("sync tool enforcement", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
     bridge Query.bad {
@@ -48,6 +47,7 @@ regressionTest("sync tool enforcement", {
   scenarios: {
     "Query.bad": {
       "throws when sync tool returns a Promise": {
+        disable: ["compiled"],
         input: { q: "hello" },
         assertError: /sync.*Promise|Promise.*sync/i,
         assertTraces: (_traces) => {
@@ -61,7 +61,6 @@ regressionTest("sync tool enforcement", {
 // ── 2. Sync tool execution ──────────────────────────────────────────────────
 
 regressionTest("sync tool execution", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -173,7 +172,6 @@ const syncEnrich = (input: any) => ({
 (syncEnrich as any).bridge = { sync: true } satisfies ToolMetadata;
 
 regressionTest("sync array map", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

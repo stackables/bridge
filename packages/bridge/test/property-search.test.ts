@@ -44,7 +44,6 @@ const propertyTools: Record<string, any> = {
 };
 
 regressionTest("property search (.bridge file)", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -93,11 +92,13 @@ regressionTest("property search (.bridge file)", {
   scenarios: {
     "Query.propertySearch": {
       "passthrough: location echoed": {
+        disable: ["compiled"],
         input: { location: "Berlin" },
         assertData: { location: "Berlin" },
         assertTraces: 3,
       },
       "topPick: chained geocode → zillow → centsToUsd": {
+        disable: ["compiled"],
         input: { location: "Berlin" },
         assertData: {
           topPick: {
@@ -110,6 +111,7 @@ regressionTest("property search (.bridge file)", {
         assertTraces: 3,
       },
       "listings: array mapping with per-element rename": {
+        disable: ["compiled"],
         input: { location: "Berlin" },
         assertData: (data: any) => {
           const listings = data.listings;
@@ -123,6 +125,7 @@ regressionTest("property search (.bridge file)", {
         assertTraces: 3,
       },
       "empty listings: array source returns empty": {
+        disable: ["compiled"],
         input: { location: "Berlin" },
         fields: ["listings"],
         tools: {
@@ -135,6 +138,7 @@ regressionTest("property search (.bridge file)", {
     },
     "Query.propertyComments": {
       "chained tools + pluckText pipe": {
+        disable: ["compiled"],
         input: { location: "Berlin" },
         assertData: {
           propertyComments: ["Great neighborhood", "Quiet area"],

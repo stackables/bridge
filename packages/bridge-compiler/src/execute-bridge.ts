@@ -20,6 +20,8 @@ import {
   BridgeRuntimeError,
   BridgeTimeoutError,
   attachBridgeErrorDocumentContext,
+  isFatalError,
+  wrapBridgeRuntimeError,
   executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
@@ -344,11 +346,17 @@ export async function executeBridge<T = unknown>(
   try {
     data = await fn(input, flatTools, context, opts);
   } catch (err) {
-    if (err && typeof err === "object") {
-      (err as { executionTraceId?: bigint }).executionTraceId = 0n;
-      (err as { traces?: ToolTrace[] }).traces = tracer?.traces ?? [];
+    if (isFatalError(err)) {
+      if (err && typeof err === "object") {
+        (err as { executionTraceId?: bigint }).executionTraceId = 0n;
+        (err as { traces?: ToolTrace[] }).traces = tracer?.traces ?? [];
+      }
+      throw attachBridgeErrorDocumentContext(err, document);
     }
-    throw attachBridgeErrorDocumentContext(err, document);
+    const wrapped = wrapBridgeRuntimeError(err);
+    wrapped.executionTraceId = 0n;
+    wrapped.traces = tracer?.traces ?? [];
+    throw attachBridgeErrorDocumentContext(wrapped, document);
   }
   return {
     data: data as T,

@@ -7,7 +7,6 @@ import { bridge } from "@stackables/bridge";
 // ── Basic ternary: ref + literal branches ─────────────────────────────────
 
 regressionTest("ternary: basic + literal branches", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -39,7 +38,6 @@ regressionTest("ternary: basic + literal branches", {
 // ── Expression condition ──────────────────────────────────────────────────
 
 regressionTest("ternary: expression condition", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -69,7 +67,6 @@ regressionTest("ternary: expression condition", {
 // ── Fallbacks ─────────────────────────────────────────────────────────────
 
 regressionTest("ternary: fallbacks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -173,7 +170,6 @@ regressionTest("ternary: fallbacks", {
 // ── Tool branches (lazy evaluation) ───────────────────────────────────────
 
 regressionTest("ternary: tool branches (lazy evaluation)", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -217,7 +213,6 @@ regressionTest("ternary: tool branches (lazy evaluation)", {
 // ── Ternary in array mapping ──────────────────────────────────────────
 
 regressionTest("ternary: array element mapping", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -284,7 +279,6 @@ regressionTest("ternary: array element mapping", {
 // ── Alias ternary: geo + panic gate ───────────────────────────────────
 
 regressionTest("alias ternary: panic gate on age check", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -307,6 +301,7 @@ regressionTest("alias ternary: panic gate on age check", {
   scenarios: {
     "Query.location": {
       "alias ternary + ?? panic fires on false branch → null": {
+        disable: ["compiled"],
         input: { age: 15, city: "Zurich" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
@@ -315,6 +310,7 @@ regressionTest("alias ternary: panic gate on age check", {
         assertTraces: 0,
       },
       "alias ternary + ?? panic does NOT fire when condition is true": {
+        disable: ["compiled"],
         input: { age: 25, city: "Zurich" },
         assertData: { lat: 47.37, lon: 8.54 },
         assertTraces: 1,
@@ -326,7 +322,6 @@ regressionTest("alias ternary: panic gate on age check", {
 // ── Alias ternary: fallback variants ──────────────────────────────────
 
 regressionTest("alias ternary: fallback variants", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

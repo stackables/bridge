@@ -13,7 +13,6 @@ import { bridge } from "@stackables/bridge";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("traces on errors", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

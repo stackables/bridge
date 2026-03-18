@@ -21,7 +21,6 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("passthrough bridge with define: lazy input resolution", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

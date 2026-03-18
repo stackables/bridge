@@ -77,8 +77,8 @@ regressionTest("|| fallback chains", {
         assertTraces: 1,
       },
       "a throws → uncaught wires fail": {
-        input: { a: { _error: "boom" } },
         disable: ["compiled"],
+        input: { a: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 1,
         assertGraphql: {
@@ -89,8 +89,8 @@ regressionTest("|| fallback chains", {
         },
       },
       "b throws → fallback error propagates": {
-        input: { b: { _error: "boom" } },
         disable: ["compiled"],
+        input: { b: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
@@ -101,8 +101,8 @@ regressionTest("|| fallback chains", {
         },
       },
       "c throws → third-position fallback error": {
-        input: { c: { _error: "boom" } },
         disable: ["compiled"],
+        input: { c: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("c.label"),
         assertTraces: 3,
         assertGraphql: {
@@ -201,25 +201,25 @@ regressionTest("overdefinition: cost-based prioritization", {
         assertTraces: 2,
       },
       "api throws → error when no cheaper override": {
+        disable: ["compiled"],
         input: { api: { _error: "boom" } },
         fields: ["inputBeats"],
-        disable: ["compiled"],
         assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: () => {},
       },
       "api throws → contextBeats error": {
+        disable: ["compiled"],
         input: { api: { _error: "boom" } },
         fields: ["contextBeats"],
-        disable: ["compiled"],
         assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: () => {},
       },
       "a throws → sameCost error": {
+        disable: ["compiled"],
         input: { a: { _error: "boom" } },
         fields: ["sameCost"],
-        disable: ["compiled"],
         assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 2,
         assertGraphql: {
@@ -227,9 +227,9 @@ regressionTest("overdefinition: cost-based prioritization", {
         },
       },
       "a null, b throws → sameCost fails": {
+        disable: ["compiled"],
         input: { b: { _error: "boom" } },
         fields: ["sameCost"],
-        disable: ["compiled"],
         assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
@@ -249,8 +249,8 @@ regressionTest("overdefinition: cost-based prioritization", {
         assertTraces: 1,
       },
       "api throws → error when alias null": {
-        input: { api: { _error: "boom" } },
         disable: ["compiled"],
+        input: { api: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: {
@@ -384,7 +384,6 @@ regressionTest("?. safe execution modifier", {
       },
       "?. on non-existent const paths": {
         input: {},
-        disable: ["compiled"],
         fields: ["constChained", "constMixed"],
         assertData: {
           constChained: "A",
@@ -393,8 +392,8 @@ regressionTest("?. safe execution modifier", {
         assertTraces: 0,
       },
       "b throws in fallback position → error propagates": {
-        input: { a: { _error: "any" }, b: { _error: "boom" } },
         disable: ["compiled"],
+        input: { a: { _error: "any" }, b: { _error: "boom" } },
         fields: ["withToolFallback"],
         assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
@@ -480,8 +479,8 @@ regressionTest("mixed || and ?? chains", {
         assertTraces: 3,
       },
       "a throws → error on all wires": {
-        input: { a: { _error: "boom" } },
         disable: ["compiled"],
+        input: { a: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 1,
         assertGraphql: {
@@ -491,8 +490,8 @@ regressionTest("mixed || and ?? chains", {
         },
       },
       "b throws → fallback error": {
-        input: { b: { _error: "boom" } },
         disable: ["compiled"],
+        input: { b: { _error: "boom" } },
         assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
@@ -502,8 +501,8 @@ regressionTest("mixed || and ?? chains", {
         },
       },
       "c throws → fallback:1 error on fourItem": {
-        input: { c: { _error: "boom" } },
         disable: ["compiled"],
+        input: { c: { _error: "boom" } },
         fields: ["fourItem"],
         assertError: assertRuntimeErrorAt("c.label"),
         assertTraces: 3,

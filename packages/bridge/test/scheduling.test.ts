@@ -65,7 +65,6 @@ function assertSequential(traces: ToolTrace[], before: string, after: string) {
 // after geocode, formatGreeting runs independently in parallel.
 
 regressionTest("scheduling: diamond dependency dedup", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -125,7 +124,6 @@ regressionTest("scheduling: diamond dependency dedup", {
 // timing (two 60ms calls completing in ~60ms, not 120ms).
 
 regressionTest("scheduling: pipe forks run independently", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -159,7 +157,6 @@ regressionTest("scheduling: pipe forks run independently", {
 // Execution: i.text → toUpper → normalize (right-to-left)
 
 regressionTest("scheduling: chained pipes execute right-to-left", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -193,7 +190,6 @@ regressionTest("scheduling: chained pipes execute right-to-left", {
 // The tool should be called the minimum number of times necessary.
 
 regressionTest("scheduling: shared tool dedup across pipe and direct", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -239,7 +235,6 @@ regressionTest("scheduling: shared tool dedup across pipe and direct", {
 // ~50ms (not 150ms). Verified via trace startedAt overlap.
 
 regressionTest("scheduling: parallel independent tools", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -294,7 +289,6 @@ regressionTest("scheduling: parallel independent tools", {
 // Converted to data correctness only.
 
 regressionTest("scheduling: A||B parallel with C depending on A", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -325,7 +319,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
         assertData: { coalesced: "from-A", fromC: 84 },
         // toolA returns non-null val → toolB short-circuited (2 traces: A + C)
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
       "A null → B fallback used": {
         input: { x: 7 },
@@ -336,7 +330,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
         },
         assertData: { coalesced: "B-7", fromC: 14 },
         assertTraces: 3,
-        allowDowngrade: true,
+        
       },
     },
   },
@@ -349,7 +343,6 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
 // starts after both finish.
 
 regressionTest("scheduling: tool-level deps resolve in parallel", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -384,6 +377,7 @@ regressionTest("scheduling: tool-level deps resolve in parallel", {
   scenarios: {
     "Query.toolDeps": {
       "auth and quota resolve in parallel, then mainApi runs": {
+        disable: ["compiled"],
         input: { q: "search" },
         assertData: {
           result: {
