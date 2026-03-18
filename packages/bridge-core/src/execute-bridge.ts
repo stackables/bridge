@@ -284,6 +284,29 @@ function lookupToolFn(
 }
 
 /**
+ * Pre-computed, read-only index of statements for a scope body.
+ * Built once by `buildStaticIndex()` and shared across all array element
+ * scopes that execute the same loop body — avoids re-indexing per element.
+ */
+interface StaticScopeIndex {
+  readonly ownedTools: Set<string>;
+  readonly toolInputWires: Map<string, WireStatement[]>;
+  readonly outputWires: Map<string, WireStatement[]>;
+  readonly spreadStatements: { stmt: SpreadStatement; pathPrefix: string[] }[];
+  readonly aliases: Map<string, WireAliasStatement>;
+  readonly handleBindings: Map<string, HandleBinding>;
+  readonly ownedDefines: Set<string>;
+  readonly forceStatements: ForceStatement[];
+  readonly defineInputWires: Map<string, WireStatement[]>;
+  readonly memoizedToolKeys: Set<string>;
+}
+
+/** Empty shared instances for scopes that use a static index (no local maps needed). */
+const EMPTY_SET = new Set<string>() as Set<string> & ReadonlySet<string>;
+const EMPTY_MAP = new Map<string, never>() as Map<never, never>;
+const EMPTY_ARRAY: never[] = [] as never[];
+
+/**
  * Execution scope — the core of the v3 pull-based engine.
  *
  * Each scope holds:
@@ -293,6 +316,10 @@ function lookupToolFn(
  *  - Memoized tool call results
  *  - Element data stack for array iteration
  *  - Output object reference
+ *
+ * When constructed with a `StaticScopeIndex`, the scope reads wire/alias/tool
+ * metadata from the shared index instead of allocating its own maps.
+ * This dramatically reduces allocations in array iteration hot loops.
  */
 class ExecutionScope {
   readonly parent: ExecutionScope | null;
@@ -300,45 +327,53 @@ class ExecutionScope {
   readonly selfInput: Record<string, unknown>;
   readonly engine: EngineContext;
 
+  /**
+   * Optional shared static index — when set, the scope reads from it
+   * instead of the local mutable maps.
+   */
+  private readonly staticIndex: StaticScopeIndex | null;
+
   /** Tools declared via `with` at this scope level — keyed by "module:field". */
-  private readonly ownedTools = new Set<string>();
+  private _ownedTools: Set<string> | null = null;
 
   /** Tool input wires indexed by full tool key — evaluated lazily on demand. */
-  private readonly toolInputWires = new Map<string, WireStatement[]>();
+  private _toolInputWires: Map<string, WireStatement[]> | null = null;
 
   /** Memoized tool call results — cached Promise per tool key. */
-  private readonly toolResults = new Map<string, Promise<unknown>>();
+  private _toolResults: Map<string, Promise<unknown>> | null = null;
 
   /** Element data stack for array iteration nesting. */
-  private readonly elementData: unknown[] = [];
+  private _elementData: unknown[] | null = null;
 
   /** Output wires (self-module and element) indexed by dot-joined target path.
    *  Multiple wires to the same path are stored as an array for overdefinition. */
-  private readonly outputWires = new Map<string, WireStatement[]>();
+  private _outputWires: Map<string, WireStatement[]> | null = null;
 
   /** Spread statements collected during indexing, with optional path prefix for scope blocks. */
-  private readonly spreadStatements: {
-    stmt: SpreadStatement;
-    pathPrefix: string[];
-  }[] = [];
+  private _spreadStatements:
+    | {
+        stmt: SpreadStatement;
+        pathPrefix: string[];
+      }[]
+    | null = null;
 
   /** Alias statements indexed by name — evaluated lazily on first read. */
-  private readonly aliases = new Map<string, WireAliasStatement>();
+  private _aliases: Map<string, WireAliasStatement> | null = null;
 
   /** Cached alias evaluation results. */
-  private readonly aliasResults = new Map<string, Promise<unknown>>();
+  private _aliasResults: Map<string, Promise<unknown>> | null = null;
 
   /** Handle bindings — maps handle alias to binding info. */
-  private readonly handleBindings = new Map<string, HandleBinding>();
+  private _handleBindings: Map<string, HandleBinding> | null = null;
 
   /** Owned define modules — keyed by __define_<handle> prefix. */
-  private readonly ownedDefines = new Set<string>();
+  private _ownedDefines: Set<string> | null = null;
 
   /** Force statements collected during indexing. */
-  readonly forceStatements: ForceStatement[] = [];
+  private _forceStatements: ForceStatement[] | null = null;
 
   /** Define input wires indexed by "module:field" key. */
-  private readonly defineInputWires = new Map<string, WireStatement[]>();
+  private _defineInputWires: Map<string, WireStatement[]> | null = null;
 
   /**
    * Lazy-input factories for define scopes: keyed by dot-joined selfInput path.
@@ -356,7 +391,7 @@ class ExecutionScope {
   private readonly depth: number;
 
   /** Set of tool owner keys that have memoize enabled. */
-  private readonly memoizedToolKeys = new Set<string>();
+  private _memoizedToolKeys: Set<string> | null = null;
 
   constructor(
     parent: ExecutionScope | null,
@@ -364,41 +399,138 @@ class ExecutionScope {
     output: Record<string, unknown>,
     engine: EngineContext,
     depth = 0,
+    staticIndex: StaticScopeIndex | null = null,
   ) {
     this.parent = parent;
     this.selfInput = selfInput;
     this.output = output;
     this.engine = engine;
     this.depth = depth;
+    this.staticIndex = staticIndex;
+  }
+
+  // ── Lazy accessors: read from staticIndex if available, else local maps ──
+
+  private get ownedTools(): Set<string> {
+    if (this.staticIndex) return this.staticIndex.ownedTools;
+    return (this._ownedTools ??= new Set());
+  }
+
+  private get toolInputWires(): Map<string, WireStatement[]> {
+    if (this.staticIndex) return this.staticIndex.toolInputWires;
+    return (this._toolInputWires ??= new Map());
+  }
+
+  private get toolResults(): Map<string, Promise<unknown>> {
+    return (this._toolResults ??= new Map());
+  }
+
+  private get elementData(): unknown[] {
+    return (this._elementData ??= []);
+  }
+
+  private get outputWires(): Map<string, WireStatement[]> {
+    if (this.staticIndex) return this.staticIndex.outputWires;
+    return (this._outputWires ??= new Map());
+  }
+
+  private get spreadStatements(): {
+    stmt: SpreadStatement;
+    pathPrefix: string[];
+  }[] {
+    if (this.staticIndex) return this.staticIndex.spreadStatements;
+    return (this._spreadStatements ??= []);
+  }
+
+  private get aliases(): Map<string, WireAliasStatement> {
+    if (this.staticIndex) return this.staticIndex.aliases;
+    return (this._aliases ??= new Map());
+  }
+
+  private get aliasResults(): Map<string, Promise<unknown>> {
+    return (this._aliasResults ??= new Map());
+  }
+
+  private get handleBindings(): Map<string, HandleBinding> {
+    if (this.staticIndex) return this.staticIndex.handleBindings;
+    return (this._handleBindings ??= new Map());
+  }
+
+  private get ownedDefines(): Set<string> {
+    if (this.staticIndex) return this.staticIndex.ownedDefines;
+    return (this._ownedDefines ??= new Set());
+  }
+
+  get forceStatements(): ForceStatement[] {
+    if (this.staticIndex) return this.staticIndex.forceStatements;
+    return (this._forceStatements ??= []);
+  }
+
+  private get defineInputWires(): Map<string, WireStatement[]> {
+    if (this.staticIndex) return this.staticIndex.defineInputWires;
+    return (this._defineInputWires ??= new Map());
+  }
+
+  private get memoizedToolKeys(): Set<string> {
+    if (this.staticIndex) return this.staticIndex.memoizedToolKeys;
+    return (this._memoizedToolKeys ??= new Set());
+  }
+
+  /**
+   * Extract a StaticScopeIndex from this scope's current indexed state.
+   * Used by `buildStaticIndex` to capture the maps after calling indexStatements
+   * on a temporary scope.
+   */
+  extractStaticIndex(): StaticScopeIndex {
+    return {
+      ownedTools: this._ownedTools ?? (EMPTY_SET as Set<string>),
+      toolInputWires:
+        this._toolInputWires ?? (EMPTY_MAP as Map<string, WireStatement[]>),
+      outputWires:
+        this._outputWires ?? (EMPTY_MAP as Map<string, WireStatement[]>),
+      spreadStatements:
+        this._spreadStatements ??
+        (EMPTY_ARRAY as { stmt: SpreadStatement; pathPrefix: string[] }[]),
+      aliases: this._aliases ?? (EMPTY_MAP as Map<string, WireAliasStatement>),
+      handleBindings:
+        this._handleBindings ?? (EMPTY_MAP as Map<string, HandleBinding>),
+      ownedDefines: this._ownedDefines ?? (EMPTY_SET as Set<string>),
+      forceStatements:
+        this._forceStatements ?? (EMPTY_ARRAY as ForceStatement[]),
+      defineInputWires:
+        this._defineInputWires ?? (EMPTY_MAP as Map<string, WireStatement[]>),
+      memoizedToolKeys: this._memoizedToolKeys ?? (EMPTY_SET as Set<string>),
+    };
   }
 
   /** Register that this scope owns a tool declared via `with`. */
   declareToolBinding(name: string, memoize?: true): void {
-    this.ownedTools.add(bindingOwnerKey(name));
+    (this._ownedTools ??= new Set()).add(bindingOwnerKey(name));
     if (memoize) {
-      this.memoizedToolKeys.add(bindingOwnerKey(name));
+      (this._memoizedToolKeys ??= new Set()).add(bindingOwnerKey(name));
     }
   }
 
   /** Register that this scope owns a define block declared via `with`. */
   declareDefineBinding(handle: string): void {
-    this.ownedDefines.add(`__define_${handle}`);
+    (this._ownedDefines ??= new Set()).add(`__define_${handle}`);
   }
 
   /** Index a define input wire (wire targeting a __define_* module). */
   addDefineInputWire(wire: WireStatement): void {
+    const map = (this._defineInputWires ??= new Map());
     const key = `${wire.target.module}:${wire.target.field}`;
-    let wires = this.defineInputWires.get(key);
+    let wires = map.get(key);
     if (!wires) {
       wires = [];
-      this.defineInputWires.set(key, wires);
+      map.set(key, wires);
     }
     wires.push(wire);
   }
 
   /** Register a handle binding for later lookup (pipe expressions, etc.). */
   registerHandle(binding: HandleBinding): void {
-    this.handleBindings.set(binding.handle, binding);
+    (this._handleBindings ??= new Map()).set(binding.handle, binding);
   }
 
   /** Look up a handle binding by alias, walking the scope chain. */
@@ -428,15 +560,16 @@ class ExecutionScope {
 
   /** Index a tool input wire for lazy evaluation during tool call. */
   addToolInputWire(wire: WireStatement): void {
+    const map = (this._toolInputWires ??= new Map());
     const key = toolKey(
       wire.target.module,
       wire.target.field,
       wire.target.instance,
     );
-    let wires = this.toolInputWires.get(key);
+    let wires = map.get(key);
     if (!wires) {
       wires = [];
-      this.toolInputWires.set(key, wires);
+      map.set(key, wires);
     }
     wires.push(wire);
   }
@@ -444,18 +577,19 @@ class ExecutionScope {
   /** Index an output wire (self-module or element) by its target path.
    *  Multiple wires to the same path are collected for overdefinition. */
   addOutputWire(wire: WireStatement): void {
+    const map = (this._outputWires ??= new Map());
     const key = wire.target.path.join(".");
-    let wires = this.outputWires.get(key);
+    let wires = map.get(key);
     if (!wires) {
       wires = [];
-      this.outputWires.set(key, wires);
+      map.set(key, wires);
     }
     wires.push(wire);
   }
 
   /** Add a spread statement with an optional path prefix for scope blocks. */
   addSpread(stmt: SpreadStatement, pathPrefix: string[] = []): void {
-    this.spreadStatements.push({ stmt, pathPrefix });
+    (this._spreadStatements ??= []).push({ stmt, pathPrefix });
   }
 
   /** Get all spread statements with their path prefixes. */
@@ -525,7 +659,7 @@ class ExecutionScope {
 
   /** Index an alias statement for lazy evaluation. */
   addAlias(stmt: WireAliasStatement): void {
-    this.aliases.set(stmt.name, stmt);
+    (this._aliases ??= new Map()).set(stmt.name, stmt);
   }
 
   /**
@@ -1557,6 +1691,27 @@ function indexStatements(
 }
 
 /**
+ * Build a StaticScopeIndex by indexing statements into a temporary scope
+ * and extracting its maps. The result is shared across all array element
+ * scopes to avoid re-indexing per element.
+ */
+function buildStaticIndex(
+  statements: Statement[],
+  parentScope: ExecutionScope,
+): StaticScopeIndex {
+  // Use a temporary scope as a builder — it has the same parent chain
+  // so scope-context resolution during indexing works identically.
+  const temp = new ExecutionScope(
+    parentScope,
+    parentScope.selfInput,
+    {},
+    parentScope.engine,
+  );
+  indexStatements(statements, temp);
+  return temp.extractStaticIndex();
+}
+
+/**
  * Compute sub-requestedFields for a wire target.
  *
  * Given a wire at `wireKey` and the parent's `requestedFields`, returns the
@@ -2214,9 +2369,9 @@ async function evaluateExpression(
 /**
  * Evaluate an array mapping expression.
  *
- * Creates a child scope for each element, indexes its body statements,
- * then pulls output wires. Tool reads inside the body trigger lazy
- * evaluation up the scope chain.
+ * Pre-computes the execution plan (wire matching, ordering, sub-fields)
+ * once outside the loop, then processes elements in chunks to avoid
+ * GC thrashing on large arrays.
  */
 async function evaluateArrayExpr(
   expr: Extract<Expression, { type: "array" }>,
@@ -2233,14 +2388,12 @@ async function evaluateArrayExpr(
     pullPath,
   );
   if (sourceValue == null) {
-    // Null/undefined source — record empty-array bit
     const emptyBit = scope.engine.emptyArrayBits?.get(expr);
     if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
     return null;
   }
   if (!Array.isArray(sourceValue)) return [];
 
-  // Empty array — record empty-array bit
   if (sourceValue.length === 0) {
     const emptyBit = scope.engine.emptyArrayBits?.get(expr);
     if (emptyBit != null) recordTraceBit(scope.engine, emptyBit);
@@ -2255,53 +2408,208 @@ async function evaluateArrayExpr(
     );
   }
 
-  const results: unknown[] = [];
+  // ── 1. Build the static index ONCE ──────────────────────────────────────
+  const bodyIndex = buildStaticIndex(expr.body, scope);
 
-  // Launch all loop body evaluations concurrently so that batched tool calls
-  // accumulate within the same microtask tick before the batch queue flushes.
-  const settled = await Promise.allSettled(
-    sourceValue.map(async (element) => {
-      const elementOutput: Record<string, unknown> = {};
-      const childScope = new ExecutionScope(
-        scope,
-        scope.selfInput,
-        elementOutput,
-        scope.engine,
-        childDepth,
-      );
-      childScope.pushElement(element);
-
-      // Index then pull — child scope may declare its own tools
-      indexStatements(expr.body, childScope);
-      const signal = await resolveRequestedFields(
-        childScope,
-        requestedFields ?? [],
-        pullPath,
-      );
-      return { elementOutput, signal };
-    }),
+  // ── 2. Pre-compute the execution plan ONCE ──────────────────────────────
+  // Use a disposable scope to query the shared index for wire groups, ordering,
+  // and sub-fields. This avoids repeating O(W * R) string matching per element.
+  const planScope = new ExecutionScope(
+    scope,
+    scope.selfInput,
+    {},
+    scope.engine,
+    0,
+    bodyIndex,
   );
 
+  const wireGroups =
+    requestedFields && requestedFields.length > 0
+      ? planScope.collectMatchingOutputWireGroups(requestedFields)
+      : planScope.allOutputFields().map((f) => planScope.getOutputWires(f)!);
+
+  const executionPlan = wireGroups.map((wires) => {
+    const ordered =
+      wires.length > 1 ? orderOverdefinedWires(wires, scope.engine) : wires;
+    let subFields: string[] | undefined;
+    if (requestedFields && requestedFields.length > 0) {
+      const wireKey = ordered[0]!.target.path.join(".");
+      subFields = computeSubRequestedFields(wireKey, requestedFields);
+    }
+    return { ordered, subFields };
+  });
+  const spreads = planScope.getSpreads();
+
+  // ── 3. Process elements in chunks to bound concurrent promises ──────────
+  const results: unknown[] = [];
   let propagate:
     | LoopControlSignal
     | typeof BREAK_SYM
     | typeof CONTINUE_SYM
     | undefined;
 
-  for (const result of settled) {
-    if (result.status === "rejected") throw result.reason;
-    const { elementOutput, signal } = result.value;
+  const CHUNK_SIZE = 2048;
 
-    if (isLoopControlSignal(signal)) {
-      if (signal === CONTINUE_SYM) continue;
-      if (signal === BREAK_SYM) break;
-      // Multi-level: consume one boundary, propagate rest
-      propagate = decrementLoopControl(signal);
-      if (signal.__bridgeControl === "break") break;
-      continue; // "continue" kind → skip this element
+  for (
+    let chunkStart = 0;
+    chunkStart < sourceValue.length;
+    chunkStart += CHUNK_SIZE
+  ) {
+    const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, sourceValue.length);
+
+    const settled = await Promise.allSettled(
+      sourceValue.slice(chunkStart, chunkEnd).map(async (element) => {
+        const elementOutput: Record<string, unknown> = {};
+        const childScope = new ExecutionScope(
+          scope,
+          scope.selfInput,
+          elementOutput,
+          scope.engine,
+          childDepth,
+          bodyIndex,
+        );
+        childScope.pushElement(element);
+
+        // Evaluate pre-computed execution plan (bypassing resolveRequestedFields)
+        const groupPromises = executionPlan.map(
+          async ({ ordered, subFields }) => {
+            let value: unknown;
+            let lastError: unknown;
+            for (const wire of ordered) {
+              try {
+                value = await evaluateSourceChain(
+                  wire,
+                  childScope,
+                  subFields,
+                  pullPath,
+                );
+                if (isLoopControlSignal(value)) return value;
+                if (value != null) break;
+              } catch (err) {
+                if (isFatalError(err) && !childScope.engine.partialSuccess)
+                  throw err;
+                lastError = err;
+              }
+            }
+            if (value == null && lastError) {
+              if (childScope.engine.partialSuccess) {
+                writeTarget(
+                  ordered[0]!.target,
+                  lastError instanceof Error
+                    ? lastError
+                    : new Error(String(lastError)),
+                  childScope,
+                );
+                return undefined;
+              }
+              throw lastError;
+            }
+            writeTarget(ordered[0]!.target, value, childScope);
+            return undefined;
+          },
+        );
+
+        // Evaluate pre-computed spreads
+        const spreadPromises = spreads.map(
+          async ({ stmt: spread, pathPrefix }) => {
+            const spreadValue = await evaluateSourceChain(
+              spread,
+              childScope,
+              undefined,
+              pullPath,
+            );
+            if (
+              spreadValue != null &&
+              typeof spreadValue === "object" &&
+              !Array.isArray(spreadValue)
+            ) {
+              const targetOutput = childScope.root().output;
+              if (pathPrefix.length > 0) {
+                let nested: Record<string, unknown> = targetOutput;
+                for (const segment of pathPrefix) {
+                  if (UNSAFE_KEYS.has(segment))
+                    throw new Error(`Unsafe assignment key: ${segment}`);
+                  if (
+                    nested[segment] == null ||
+                    typeof nested[segment] !== "object" ||
+                    Array.isArray(nested[segment])
+                  ) {
+                    nested[segment] = {};
+                  }
+                  nested = nested[segment] as Record<string, unknown>;
+                }
+                Object.assign(nested, spreadValue as Record<string, unknown>);
+              } else {
+                Object.assign(
+                  targetOutput,
+                  spreadValue as Record<string, unknown>,
+                );
+              }
+            }
+          },
+        );
+
+        const innerSettled = await Promise.allSettled([
+          ...groupPromises,
+          ...spreadPromises,
+        ]);
+
+        let fatalError: unknown;
+        let firstError: unknown;
+        let firstSignal:
+          | LoopControlSignal
+          | typeof BREAK_SYM
+          | typeof CONTINUE_SYM
+          | undefined;
+
+        for (const res of innerSettled) {
+          if (res.status === "rejected") {
+            if (isFatalError(res.reason)) {
+              if (!fatalError) fatalError = res.reason;
+            } else {
+              if (!firstError) firstError = res.reason;
+            }
+          } else if (res.value != null) {
+            if (!firstSignal)
+              firstSignal = res.value as
+                | LoopControlSignal
+                | typeof BREAK_SYM
+                | typeof CONTINUE_SYM;
+          }
+        }
+
+        if (fatalError) throw fatalError;
+        if (firstSignal) return { elementOutput, signal: firstSignal };
+        if (firstError) throw firstError;
+
+        return { elementOutput, signal: undefined as typeof firstSignal };
+      }),
+    );
+
+    for (const result of settled) {
+      if (result.status === "rejected") throw result.reason;
+      const { elementOutput, signal } = result.value;
+
+      if (isLoopControlSignal(signal)) {
+        if (signal === CONTINUE_SYM) continue;
+        if (signal === BREAK_SYM) break;
+        // Multi-level: consume one boundary, propagate rest
+        propagate = decrementLoopControl(signal);
+        if (signal.__bridgeControl === "break") break;
+        continue;
+      }
+
+      results.push(elementOutput);
     }
 
-    results.push(elementOutput);
+    // Break outer chunk loop if a break signal was caught
+    if (
+      propagate === BREAK_SYM ||
+      (propagate &&
+        typeof propagate === "object" &&
+        propagate.__bridgeControl === "break")
+    )
+      break;
   }
 
   if (propagate) return propagate;
