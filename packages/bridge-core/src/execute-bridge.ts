@@ -2341,6 +2341,33 @@ interface ArrayExecutionPlan {
   spreads: { stmt: SpreadStatement; pathPrefix: string[] }[];
 }
 
+/**
+ * Check if an execution plan can be fully evaluated synchronously.
+ *
+ * True when every wire task is a single, non-overdefined element ref
+ * (no fallbacks, no catch, depth 0) targeting an element output path,
+ * and there are no spreads.  This covers the common pattern of
+ * `o <- source[] as it { .x <- it.x  .y <- it.y }`.
+ */
+function isPlanSynchronous(plan: ArrayExecutionPlan): boolean {
+  if (plan.spreads.length > 0) return false;
+  for (const { ordered } of plan.wireTasks) {
+    if (ordered.length !== 1) return false;
+    const wire = ordered[0]!;
+    if (wire.catch) return false;
+    if (!wire.target.element) return false;
+    if (wire.sources.length !== 1) return false;
+    const src = wire.sources[0]!;
+    if (src.gate) return false;
+    const expr = src.expr;
+    if (expr.type !== "ref") return false;
+    const ref = expr.ref;
+    if (!ref.element) return false;
+    if (ref.elementDepth != null && ref.elementDepth !== 0) return false;
+  }
+  return true;
+}
+
 /** Analyse the static array body AST and build a reusable execution plan. */
 function buildArrayExecutionPlan(
   expr: Extract<Expression, { type: "array" }>,
@@ -2526,6 +2553,41 @@ async function evaluateArrayExpr(
   }
 
   const plan = buildArrayExecutionPlan(expr, scope, requestedFields);
+
+  // ── Synchronous fast path for pure element-ref arrays ──────────────────
+  // When every wire is a simple element property read (no fallbacks, catches,
+  // overdefinition, or spreads), skip all async machinery and evaluate the
+  // entire array in a tight synchronous loop.
+  if (isPlanSynchronous(plan)) {
+    const engine = scope.engine;
+    // Pre-extract ref / target / trace-bit info outside the element loop
+    const taskMeta = plan.wireTasks.map(({ ordered }) => {
+      const wire = ordered[0]!;
+      const ref = (
+        wire.sources[0]!.expr as Extract<Expression, { type: "ref" }>
+      ).ref;
+      const bits = engine.traceBits?.get(wire.sources);
+      return { ref, targetPath: wire.target.path, primaryBit: bits?.primary };
+    });
+
+    const results: unknown[] = new Array(sourceValue.length);
+    for (let i = 0; i < sourceValue.length; i++) {
+      const element = sourceValue[i];
+      const elementOutput: Record<string, unknown> = {};
+      for (const { ref, targetPath, primaryBit } of taskMeta) {
+        if (primaryBit != null) recordTraceBit(engine, primaryBit);
+        setPath(
+          elementOutput,
+          targetPath,
+          getPath(element, ref.path, ref.rootSafe, ref.pathSafe),
+        );
+      }
+      results[i] = elementOutput;
+    }
+    return results;
+  }
+
+  // ── General async path ─────────────────────────────────────────────────
   const results: unknown[] = [];
   let propagate: AnySignal | undefined;
 
