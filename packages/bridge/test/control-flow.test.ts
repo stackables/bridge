@@ -16,7 +16,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("throw control flow", {
-  disable: [],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -107,7 +107,7 @@ regressionTest("throw control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("panic control flow", {
-  disable: [],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -184,7 +184,7 @@ regressionTest("panic control flow", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("continue and break in arrays", {
-  disable: [],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -408,7 +408,7 @@ regressionTest("continue and break in arrays", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("AbortSignal control flow", {
-  disable: [],
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

@@ -1100,7 +1100,27 @@ export function buildBody(
         ? ("falsy" as const)
         : ("nullish" as const);
       const altNode = sub(item, "altValue")!;
-      const expr = buildCoalesceAltExpression(altNode, lineNum, iterScope);
+      let expr = buildCoalesceAltExpression(altNode, lineNum, iterScope);
+
+      // Array mapping on coalesce alternative: || source[] as iter { ... }
+      const arrayMappingNode = sub(item, "altArrayMapping");
+      if (arrayMappingNode) {
+        const iterName = extractNameToken(sub(arrayMappingNode, "iterName")!);
+        const newIterScope = [...(iterScope ?? []), iterName];
+        const arrayBody = buildArrayMappingBody(
+          arrayMappingNode,
+          lineNum,
+          newIterScope,
+        );
+        expr = {
+          type: "array",
+          source: expr,
+          iteratorName: iterName,
+          body: arrayBody,
+          loc: locFromNode(arrayMappingNode),
+        };
+      }
+
       return { expr, gate, loc: locFromNode(altNode) };
     });
   }

@@ -44,6 +44,7 @@ const propertyTools: Record<string, any> = {
 };
 
 regressionTest("property search (.bridge file)", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

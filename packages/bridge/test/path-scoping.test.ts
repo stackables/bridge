@@ -401,6 +401,7 @@ regressionTest("path scoping: array mapper scope blocks", {
 // ── 7. Spread syntax ────────────────────────────────────────────────────────
 
 regressionTest("path scoping: spread syntax", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

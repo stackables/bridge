@@ -15,9 +15,13 @@ regressionTest("alias keyword", {
     version 1.5
 
     bridge Array.is_wire {
+      with output as o
       with context as c
+      with test.multitool as echo
 
-      o.arrayWithFallback <- c.missingArray[] as i {
+      echo.items <- c.items
+
+      o.arrayWithFallback <- echo.items[] as i {
         .value <- i.value || "Fallback 1"
       } || c.realArray[] as i {
         .value <- i.value || "Fallback 2"
@@ -26,22 +30,73 @@ regressionTest("alias keyword", {
     }
 
   `,
-  // Parser doesn't yet support array mappings inside coalesce alternatives
-  // (|| source[] as i { ... }), so the bridge can't be parsed at all.
-  disable: true,
+  disable: ["compiled"],
   tools: tools,
   scenarios: {
     "Array.is_wire": {
-      "falsy gate with 2 arrays": {
+      "primary tool array present — uses first mapping": {
         context: {
-          missingArray: undefined,
+          items: [{ value: "A" }, { value: undefined }],
+          realArray: [{ value: "should not appear" }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [{ value: "A" }, { value: "Fallback 1" }],
+        },
+        assertTraces: 1,
+      },
+      "primary tool returns null — falls through to second array": {
+        context: {
+          items: undefined,
           realArray: [{ value: "Real value" }, { value: undefined }],
         },
         input: {},
         assertData: {
-          arrayWithFallback: [{ value: "Real value" }, { value: "Fallback" }],
+          arrayWithFallback: [{ value: "Real value" }, { value: "Fallback 2" }],
         },
-        assertTraces: 0,
+        assertTraces: 1,
+      },
+      "primary is empty array — stays empty (truthy)": {
+        context: {
+          items: [],
+          realArray: [{ value: "B" }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [],
+        },
+        assertTraces: 1,
+      },
+      "both null — result is null": {
+        context: {
+          items: undefined,
+          realArray: undefined,
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: null,
+        },
+        assertTraces: 1,
+      },
+      "tool errors — catch fires": {
+        context: {
+          items: "will cause _error",
+          realArray: undefined,
+        },
+        tools: {
+          "test.multitool": (() => {
+            const fn = () => {
+              throw new Error("forced");
+            };
+            fn.bridge = { sync: true };
+            return fn;
+          })(),
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [],
+        },
+        assertTraces: 1,
       },
     },
   },

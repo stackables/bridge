@@ -32,6 +32,7 @@ async function asyncTool(input: { q: string }) {
 // ── 1. Enforcement ──────────────────────────────────────────────────────────
 
 regressionTest("sync tool enforcement", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
     bridge Query.bad {

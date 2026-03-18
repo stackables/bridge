@@ -4,6 +4,7 @@ import { tools } from "./utils/bridge-tools.ts";
 import { bridge } from "@stackables/bridge";
 
 regressionTest("native batching: loop-scoped calls", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -52,6 +53,7 @@ regressionTest("native batching: loop-scoped calls", {
 });
 
 regressionTest("native batching: traces and logs", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -120,6 +122,7 @@ regressionTest("native batching: traces and logs", {
 });
 
 regressionTest("native batching: partial failures with catch", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

@@ -8,6 +8,7 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("memoized loop-scoped tools - data correctness", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -159,6 +160,7 @@ regressionTest("memoized loop-scoped tools - data correctness", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("define blocks with memoized tools in loops", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

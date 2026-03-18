@@ -239,6 +239,7 @@ regressionTest("scheduling: shared tool dedup across pipe and direct", {
 // ~50ms (not 150ms). Verified via trace startedAt overlap.
 
 regressionTest("scheduling: parallel independent tools", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -293,6 +294,7 @@ regressionTest("scheduling: parallel independent tools", {
 // Converted to data correctness only.
 
 regressionTest("scheduling: A||B parallel with C depending on A", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -347,6 +349,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
 // starts after both finish.
 
 regressionTest("scheduling: tool-level deps resolve in parallel", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

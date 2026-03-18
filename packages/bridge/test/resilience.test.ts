@@ -393,6 +393,7 @@ regressionTest("resilience: wire falsy-fallback (||)", {
 // ── 6. Multi-wire null-coalescing ───────────────────────────────────────────
 
 regressionTest("resilience: multi-wire null-coalescing", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

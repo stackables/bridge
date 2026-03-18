@@ -901,6 +901,10 @@ class BridgeParser extends CstParser {
       { ALT: () => this.CONSUME(ErrorCoalesce, { LABEL: "nullishOp" }) },
     ]);
     this.SUBRULE(this.coalesceAlternative, { LABEL: "altValue" });
+    // Optional array mapping on source-based coalesce alternatives
+    this.OPTION(() =>
+      this.SUBRULE(this.arrayMapping, { LABEL: "altArrayMapping" }),
+    );
   });
 
   // ── Define block ───────────────────────────────────────────────────────

@@ -596,6 +596,7 @@ regressionTest("parity: catch fallbacks", {
 // ── 6. Force statements ─────────────────────────────────────────────────────
 
 regressionTest("parity: force statements", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1153,7 +1154,6 @@ regressionTest("parity: pipe operators", {
 // ── 15. Define blocks ───────────────────────────────────────────────────────
 
 regressionTest("parity: define blocks", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1297,6 +1297,7 @@ regressionTest("parity: alias declarations", {
 // ── 17. Overdefinition ──────────────────────────────────────────────────────
 
 regressionTest("parity: overdefinition", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1397,6 +1398,7 @@ regressionTest("parity: overdefinition", {
 // ── 18. Break/continue in array mapping ─────────────────────────────────────
 
 regressionTest("parity: break/continue in array mapping", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1592,6 +1594,7 @@ regressionTest("parity: break/continue in array mapping", {
 // ── 19. Sparse fieldsets (requestedFields) ──────────────────────────────────
 
 regressionTest("parity: sparse fieldsets — basic", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1686,6 +1689,7 @@ regressionTest("parity: sparse fieldsets — basic", {
 });
 
 regressionTest("parity: sparse fieldsets — wildcard and chains", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -1786,6 +1790,7 @@ regressionTest("parity: sparse fieldsets — wildcard and chains", {
 });
 
 regressionTest("parity: sparse fieldsets — nested and array paths", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -2076,6 +2081,7 @@ regressionTest("parity: sparse fieldsets — nested and array paths", {
 });
 
 regressionTest("parity: sparse fieldsets — non-array object selection", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

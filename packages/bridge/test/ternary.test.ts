@@ -7,6 +7,7 @@ import { bridge } from "@stackables/bridge";
 // ── Basic ternary: ref + literal branches ─────────────────────────────────
 
 regressionTest("ternary: basic + literal branches", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -38,6 +39,7 @@ regressionTest("ternary: basic + literal branches", {
 // ── Expression condition ──────────────────────────────────────────────────
 
 regressionTest("ternary: expression condition", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -67,6 +69,7 @@ regressionTest("ternary: expression condition", {
 // ── Fallbacks ─────────────────────────────────────────────────────────────
 
 regressionTest("ternary: fallbacks", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -170,6 +173,7 @@ regressionTest("ternary: fallbacks", {
 // ── Tool branches (lazy evaluation) ───────────────────────────────────────
 
 regressionTest("ternary: tool branches (lazy evaluation)", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -213,6 +217,7 @@ regressionTest("ternary: tool branches (lazy evaluation)", {
 // ── Ternary in array mapping ──────────────────────────────────────────
 
 regressionTest("ternary: array element mapping", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -279,6 +284,7 @@ regressionTest("ternary: array element mapping", {
 // ── Alias ternary: geo + panic gate ───────────────────────────────────
 
 regressionTest("alias ternary: panic gate on age check", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -320,6 +326,7 @@ regressionTest("alias ternary: panic gate on age check", {
 // ── Alias ternary: fallback variants ──────────────────────────────────
 
 regressionTest("alias ternary: fallback variants", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

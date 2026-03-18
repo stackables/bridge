@@ -1117,8 +1117,8 @@ function isDisabled(
   // Explicit array: trust exactly what the user listed
   if (Array.isArray(disable)) return disable.includes(check);
 
-  // Not set: defaults — compiled and parser are off
-  return ["compiled", "parser"].includes(check);
+  // Not set: defaults — all is enabled
+  return [""].includes(check);
 }
 
 export function regressionTest(name: string, data: RegressionTest) {

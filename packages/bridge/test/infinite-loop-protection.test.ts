@@ -8,6 +8,7 @@ import { bridge } from "@stackables/bridge";
 // ══════════════════════════════════════════════════════════════════════════════
 
 regressionTest("circular dependency detection", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
     bridge Query.loop {

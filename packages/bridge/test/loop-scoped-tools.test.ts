@@ -16,6 +16,7 @@ const httpTool = {
 };
 
 regressionTest("loop scoped tools - valid behavior", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

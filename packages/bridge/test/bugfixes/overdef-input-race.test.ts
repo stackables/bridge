@@ -20,7 +20,6 @@ import { bridge } from "@stackables/bridge";
 // ═══════════════════════════════════════════════════════════════════════════
 
 regressionTest("overdefined tool-input: panic race condition", {
-  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 

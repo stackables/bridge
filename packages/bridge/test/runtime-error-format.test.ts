@@ -22,6 +22,7 @@ const FN = "playground.bridge";
 // ── Engine-level error formatting ────────────────────────────────────────────
 
 regressionTest("error formatting – runtime errors", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -58,6 +59,7 @@ regressionTest("error formatting – runtime errors", {
 });
 
 regressionTest("error formatting – missing tool", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -91,6 +93,7 @@ regressionTest("error formatting – missing tool", {
 });
 
 regressionTest("error formatting – throw fallback", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -129,6 +132,7 @@ regressionTest("error formatting – throw fallback", {
 });
 
 regressionTest("error formatting – panic fallback", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -201,6 +205,7 @@ regressionTest("error formatting – ternary branch", {
 });
 
 regressionTest("error formatting – array throw", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -336,6 +341,7 @@ regressionTest("error formatting – ternary condition", {
 });
 
 regressionTest("error formatting – coalesce fallback", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -387,6 +393,7 @@ regressionTest("error formatting – coalesce fallback", {
 });
 
 regressionTest("error formatting – falsy fallback branch", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
@@ -446,6 +453,7 @@ regressionTest("error formatting – falsy fallback branch", {
 });
 
 regressionTest("error formatting – tool input cycle", {
+  disable: ["compiled"],
   bridge: bridge`
     version 1.5
 
