@@ -82,6 +82,57 @@ function jsLoc(loc: {
 }
 
 /**
+ * Recursively check if a statement body (or any nested body) contains
+ * break or continue control flow expressions. Used to decide whether
+ * the sentinel check in array loops can be elided.
+ */
+function bodyHasControlFlow(body: Statement[]): boolean {
+  for (const stmt of body) {
+    if (stmt.kind === "scope") {
+      if (bodyHasControlFlow(stmt.body)) return true;
+      continue;
+    }
+    const sources: WireSourceEntry[] | undefined =
+      "sources" in stmt ? stmt.sources : undefined;
+    if (sources) {
+      for (const src of sources) {
+        if (exprHasControlFlow(src.expr)) return true;
+      }
+    }
+    const wireCatch: WireCatch | undefined =
+      "catch" in stmt ? (stmt as any).catch : undefined;
+    if (wireCatch && "control" in wireCatch) {
+      const k = wireCatch.control.kind;
+      if (k === "break" || k === "continue") return true;
+    }
+  }
+  return false;
+}
+
+function exprHasControlFlow(expr: Expression): boolean {
+  switch (expr.type) {
+    case "control":
+      return expr.control.kind === "break" || expr.control.kind === "continue";
+    case "ternary":
+      return (
+        exprHasControlFlow(expr.cond) ||
+        exprHasControlFlow(expr.then) ||
+        exprHasControlFlow(expr.else)
+      );
+    case "and":
+    case "or":
+    case "binary":
+      return exprHasControlFlow(expr.left) || exprHasControlFlow(expr.right);
+    case "concat":
+      return expr.parts.some(exprHasControlFlow);
+    case "array":
+      return bodyHasControlFlow(expr.body);
+    default:
+      return false;
+  }
+}
+
+/**
  * Compile a NodeRef path access into JS property access.
  * e.g. ref with path ["data", "items"] → `.data.items`
  * Handles rootSafe (?.) and pathSafe per-segment.
@@ -248,6 +299,14 @@ class CodegenContext {
   private memoMapCounter = 0;
   /** List of memo map variable names to inject at function scope. */
   private memoMapDeclarations: string[] = [];
+  /**
+   * When set inside an array loop body, compileSourceChainWithLoc uses a
+   * shared loc-index variable + single try/catch instead of per-wire IIFEs.
+   * Locs are precomputed in an array; only an integer index is written per-access.
+   */
+  private loopLocInfo:
+    | { indexVar: string; locsVar: string; locs: string[] }
+    | undefined;
 
   constructor(
     bridge: Bridge,
@@ -686,6 +745,7 @@ class CodegenContext {
       valueExpr: string;
       targetExpr: string;
       isRoot: boolean;
+      locExpr?: string;
     }[] = [];
     const deferredForces: ForceStatement[] = [];
     const flushPending = () => {
@@ -693,6 +753,7 @@ class CodegenContext {
       this.emitParallelAssignments(
         pendingWires.map((w) => ({
           expr: w.valueExpr,
+          locExpr: w.locExpr,
           assign: (v: string) =>
             w.isRoot
               ? `Object.assign(${outputVar}, ${v});`
@@ -773,18 +834,31 @@ class CodegenContext {
                 outputVar,
                 pathPrefix,
               );
-              const valueExpr = this.compileSourceChainWithLoc(
-                stmt.sources,
-                stmt.catch,
-                scope,
-              );
+              // Use raw compileSourceChain (no IIFE wrapping) and capture loc
+              // separately. emitParallelAssignments will annotate errors with
+              // bridgeLoc at the batch level — avoiding per-expression async
+              // IIFE closures in the hot path.
+              const hasLoc = stmt.sources.some((s) => s.expr.loc);
+              const locExpr =
+                hasLoc && !stmt.catch
+                  ? stmt.sources.length === 1 && stmt.sources[0]!.expr.loc
+                    ? jsLoc(stmt.sources[0]!.expr.loc)
+                    : undefined
+                  : undefined;
+              const valueExpr = locExpr
+                ? this.compileSourceChain(stmt.sources, stmt.catch, scope)
+                : this.compileSourceChainWithLoc(
+                    stmt.sources,
+                    stmt.catch,
+                    scope,
+                  );
               const isRoot =
                 target.module === SELF_MODULE &&
                 target.type === this.bridge.type &&
                 target.field === this.bridge.field &&
                 target.path.length === 0 &&
                 pathPrefix.length === 0;
-              pendingWires.push({ valueExpr, targetExpr, isRoot });
+              pendingWires.push({ valueExpr, targetExpr, isRoot, locExpr });
             }
           }
           break;
@@ -1365,7 +1439,8 @@ class CodegenContext {
       }
 
       // Separate overdefined from single-source fields
-      const singleFields: { field: string; expr: string }[] = [];
+      const singleFields: { field: string; expr: string; locExpr?: string }[] =
+        [];
       for (const { field, stmts } of fieldGroups) {
         // Prototype pollution guard for tool input fields
         if (UNSAFE_KEYS.has(field)) {
@@ -1375,12 +1450,18 @@ class CodegenContext {
           continue;
         }
         if (stmts.length === 1) {
-          const valueExpr = this.compileSourceChainWithLoc(
-            stmts[0]!.sources,
-            stmts[0]!.catch,
-            scope,
-          );
-          singleFields.push({ field, expr: valueExpr });
+          const stmt0 = stmts[0]!;
+          const hasLoc = stmt0.sources.some((s) => s.expr.loc);
+          const locExpr =
+            hasLoc && !stmt0.catch
+              ? stmt0.sources.length === 1 && stmt0.sources[0]!.expr.loc
+                ? jsLoc(stmt0.sources[0]!.expr.loc)
+                : undefined
+              : undefined;
+          const valueExpr = locExpr
+            ? this.compileSourceChain(stmt0.sources, stmt0.catch, scope)
+            : this.compileSourceChainWithLoc(stmt0.sources, stmt0.catch, scope);
+          singleFields.push({ field, expr: valueExpr, locExpr });
         } else {
           // Overdefined — sort by cost and emit null-coalescing block
           const ranked = stmts.map((s, i) => ({
@@ -1447,6 +1528,7 @@ class CodegenContext {
       this.emitParallelAssignments(
         singleFields.map((f) => ({
           expr: f.expr,
+          locExpr: f.locExpr,
           assign: (v: string) => {
             if (f.field.includes(".")) {
               const parts = f.field.split(".");
@@ -2311,7 +2393,11 @@ class CodegenContext {
    * returns the full assignment statement given the resolved value.
    */
   private emitParallelAssignments(
-    items: { expr: string; assign: (valueExpr: string) => string }[],
+    items: {
+      expr: string;
+      assign: (valueExpr: string) => string;
+      locExpr?: string;
+    }[],
   ) {
     if (items.length === 0) return;
 
@@ -2330,8 +2416,15 @@ class CodegenContext {
       }
     }
 
+    // For sync items that have loc, wrap in try/catch at the statement level
     for (const it of syncItems) {
-      this.emit(it.assign(it.expr));
+      if (it.locExpr) {
+        this.emit(
+          `try { ${it.assign(it.expr)} } catch (__e) { if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${it.locExpr}; throw __e; } throw __wrapErr(__e, {bridgeLoc:${it.locExpr}}); }`,
+        );
+      } else {
+        this.emit(it.assign(it.expr));
+      }
     }
 
     if (asyncItems.length > 1) {
@@ -2352,15 +2445,36 @@ class CodegenContext {
       }
       this.popIndent();
       this.emit(`]);`);
-      // Re-throw the first rejection (fatal errors first, matching runtime)
-      this.emit(
-        `{ let __fatal, __first; for (const __r of ${settledVar}) { if (__r instanceof Error) { if (__isFatal(__r)) { if (!__fatal) __fatal = __r; } else { if (!__first) __first = __r; } } } if (__fatal) throw __fatal; if (__first) throw __first; }`,
-      );
+      // Re-throw the first rejection (fatal errors first, matching runtime).
+      // Annotate with bridgeLoc from the per-wire loc metadata when available.
+      const hasLocs = asyncItems.some((it) => it.locExpr);
+      if (hasLocs) {
+        const locsArray = `[${asyncItems.map((it) => it.locExpr || "undefined").join(",")}]`;
+        this.emit(
+          `{ const __locs = ${locsArray}; let __fatal, __first, __fi = 0; for (let __i = 0; __i < ${settledVar}.length; __i++) { const __r = ${settledVar}[__i]; if (__r instanceof Error) { if (__isFatal(__r)) { if (!__fatal) { __fatal = __r; __fi = __i; } } else { if (!__first) { __first = __r; __fi = __i; } } } } if (__fatal) { if (__locs[__fi] && !__fatal.bridgeLoc) __fatal.bridgeLoc = __locs[__fi]; throw __fatal; } if (__first) { if (__locs[__fi]) throw __wrapErr(__first, {bridgeLoc:__locs[__fi]}); throw __first; } }`,
+        );
+      } else {
+        this.emit(
+          `{ let __fatal, __first; for (const __r of ${settledVar}) { if (__r instanceof Error) { if (__isFatal(__r)) { if (!__fatal) __fatal = __r; } else { if (!__first) __first = __r; } } } if (__fatal) throw __fatal; if (__first) throw __first; }`,
+        );
+      }
       for (let i = 0; i < asyncItems.length; i++) {
         this.emit(asyncItems[i]!.assign(`${settledVar}[${i}]`));
       }
     } else if (asyncItems.length === 1) {
-      this.emit(asyncItems[0]!.assign(asyncItems[0]!.expr));
+      const it = asyncItems[0]!;
+      if (it.locExpr) {
+        // Single async item with loc — wrap assignment in try/catch
+        this.emit(`try {`);
+        this.pushIndent();
+        this.emit(it.assign(it.expr));
+        this.popIndent();
+        this.emit(
+          `} catch (__e) { if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${it.locExpr}; throw __e; } throw __wrapErr(__e, {bridgeLoc:${it.locExpr}}); }`,
+        );
+      } else {
+        this.emit(it.assign(it.expr));
+      }
     }
   }
 
@@ -2426,6 +2540,16 @@ class CodegenContext {
       const expr = this.compileExpression(sources[0]!.expr, scope);
       const loc = sources[0]!.expr.loc;
       const locExpr = loc ? jsLoc(loc) : "undefined";
+
+      // Fast path: when inside an optimized array loop body, use a comma
+      // expression to set the loc index before the value is evaluated. The
+      // caller wraps the entire loop body in a single try/catch. Locs are
+      // precomputed in an array, so no object allocation per iteration.
+      if (this.loopLocInfo && !wireCatch && !expr.includes("await")) {
+        const idx = this.loopLocInfo.locs.length;
+        this.loopLocInfo.locs.push(locExpr);
+        return `(${this.loopLocInfo.indexVar} = ${idx}, ${expr})`;
+      }
 
       const fatalGuard = `if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${locExpr}; throw __e; }`;
       const catchBody = wireCatch ? this.compileCatch(wireCatch, scope) : "";
@@ -2779,6 +2903,27 @@ class CodegenContext {
       this.emit(`const ${outVar} = {};`);
     } else {
       this.emit(`const ${resultVar} = [];`);
+    }
+
+    // Static analysis: does this loop body use break/continue sentinels?
+    const hasCtrlFlow = !hasTool && bodyHasControlFlow(expr.body);
+
+    // Optimized sync path: consolidate per-wire IIFEs into a single try/catch
+    // with a shared __loc variable. Hoist try/catch OUTSIDE the loop so V8
+    // doesn't enter/exit the catch frame per element.
+    const useLoopLoc = !hasTool && !hasCtrlFlow;
+    const locVar = useLoopLoc ? `__li_${depth}` : undefined;
+    const locsVar = useLoopLoc ? `__locs_${depth}` : undefined;
+    const prevLoopLocInfo = this.loopLocInfo;
+    const locCollector: string[] = [];
+    if (locVar && locsVar) {
+      this.emit(`let ${locVar} = 0;`);
+      this.emit(`try {`);
+      this.pushIndent();
+      this.loopLocInfo = { indexVar: locVar, locsVar, locs: locCollector };
+    }
+
+    if (!hasTool) {
       this.emit(`for (const ${iterVar} of ${arrVar}) {`);
       this.pushIndent();
       this.emit(`const ${outVar} = {};`);
@@ -2799,6 +2944,7 @@ class CodegenContext {
 
     this.iteratorStack.pop();
     this.currentBatchQueue = undefined;
+    this.loopLocInfo = prevLoopLocInfo;
 
     if (hasTool) {
       // Concurrent path: return element output from map callback
@@ -2806,8 +2952,22 @@ class CodegenContext {
       this.popIndent();
       this.emit(`}));`);
       this.emit(`${targetExpr} = ${resultVar};`);
+    } else if (!hasCtrlFlow) {
+      // Optimized sequential path: no control flow → skip sentinel check
+      this.emit(`${resultVar}.push(${outVar});`);
+      this.popIndent();
+      this.emit(`}`); // close for loop
+      if (locVar && locsVar) {
+        // Close the try block hoisted outside the loop
+        const locsExpr = `[${locCollector.join(",")}]`;
+        this.popIndent();
+        this.emit(
+          `} catch (__e) { if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${locsExpr}[${locVar}]; throw __e; } throw __wrapErr(__e, {bridgeLoc:${locsExpr}[${locVar}]}); }`,
+        );
+      }
+      this.emit(`${targetExpr} = ${resultVar};`);
     } else {
-      // Sequential path: check for control flow sentinels
+      // Sequential path with control flow: check for sentinels
       const sigVar = `__sig_${depth}`;
       this.emit(
         `const ${sigVar} = Object.values(${outVar}).find(__v => __v === Symbol.for("BRIDGE_BREAK") || __v === Symbol.for("BRIDGE_CONTINUE") || (__v && typeof __v === 'object' && (__v.__bridgeControl === 'break' || __v.__bridgeControl === 'continue')));`,
