@@ -10,17 +10,17 @@ import type {
   HandleBinding,
   Instruction,
   ToolDef,
-  Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
 import {
   assertDeepStrictEqualIgnoringLoc,
   flatWires,
+  type FlatWire,
 } from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
-/** Helper to extract the source ref from a Wire */
-function sourceRef(wire: Wire) {
+/** Helper to extract the source ref from a FlatWire */
+function sourceRef(wire: FlatWire) {
   const expr = wire.sources[0]?.expr;
   return expr?.type === "ref" ? expr.ref : undefined;
 }
@@ -101,7 +101,7 @@ describe("parseBridge", () => {
     assert.equal(flatWires(instr.body).length, 2);
 
     assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
-      to: {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "geocode",
@@ -122,7 +122,7 @@ describe("parseBridge", () => {
       ],
     });
     assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
-      to: {
+      target: {
         module: "hereapi",
         type: "Query",
         field: "geocode",
@@ -166,7 +166,7 @@ describe("parseBridge", () => {
     )!;
     assert.equal(instr.handles.length, 3);
     assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
-      to: {
+      target: {
         module: SELF_MODULE,
         type: "Tools",
         field: "toInt",
@@ -189,7 +189,7 @@ describe("parseBridge", () => {
       ],
     });
     assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
-      to: {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "health",
@@ -235,7 +235,7 @@ describe("parseBridge", () => {
       instance: 1,
       path: ["properties", "0", "streetAddress"],
     });
-    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.target, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
@@ -245,7 +245,7 @@ describe("parseBridge", () => {
       sourceRef(flatWires(instr.body)[1]!)?.path,
       ["properties", "0", "location", "city"],
     );
-    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1]!.to.path, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1]!.target.path, [
       "topPick",
       "city",
     ]);
@@ -273,7 +273,7 @@ describe("parseBridge", () => {
     assert.equal(allWires.length, 3);
     // First wire: array mapping to results
     const resultsWire = allWires[0];
-    assertDeepStrictEqualIgnoringLoc(resultsWire.to, {
+    assertDeepStrictEqualIgnoringLoc(resultsWire.target, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
@@ -295,7 +295,7 @@ describe("parseBridge", () => {
       });
     }
     assertDeepStrictEqualIgnoringLoc(allWires[1], {
-      to: {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
@@ -318,7 +318,7 @@ describe("parseBridge", () => {
       ],
     });
     assertDeepStrictEqualIgnoringLoc(allWires[2], {
-      to: {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
@@ -360,7 +360,7 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.type, "Mutation");
-    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.target, {
       module: "sendgrid",
       type: "Mutation",
       field: "send",
@@ -789,7 +789,7 @@ describe("parseBridge: tool blocks", () => {
     ]);
     assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
-        to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
+        target: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
         sources: [
           {
             expr: {
@@ -800,7 +800,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi",
@@ -827,7 +827,7 @@ describe("parseBridge: tool blocks", () => {
     assert.equal(child.extends, "hereapi");
     assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi.geocode",
@@ -836,7 +836,7 @@ describe("parseBridge: tool blocks", () => {
         sources: [{ expr: { type: "literal", value: "GET" } }],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi.geocode",
@@ -876,7 +876,7 @@ describe("parseBridge: tool blocks", () => {
     )!;
     assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -887,7 +887,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -908,7 +908,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -924,7 +924,7 @@ describe("parseBridge: tool blocks", () => {
     assert.equal(child.extends, "sendgrid");
     assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid.send",
@@ -933,7 +933,7 @@ describe("parseBridge: tool blocks", () => {
         sources: [{ expr: { type: "literal", value: "POST" } }],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid.send",
@@ -979,7 +979,7 @@ describe("parseBridge: tool blocks", () => {
       { kind: "tool", handle: "auth", name: "authService" },
     ]);
     assertDeepStrictEqualIgnoringLoc(flatWires(serviceB.body)[1], {
-      to: {
+      target: {
         module: "_",
         type: "Tools",
         field: "serviceB",
@@ -1293,7 +1293,7 @@ describe("parser robustness", () => {
     const wire = flatWires(instr.body).find(
       (w) => w.sources[0]?.expr.type === "ref",
     )!;
-    assert.equal(wire.to.path.join("."), "name");
+    assert.equal(wire.target.path.join("."), "name");
     const expr = wire.sources[0]!.expr;
     assert.equal(
       expr.type === "ref" ? expr.ref.path.join(".") : undefined,
@@ -1311,7 +1311,7 @@ describe("parser robustness", () => {
     `).instructions.find((inst) => inst.kind === "tool") as ToolDef;
     const urlWire = flatWires(tool.body).find(
       (w) =>
-        w.sources[0]?.expr.type === "literal" && w.to.path.join(".") === "url",
+        w.sources[0]?.expr.type === "literal" && w.target.path.join(".") === "url",
     );
     assert.ok(urlWire);
     assert.equal(

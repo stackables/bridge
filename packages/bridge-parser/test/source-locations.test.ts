@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseBridgeChevrotain as parseBridge } from "../src/index.ts";
-import type { Bridge, Wire, WireAliasStatement } from "@stackables/bridge-core";
+import type { Bridge, WireAliasStatement } from "@stackables/bridge-core";
 import { bridge } from "@stackables/bridge-core";
-import { flatWires } from "./utils/parse-test-utils.ts";
+import { flatWires, type FlatWire } from "./utils/parse-test-utils.ts";
 
 function getBridge(text: string): Bridge {
   const document = parseBridge(text);
@@ -14,7 +14,7 @@ function getBridge(text: string): Bridge {
   return instr;
 }
 
-function assertLoc(wire: Wire | undefined, line: number, column: number): void {
+function assertLoc(wire: FlatWire | undefined, line: number, column: number): void {
   assert.ok(wire, "expected wire to exist");
   assert.ok(wire.loc, "expected wire to carry a source location");
   assert.equal(wire.loc.startLine, line);
@@ -109,7 +109,7 @@ describe("parser source locations", () => {
     assert.equal(aliasStmt.catch.loc?.startColumn, 44);
 
     const messageWire = flatWires(instr.body).find(
-      (wire) => wire.to.path.join(".") === "message",
+      (wire) => wire.target.path.join(".") === "message",
     );
     assert.ok(messageWire && messageWire.sources.length >= 2);
     const msgExpr0 = messageWire.sources[0]!.expr;
@@ -147,7 +147,7 @@ describe("parser source locations", () => {
     `);
 
     const destinationIdWire = flatWires(instr.body).find(
-      (wire) => wire.to.path.join(".") === "legs.destination.station.id",
+      (wire) => wire.target.path.join(".") === "legs.destination.station.id",
     );
     assertLoc(destinationIdWire, 8, 9);
     assert.ok(destinationIdWire);
@@ -159,7 +159,7 @@ describe("parser source locations", () => {
     );
 
     const destinationPlannedTimeWire = flatWires(instr.body).find(
-      (wire) => wire.to.path.join(".") === "legs.destination.plannedTime",
+      (wire) => wire.target.path.join(".") === "legs.destination.plannedTime",
     );
     assertLoc(destinationPlannedTimeWire, 11, 7);
     assert.ok(destinationPlannedTimeWire);
@@ -171,7 +171,7 @@ describe("parser source locations", () => {
     );
 
     const destinationDelayWire = flatWires(instr.body).find(
-      (wire) => wire.to.path.join(".") === "legs.destination.delayMinutes",
+      (wire) => wire.target.path.join(".") === "legs.destination.delayMinutes",
     );
     assert.ok(destinationDelayWire && destinationDelayWire.sources.length >= 2);
     assertLoc(destinationDelayWire, 12, 7);

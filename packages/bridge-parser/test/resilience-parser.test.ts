@@ -692,7 +692,7 @@ describe("parseBridge: || source references", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const labelWires = flatWires(instr.body).filter(
-      (w) => w.to.path[0] === "label",
+      (w) => w.target.path[0] === "label",
     );
     assert.equal(labelWires.length, 1, "should be one wire, not two");
     assert.ok(
@@ -727,7 +727,7 @@ describe("parseBridge: || source references", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const labelWires = flatWires(instr.body).filter(
-      (w) => w.to.path[0] === "label",
+      (w) => w.target.path[0] === "label",
     );
     assert.equal(labelWires.length, 1);
     assert.ok(
@@ -768,7 +768,7 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = flatWires(instr.body).find((w) => w.to.path[0] === "label")!;
+    const wire = flatWires(instr.body).find((w) => w.target.path[0] === "label")!;
     assert.ok(wire.catch && "ref" in wire.catch, "should have catch ref");
     assert.equal(
       wire.catch && "value" in wire.catch ? wire.catch.value : undefined,
@@ -798,7 +798,7 @@ describe("parseBridge: catch source/pipe references", () => {
     const instr = doc.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wire = flatWires(instr.body).find((w) => w.to.path[0] === "label")!;
+    const wire = flatWires(instr.body).find((w) => w.target.path[0] === "label")!;
     assert.ok(wire.catch && "expr" in wire.catch, "should have catch expr");
     assert.equal(
       wire.catch.expr.type,
@@ -827,7 +827,7 @@ describe("parseBridge: catch source/pipe references", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     const labelWires = flatWires(instr.body).filter(
-      (w) => !w.pipe && w.to.path[0] === "label",
+      (w) => w.target.path[0] === "label",
     );
     assert.equal(labelWires.length, 1);
     assert.ok(

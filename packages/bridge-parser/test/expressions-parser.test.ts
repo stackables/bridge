@@ -41,7 +41,7 @@ function findBinaryOp(
 function getOutputExpr(doc: ReturnType<typeof parseBridge>): any {
   const instr = doc.instructions.find((i) => i.kind === "bridge")!;
   const wires = flatWires(instr.body);
-  const outputWire = wires.find((w) => w.to.path.includes("result"));
+  const outputWire = wires.find((w) => w.target.path.includes("result"));
   return outputWire?.sources[0]?.expr;
 }
 
@@ -237,7 +237,7 @@ describe("expressions: operator precedence (parser)", () => {
     `);
     const instr = doc.instructions.find((i) => i.kind === "bridge")!;
     const wires = flatWires(instr.body);
-    const outputWire = wires.find((w) => w.to.path.includes("total"));
+    const outputWire = wires.find((w) => w.target.path.includes("total"));
     assert.ok(outputWire, "should have output wire");
     const expr = outputWire!.sources[0]?.expr;
     assert.equal(expr.type, "binary");
@@ -547,7 +547,7 @@ describe("serializeBridge: keyword strings are quoted", () => {
       const wire = flatWires(instr.body).find(
         (w) =>
           w.sources?.[0]?.expr?.type === "literal" &&
-          w.to?.path?.[0] === "result",
+          w.target?.path?.[0] === "result",
       );
       assert.equal(
         wire?.sources[0]?.expr.type === "literal"

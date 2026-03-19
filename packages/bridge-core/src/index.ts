@@ -90,7 +90,6 @@ export type {
   ToolMap,
   ToolMetadata,
   VersionDecl,
-  Wire,
   WireAliasStatement,
   WireCatch,
   WireSourceEntry,
@@ -98,14 +97,9 @@ export type {
   WithStatement,
 } from "./types.ts";
 
-// ── Wire resolution ─────────────────────────────────────────────────────────
+// ── Expression evaluation ──────────────────────────────────────────────────
 
-export {
-  evaluateExpression,
-  resolveSourceEntries,
-  applyFallbackGates as applyFallbackGatesV2,
-  applyCatch as applyCatchV2,
-} from "./resolveWiresSources.ts";
+export { evaluateExpression } from "./resolveWiresSources.ts";
 
 // ── Traversal enumeration ───────────────────────────────────────────────────
 

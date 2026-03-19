@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
-import type { Statement, Wire } from "@stackables/bridge-core";
+import type { Statement, WireSourceEntry, WireCatch, NodeRef, SourceLocation } from "@stackables/bridge-core";
 import type { ForceStatement } from "@stackables/bridge-core";
+
+/** Flattened wire result — mirrors WireStatement but with path prefix folded into target. */
+export type FlatWire = {
+  target: NodeRef;
+  sources: WireSourceEntry[];
+  catch?: WireCatch;
+  loc?: SourceLocation;
+  spread?: true;
+};
 
 function omitLoc(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -37,17 +46,17 @@ export function assertDeepStrictEqualIgnoringLoc(
 
 /**
  * Extract Wire-compatible objects from a body Statement[] tree.
- * Maps WireStatement.target → Wire.to for backward-compatible test assertions.
+ * Folds scope path prefixes into each wire's target path.
  */
 export function flatWires(
   stmts: Statement[],
   pathPrefix: string[] = [],
   isElement?: boolean,
-): Wire[] {
-  const result: Wire[] = [];
+): FlatWire[] {
+  const result: FlatWire[] = [];
   for (const s of stmts) {
     if (s.kind === "wire") {
-      const to =
+      const target =
         pathPrefix.length > 0 || isElement
           ? {
               ...s.target,
@@ -55,7 +64,7 @@ export function flatWires(
               ...(isElement ? { element: true } : {}),
             }
           : s.target;
-      const w: Wire = { to, sources: s.sources };
+      const w: FlatWire = { target, sources: s.sources };
       if (s.catch) w.catch = s.catch;
       if (s.loc) w.loc = s.loc;
       result.push(w);
@@ -72,12 +81,12 @@ export function flatWires(
         }
       }
     } else if (s.kind === "spread") {
-      const to =
+      const target =
         pathPrefix.length > 0
           ? { module: "", type: "", field: "", path: [...pathPrefix] }
           : { module: "", type: "", field: "" as string, path: [] as string[] };
-      const w: Wire = {
-        to,
+      const w: FlatWire = {
+        target,
         sources: s.sources,
         spread: true,
       };

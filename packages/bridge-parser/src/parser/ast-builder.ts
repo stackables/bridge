@@ -631,6 +631,11 @@ export function buildBody(
     segments: string[],
     lineNum: number,
   ): NodeRef {
+    if (root === "") {
+      throw new Error(
+        `Line ${lineNum}: Self-reference creates a circular dependency. Remove the leading dot or use a declared handle.`,
+      );
+    }
     const resolution = handleRes.get(root);
     if (!resolution) {
       if (segments.length === 0) {
@@ -1939,7 +1944,7 @@ export function buildBody(
       const res = handleRes.get(handle);
       if (!res) {
         throw new Error(
-          `Line ${bodyLineNum}: Undeclared handle "${handle}" in force statement`,
+          `Line ${bodyLineNum}: Cannot force undeclared handle "${handle}"`,
         );
       }
       body.push({

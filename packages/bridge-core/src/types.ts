@@ -38,28 +38,6 @@ export type NodeRef = {
 };
 
 /**
- * A wire connects a data source (from) to a data sink (to).
- *
- * Unified shape: every wire has an ordered list of source entries and an
- * optional catch handler. The first source entry is always evaluated; subsequent
- * entries have a gate (`||` for falsy, `??` for nullish) that determines whether
- * to fall through to them.
- *
- * Constant wires have a single literal source entry.
- * Ternary/boolean wires have a single ternary/and/or expression entry.
- * Pipe wires (`pipe: true`) route data through declared tool handles.
- * Spread wires (`spread: true`) merge source object properties into the target.
- */
-export type Wire = {
-  to: NodeRef;
-  sources: WireSourceEntry[];
-  catch?: WireCatch;
-  pipe?: true;
-  spread?: true;
-  loc?: SourceLocation;
-};
-
-/**
  * Bridge definition — wires one GraphQL field to its data sources.
  */
 export type Bridge = {
@@ -168,9 +146,9 @@ export type ControlFlowInstruction =
   | { kind: "continue"; levels?: number }
   | { kind: "break"; levels?: number };
 
-// ── Wire Expression Model ───────────────────────────────────────────────────
+// ── Source Expression Model ──────────────────────────────────────────────────
 //
-// Every wire is an ordered list of source entries + an optional catch handler.
+// Every statement has an ordered list of source entries + an optional catch handler.
 // Source entries contain recursive Expression trees that evaluate to values.
 
 /**
@@ -199,8 +177,7 @@ export type Expression =
        * A fully parsed, ready-to-use literal value.
        *
        * The AST builder runs JSON.parse() once during compilation.
-       * Legacy path (flat Wire[]): value is still a JSON-encoded string.
-       * New path (Statement[]): value is the parsed JsonValue.
+       * Value is the parsed JsonValue.
        */
       type: "literal";
       value: JsonValue;
@@ -477,8 +454,7 @@ export type ForceStatement = {
 /**
  * Union of all statement types that can appear in a bridge/define/tool body.
  *
- * This is the recursive building block of the nested IR. Statement[] replaces
- * the flat Wire[] in Bridge, ToolDef, and DefineDef.
+ * This is the recursive building block of the nested IR.
  */
 export type Statement =
   | WireStatement
