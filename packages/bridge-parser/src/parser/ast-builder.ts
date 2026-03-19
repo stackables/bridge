@@ -34,7 +34,7 @@ import type {
   WithStatement,
 } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
-import type { SourceLocation } from "@stackables/bridge-types";
+import type { SourceLocation } from "@stackables/bridge-core";
 
 // ── CST Navigation Helpers ──────────────────────────────────────────────────
 

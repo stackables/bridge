@@ -157,7 +157,7 @@ run("npm install --ignore-scripts", { cwd: tempDir });
 
 const smokeScript = `
 import { parseBridgeFormat, executeBridge } from "@stackables/bridge";
-import { ExecutionTree } from "@stackables/bridge-core";
+import { executeBridge as executeBridgeCore } from "@stackables/bridge-core";
 import { parseBridgeChevrotain, serializeBridge } from "@stackables/bridge-parser";
 import { createHttpCall, std } from "@stackables/bridge-stdlib";
 import { bridgeTransform } from "@stackables/bridge-graphql";
@@ -211,7 +211,7 @@ if (!std || typeof std !== "object") throw new Error("std namespace missing");
 if (typeof std.httpCall !== "function") throw new Error("std.httpCall missing");
 
 // --- Verify types at runtime shapes ---
-if (typeof ExecutionTree !== "function") throw new Error("ExecutionTree not exported");
+if (typeof executeBridgeCore !== "function") throw new Error("executeBridge not exported from bridge-core");
 if (typeof bridgeTransform !== "function") throw new Error("bridgeTransform not exported");
 
 console.log("✓ All runtime smoke tests passed");
@@ -233,7 +233,7 @@ try {
 
 const typeCheckScript = `
 import { parseBridgeFormat, executeBridge, serializeBridge } from "@stackables/bridge";
-import type { Bridge, BridgeDocument, Wire, NodeRef, ToolDef, ToolMap, ToolCallFn, ToolContext } from "@stackables/bridge";
+import type { Bridge, BridgeDocument, WireStatement, NodeRef, ToolDef, ToolMap, ToolCallFn, ToolContext } from "@stackables/bridge";
 import type { ExecuteBridgeOptions, ExecuteBridgeResult } from "@stackables/bridge";
 
 // Verify key type shapes compile
