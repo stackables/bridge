@@ -1626,7 +1626,7 @@ export function buildBody(
         const scopeBody: Statement[] = [];
 
         for (const scopeLine of subs(elemLine, "elemScopeLine")) {
-          buildPathScopeLine(scopeLine, scopeBody, iterScope);
+          buildPathScopeLine(scopeLine, scopeBody, iterScope, true);
         }
         for (const spreadLine of subs(elemLine, "elemSpreadLine")) {
           buildSpreadLine(spreadLine, scopeBody, iterScope);
@@ -1694,6 +1694,7 @@ export function buildBody(
     scopeLine: CstNode,
     stmts: Statement[],
     iterScope?: string[],
+    inElement?: boolean,
   ): void {
     const scopeLineNum = line(findFirstToken(scopeLine));
     const targetStr = extractDottedPathStr(sub(scopeLine, "scopeTarget")!);
@@ -1714,6 +1715,7 @@ export function buildBody(
         module: SELF_MODULE,
         type: bridgeType,
         field: bridgeField,
+        ...(inElement ? { element: true as const } : {}),
         path: scopeSegs,
       };
       const scopeBody: Statement[] = [];
@@ -1722,7 +1724,7 @@ export function buildBody(
         buildAliasStatement(innerAlias, scopeBody, iterScope);
       }
       for (const innerLine of nestedScopeLines) {
-        buildPathScopeLine(innerLine, scopeBody, iterScope);
+        buildPathScopeLine(innerLine, scopeBody, iterScope, inElement);
       }
       for (const innerSpread of nestedSpreadLines) {
         buildSpreadLine(innerSpread, scopeBody, iterScope);
@@ -1742,6 +1744,7 @@ export function buildBody(
       module: SELF_MODULE,
       type: bridgeType,
       field: bridgeField,
+      ...(inElement ? { element: true as const } : {}),
       path: scopeSegs,
     };
 
