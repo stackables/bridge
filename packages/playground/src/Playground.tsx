@@ -1,4 +1,12 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useMemo,
+  useEffect,
+  lazy,
+  Suspense,
+} from "react";
 import {
   Panel,
   Group,
@@ -16,6 +24,19 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { collectInactiveTraversalLocations } from "@/lib/trace-highlighting";
 import type { PlaygroundMode } from "./share";
+
+declare const __BRIDGE_COMPILER_PREVIEW__: boolean;
+
+const COMPILER_PREVIEW_ENABLED =
+  typeof __BRIDGE_COMPILER_PREVIEW__ === "boolean"
+    ? __BRIDGE_COMPILER_PREVIEW__
+    : true;
+const LazyCompiledPanel = COMPILER_PREVIEW_ENABLED
+  ? lazy(async () => {
+      const module = await import("./components/CompiledPanel");
+      return { default: module.CompiledPanel };
+    })
+  : null;
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -219,58 +240,6 @@ function QueryTabBar({
   );
 }
 
-// ── bridge DSL header with optional trace badge ─────────────────────────────
-function BridgeDslHeader({
-  executionTraceId,
-  onClearExecutionTraceId,
-}: {
-  executionTraceId?: bigint;
-  onClearExecutionTraceId?: () => void;
-}) {
-  const hasTrace = executionTraceId != null && executionTraceId > 0n;
-  return (
-    <div className="content-center shrink-0 px-5 h-10 flex items-center gap-4">
-      <span className="text-[11px] font-bold uppercase tracking-widest text-slate-200">
-        Bridge DSL
-      </span>
-      {hasTrace && (
-        <span
-          title={`Execution trace ID: ${executionTraceId} (decimal)`}
-          className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
-        >
-          <a
-            href="/advanced/trace-id/"
-            className="rounded-sm hover:text-indigo-100 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-300"
-            target="docs"
-          >
-            trace-id 0x{executionTraceId.toString(16)}
-          </a>
-          {onClearExecutionTraceId && (
-            <button
-              type="button"
-              onClick={onClearExecutionTraceId}
-              title="Clear execution trace ID highlighting"
-              className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
-            >
-              <svg
-                className="w-2.5 h-2.5"
-                viewBox="0 0 10 10"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <line x1="2" y1="2" x2="8" y2="8" />
-                <line x1="8" y1="2" x2="2" y2="8" />
-              </svg>
-            </button>
-          )}
-        </span>
-      )}
-    </div>
-  );
-}
-
 // ── schema panel header with mode toggle ─────────────────────────────────────
 function SchemaHeader({
   mode,
@@ -317,6 +286,79 @@ function SchemaHeader({
 }
 
 import { getTraversalManifest, decodeExecutionTrace } from "./engine";
+
+// ── DSL panel tab bar (Bridge DSL | Compiled) ─────────────────────────────────
+function DslPanelTabBar({
+  dslTab,
+  onDslTabChange,
+  compilerPreviewEnabled,
+  executionTraceId,
+  onClearExecutionTraceId,
+}: {
+  dslTab: "bridge" | "compiled";
+  onDslTabChange: (tab: "bridge" | "compiled") => void;
+  compilerPreviewEnabled: boolean;
+  executionTraceId?: bigint;
+  onClearExecutionTraceId?: () => void;
+}) {
+  const hasTrace =
+    dslTab === "bridge" && executionTraceId != null && executionTraceId > 0n;
+  const tabs = compilerPreviewEnabled
+    ? (["bridge", "compiled"] as const)
+    : (["bridge"] as const);
+  return (
+    <div className="shrink-0 flex items-center gap-px px-5 pt-1.5">
+      {tabs.map((tab) => (
+        <button
+          key={tab}
+          onClick={() => onDslTabChange(tab)}
+          className={cn(
+            "uppercase px-3 py-1.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
+            dslTab === tab
+              ? "border-sky-400 text-slate-200"
+              : "border-transparent text-slate-500 hover:text-slate-300",
+          )}
+        >
+          {tab === "bridge" ? "Bridge DSL" : "Compiled"}
+        </button>
+      ))}
+      {hasTrace && (
+        <span
+          title={`Execution trace ID: ${executionTraceId} (decimal)`}
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-indigo-900/50 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-mono font-medium text-indigo-300"
+        >
+          <a
+            href="/advanced/trace-id/"
+            className="rounded-sm hover:text-indigo-100 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-300"
+            target="docs"
+          >
+            trace-id 0x{executionTraceId!.toString(16)}
+          </a>
+          {onClearExecutionTraceId && (
+            <button
+              type="button"
+              onClick={onClearExecutionTraceId}
+              title="Clear execution trace ID highlighting"
+              className="ml-0.5 rounded-full hover:bg-indigo-700/50 transition-colors p-0.5 -mr-0.5"
+            >
+              <svg
+                className="w-2.5 h-2.5"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <line x1="2" y1="2" x2="8" y2="8" />
+                <line x1="8" y1="2" x2="2" y2="8" />
+              </svg>
+            </button>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function getInactiveTraversalLocations(
   bridge: string,
@@ -423,6 +465,25 @@ export function Playground({
   const leftVLayout = useDefaultLayout({ id: "bridge-playground-left-v" });
   const rightVLayout = useDefaultLayout({ id: "bridge-playground-right-v" });
 
+  // ── Bridge DSL panel tabs ─────────────────────────────────────────────────
+  const [dslTab, setDslTab] = useState<"bridge" | "compiled">("bridge");
+  const [compiledOperation, setCompiledOperation] = useState<string>(() =>
+    bridgeOperations.length > 0 ? bridgeOperations[0]!.label : "",
+  );
+
+  useEffect(() => {
+    if (!COMPILER_PREVIEW_ENABLED && dslTab === "compiled") {
+      setDslTab("bridge");
+    }
+  }, [dslTab]);
+
+  // Keep compiledOperation consistent with available operations
+  const resolvedCompiledOperation =
+    compiledOperation &&
+    bridgeOperations.some((op) => op.label === compiledOperation)
+      ? compiledOperation
+      : (bridgeOperations[0]?.label ?? "");
+
   const activeQuery = queries.find((q) => q.id === activeTabId);
   const isStandalone = mode === "standalone";
 
@@ -478,20 +539,41 @@ export function Playground({
 
         {/* Bridge DSL panel */}
         <div className="bg-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <BridgeDslHeader
+          <DslPanelTabBar
+            dslTab={dslTab}
+            onDslTabChange={setDslTab}
+            compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
             executionTraceId={displayResult?.executionTraceId}
             onClearExecutionTraceId={onClearExecutionTraceId}
           />
           <div className="px-3 pb-3">
-            <Editor
-              label=""
-              value={bridge}
-              onChange={onBridgeChange}
-              language="bridge"
-              deadCodeLocations={inactiveTraversalLocations}
-              autoHeight
-              onFormat={onFormatBridge}
-            />
+            {dslTab === "bridge" ? (
+              <Editor
+                label=""
+                value={bridge}
+                onChange={onBridgeChange}
+                language="bridge"
+                deadCodeLocations={inactiveTraversalLocations}
+                autoHeight
+                onFormat={onFormatBridge}
+              />
+            ) : LazyCompiledPanel ? (
+              <Suspense
+                fallback={
+                  <div className="text-xs text-slate-400">
+                    Loading compiled preview...
+                  </div>
+                }
+              >
+                <LazyCompiledPanel
+                  bridge={bridge}
+                  operations={bridgeOperations}
+                  selectedOperation={resolvedCompiledOperation}
+                  onOperationChange={(op) => setCompiledOperation(op)}
+                  autoHeight
+                />
+              </Suspense>
+            ) : null}
           </div>
         </div>
 
@@ -606,19 +688,39 @@ export function Playground({
                   </div>
                 )}
                 <PanelBox>
-                  <BridgeDslHeader
+                  <DslPanelTabBar
+                    dslTab={dslTab}
+                    onDslTabChange={setDslTab}
+                    compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
                     executionTraceId={displayResult?.executionTraceId}
                     onClearExecutionTraceId={onClearExecutionTraceId}
                   />
                   <div className="flex-1 min-h-0 px-3 pb-3">
-                    <Editor
-                      label=""
-                      value={bridge}
-                      onChange={onBridgeChange}
-                      language="bridge"
-                      deadCodeLocations={inactiveTraversalLocations}
-                      onFormat={onFormatBridge}
-                    />
+                    {dslTab === "bridge" ? (
+                      <Editor
+                        label=""
+                        value={bridge}
+                        onChange={onBridgeChange}
+                        language="bridge"
+                        deadCodeLocations={inactiveTraversalLocations}
+                        onFormat={onFormatBridge}
+                      />
+                    ) : LazyCompiledPanel ? (
+                      <Suspense
+                        fallback={
+                          <div className="text-xs text-slate-400">
+                            Loading compiled preview...
+                          </div>
+                        }
+                      >
+                        <LazyCompiledPanel
+                          bridge={bridge}
+                          operations={bridgeOperations}
+                          selectedOperation={resolvedCompiledOperation}
+                          onOperationChange={(op) => setCompiledOperation(op)}
+                        />
+                      </Suspense>
+                    ) : null}
                   </div>
                 </PanelBox>
               </div>
@@ -654,19 +756,39 @@ export function Playground({
                 {/* Bridge DSL panel */}
                 <Panel defaultSize={65} minSize={20}>
                   <PanelBox>
-                    <BridgeDslHeader
+                    <DslPanelTabBar
+                      dslTab={dslTab}
+                      onDslTabChange={setDslTab}
+                      compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
                       executionTraceId={displayResult?.executionTraceId}
                       onClearExecutionTraceId={onClearExecutionTraceId}
                     />
                     <div className="flex-1 min-h-0 px-3 pb-3">
-                      <Editor
-                        label=""
-                        value={bridge}
-                        onChange={onBridgeChange}
-                        language="bridge"
-                        deadCodeLocations={inactiveTraversalLocations}
-                        onFormat={onFormatBridge}
-                      />
+                      {dslTab === "bridge" ? (
+                        <Editor
+                          label=""
+                          value={bridge}
+                          onChange={onBridgeChange}
+                          language="bridge"
+                          deadCodeLocations={inactiveTraversalLocations}
+                          onFormat={onFormatBridge}
+                        />
+                      ) : LazyCompiledPanel ? (
+                        <Suspense
+                          fallback={
+                            <div className="text-xs text-slate-400">
+                              Loading compiled preview...
+                            </div>
+                          }
+                        >
+                          <LazyCompiledPanel
+                            bridge={bridge}
+                            operations={bridgeOperations}
+                            selectedOperation={resolvedCompiledOperation}
+                            onOperationChange={(op) => setCompiledOperation(op)}
+                          />
+                        </Suspense>
+                      ) : null}
                     </div>
                   </PanelBox>
                 </Panel>

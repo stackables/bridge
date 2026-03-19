@@ -720,31 +720,11 @@ describe("executeGraph: multilevel break/continue in nested arrays", () => {
     { name: "Autumn", items: [{ sku: "A4", price: 20.0 }] },
   ];
 
-  test("falls back to standalone execution mode with a warning", async () => {
-    const warnings: string[] = [];
-    const mockLogger = {
-      debug: () => {},
-      info: () => {},
-      warn: (msg: string) => warnings.push(msg),
-      error: () => {},
-    };
-
+  test("uses standalone execution mode for multilevel break/continue", async () => {
     const instructions = parseBridge(catalogBridge);
-    // Must NOT throw at setup time — fallback mode is used instead
     const gateway = createGateway(catalogTypeDefs, instructions, {
-      logger: mockLogger,
       context: { catalog },
     });
-
-    // Warning must be logged at setup time
-    assert.ok(
-      warnings.some((w) => w.includes("Query.processCatalog")),
-      `Expected a warning about Query.processCatalog, got: ${JSON.stringify(warnings)}`,
-    );
-    assert.ok(
-      warnings.some((w) => w.includes("standalone")),
-      `Expected warning to mention standalone mode, got: ${JSON.stringify(warnings)}`,
-    );
 
     const executor = buildHTTPExecutor({ fetch: gateway.fetch as any });
     const result: any = await executor({

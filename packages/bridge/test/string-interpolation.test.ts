@@ -96,3 +96,49 @@ regressionTest("string interpolation", {
     },
   },
 });
+
+regressionTest("string interpolation: pipe expression in template", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Interpolation.pipeInTemplate {
+      with std.str.toUpperCase as toUpper
+      with input as i
+      with output as o
+
+      o.symbol <- "{toUpper:i.symbol}USDT"
+    }
+
+    bridge Interpolation.pipeInTemplateMixed {
+      with std.str.toUpperCase as toUpper
+      with input as i
+      with output as o
+
+      o.label <- "Asset: {toUpper:i.name} (v2)"
+    }
+  `,
+  tools: {
+    std: {
+      str: {
+        toUpperCase: (input: { in: string }) =>
+          typeof input.in === "string" ? input.in.toUpperCase() : "",
+      },
+    },
+  },
+  scenarios: {
+    "Interpolation.pipeInTemplate": {
+      "pipe expression inside template placeholder": {
+        input: { symbol: "btc" },
+        assertData: { symbol: "BTCUSDT" },
+        assertTraces: 1,
+      },
+    },
+    "Interpolation.pipeInTemplateMixed": {
+      "pipe expression mixed with surrounding text": {
+        input: { name: "btc" },
+        assertData: { label: "Asset: BTC (v2)" },
+        assertTraces: 1,
+      },
+    },
+  },
+});

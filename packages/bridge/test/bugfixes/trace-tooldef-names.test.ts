@@ -18,10 +18,22 @@ import { regressionTest, type AssertContext } from "../utils/regression.ts";
 
 function assertTraceShape(traces: ToolTrace[]) {
   for (const t of traces) {
-    assert.ok(typeof t.tool === "string" && t.tool.length > 0, "tool field must be a non-empty string");
-    assert.ok(typeof t.fn === "string" && t.fn.length > 0, "fn field must be a non-empty string");
-    assert.ok(typeof t.durationMs === "number" && t.durationMs >= 0, "durationMs must be non-negative");
-    assert.ok(typeof t.startedAt === "number" && t.startedAt >= 0, "startedAt must be non-negative");
+    assert.ok(
+      typeof t.tool === "string" && t.tool.length > 0,
+      "tool field must be a non-empty string",
+    );
+    assert.ok(
+      typeof t.fn === "string" && t.fn.length > 0,
+      "fn field must be a non-empty string",
+    );
+    assert.ok(
+      typeof t.durationMs === "number" && t.durationMs >= 0,
+      "durationMs must be non-negative",
+    );
+    assert.ok(
+      typeof t.startedAt === "number" && t.startedAt >= 0,
+      "startedAt must be non-negative",
+    );
     // full trace level → input + output present on success
     assert.ok("input" in t, "input field must be present at full trace level");
     assert.ok("output" in t || "error" in t, "output or error must be present");
@@ -57,8 +69,16 @@ regressionTest("trace: ToolDef name preserved in trace", {
           assert.equal(traces.length, 1);
           assertTraceShape(traces);
           const t = traces[0]!;
-          assert.equal(t.tool, "apiA", `[${ctx.engine}] tool field should be ToolDef name "apiA"`);
-          assert.equal(t.fn, "test.multitool", `[${ctx.engine}] fn field should be underlying function "test.multitool"`);
+          assert.equal(
+            t.tool,
+            "apiA",
+            `[${ctx.engine}] tool field should be ToolDef name "apiA"`,
+          );
+          assert.equal(
+            t.fn,
+            "test.multitool",
+            `[${ctx.engine}] fn field should be underlying function "test.multitool"`,
+          );
         },
       },
     },
@@ -105,10 +125,24 @@ regressionTest("trace: multiple ToolDefs from same fn are distinguishable", {
           assertTraceShape(traces);
           const alphaTrace = traces.find((t) => t.tool === "alpha");
           const betaTrace = traces.find((t) => t.tool === "beta");
-          assert.ok(alphaTrace, `[${ctx.engine}] expected trace with tool="alpha"`);
-          assert.ok(betaTrace, `[${ctx.engine}] expected trace with tool="beta"`);
-          assert.equal(alphaTrace.fn, "test.multitool", `[${ctx.engine}] alpha.fn`);
-          assert.equal(betaTrace.fn, "test.multitool", `[${ctx.engine}] beta.fn`);
+          assert.ok(
+            alphaTrace,
+            `[${ctx.engine}] expected trace with tool="alpha"`,
+          );
+          assert.ok(
+            betaTrace,
+            `[${ctx.engine}] expected trace with tool="beta"`,
+          );
+          assert.equal(
+            alphaTrace.fn,
+            "test.multitool",
+            `[${ctx.engine}] alpha.fn`,
+          );
+          assert.equal(
+            betaTrace.fn,
+            "test.multitool",
+            `[${ctx.engine}] beta.fn`,
+          );
         },
       },
     },
@@ -186,8 +220,16 @@ regressionTest("trace: ToolDef in define block preserves name", {
           assert.equal(traces.length, 1);
           assertTraceShape(traces);
           const t = traces[0]!;
-          assert.equal(t.tool, "enricher", `[${ctx.engine}] tool field should be "enricher"`);
-          assert.equal(t.fn, "test.multitool", `[${ctx.engine}] fn field should be "test.multitool"`);
+          assert.equal(
+            t.tool,
+            "enricher",
+            `[${ctx.engine}] tool field should be "enricher"`,
+          );
+          assert.equal(
+            t.fn,
+            "test.multitool",
+            `[${ctx.engine}] fn field should be "test.multitool"`,
+          );
         },
       },
     },

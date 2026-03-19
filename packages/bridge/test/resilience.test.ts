@@ -228,7 +228,7 @@ regressionTest("resilience: wire catch", {
         assertData: { result: "chainCaught" },
         // first throws, second never called; catch kicks in
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
     },
   },
@@ -428,7 +428,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-primary" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "backup used when primary returns null": {
         input: {},
@@ -438,7 +438,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.secondUsed": {
@@ -450,7 +450,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.multiWithFalsy": {
@@ -462,7 +462,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "terminal" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
       "primary wins when non-null": {
         input: {},
@@ -472,7 +472,7 @@ regressionTest("resilience: multi-wire null-coalescing", {
         },
         assertData: { value: "primary-val" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
     },
   },
@@ -544,7 +544,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "from-backup" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.backupSkipped": {
@@ -558,7 +558,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "has-value" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "primary null → backup provides value": {
         input: {},
@@ -568,7 +568,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "backup-result" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.bothNull": {
@@ -580,7 +580,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "literal" },
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
     },
     "Query.catchSourcePath": {
@@ -606,7 +606,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "direct-value" },
         assertTraces: 1,
-        allowDowngrade: true,
+        
       },
       "catch pipes fallback through tool": {
         input: {},
@@ -619,7 +619,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         },
         assertData: { value: "RECOVERY" },
         assertTraces: 3,
-        allowDowngrade: true,
+        
       },
     },
     "Query.fullCoalesce": {
@@ -635,7 +635,7 @@ regressionTest("resilience: || source + catch source (COALESCE)", {
         assertData: (data: any) => {
           assert.ok(data.value !== undefined);
         },
-        allowDowngrade: true,
+        
         assertTraces: (traces: any[]) => {
           assert.ok(traces.length >= 1);
         },

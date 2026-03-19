@@ -22,6 +22,8 @@ import type {
   Logger,
   CacheStore,
   TraversalEntry,
+  Statement,
+  Expression,
 } from "@stackables/bridge";
 import {
   bridgeTransform,
@@ -346,21 +348,36 @@ export function extractOutputFields(
 
     const pathSet = new Set<string>();
 
-    for (const wire of bridge.wires) {
-      if (
-        wire.to.module === "_" &&
-        wire.to.type === type &&
-        wire.to.field === field &&
-        wire.to.path.length > 0
-      ) {
-        // Add the full path
-        pathSet.add(wire.to.path.join("."));
-        // Add all intermediate ancestor paths
-        for (let i = 1; i < wire.to.path.length; i++) {
-          pathSet.add(wire.to.path.slice(0, i).join("."));
+    const addPath = (fullPath: string[]): void => {
+      if (fullPath.length > 0) {
+        pathSet.add(fullPath.join("."));
+        for (let i = 1; i < fullPath.length; i++) {
+          pathSet.add(fullPath.slice(0, i).join("."));
         }
       }
-    }
+    };
+
+    // Recursively walk body statements to collect output target paths
+    const walkOutputPaths = (stmts: Statement[], prefix: string[]): void => {
+      for (const s of stmts) {
+        if (s.kind === "wire") {
+          const t = s.target;
+          if (t.module === "_" && t.type === type && t.field === field) {
+            const fullPath = [...prefix, ...t.path];
+            addPath(fullPath);
+          }
+          // Walk into array expression bodies (e.g. `o <- src[] as x { ... }`)
+          for (const src of s.sources) {
+            if (src.expr.type === "array") {
+              walkOutputPaths(src.expr.body, [...prefix, ...s.target.path]);
+            }
+          }
+        } else if (s.kind === "scope") {
+          walkOutputPaths(s.body, [...prefix, ...s.target.path]);
+        }
+      }
+    };
+    walkOutputPaths(bridge.body!, []);
 
     const allPaths = [...pathSet].sort((a, b) => {
       const aParts = a.split(".");
@@ -420,9 +437,8 @@ export function extractInputSkeleton(
     // SELF_MODULE but have `element: true` — those are tool response fields, not inputs.
     const inputPaths: string[][] = [];
 
-    const collectRef = (ref: NodeRef | undefined) => {
+    const collectRef = (ref: NodeRef) => {
       if (
-        ref &&
         ref.module === "_" &&
         ref.type === type &&
         ref.field === field &&
@@ -433,21 +449,50 @@ export function extractInputSkeleton(
       }
     };
 
-    for (const wire of bridge.wires) {
-      if ("from" in wire) {
-        collectRef(wire.from);
-      } else if ("cond" in wire) {
-        collectRef(wire.cond);
-        collectRef(wire.thenRef);
-        collectRef(wire.elseRef);
-      } else if ("condAnd" in wire) {
-        collectRef(wire.condAnd.leftRef);
-        collectRef(wire.condAnd.rightRef);
-      } else if ("condOr" in wire) {
-        collectRef(wire.condOr.leftRef);
-        collectRef(wire.condOr.rightRef);
+    const collectExprRefs = (expr: Expression): void => {
+      switch (expr.type) {
+        case "ref":
+          collectRef(expr.ref);
+          break;
+        case "ternary":
+          collectExprRefs(expr.cond);
+          collectExprRefs(expr.then);
+          collectExprRefs(expr.else);
+          break;
+        case "and":
+        case "or":
+        case "binary":
+          collectExprRefs(expr.left);
+          collectExprRefs(expr.right);
+          break;
+        case "unary":
+          collectExprRefs(expr.operand);
+          break;
+        case "concat":
+          for (const p of expr.parts) collectExprRefs(p);
+          break;
+        case "pipe":
+          collectExprRefs(expr.source);
+          break;
+        case "array":
+          collectExprRefs(expr.source);
+          walkInputRefs(expr.body);
+          break;
       }
-    }
+    };
+
+    const walkInputRefs = (stmts: Statement[]): void => {
+      for (const s of stmts) {
+        if (s.kind === "wire" || s.kind === "alias" || s.kind === "spread") {
+          for (const src of s.sources) {
+            collectExprRefs(src.expr);
+          }
+        } else if (s.kind === "scope") {
+          walkInputRefs(s.body);
+        }
+      }
+    };
+    walkInputRefs(bridge.body!);
 
     if (inputPaths.length === 0) return "{}";
 

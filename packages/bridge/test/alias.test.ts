@@ -14,19 +14,94 @@ regressionTest("alias keyword", {
   bridge: bridge`
     version 1.5
 
-    bridge Alias.syntax {
-      with test.multitool as object
-      with input as i
+    bridge Array.is_wire {
       with output as o
+      with context as c
+      with test.multitool as echo
 
-      # Simple alias with fallback and catch
-      alias user_info <- object?.user.info || i.info catch "Unknown"
+      echo.items <- c.items
 
-      o.info <- user_info
+      o.arrayWithFallback <- echo.items[] as i {
+        .value <- i.value || "Fallback 1"
+      } || c.realArray[] as i {
+        .value <- i.value || "Fallback 2"
+      } catch []
+
     }
+
   `,
   tools: tools,
   scenarios: {
-    "Alias.syntax": {},
+    "Array.is_wire": {
+      "primary tool array present — uses first mapping": {
+        allowDowngrade: true,
+        context: {
+          items: [{ value: "A" }, { value: undefined }],
+          realArray: [{ value: "should not appear" }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [{ value: "A" }, { value: "Fallback 1" }],
+        },
+        assertTraces: 1,
+      },
+      "primary tool returns null — falls through to second array": {
+        allowDowngrade: true,
+        context: {
+          items: undefined,
+          realArray: [{ value: "Real value" }, { value: undefined }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [{ value: "Real value" }, { value: "Fallback 2" }],
+        },
+        assertTraces: 1,
+      },
+      "primary is empty array — stays empty (truthy)": {
+        allowDowngrade: true,
+        context: {
+          items: [],
+          realArray: [{ value: "B" }],
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [],
+        },
+        assertTraces: 1,
+      },
+      "both null — result is null": {
+        allowDowngrade: true,
+        context: {
+          items: undefined,
+          realArray: undefined,
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: null,
+        },
+        assertTraces: 1,
+      },
+      "tool errors — catch fires": {
+        allowDowngrade: true,
+        context: {
+          items: "will cause _error",
+          realArray: undefined,
+        },
+        tools: {
+          "test.multitool": (() => {
+            const fn = () => {
+              throw new Error("forced");
+            };
+            fn.bridge = { sync: true };
+            return fn;
+          })(),
+        },
+        input: {},
+        assertData: {
+          arrayWithFallback: [],
+        },
+        assertTraces: 1,
+      },
+    },
   },
 });

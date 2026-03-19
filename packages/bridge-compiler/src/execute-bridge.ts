@@ -20,6 +20,8 @@ import {
   BridgeRuntimeError,
   BridgeTimeoutError,
   attachBridgeErrorDocumentContext,
+  isFatalError,
+  wrapBridgeRuntimeError,
   executeBridge as executeCoreBridge,
 } from "@stackables/bridge-core";
 import { std as bundledStd } from "@stackables/bridge-stdlib";
@@ -110,6 +112,17 @@ type BridgeFn = (
     __BridgeAbortError?: new (...args: any[]) => Error;
     __BridgeTimeoutError?: new (...args: any[]) => Error;
     __BridgeRuntimeError?: new (...args: any[]) => Error;
+    __wrapBridgeRuntimeError?: (
+      err: unknown,
+      options?: {
+        bridgeLoc?: {
+          startLine: number;
+          startColumn: number;
+          endLine: number;
+          endColumn: number;
+        };
+      },
+    ) => Error;
   },
 ) => Promise<any>;
 
@@ -309,6 +322,7 @@ export async function executeBridge<T = unknown>(
     __BridgeAbortError: BridgeAbortError,
     __BridgeTimeoutError: BridgeTimeoutError,
     __BridgeRuntimeError: BridgeRuntimeError,
+    __wrapBridgeRuntimeError: wrapBridgeRuntimeError,
     __trace: tracer
       ? (
           toolDefName: string,
@@ -344,11 +358,17 @@ export async function executeBridge<T = unknown>(
   try {
     data = await fn(input, flatTools, context, opts);
   } catch (err) {
-    if (err && typeof err === "object") {
-      (err as { executionTraceId?: bigint }).executionTraceId = 0n;
-      (err as { traces?: ToolTrace[] }).traces = tracer?.traces ?? [];
+    if (isFatalError(err)) {
+      if (err && typeof err === "object") {
+        (err as { executionTraceId?: bigint }).executionTraceId = 0n;
+        (err as { traces?: ToolTrace[] }).traces = tracer?.traces ?? [];
+      }
+      throw attachBridgeErrorDocumentContext(err, document);
     }
-    throw attachBridgeErrorDocumentContext(err, document);
+    const wrapped = wrapBridgeRuntimeError(err);
+    wrapped.executionTraceId = 0n;
+    wrapped.traces = tracer?.traces ?? [];
+    throw attachBridgeErrorDocumentContext(wrapped, document);
   }
   return {
     data: data as T,

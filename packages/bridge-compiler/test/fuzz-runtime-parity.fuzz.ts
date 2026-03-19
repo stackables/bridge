@@ -5,7 +5,7 @@ import type {
   Bridge,
   BridgeDocument,
   NodeRef,
-  Wire,
+  WireStatement,
 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import { parseBridgeFormat } from "@stackables/bridge-parser";
@@ -83,21 +83,26 @@ function outputRef(type: string, field: string, path: string[]): NodeRef {
 // ── Deep-path bridge arbitrary ──────────────────────────────────────────────
 // Uses multi-segment paths (1–4 segments) to exercise deep property access.
 
-const deepWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
-  const toArb = flatPathArb.map((path) => outputRef(type, field, path));
+const deepWireArb = (
+  type: string,
+  field: string,
+): fc.Arbitrary<WireStatement> => {
+  const targetArb = flatPathArb.map((path) => outputRef(type, field, path));
   const fromArb = pathArb.map((path) => inputRef(type, field, path));
 
   return fc.oneof(
-    fc.record({
-      sources: constantValueArb.map((v) => [
-        { expr: { type: "literal" as const, value: v } },
-      ]),
-      to: toArb,
-    }),
-    fc.record({
-      sources: fromArb.map((r) => [{ expr: { type: "ref" as const, ref: r } }]),
-      to: toArb,
-    }),
+    fc
+      .tuple(
+        constantValueArb.map((v) => [{ expr: { type: "literal" as const, value: v } }]),
+        targetArb,
+      )
+      .map(([sources, target]): WireStatement => ({ kind: "wire", target, sources })),
+    fc
+      .tuple(
+        fromArb.map((r) => [{ expr: { type: "ref" as const, ref: r } }]),
+        targetArb,
+      )
+      .map(([sources, target]): WireStatement => ({ kind: "wire", target, sources })),
   );
 };
 
@@ -115,10 +120,10 @@ const deepBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(deepWireArb(type, field), {
+      body: fc.uniqueArray(deepWireArb(type, field), {
         minLength: 1,
         maxLength: 20,
-        selector: (wire) => wire.to.path.join("."),
+        selector: (wire) => wire.target.path.join("."),
       }),
     }),
   );

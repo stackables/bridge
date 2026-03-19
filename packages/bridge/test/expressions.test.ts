@@ -416,7 +416,7 @@ regressionTest("expressions: catch error fallback", {
       "expression with catch error fallback: api.price * 100 catch -1": {
         input: { dollars: 5 },
         assertData: { cents: -1 },
-        allowDowngrade: true,
+
         assertTraces: 1,
       },
     },
@@ -632,6 +632,77 @@ regressionTest("safe flag on right operand expressions", {
   },
 });
 
+// ── Arithmetic null/undefined propagation through ?? fallback ───────────────
+//
+// Bug: `undefined * N ?? fallback` returned NaN instead of the fallback value.
+// When an arithmetic operand is null/undefined (e.g. from a mistyped path
+// accessed via `?.`), the result should propagate null so that `??` can
+// correctly fall through to the next source in the chain.
+
+regressionTest("expressions: arithmetic null/undefined propagates through ??", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.undefinedArith {
+      with test.multitool as api
+      with input as i
+      with output as o
+
+      api <- i.api
+      o.price <- api?.price * 100 ?? -1
+    }
+
+    bridge Query.toolFallback {
+      with test.multitool as primary
+      with test.multitool as backup
+      with input as i
+      with output as o
+
+      primary <- i.primary
+      backup <- i.backup
+      o.price <- primary?.amount * 1 ?? backup.price
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Query.undefinedArith": {
+      "undefined * 100 ?? -1 → fallback fires (safe api crash)": {
+        input: { api: { _error: "HTTP 500" } },
+        assertData: { price: -1 },
+        assertTraces: 1,
+      },
+      "null * 100 ?? -1 → fallback fires (null field from tool)": {
+        input: { api: { price: null } },
+        assertData: { price: -1 },
+        assertTraces: 1,
+      },
+      "5 * 100 ?? -1 → arithmetic value returned (api succeeds)": {
+        input: { api: { price: 5 } },
+        assertData: { price: 500 },
+        assertTraces: 1,
+      },
+    },
+    "Query.toolFallback": {
+      "primary?.amount missing (typo path) → fallback to backup.price": {
+        input: {
+          primary: { wrongKey: 65000 },
+          backup: { price: 99 },
+        },
+        assertData: { price: 99 },
+        assertTraces: 2,
+      },
+      "primary?.amount present → use calculated value": {
+        input: {
+          primary: { amount: 65000 },
+          backup: { price: 99 },
+        },
+        assertData: { price: 65000 },
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
 // ── Short-circuit data correctness ──────────────────────────────────────────
 
 regressionTest("and/or short-circuit data correctness", {
@@ -683,6 +754,73 @@ regressionTest("and/or short-circuit data correctness", {
         tools: { checker: async () => ({ ok: false }) },
         assertData: { result: false },
         assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── Expressions in coalesce (|| / ??) fallback positions ────────────────────
+
+regressionTest("expressions in coalesce fallback positions", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.binaryInNullish {
+      with input as i
+      with output as o
+
+      o.price <- i.a ?? i.b * 1
+    }
+
+    bridge Query.binaryInFalsy {
+      with input as i
+      with output as o
+
+      o.total <- i.subtotal || i.base + i.fee
+    }
+
+    bridge Query.multipleFallbacks {
+      with input as i
+      with output as o
+
+      o.val <- i.a ?? i.b * 2 ?? i.c + 1
+    }
+  `,
+  scenarios: {
+    "Query.binaryInNullish": {
+      "primary null → fallback binary expression executes": {
+        input: { a: null, b: 3 },
+        assertData: { price: 3 },
+        assertTraces: 0,
+      },
+      "primary non-null → fallback not evaluated": {
+        input: { a: 42, b: 3 },
+        assertData: { price: 42 },
+        assertTraces: 0,
+      },
+    },
+    "Query.binaryInFalsy": {
+      "primary falsy → fallback binary expression executes": {
+        input: { subtotal: 0, base: 10, fee: 5 },
+        assertData: { total: 15 },
+        assertTraces: 0,
+      },
+      "primary truthy → fallback not evaluated": {
+        input: { subtotal: 99, base: 10, fee: 5 },
+        assertData: { total: 99 },
+        assertTraces: 0,
+      },
+    },
+    "Query.multipleFallbacks": {
+      "first fallback evaluates when primary is null": {
+        input: { a: null, b: 4, c: 10 },
+        assertData: { val: 8 },
+        assertTraces: 0,
+      },
+      "second fallback evaluates when first is also null": {
+        input: { a: null, b: null, c: 10 },
+        assertData: { val: 11 },
+        assertTraces: 0,
       },
     },
   },

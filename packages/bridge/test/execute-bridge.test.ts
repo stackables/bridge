@@ -340,7 +340,6 @@ regressionTest("nested structures: scope blocks and nested arrays", {
     "Query.scopeBlock": {
       "scope block produces nested object": {
         input: { w: { temperature: 25 }, city: "Berlin" },
-        allowDowngrade: true,
         assertData: {
           decision: true,
           why: { temperature: 25, city: "Berlin" },
@@ -349,7 +348,6 @@ regressionTest("nested structures: scope blocks and nested arrays", {
       },
       "scope block with false decision": {
         input: { w: { temperature: 15 }, city: "Oslo" },
-        allowDowngrade: true,
         assertData: {
           decision: false,
           why: { temperature: 15, city: "Oslo" },
@@ -358,7 +356,6 @@ regressionTest("nested structures: scope blocks and nested arrays", {
       },
       "temperature null → ?? fallback fires": {
         input: { w: { temperature: null }, city: "Null" },
-        allowDowngrade: true,
         assertData: {
           decision: false,
           why: { temperature: 0, city: "Null" },
@@ -367,7 +364,6 @@ regressionTest("nested structures: scope blocks and nested arrays", {
       },
       "tool error → catch fires for decision": {
         input: { w: { _error: "fail" }, city: "Error" },
-        allowDowngrade: true,
         fields: ["decision"],
         assertData: { decision: false },
         assertTraces: 1,
@@ -521,7 +517,6 @@ regressionTest("alias: iterator-scoped aliases", {
             items: [{ nested: { a: 1, b: 2 } }, { nested: { a: 3, b: 4 } }],
           },
         },
-        allowDowngrade: true,
         assertData: [
           { x: 1, y: 2 },
           { x: 3, y: 4 },
@@ -530,7 +525,6 @@ regressionTest("alias: iterator-scoped aliases", {
       },
       "empty items": {
         input: { api: { items: [] } },
-        allowDowngrade: true,
         assertData: [],
         assertTraces: 1,
       },
@@ -625,7 +619,6 @@ regressionTest("alias: top-level aliases", {
             result: { data: { name: "Alice", email: "alice@test.com" } },
           },
         },
-        allowDowngrade: true,
         assertData: { name: "Alice", email: "alice@test.com" },
         assertTraces: 1,
       },
@@ -770,13 +763,11 @@ regressionTest("alias: expressions and modifiers", {
     "AliasOr.test": {
       "nickname present": {
         input: { nickname: "Alice" },
-        allowDowngrade: true,
         assertData: { name: "Alice" },
         assertTraces: 0,
       },
       "nickname missing → fallback": {
         input: {},
-        allowDowngrade: true,
         assertData: { name: "Guest" },
         assertTraces: 0,
       },
@@ -784,13 +775,11 @@ regressionTest("alias: expressions and modifiers", {
     "AliasNullish.test": {
       "value present": {
         input: { score: 42 },
-        allowDowngrade: true,
         assertData: { score: 42 },
         assertTraces: 0,
       },
       "value missing → fallback": {
         input: {},
-        allowDowngrade: true,
         assertData: { score: 0 },
         assertTraces: 0,
       },
@@ -798,13 +787,11 @@ regressionTest("alias: expressions and modifiers", {
     "AliasCatch.test": {
       "tool throws → catch provides fallback": {
         input: { api: { _error: "Service unavailable" } },
-        allowDowngrade: true,
         assertData: { result: 99 },
         assertTraces: 1,
       },
       "tool succeeds → value used": {
         input: { api: { value: 42 } },
-        allowDowngrade: true,
         assertData: { result: 42 },
         assertTraces: 1,
       },
@@ -812,13 +799,11 @@ regressionTest("alias: expressions and modifiers", {
     "AliasSafe.test": {
       "tool throws → ?. returns undefined, || picks fallback": {
         input: { api: { _error: "Service unavailable" } },
-        allowDowngrade: true,
         assertData: { result: "fallback" },
         assertTraces: 1,
       },
       "tool succeeds → value used": {
         input: { api: { value: "real" } },
-        allowDowngrade: true,
         assertData: { result: "real" },
         assertTraces: 1,
       },

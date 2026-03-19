@@ -5,6 +5,7 @@ import { keymap } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { diagnosticCount, lintGutter } from "@codemirror/lint";
 import { json } from "@codemirror/lang-json";
+import { javascript } from "@codemirror/lang-javascript";
 import { graphql, graphqlLanguageSupport, updateSchema } from "cm6-graphql";
 import type { GraphQLSchema } from "graphql";
 import type { SourceLocation } from "@stackables/bridge";
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
  * - "graphql"       — GraphQL SDL highlighting + inline schema linting
  * - "graphql-query" — GraphQL query editing with schema-aware autocomplete + linting (cm6-graphql)
  * - "json"          — JSON highlighting (context panel)
+ * - "javascript"    — JavaScript highlighting (read-only compiled output)
  * - "plain"         — no language support (fallback)
  */
 export type EditorLanguage =
@@ -31,6 +33,7 @@ export type EditorLanguage =
   | "graphql"
   | "graphql-query"
   | "json"
+  | "javascript"
   | "plain";
 
 type Props = {
@@ -62,6 +65,8 @@ function languageExtension(
       return [...graphql(graphqlSchema), lintGutter()];
     case "json":
       return [json()];
+    case "javascript":
+      return [javascript()];
     case "plain":
       return [];
   }

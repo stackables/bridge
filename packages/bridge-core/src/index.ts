@@ -34,9 +34,8 @@ export {
 
 export { mergeBridgeDocuments } from "./merge-documents.ts";
 
-// ── Execution tree (advanced) ───────────────────────────────────────────────
+// ── Tracing & error formatting ──────────────────────────────────────────────
 
-export { ExecutionTree } from "./ExecutionTree.ts";
 export { TraceCollector, boundedClone } from "./tracing.ts";
 export type { ToolTrace, TraceLevel } from "./tracing.ts";
 export {
@@ -53,7 +52,9 @@ export {
   BridgeRuntimeError,
   BridgeTimeoutError,
   MAX_EXECUTION_DEPTH,
+  isFatalError,
   isLoopControlSignal,
+  wrapBridgeRuntimeError,
 } from "./tree-types.ts";
 export type { Logger } from "./tree-types.ts";
 
@@ -61,6 +62,7 @@ export type { Logger } from "./tree-types.ts";
 
 export { SELF_MODULE } from "./types.ts";
 export type {
+  BinaryOp,
   Bridge,
   BridgeDocument,
   BatchToolCallFn,
@@ -70,39 +72,42 @@ export type {
   ControlFlowInstruction,
   DefineDef,
   Expression,
+  ForceStatement,
   HandleBinding,
   Instruction,
+  JsonValue,
   NodeRef,
+  ScopeStatement,
   SourceLocation,
   ScalarToolCallFn,
   ScalarToolFn,
+  SourceChain,
+  SpreadStatement,
+  Statement,
   ToolCallFn,
   ToolContext,
   ToolDef,
   ToolMap,
   ToolMetadata,
   VersionDecl,
-  Wire,
+  WireAliasStatement,
   WireCatch,
   WireSourceEntry,
+  WireStatement,
+  WithStatement,
 } from "./types.ts";
 
-// ── Wire resolution ─────────────────────────────────────────────────────────
+// ── Expression evaluation ──────────────────────────────────────────────────
 
-export {
-  evaluateExpression,
-  resolveSourceEntries,
-  applyFallbackGates as applyFallbackGatesV2,
-  applyCatch as applyCatchV2,
-} from "./resolveWiresSources.ts";
+export { evaluateExpression } from "./resolveWiresSources.ts";
 
 // ── Traversal enumeration ───────────────────────────────────────────────────
 
 export {
-  enumerateTraversalIds,
   buildTraversalManifest,
+  buildTraversalManifest as enumerateTraversalIds,
+  buildBodyTraversalMaps,
   decodeExecutionTrace,
-  buildTraceBitsMap,
   buildEmptyArrayBitsMap,
 } from "./enumerate-traversals.ts";
 export type { TraversalEntry, TraceWireBits } from "./enumerate-traversals.ts";

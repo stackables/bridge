@@ -50,23 +50,15 @@ import {
   type GraphQLSchema,
   type TypeNode,
 } from "graphql";
-import type { Bridge } from "@stackables/bridge-core";
+import type { Bridge, Statement } from "@stackables/bridge-core";
 import { omitLoc } from "./parse-test-utils.ts";
 import { GraphQLSchemaObserver } from "./observed-schema/index.ts";
 
 // ── Round-trip normalisation ────────────────────────────────────────────────
 
-/** Strip locations and sort wire arrays so order differences don't fail. */
+/** Strip locations so structural differences don't fail. */
 function normalizeDoc(doc: unknown): unknown {
-  const stripped = omitLoc(doc) as any;
-  for (const instr of stripped?.instructions ?? []) {
-    if (Array.isArray(instr.wires)) {
-      instr.wires.sort((a: any, b: any) =>
-        JSON.stringify(a) < JSON.stringify(b) ? -1 : 1,
-      );
-    }
-  }
-  return stripped;
+  return omitLoc(doc);
 }
 
 // ── Log capture ─────────────────────────────────────────────────────────────
@@ -360,7 +352,7 @@ function collectFieldsRequiringJSONObject(
   const allPaths = new Set<string>();
   for (const name of scenarioNames) {
     const scenario = scenarios[name]!;
-    if (scenario.disable?.includes("graphql") || !scenario.fields) continue;
+    if (isDisabled(scenario.disable, "graphql") || !scenario.fields) continue;
     for (const field of scenario.fields) {
       if (!field.endsWith(".*")) {
         allPaths.add(field);
@@ -703,20 +695,28 @@ function getOperationOutputFieldOrder(
   const seen = new Set<string>();
   const orderedFields: string[] = [];
 
-  for (const wire of bridge.wires) {
-    if (
-      wire.to.module === SELF_MODULE &&
-      wire.to.type === type &&
-      wire.to.field === field &&
-      wire.to.path.length > 0
-    ) {
-      const topLevel = wire.to.path[0]!;
-      if (!seen.has(topLevel)) {
-        seen.add(topLevel);
-        orderedFields.push(topLevel);
+  function walkStatements(statements: Statement[]): void {
+    for (const stmt of statements) {
+      if (stmt.kind === "wire") {
+        if (
+          stmt.target.module === SELF_MODULE &&
+          stmt.target.type === type &&
+          stmt.target.field === field &&
+          stmt.target.path.length > 0
+        ) {
+          const topLevel = stmt.target.path[0]!;
+          if (!seen.has(topLevel)) {
+            seen.add(topLevel);
+            orderedFields.push(topLevel);
+          }
+        }
+      } else if (stmt.kind === "scope") {
+        walkStatements(stmt.body);
       }
     }
   }
+
+  walkStatements(bridge.body);
 
   return orderedFields;
 }
@@ -857,10 +857,13 @@ export type Scenario = {
   assertLogs?: RegExp | ((logs: LogEntry[], ctx: AssertContext) => void);
   assertTraces: number | ((traces: ToolTrace[], ctx: AssertContext) => void);
   /**
-   * Temporarily disable specific test aspects for this scenario.
-   * The test is still defined (not removed) but will be skipped.
+   * Disable specific engines for this scenario.
+   *
+   * - `true` — skip this scenario entirely
+   * - explicit array — only listed engines are disabled; unlisted ones run
+   * - omitted — defaults apply (compiled, parser are off)
    */
-  disable?: ("runtime" | "compiled" | "graphql")[];
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
 };
 
 export type RegressionTest = {
@@ -869,6 +872,14 @@ export type RegressionTest = {
   context?: Record<string, any>;
   /** Tool-level timeout in ms (default: 5 000). */
   toolTimeoutMs?: number;
+  /**
+   * Disable specific engines for all scenarios in this test.
+   *
+   * - `true` — skip this test entirely
+   * - explicit array — only listed engines are disabled; unlisted ones run
+   * - omitted — defaults apply (compiled, parser are off)
+   */
+  disable?: true | ("runtime" | "compiled" | "graphql" | "parser")[];
   scenarios: Record<string, Record<string, Scenario>>;
 };
 
@@ -1097,14 +1108,36 @@ export function assertGraphqlExpectation(
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
+function isDisabled(
+  disable: true | ("runtime" | "compiled" | "graphql" | "parser")[] | undefined,
+  check: "runtime" | "compiled" | "graphql" | "parser",
+): boolean {
+  if (disable === true) return true;
+
+  // Explicit array: trust exactly what the user listed
+  if (Array.isArray(disable)) return disable.includes(check);
+
+  // Not set: defaults — all is enabled
+  return [""].includes(check);
+}
+
 export function regressionTest(name: string, data: RegressionTest) {
+  if (data.disable === true) {
+    describe.skip(name, () => {});
+    return;
+  }
+
   describe(name, () => {
     const document: BridgeDocument = parseBridge(data.bridge);
 
     // Per-operation accumulated runtime trace bitmasks for coverage check
     const traceMasks = new Map<string, bigint>();
 
-    test("parse → serialise → parse", () => {
+    test("parse → serialise → parse", (t) => {
+      if (isDisabled(data.disable, "parser")) {
+        t.skip("disabled");
+        return;
+      }
       const serialised = serializeBridge(JSON.parse(JSON.stringify(document)));
       const parsed = parseBridge(serialised);
 
@@ -1123,7 +1156,8 @@ export function regressionTest(name: string, data: RegressionTest) {
           output: unknown;
         }> = [];
         let pendingRuntimeTests = scenarioNames.filter(
-          (name) => !scenarios[name]!.disable?.includes("runtime"),
+          (name) =>
+            !isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
         ).length;
         let resolveRuntimeCollection!: () => void;
 
@@ -1135,13 +1169,11 @@ export function regressionTest(name: string, data: RegressionTest) {
         });
 
         afterEach((t) => {
-          if (t.name !== "runtime") {
-            return;
-          }
-
-          pendingRuntimeTests -= 1;
-          if (pendingRuntimeTests === 0) {
-            resolveRuntimeCollection();
+          if (t.name === "runtime") {
+            pendingRuntimeTests -= 1;
+            if (pendingRuntimeTests === 0) {
+              resolveRuntimeCollection();
+            }
           }
         });
 
@@ -1152,7 +1184,10 @@ export function regressionTest(name: string, data: RegressionTest) {
 
             for (const { name: engineName, execute } of engines) {
               test(engineName, async (t) => {
-                if (scenario.disable?.includes(engineName)) {
+                // Scenario-level disable overrides test-level when set;
+                // otherwise test-level (or defaults) apply.
+                const effectiveDisable = scenario.disable ?? data.disable;
+                if (isDisabled(effectiveDisable, engineName)) {
                   t.skip("disabled");
                   return;
                 }
@@ -1203,18 +1238,15 @@ export function regressionTest(name: string, data: RegressionTest) {
                       scenarioName,
                       output: resultData,
                     });
-                  }
-
-                  if (scenario.assertError) {
-                    assert.fail("Expected an error but execution succeeded");
-                  }
-
-                  // Accumulate runtime trace coverage
-                  if (engineName === "runtime") {
+                    // Accumulate runtime trace coverage
                     traceMasks.set(
                       operation,
                       (traceMasks.get(operation) ?? 0n) | executionTraceId,
                     );
+                  }
+
+                  if (scenario.assertError) {
+                    assert.fail("Expected an error but execution succeeded");
                   }
 
                   assertDataExpectation(
@@ -1298,7 +1330,7 @@ export function regressionTest(name: string, data: RegressionTest) {
         );
 
         const allGraphqlDisabled = scenarioNames.every((name) =>
-          scenarios[name]!.disable?.includes("graphql"),
+          isDisabled(scenarios[name]!.disable ?? data.disable, "graphql"),
         );
 
         if (scenarioNames.length > 0) {
@@ -1383,7 +1415,7 @@ export function regressionTest(name: string, data: RegressionTest) {
             for (const scenarioName of scenarioNames) {
               test(scenarioName, async (t) => {
                 const scenario = scenarios[scenarioName]!;
-                if (scenario.disable?.includes("graphql")) {
+                if (isDisabled(scenario.disable ?? data.disable, "graphql")) {
                   t.skip("disabled");
                   return;
                 }
@@ -1443,6 +1475,7 @@ export function regressionTest(name: string, data: RegressionTest) {
                     signalMapper: (ctx) => ctx.__bridgeSignal,
                     toolTimeoutMs: data.toolTimeoutMs ?? 5_000,
                     trace: "full",
+                    partialSuccess: true,
                   },
                 );
                 const source = buildGraphQLOperationSource(
@@ -1545,7 +1578,7 @@ export function regressionTest(name: string, data: RegressionTest) {
         // After all scenarios for this operation, verify traversal coverage
         test("traversal coverage", async (t) => {
           const allRuntimeDisabled = scenarioNames.every((name) =>
-            scenarios[name]!.disable?.includes("runtime"),
+            isDisabled(scenarios[name]!.disable ?? data.disable, "runtime"),
           );
           if (allRuntimeDisabled) {
             t.skip("all scenarios have runtime disabled");

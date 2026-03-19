@@ -1,60 +1,11 @@
 /**
- * Pure utility functions for the execution tree — no class dependency.
- *
- * Extracted from ExecutionTree.ts — Phase 1 of the refactor.
- * See docs/execution-tree-refactor.md
+ * Pure utility functions used by the execution engine.
  */
-
-import type { NodeRef, Wire } from "./types.ts";
-import type { Trunk } from "./tree-types.ts";
-
-// ── Trunk helpers ───────────────────────────────────────────────────────────
-
-/** Stable string key for the state map */
-export function trunkKey(ref: Trunk & { element?: boolean }): string {
-  if (ref.element) return `${ref.module}:${ref.type}:${ref.field}:*`;
-  return `${ref.module}:${ref.type}:${ref.field}${ref.instance != null ? `:${ref.instance}` : ""}`;
-}
-
-/** Match two trunks (ignoring path and element) */
-export function sameTrunk(a: Trunk, b: Trunk): boolean {
-  return (
-    a.module === b.module &&
-    a.type === b.type &&
-    a.field === b.field &&
-    (a.instance ?? undefined) === (b.instance ?? undefined)
-  );
-}
-
-// ── Path helpers ────────────────────────────────────────────────────────────
-
-/** Strict path equality — manual loop avoids `.every()` closure allocation. See packages/bridge-core/performance.md (#7). */
-export function pathEquals(a: string[], b: string[]): boolean {
-  if (!a || !b) return a === b;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
 
 // ── Constant coercion ───────────────────────────────────────────────────────
 
-/**
- * Coerce a constant wire value string to its proper JS type.
- *
- * Uses strict primitive parsing — no `JSON.parse` — to eliminate any
- * hypothetical AST-injection gadget chains.  Handles boolean, null,
- * numeric literals, and JSON-encoded strings (`'"hello"'` → `"hello"`).
- * JSON objects/arrays in fallback positions return the raw string.
- *
- * Results are cached in a module-level Map because the same constant
- * strings appear repeatedly across shadow trees.  Only safe for
- * immutable values (primitives); callers must not mutate the returned
- * value. See packages/bridge-core/performance.md (#6).
- */
 const constantCache = new Map<string, unknown>();
-export function coerceConstant(raw: string): unknown {
+export function coerceConstant(raw: string | unknown): unknown {
   if (typeof raw !== "string") return raw;
   const cached = constantCache.get(raw);
   if (cached !== undefined) return cached;
@@ -152,61 +103,8 @@ export function setNested(obj: any, path: string[], value: any): void {
   }
 }
 
-// ── Symbol-keyed engine caches ──────────────────────────────────────────────
-//
-// Cached values are stored on AST objects using Symbol keys instead of
-// string keys.  V8 stores Symbol-keyed properties in a separate backing
-// store that does not participate in the hidden-class (Shape) system.
-// This means the execution engine can safely cache computed values on
-// parser-produced objects without triggering shape transitions that would
-// degrade the parser's allocation-site throughput.
-// See packages/bridge-core/performance.md (#11).
+// ── Timing ──────────────────────────────────────────────────────────────────
 
-/** Symbol key for the cached `trunkKey()` result on NodeRef objects. */
-export const TRUNK_KEY_CACHE = Symbol.for("bridge.trunkKey");
-
-/** Symbol key for the cached simple-pull ref on Wire objects. */
-export const SIMPLE_PULL_CACHE = Symbol.for("bridge.simplePull");
-
-// ── Wire helpers ────────────────────────────────────────────────────────────
-
-/**
- * Get the primary NodeRef from a wire's first source expression, if it's a ref.
- * Unlike `getSimplePullRef`, this works for any wire (including those with
- * fallbacks, catch, or safe access).
- */
-export function getPrimaryRef(w: Wire): NodeRef | undefined {
-  const expr = w.sources[0]?.expr;
-  return expr?.type === "ref" ? expr.ref : undefined;
-}
-
-/** Return true if the wire's primary source is a ref expression. */
-export function isPullWire(w: Wire): boolean {
-  return w.sources[0]?.expr.type === "ref";
-}
-
-/**
- * Returns the source NodeRef when a wire qualifies for the simple-pull fast
- * path: single ref source, not safe, no fallbacks, no catch.  Returns
- * `null` otherwise.  The result is cached on the wire via a Symbol key so
- * subsequent calls are a single property read without affecting V8 shapes.
- * See packages/bridge-core/performance.md (#11).
- */
-export function getSimplePullRef(w: Wire): NodeRef | null {
-  const cached = (w as any)[SIMPLE_PULL_CACHE];
-  if (cached !== undefined) return cached;
-  let ref: NodeRef | null = null;
-  if (w.sources.length === 1 && !w.catch) {
-    const expr = w.sources[0]!.expr;
-    if (expr.type === "ref" && !expr.safe) ref = expr.ref;
-  }
-  (w as any)[SIMPLE_PULL_CACHE] = ref;
-  return ref;
-}
-
-// ── Misc ────────────────────────────────────────────────────────────────────
-
-/** Round milliseconds to 2 decimal places */
 export function roundMs(ms: number): number {
   return Math.round(ms * 100) / 100;
 }

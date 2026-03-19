@@ -3,6 +3,7 @@ import { describe } from "node:test";
 import { std } from "@stackables/bridge-stdlib";
 import { regressionTest } from "./utils/regression.ts";
 import { bridge } from "@stackables/bridge";
+import { assertRuntimeErrorAt } from "./utils/error-utils.ts";
 
 // ── String builtins ─────────────────────────────────────────────────────────
 // Single bridge exercises toUpperCase, toLowerCase, trim, length all at once.
@@ -58,7 +59,7 @@ describe("builtin tools", () => {
           tools: {
             std: { somethingElse: () => ({}) },
           },
-          assertError: /BridgeRuntimeError/,
+          assertError: assertRuntimeErrorAt("up:i.text"),
           assertTraces: 0,
         },
         "uppercase tool failure propagates": {
@@ -164,7 +165,7 @@ describe("builtin tools", () => {
               throw new Error("db.users error");
             },
           },
-          assertError: /BridgeRuntimeError/,
+          assertError: assertRuntimeErrorAt("db.users"),
           assertTraces: 1,
         },
       },
@@ -212,7 +213,7 @@ describe("builtin tools", () => {
               throw new Error("db.users error");
             },
           },
-          assertError: /BridgeRuntimeError/,
+          assertError: assertRuntimeErrorAt("db.users"),
           assertTraces: 1,
         },
         "find tool failure propagates to projected fields": {
@@ -268,7 +269,7 @@ describe("builtin tools", () => {
               },
             },
           },
-          assertError: /BridgeRuntimeError/,
+          assertError: assertRuntimeErrorAt("pf:i.items"),
           assertTraces: 1,
         },
       },

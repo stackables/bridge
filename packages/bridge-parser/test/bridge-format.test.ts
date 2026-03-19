@@ -10,14 +10,17 @@ import type {
   HandleBinding,
   Instruction,
   ToolDef,
-  Wire,
 } from "@stackables/bridge-core";
 import { SELF_MODULE, parsePath } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatWires,
+  type FlatWire,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
-/** Helper to extract the source ref from a Wire */
-function sourceRef(wire: Wire) {
+/** Helper to extract the source ref from a FlatWire */
+function sourceRef(wire: FlatWire) {
   const expr = wire.sources[0]?.expr;
   return expr?.type === "ref" ? expr.ref : undefined;
 }
@@ -95,10 +98,10 @@ describe("parseBridge", () => {
       handle: "o",
       kind: "output",
     });
-    assert.equal(instr.wires.length, 2);
+    assert.equal(flatWires(instr.body).length, 2);
 
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "geocode",
@@ -118,8 +121,8 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
+      target: {
         module: "hereapi",
         type: "Query",
         field: "geocode",
@@ -162,8 +165,8 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.handles.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0], {
+      target: {
         module: SELF_MODULE,
         type: "Tools",
         field: "toInt",
@@ -185,8 +188,8 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1], {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "health",
@@ -225,26 +228,24 @@ describe("parseBridge", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[0]!), {
+    assertDeepStrictEqualIgnoringLoc(sourceRef(flatWires(instr.body)[0]!), {
       module: "zillow",
       type: "Query",
       field: "find",
       instance: 1,
       path: ["properties", "0", "streetAddress"],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.target, {
       module: SELF_MODULE,
       type: "Query",
       field: "search",
       path: ["topPick", "address"],
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[1]!)?.path, [
-      "properties",
-      "0",
-      "location",
-      "city",
-    ]);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1]!.to.path, [
+    assertDeepStrictEqualIgnoringLoc(
+      sourceRef(flatWires(instr.body)[1]!)?.path,
+      ["properties", "0", "location", "city"],
+    );
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[1]!.target.path, [
       "topPick",
       "city",
     ]);
@@ -268,34 +269,37 @@ describe("parseBridge", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.equal(instr.wires.length, 3);
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0], {
-      to: {
-        module: SELF_MODULE,
-        type: "Query",
-        field: "search",
-        path: ["results"],
-      },
-      sources: [
-        {
-          expr: {
-            type: "ref",
-            ref: {
-              module: "provider",
-              type: "Query",
-              field: "list",
-              instance: 1,
-              path: ["items"],
-            },
-          },
-        },
-      ],
+    const allWires = flatWires(instr.body);
+    assert.equal(allWires.length, 3);
+    // First wire: array mapping to results
+    const resultsWire = allWires[0];
+    assertDeepStrictEqualIgnoringLoc(resultsWire.target, {
+      module: SELF_MODULE,
+      type: "Query",
+      field: "search",
+      path: ["results"],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[1], {
-      to: {
+    const arrayExpr = resultsWire.sources[0]!.expr;
+    assert.equal(arrayExpr.type, "array");
+    if (arrayExpr.type === "array") {
+      assert.equal(arrayExpr.iteratorName, "item");
+      assertDeepStrictEqualIgnoringLoc(arrayExpr.source, {
+        type: "ref",
+        ref: {
+          module: "provider",
+          type: "Query",
+          field: "list",
+          instance: 1,
+          path: ["items"],
+        },
+      });
+    }
+    assertDeepStrictEqualIgnoringLoc(allWires[1], {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "name"],
       },
       sources: [
@@ -313,11 +317,12 @@ describe("parseBridge", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(instr.wires[2], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(allWires[2], {
+      target: {
         module: SELF_MODULE,
         type: "Query",
         field: "search",
+        element: true,
         path: ["results", "lat"],
       },
       sources: [
@@ -355,17 +360,17 @@ describe("parseBridge", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.equal(instr.type, "Mutation");
-    assertDeepStrictEqualIgnoringLoc(instr.wires[0]!.to, {
+    assertDeepStrictEqualIgnoringLoc(flatWires(instr.body)[0]!.target, {
       module: "sendgrid",
       type: "Mutation",
       field: "send",
       instance: 1,
       path: ["content"],
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[1]!)?.path, [
-      "headers",
-      "x-message-id",
-    ]);
+    assertDeepStrictEqualIgnoringLoc(
+      sourceRef(flatWires(instr.body)[1]!)?.path,
+      ["headers", "x-message-id"],
+    );
   });
 
   test("multiple bridges separated by ---", () => {
@@ -418,7 +423,7 @@ describe("parseBridge", () => {
       handle: "c",
       kind: "context",
     });
-    assertDeepStrictEqualIgnoringLoc(sourceRef(instr.wires[0]!), {
+    assertDeepStrictEqualIgnoringLoc(sourceRef(flatWires(instr.body)[0]!), {
       module: SELF_MODULE,
       type: "Context",
       field: "context",
@@ -583,9 +588,26 @@ describe("serializeBridge", () => {
           { handle: "i", kind: "input" },
           { handle: "o", kind: "output" },
         ],
-        wires: [
+        body: [
           {
-            to: {
+            kind: "with" as const,
+            binding: {
+              handle: "sg",
+              kind: "tool" as const,
+              name: "sendgrid.send",
+            },
+          },
+          {
+            kind: "with" as const,
+            binding: { handle: "i", kind: "input" as const },
+          },
+          {
+            kind: "with" as const,
+            binding: { handle: "o", kind: "output" as const },
+          },
+          {
+            kind: "wire" as const,
+            target: {
               module: "sendgrid",
               type: "Mutation",
               field: "send",
@@ -595,7 +617,7 @@ describe("serializeBridge", () => {
             sources: [
               {
                 expr: {
-                  type: "ref",
+                  type: "ref" as const,
                   ref: {
                     module: SELF_MODULE,
                     type: "Mutation",
@@ -605,9 +627,10 @@ describe("serializeBridge", () => {
                 },
               },
             ],
-          } as Wire,
+          },
           {
-            to: {
+            kind: "wire" as const,
+            target: {
               module: SELF_MODULE,
               type: "Mutation",
               field: "sendEmail",
@@ -616,7 +639,7 @@ describe("serializeBridge", () => {
             sources: [
               {
                 expr: {
-                  type: "ref",
+                  type: "ref" as const,
                   ref: {
                     module: "sendgrid",
                     type: "Mutation",
@@ -627,7 +650,7 @@ describe("serializeBridge", () => {
                 },
               },
             ],
-          } as Wire,
+          },
         ],
       },
     ];
@@ -764,9 +787,9 @@ describe("parseBridge: tool blocks", () => {
     assertDeepStrictEqualIgnoringLoc(root.handles, [
       { kind: "context", handle: "context" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
-        to: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
+        target: { module: "_", type: "Tools", field: "hereapi", path: ["baseUrl"] },
         sources: [
           {
             expr: {
@@ -777,7 +800,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi",
@@ -802,9 +825,9 @@ describe("parseBridge: tool blocks", () => {
     const child = tools.find((t) => t.name === "hereapi.geocode")!;
     assert.equal(child.fn, undefined);
     assert.equal(child.extends, "hereapi");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi.geocode",
@@ -813,7 +836,7 @@ describe("parseBridge: tool blocks", () => {
         sources: [{ expr: { type: "literal", value: "GET" } }],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "hereapi.geocode",
@@ -851,9 +874,9 @@ describe("parseBridge: tool blocks", () => {
     const root = result.instructions.find(
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid",
     )!;
-    assertDeepStrictEqualIgnoringLoc(root.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(root.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -864,7 +887,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -885,7 +908,7 @@ describe("parseBridge: tool blocks", () => {
         ],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid",
@@ -899,9 +922,9 @@ describe("parseBridge: tool blocks", () => {
       (i): i is ToolDef => i.kind === "tool" && i.name === "sendgrid.send",
     )!;
     assert.equal(child.extends, "sendgrid");
-    assertDeepStrictEqualIgnoringLoc(child.wires, [
+    assertDeepStrictEqualIgnoringLoc(flatWires(child.body), [
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid.send",
@@ -910,7 +933,7 @@ describe("parseBridge: tool blocks", () => {
         sources: [{ expr: { type: "literal", value: "POST" } }],
       },
       {
-        to: {
+        target: {
           module: "_",
           type: "Tools",
           field: "sendgrid.send",
@@ -955,8 +978,8 @@ describe("parseBridge: tool blocks", () => {
       { kind: "context", handle: "context" },
       { kind: "tool", handle: "auth", name: "authService" },
     ]);
-    assertDeepStrictEqualIgnoringLoc(serviceB.wires[1], {
-      to: {
+    assertDeepStrictEqualIgnoringLoc(flatWires(serviceB.body)[1], {
+      target: {
         module: "_",
         type: "Tools",
         field: "serviceB",
@@ -1248,7 +1271,7 @@ describe("parser robustness", () => {
       "version 1.5\nbridge Query.search {\n\twith hereapi.geocode as gc\n\twith input as i\n\twith output as o\n\ngc.q <- i.search\no.results <- gc.items[] as item {\n\t.lat <- item.position.lat\n\t.lng <- item.position.lng\n}\n}\n",
     ).instructions.find((i) => i.kind === "bridge") as Bridge;
     assert.equal(
-      instr.wires.filter(
+      flatWires(instr.body).filter(
         (w) =>
           w.sources[0]?.expr.type === "ref" && w.sources[0].expr.ref.element,
       ).length,
@@ -1267,8 +1290,10 @@ describe("parser robustness", () => {
         o.name <- i.username # copy the name across
       }
     `).instructions.find((inst) => inst.kind === "bridge") as Bridge;
-    const wire = instr.wires.find((w) => w.sources[0]?.expr.type === "ref")!;
-    assert.equal(wire.to.path.join("."), "name");
+    const wire = flatWires(instr.body).find(
+      (w) => w.sources[0]?.expr.type === "ref",
+    )!;
+    assert.equal(wire.target.path.join("."), "name");
     const expr = wire.sources[0]!.expr;
     assert.equal(
       expr.type === "ref" ? expr.ref.path.join(".") : undefined,
@@ -1284,9 +1309,9 @@ describe("parser robustness", () => {
         .url = "https://example.com/things#anchor"
       }
     `).instructions.find((inst) => inst.kind === "tool") as ToolDef;
-    const urlWire = tool.wires.find(
+    const urlWire = flatWires(tool.body).find(
       (w) =>
-        w.sources[0]?.expr.type === "literal" && w.to.path.join(".") === "url",
+        w.sources[0]?.expr.type === "literal" && w.target.path.join(".") === "url",
     );
     assert.ok(urlWire);
     assert.equal(

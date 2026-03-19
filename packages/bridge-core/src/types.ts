@@ -1,5 +1,14 @@
 import type { SourceLocation } from "@stackables/bridge-types";
 
+/** Standard JSON primitive type — the result of JSON.parse(). */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
 /**
  * Structured node reference — identifies a specific data point in the execution graph.
  *
@@ -29,28 +38,6 @@ export type NodeRef = {
 };
 
 /**
- * A wire connects a data source (from) to a data sink (to).
- *
- * Unified shape: every wire has an ordered list of source entries and an
- * optional catch handler. The first source entry is always evaluated; subsequent
- * entries have a gate (`||` for falsy, `??` for nullish) that determines whether
- * to fall through to them.
- *
- * Constant wires have a single literal source entry.
- * Ternary/boolean wires have a single ternary/and/or expression entry.
- * Pipe wires (`pipe: true`) route data through declared tool handles.
- * Spread wires (`spread: true`) merge source object properties into the target.
- */
-export type Wire = {
-  to: NodeRef;
-  sources: WireSourceEntry[];
-  catch?: WireCatch;
-  pipe?: true;
-  spread?: true;
-  loc?: SourceLocation;
-};
-
-/**
  * Bridge definition — wires one GraphQL field to its data sources.
  */
 export type Bridge = {
@@ -61,37 +48,13 @@ export type Bridge = {
   field: string;
   /** Declared data sources and their wire handles */
   handles: HandleBinding[];
-  /** Connection wires */
-  wires: Wire[];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
   /**
    * When set, this bridge was declared with the passthrough shorthand:
    * `bridge Type.field with <name>`. The value is the define/tool name.
    */
   passthrough?: string;
-  /** Handles to eagerly evaluate (e.g. side-effect tools).
-   *  Critical by default — a forced handle that throws aborts the bridge.
-   *  Add `catchError: true` (written as `force <handle> ?? null`) to
-   *  swallow the error for fire-and-forget side-effects. */
-  forces?: Array<{
-    handle: string;
-    module: string;
-    type: string;
-    field: string;
-    instance?: number;
-    /** When true, errors from this forced handle are silently caught (`?? null`). */
-    catchError?: true;
-  }>;
-  arrayIterators?: Record<string, string>;
-  pipeHandles?: Array<{
-    key: string;
-    handle: string;
-    baseTrunk: {
-      module: string;
-      type: string;
-      field: string;
-      instance?: number;
-    };
-  }>;
 };
 
 /**
@@ -141,10 +104,8 @@ export type ToolDef = {
   /** Declared handles — same as Bridge/Define handles (tools, context, const, etc.)
    *  Tools cannot declare `input` or `output` handles. */
   handles: HandleBinding[];
-  /** Connection wires — same format as Bridge/Define wires */
-  wires: Wire[];
-  /** Synthetic fork handles for expressions, string interpolation, etc. */
-  pipeHandles?: Bridge["pipeHandles"];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
   /** Error fallback for the tool call — replaces the result when the tool throws. */
   onError?: { value: string } | { source: string };
 };
@@ -185,9 +146,9 @@ export type ControlFlowInstruction =
   | { kind: "continue"; levels?: number }
   | { kind: "break"; levels?: number };
 
-// ── Wire Expression Model ───────────────────────────────────────────────────
+// ── Source Expression Model ──────────────────────────────────────────────────
 //
-// Every wire is an ordered list of source entries + an optional catch handler.
+// Every statement has an ordered list of source entries + an optional catch handler.
 // Source entries contain recursive Expression trees that evaluate to values.
 
 /**
@@ -212,9 +173,14 @@ export type Expression =
       loc?: SourceLocation;
     }
   | {
-      /** JSON-encoded constant: "\"hello\"", "42", "true", "null" */
+      /**
+       * A fully parsed, ready-to-use literal value.
+       *
+       * The AST builder runs JSON.parse() once during compilation.
+       * Value is the parsed JsonValue.
+       */
       type: "literal";
-      value: string;
+      value: JsonValue;
       loc?: SourceLocation;
     }
   | {
@@ -251,7 +217,101 @@ export type Expression =
       type: "control";
       control: ControlFlowInstruction;
       loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Array mapping expression — iterates over a source array and maps each
+       * element through a scoped statement body.
+       *
+       * Syntax: `source[] as iterName { body }`
+       *
+       * This is a first-class expression: it can appear anywhere an expression
+       * is valid, including in fallback chains (`||`, `??`), catch handlers,
+       * ternary branches, and aliases.
+       */
+      type: "array";
+      /** Expression producing the source array to iterate over */
+      source: Expression;
+      /** Iterator binding name (the `as <name>` part) */
+      iteratorName: string;
+      /** Scoped statement body — wires, withs, nested scopes */
+      body: Statement[];
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Pipe expression — passes data through a tool/define handle.
+       *
+       * Syntax: `handle:source` (chained: `trim:upper:i.text`)
+       *
+       * Replaces the legacy `pipe: true` wire flag + `pipeHandles` registry.
+       * The engine creates fork instances internally during evaluation.
+       */
+      type: "pipe";
+      /** The data being piped into the tool */
+      source: Expression;
+      /** Tool or define handle name to process the data */
+      handle: string;
+      /** Input path within the tool (e.g. `dv.dividend:source` → ["dividend"]) */
+      path?: string[];
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Binary operator expression — arithmetic or comparison.
+       *
+       * Replaces the legacy desugaring that created synthetic tool forks
+       * (e.g. `Tools.add`, `Tools.eq`) for operators like `+`, `==`.
+       */
+      type: "binary";
+      op: BinaryOp;
+      left: Expression;
+      right: Expression;
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * Unary operator expression — logical NOT.
+       *
+       * Replaces the legacy `Tools.not` synthetic fork.
+       */
+      type: "unary";
+      op: "not";
+      operand: Expression;
+      loc?: SourceLocation;
+    }
+  | {
+      /**
+       * String template concatenation — joins parts into a single string.
+       *
+       * Replaces the legacy `Tools.concat` synthetic fork with indexed
+       * `parts.0`, `parts.1` inputs.
+       *
+       * Result: `{ value: string }` (matches internal.concat return shape).
+       */
+      type: "concat";
+      parts: Expression[];
+      loc?: SourceLocation;
     };
+
+/**
+ * Binary operator names for arithmetic and comparison expressions.
+ *
+ * Matches the internal tool function names:
+ * - Arithmetic: add (+), sub (-), mul (*), div (/)
+ * - Comparison: eq (==), neq (!=), gt (>), gte (>=), lt (<), lte (<=)
+ */
+export type BinaryOp =
+  | "add"
+  | "sub"
+  | "mul"
+  | "div"
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte";
 
 /**
  * One entry in the wire's ordered fallback chain.
@@ -276,13 +336,133 @@ export interface WireSourceEntry {
 }
 
 /**
- * Catch handler for a wire — provides error recovery via a ref, literal, or
- * control flow instruction.
+ * Catch handler for a wire — provides error recovery via a ref, literal,
+ * control flow instruction, or a full expression (e.g. pipe chain).
  */
 export type WireCatch =
   | { ref: NodeRef; loc?: SourceLocation }
-  | { value: string; loc?: SourceLocation }
-  | { control: ControlFlowInstruction; loc?: SourceLocation };
+  | { value: JsonValue; loc?: SourceLocation }
+  | { control: ControlFlowInstruction; loc?: SourceLocation }
+  | { expr: Expression; loc?: SourceLocation };
+
+/**
+ * The shared right-hand side of any assignment — a fallback chain of source
+ * entries with an optional catch handler.
+ *
+ * Used by both WireStatement (assigns to a graph node) and
+ * WireAliasStatement (assigns to a local name).
+ */
+export interface SourceChain {
+  sources: WireSourceEntry[];
+  catch?: WireCatch;
+}
+
+// ── Statement Model (Nested Scoped IR) ──────────────────────────────────────
+//
+// Statements form a recursive tree that preserves scope boundaries from the
+// source code. Each bridge/define/tool body is a Statement[].
+//
+// Scopes created by ScopeStatement and ArrayExpression.body support:
+//   - `with` declarations with lexical shadowing (inner overrides outer)
+//   - wire targets relative to the scope's path prefix
+//   - tool registration fallthrough to parent scopes
+
+/**
+ * A wire statement — assigns an evaluation chain to a graph target.
+ *
+ * Corresponds to: `target <- expression [|| fallback] [catch handler]`
+ */
+export type WireStatement = SourceChain & {
+  kind: "wire";
+  /** The graph node being assigned to */
+  target: NodeRef;
+  loc?: SourceLocation;
+};
+
+/**
+ * A wire alias — assigns an evaluation chain to a local name.
+ *
+ * Corresponds to: `alias name <- expression [|| fallback] [catch handler]`
+ */
+export type WireAliasStatement = SourceChain & {
+  kind: "alias";
+  /** The alias name (used as a local reference in subsequent wires) */
+  name: string;
+  loc?: SourceLocation;
+};
+
+/**
+ * A with statement — declares a named data source in the current scope.
+ *
+ * Can appear at any scope level (bridge body, scope block, array body).
+ * Inner scopes shadow outer scopes with the same handle name.
+ *
+ * Corresponds to: `with <name> [as <handle>] [memoize]`
+ */
+export type WithStatement = {
+  kind: "with";
+  binding: HandleBinding;
+};
+
+/**
+ * A scope statement — groups statements under a path prefix.
+ *
+ * Creates a new scope layer: `with` declarations inside apply only within
+ * this scope (with fallthrough to parent for missing handles).
+ *
+ * Corresponds to: `target { statement* }`
+ */
+export type ScopeStatement = {
+  kind: "scope";
+  /** Target path prefix — all wires inside are relative to this */
+  target: NodeRef;
+  /** Nested statements within this scope */
+  body: Statement[];
+  loc?: SourceLocation;
+};
+
+/**
+ * A spread statement — merges source properties into the enclosing scope target.
+ *
+ * Can only appear inside a ScopeStatement body. The target is implicit —
+ * it is always the parent scope's target node.
+ *
+ * Corresponds to: `... <- source [|| fallback] [catch handler]`
+ */
+export type SpreadStatement = SourceChain & {
+  kind: "spread";
+  loc?: SourceLocation;
+};
+
+/**
+ * A force statement — eagerly evaluates a handle for side effects.
+ *
+ * Corresponds to: `force <handle> [catch null]`
+ */
+export type ForceStatement = {
+  kind: "force";
+  handle: string;
+  module: string;
+  type: string;
+  field: string;
+  instance?: number;
+  /** When true, errors are silently caught (`catch null`). */
+  catchError?: true;
+  loc?: SourceLocation;
+};
+
+/**
+ * Union of all statement types that can appear in a bridge/define/tool body.
+ *
+ * This is the recursive building block of the nested IR.
+ */
+export type Statement =
+  | WireStatement
+  | WireAliasStatement
+  | SpreadStatement
+  | WithStatement
+  | ScopeStatement
+  | ForceStatement;
 
 /**
  * Named constant definition — a reusable value defined in the bridge file.
@@ -359,11 +539,7 @@ export type DefineDef = {
   name: string;
   /** Declared handles (tools, input, output, etc.) */
   handles: HandleBinding[];
-  /** Connection wires (same format as Bridge wires) */
-  wires: Wire[];
-  /** Array iterators (same as Bridge) */
-  arrayIterators?: Record<string, string>;
-  /** Pipe fork registry (same as Bridge) */
-  pipeHandles?: Bridge["pipeHandles"];
+  /** Nested statement tree — the scoped IR. */
+  body: Statement[];
 };
 /* c8 ignore stop */

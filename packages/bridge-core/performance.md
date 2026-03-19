@@ -4,24 +4,25 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 
 ## Summary
 
-| #   | Optimisation                       | Date       | Result                                              |
-| --- | ---------------------------------- | ---------- | --------------------------------------------------- |
-| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)                                   |
-| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)                                     |
-| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)                                  |
-| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)                         |
-| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)                          |
-| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression)                        |
-| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)                         |
-| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)                                    |
-| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)                           |
-| 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)               |
-| 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays)              |
-| 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)                  |
-| 13  | Share toolDefCache across shadows  | March 2026 | 🔲 Planned                                          |
-| 14  | Pre-compute output wire topology   | March 2026 | 🔲 Planned                                          |
-| 15  | Cache executeBridge setup per doc  | March 2026 | 🔲 Planned                                          |
-| 16  | Cheap strict-path hot-path guards  | March 2026 | ✅ Done (partial recovery after error-mapping work) |
+| #   | Optimisation                       | Date       | Result                                                    |
+| --- | ---------------------------------- | ---------- | --------------------------------------------------------- |
+| 1   | WeakMap-cached DocumentIndex       | March 2026 | ✗ Failed (–4–11%)                                         |
+| 2   | Lightweight shadow construction    | March 2026 | ✅ Done (+5–7%)                                           |
+| 3   | Wire index by trunk key            | March 2026 | ✗ Failed (–10–23%)                                        |
+| 4   | Cached element trunk key           | March 2026 | ✅ Done (~0%, code cleanup)                               |
+| 5   | Skip OTel when idle                | March 2026 | ✅ Done (+7–9% tool-heavy)                                |
+| 6   | Constant cache                     | March 2026 | ✅ Done (~0%, no regression)                              |
+| 7   | pathEquals loop                    | March 2026 | ✅ Done (~0%, code cleanup)                               |
+| 8   | Pre-group element wires            | March 2026 | ✅ Done (see #9)                                          |
+| 9   | Batch element materialisation      | March 2026 | ✅ Done (+44–130% arrays)                                 |
+| 10  | Sync fast path for resolved values | March 2026 | ✅ Done (+8–17% all, +42–114% arrays)                     |
+| 11  | Pre-compute keys & cache wire tags | March 2026 | ✅ Done (+12–16% all, +60–129% arrays)                    |
+| 12  | De-async schedule() & callTool()   | March 2026 | ✅ Done (+11–18% tool, ~0% arrays)                        |
+| 13  | Share toolDefCache across shadows  | March 2026 | 🔲 Planned                                                |
+| 14  | Pre-compute output wire topology   | March 2026 | 🔲 Planned                                                |
+| 15  | Cache executeBridge setup per doc  | March 2026 | 🔲 Planned                                                |
+| 16  | Cheap strict-path hot-path guards  | March 2026 | ✅ Done (partial recovery after error-mapping work)       |
+| 17  | v3 scope-based engine              | March 2026 | ✅ Done (+2.2× flat-1000 vs v2 baseline, 43% of compiled) |
 
 ## Baseline (main, March 2026)
 
@@ -35,20 +36,20 @@ document are from this machine — compare only against the same hardware.
 
 | Benchmark                          | ops/sec | avg (ms) |
 | ---------------------------------- | ------- | -------- |
-| parse: simple bridge               | ~43K    | 0.023    |
-| parse: large bridge (20×5)         | ~2.5K   | 0.40     |
-| exec: passthrough (no tools)       | ~830K   | 0.001    |
-| exec: short-circuit                | ~801K   | 0.001    |
-| exec: simple chain (1 tool)        | ~558K   | 0.002    |
-| exec: chained 3-tool fan-out       | ~216K   | 0.005    |
-| exec: flat array 10                | ~175K   | 0.006    |
-| exec: flat array 100               | ~28.2K  | 0.036    |
-| exec: flat array 1000              | ~2,980  | 0.335    |
-| exec: nested array 5×5             | ~47.7K  | 0.021    |
-| exec: nested array 10×10           | ~17.5K  | 0.057    |
-| exec: nested array 20×10           | ~9.0K   | 0.110    |
-| exec: array + tool-per-element 10  | ~36.5K  | 0.028    |
-| exec: array + tool-per-element 100 | ~3.98K  | 0.253    |
+| parse: simple bridge               | ~42K    | 0.024    |
+| parse: large bridge (20×5)         | ~1.1K   | 0.930    |
+| exec: passthrough (no tools)       | ~463K   | 0.002    |
+| exec: short-circuit                | ~423K   | 0.002    |
+| exec: simple chain (1 tool)        | ~276K   | 0.004    |
+| exec: chained 3-tool fan-out       | ~89K    | 0.012    |
+| exec: flat array 10                | ~180K   | 0.006    |
+| exec: flat array 100               | ~50.5K  | 0.020    |
+| exec: flat array 1000              | ~6,420  | 0.157    |
+| exec: nested array 5×5             | ~58.8K  | 0.017    |
+| exec: nested array 10×10           | ~26K    | 0.039    |
+| exec: nested array 20×10           | ~14K    | 0.072    |
+| exec: array + tool-per-element 10  | ~42.5K  | 0.024    |
+| exec: array + tool-per-element 100 | ~4.96K  | 0.206    |
 
 This table is the current perf level. It is updated after a successful optimisation is committed.
 
@@ -796,3 +797,85 @@ steps are profiling-driven, not blind micro-optimisation:
 - measure `ExecutionTree.applyPath()` in the runtime flamegraph on tool-heavy cases
 - consider additional small-shape fast paths for 2- and 3-segment strict traversal
 - evaluate whether any error-metadata work can be deferred off the success path
+
+---
+
+### 17. v3 scope-based engine (AST interpreter)
+
+**Date:** March 2026
+**Result:** ✅ +2.2× flat-1000 vs v2 baseline, 43% of compiled engine
+
+**Context:** The v3 engine (`execute-bridge.ts`) replaced the v2 shadow-tree
+based engine with a direct AST interpreter using `ExecutionScope` and pull-based
+evaluation. The initial v3 port was ~10× slower on array workloads due to
+per-element overhead from scope construction, AST re-indexing, and excessive
+Promise allocation. A series of targeted optimisations closed the gap and then
+surpassed the v2 baseline.
+
+**Key optimisations applied (in order):**
+
+1. **StaticScopeIndex** — Shared read-only pre-computed maps (`ownedTools`,
+   `toolInputWires`, `outputWires`, `aliases`, etc.) built once per array body
+   via `buildStaticIndex()`. Child scopes reference this shared index instead
+   of eagerly allocating 9+ Map/Set objects per element.
+
+2. **Lazy map allocation** — All `ExecutionScope` maps use `private _x: T | null`
+   with getter properties: `if (this.staticIndex) return this.staticIndex.x;
+return (this._x ??= new Map())`. Elements that only read (the common case)
+   never allocate their own maps.
+
+3. **Execution plan hoisting** — `buildArrayExecutionPlan()` pre-computes wire
+   groups, ordering, and sub-field slicing once per array. The inner element
+   loop uses this plan directly, bypassing per-element `resolveRequestedFields`.
+
+4. **Chunked processing** — Elements processed in batches of 2048 via
+   `Promise.all`. Bounds concurrent promises to prevent GC panic on large arrays.
+
+5. **Promise.allSettled → Promise.all** — On the array hot path, replaced
+   `Promise.allSettled` with `Promise.all` in both `evaluateArrayElement` and
+   `evaluateArrayExpr`. The allSettled wrapper objects (3000+ per iteration for
+   flat-1000) were pure overhead since the inner code already handles errors.
+
+6. **Module-level `catchSafe()`** — Replaced per-call closure wrappers with a
+   single module-level function for safe expression evaluation.
+
+7. **Inlined `getActiveSourceLoc`** — Eliminated a per-wire closure allocation
+   in `evaluateSourceChain`'s catch block.
+
+8. **Synchronous fast path (`isPlanSynchronous`)** — The biggest single win.
+   Detects when every wire in an array body is a simple element property read
+   (no fallbacks, catches, overdefinition, or spreads). Evaluates the entire
+   array in a tight synchronous `for` loop: `getPath(element, ref.path)` →
+   `setPath(output, target)`. Zero Promises, zero ExecutionScope allocations,
+   zero async function calls. Eliminated ~47% CPU overhead (26.5% microtask
+   scheduling, 15.9% async closures, 5.1% GC) that was spent on async machinery
+   for zero actual I/O.
+
+**Benchmark results (v3 vs v2 baseline):**
+
+| Benchmark                   | v2 baseline | v3 current | Change       |
+| --------------------------- | ----------- | ---------- | ------------ |
+| exec: passthrough           | ~830K       | ~463K      | −44%         |
+| exec: short-circuit         | ~801K       | ~423K      | −47%         |
+| exec: simple chain (1 tool) | ~558K       | ~276K      | −51%         |
+| exec: 3-tool fan-out        | ~216K       | ~89K       | −59%         |
+| exec: flat array 10         | ~175K       | ~180K      | **≈ parity** |
+| exec: flat array 100        | ~28.2K      | ~50.5K     | **+79%**     |
+| exec: flat array 1000       | ~2,980      | ~6,420     | **+2.2×**    |
+| exec: nested array 5×5      | ~47.7K      | ~58.8K     | **+23%**     |
+| exec: nested array 10×10    | ~17.5K      | ~26K       | **+49%**     |
+| exec: nested array 20×10    | ~9.0K       | ~14K       | **+56%**     |
+| exec: tool-per-element 10   | ~36.5K      | ~42.5K     | **+16%**     |
+| exec: tool-per-element 100  | ~3.98K      | ~4.96K     | **+25%**     |
+
+**Summary:**
+
+- **Array workloads: v3 is significantly faster.** The sync fast path makes
+  pure element-ref arrays 2.2× faster than v2 for flat-1000, and nested arrays
+  see +23–56% gains.
+- **Non-array workloads: v3 is ~44–59% slower.** The v3 scope-based pull engine
+  has inherent overhead from `ExecutionScope` construction, recursive expression
+  evaluation, and async function wrappers. The v2 shadow-tree engine's flat
+  wire-loop was simpler for non-array cases.
+- **The v3 engine gains scope-based features** (defines, nested scopes, aliases,
+  lexical shadowing) that were not possible in the v2 flat wire model.

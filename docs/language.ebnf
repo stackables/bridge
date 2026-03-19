@@ -1,0 +1,184 @@
+(* ================================================================= *)
+(* BRIDGE LANGUAGE V1.5 (ISO/IEC 14977 COMPLIANT)                    *)
+(* ================================================================= *)
+(* --- 1. TOP LEVEL BLOCKS --- *)
+program
+    = "version 1.5", { const
+    | bridge
+    | define
+    | tool };
+
+const
+    = "const", identifier, "=", json;
+
+bridge
+    = "bridge", identifier, "{", { statement }, "}";
+
+define
+    = "define", identifier, "{", { statement }, "}";
+
+tool
+    = "tool", identifier, "from", identifier, "{", { statement }, [ "on error", "=", json ], "}";
+
+(* --- 2. STATEMENTS & SCOPE --- *)
+statement
+    = with
+    | wire
+    | wire_alias
+    | scope
+    | spread
+    | force;
+
+with
+    = "with", identifier, [ "as", identifier ];
+
+scope
+    = target, "{", { statement }, "}";
+
+(* Standard assignment *)
+wire
+    = target, ( routing
+    | "=", json );
+
+(* Local memory assignment *)
+wire_alias
+    = "alias", identifier, routing;
+
+(* Merge into current scope object *)
+spread
+    = "...", routing;
+
+(* Eager side-effect evaluation *)
+force
+    = "force", identifier, [ "catch", "null" ];
+
+(* --- 3. SHARED PATHS & ROUTING --- *)
+target
+    = [ "." ], identifier, { ".", identifier };
+
+(* The Right-Hand Side Evaluation Chain *)
+routing
+    = "<-", expression, { ( "||"
+    | "??" ), expression }, [ "catch", expression ];
+
+(* --- 4. EXPRESSIONS & REFERENCES --- *)
+ref
+    = identifier, [ [ "?" ], ".", identifier ], { [ "?" ], ".", identifier };
+
+(* An expression is a piped value, optionally followed by a ternary gate *)
+expression
+    = pipe_chain, [ "?", expression, ":", expression ];
+
+(* A pipe chain allows infinite routing:  handle:handle:source *)
+pipe_chain
+    = { identifier, [ ".", identifier ], ":" }, base_expression;
+
+base_expression
+    = json
+    | ref, "[]", "as", identifier, "{", { statement }, "}"
+    | ref
+    | ( "throw"
+    | "panic" ), [ string ]
+    | ( "continue"
+    | "break" ), [ integer ];
+
+(* --- 5. EMBEDDED JSON (RFC 8259) --- *)
+json
+    = object
+    | array
+    | string
+    | number
+    | "true"
+    | "false"
+    | "null";
+
+object
+    = "{", [ string, ":", json, { ",", string, ":", json } ], "}";
+
+array
+    = "[", [ json, { ",", json } ], "]";
+
+(* --- 6. LEXICAL RULES (TOKENS) --- *)
+identifier
+    = letter, { letter
+    | digit
+    | "_" };
+
+string
+    = '"', { character - '"' }, '"'
+    | "'", { character - "'" }, "'";
+
+number
+    = [ "-" ], integer, [ ".", integer ];
+
+integer
+    = digit, { digit };
+
+letter
+    = "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z"
+    | "A"
+    | "B"
+    | "C"
+    | "D"
+    | "E"
+    | "F"
+    | "G"
+    | "H"
+    | "I"
+    | "J"
+    | "K"
+    | "L"
+    | "M"
+    | "N"
+    | "O"
+    | "P"
+    | "Q"
+    | "R"
+    | "S"
+    | "T"
+    | "U"
+    | "V"
+    | "W"
+    | "X"
+    | "Y"
+    | "Z";
+
+digit
+    = "0"
+    | "1"
+    | "2"
+    | "3"
+    | "4"
+    | "5"
+    | "6"
+    | "7"
+    | "8"
+    | "9";
+
+character
+    = ? any valid unicode character ?;

@@ -3,23 +3,7 @@ import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 import { BridgeRuntimeError } from "@stackables/bridge-core";
 import { bridge } from "@stackables/bridge";
-
-/**
- * Returns the source text segment that would be underlined with ^^^^^ carets
- * in the formatted error output.  Uses the `bridgeLoc` + `bridgeSource`
- * attached to the error by the execution engine.
- */
-function locatedSegment(
-  err: BridgeRuntimeError & { bridgeSource?: string },
-): string {
-  const loc = err.bridgeLoc;
-  const source = err.bridgeSource;
-  if (!loc || !source) return "<no source location>";
-  const line = source.split("\n")[loc.startLine - 1] ?? "";
-  return loc.endLine === loc.startLine
-    ? line.slice(loc.startColumn - 1, loc.endColumn)
-    : line.slice(loc.startColumn - 1);
-}
+import { assertRuntimeErrorAt } from "./utils/error-utils.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Tool error location
@@ -105,12 +89,7 @@ regressionTest("tool error location", {
     "Query.outputWire": {
       "tool error points at the output wire that pulls from it": {
         input: { _error: "Failed to fetch" },
-        assertError: (err: any) => {
-          assert.ok(err instanceof BridgeRuntimeError);
-          assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-          // The caret underlines the `api.body` source reference in `o.result <- api.body`
-          assert.equal(locatedSegment(err), "api.body");
-        },
+        assertError: assertRuntimeErrorAt("api.body"),
         // Error scenarios: the tool always throws so no traces are guaranteed
         assertTraces: (t) => assert.ok(t.length >= 0),
       },
@@ -118,12 +97,8 @@ regressionTest("tool error location", {
     "Query.chainError": {
       "tool error in chain points at the closest pulling wire": {
         input: { _error: "Failed to fetch" },
-        assertError: (err: any) => {
-          assert.ok(err instanceof BridgeRuntimeError);
-          assert.ok(err.bridgeLoc, "Expected bridgeLoc on tool error");
-          // The caret underlines `api` in `e <- api`, not `e` in `o.result <- e`
-          assert.equal(locatedSegment(err), "api");
-        },
+        assertError: assertRuntimeErrorAt("api"),
+
         // Error scenarios: the tool always throws so no traces are guaranteed
         assertTraces: (t) => assert.ok(t.length >= 0),
       },

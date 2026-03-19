@@ -24,7 +24,7 @@ bridge Query.getUser {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="http-tool" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="http-tool" autoRun={true} />
 
 ### Handle Declarations (`with`)
 
@@ -90,7 +90,7 @@ tool fragileApi from std.httpCall {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="sbb-train-search" autoRun={false} />
+<MiniPlaygroundModal client:only="react" exampleId="sbb-train-search" autoRun={false} />
 
 ## 3. Tool Inheritance
 
@@ -115,7 +115,7 @@ tool baseApi.createUser from baseApi {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="tool-inheritance" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="tool-inheritance" autoRun={true} />
 
 ## 4. Const Blocks
 
@@ -134,7 +134,7 @@ const config = {
 
 To access them in your graph, bring them into scope: `with const as c`, then wire them using dot notation: `o.lat <- c.fallbackGeo.lat`.
 
-<MiniPlaygroundModal client:load exampleId="const-blocks" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="const-blocks" autoRun={true} />
 
 ## 5. Define Blocks
 
@@ -177,4 +177,4 @@ bridge Query.me {
   and injects its wires directly into the host bridge during compilation.
 </Aside>
 
-<MiniPlaygroundModal client:load exampleId="define-blocks" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="define-blocks" autoRun={true} />

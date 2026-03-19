@@ -6,8 +6,8 @@ import type {
   Bridge,
   BridgeDocument,
   NodeRef,
-  Wire,
   WireSourceEntry,
+  WireStatement,
 } from "@stackables/bridge-core";
 import { executeBridge as executeRuntime } from "@stackables/bridge-core";
 import {
@@ -72,7 +72,7 @@ function outputRef(type: string, field: string, path: string[]): NodeRef {
   };
 }
 
-const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
+const wireArb = (type: string, field: string): fc.Arbitrary<WireStatement> => {
   const toArb = pathArb.map((path) => outputRef(type, field, path));
   const fromArb = pathArb.map((path) => inputRef(type, field, path));
 
@@ -96,8 +96,9 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
   return fc.oneof(
     // 1. Constant Wires
     fc.tuple(toArb, constantValueArb).map(
-      ([to, value]): Wire => ({
-        to,
+      ([target, value]): WireStatement => ({
+        kind: "wire",
+        target,
         sources: [{ expr: { type: "literal", value } }],
       }),
     ),
@@ -110,12 +111,12 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
         fc.array(fallbackSourceArb, { minLength: 0, maxLength: 2 }),
         fc.option(constantValueArb, { nil: undefined }),
       )
-      .map(([from, to, fallbacks, catchVal]): Wire => {
+      .map(([from, target, fallbacks, catchVal]): WireStatement => {
         const sources: WireSourceEntry[] = [
           { expr: { type: "ref", ref: from } },
           ...fallbacks,
         ];
-        const wire: Wire = { to, sources };
+        const wire: WireStatement = { kind: "wire", target, sources };
         if (catchVal !== undefined) wire.catch = { value: catchVal };
         return wire;
       }),
@@ -129,8 +130,9 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
         fc.option(constantValueArb, { nil: undefined }),
       )
       .map(
-        ([cond, to, thenVal, elseVal]): Wire => ({
-          to,
+        ([cond, target, thenVal, elseVal]): WireStatement => ({
+          kind: "wire",
+          target,
           sources: [
             {
               expr: {
@@ -154,8 +156,9 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
     fc
       .tuple(fromArb, toArb, fc.option(constantValueArb, { nil: undefined }))
       .map(
-        ([left, to, rightVal]): Wire => ({
-          to,
+        ([left, target, rightVal]): WireStatement => ({
+          kind: "wire",
+          target,
           sources: [
             {
               expr: {
@@ -175,8 +178,9 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
     fc
       .tuple(fromArb, toArb, fc.option(constantValueArb, { nil: undefined }))
       .map(
-        ([left, to, rightVal]): Wire => ({
-          to,
+        ([left, target, rightVal]): WireStatement => ({
+          kind: "wire",
+          target,
           sources: [
             {
               expr: {
@@ -194,20 +198,22 @@ const wireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
   );
 };
 
-const flatWireArb = (type: string, field: string): fc.Arbitrary<Wire> => {
+const flatWireArb = (type: string, field: string): fc.Arbitrary<WireStatement> => {
   const toArb = flatPathArb.map((path) => outputRef(type, field, path));
   const fromArb = flatPathArb.map((path) => inputRef(type, field, path));
 
   return fc.oneof(
     fc.tuple(toArb, constantValueArb).map(
-      ([to, value]): Wire => ({
-        to,
+      ([target, value]): WireStatement => ({
+        kind: "wire",
+        target,
         sources: [{ expr: { type: "literal", value } }],
       }),
     ),
     fc.tuple(fromArb, toArb).map(
-      ([from, to]): Wire => ({
-        to,
+      ([from, target]): WireStatement => ({
+        kind: "wire",
+        target,
         sources: [{ expr: { type: "ref", ref: from } }],
       }),
     ),
@@ -228,7 +234,7 @@ const bridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.array(wireArb(type, field), { minLength: 1, maxLength: 20 }),
+      body: fc.array(wireArb(type, field), { minLength: 1, maxLength: 20 }),
     }),
   );
 
@@ -246,10 +252,10 @@ const flatBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(flatWireArb(type, field), {
+      body: fc.uniqueArray(flatWireArb(type, field), {
         minLength: 1,
         maxLength: 20,
-        selector: (wire) => wire.to.path.join("."),
+        selector: (wire) => wire.target.path.join("."),
       }),
     }),
   );
@@ -417,7 +423,7 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(
+      body: fc.uniqueArray(
         fc
           .tuple(
             flatPathArb.map((path) => inputRef(type, field, path)),
@@ -444,8 +450,9 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
             constantValueArb,
           )
           .map(
-            ([from, to, fallbacks, catchVal]): Wire => ({
-              to,
+            ([from, target, fallbacks, catchVal]): WireStatement => ({
+              kind: "wire",
+              target,
               sources: [{ expr: { type: "ref", ref: from } }, ...fallbacks],
               catch: { value: catchVal },
             }),
@@ -453,7 +460,7 @@ const fallbackHeavyBridgeArb: fc.Arbitrary<Bridge> = fc
         {
           minLength: 1,
           maxLength: 20,
-          selector: (wire) => wire.to.path.join("."),
+          selector: (wire) => wire.target.path.join("."),
         },
       ),
     }),
@@ -476,7 +483,7 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
         { kind: "input", handle: "i" } as const,
         { kind: "output", handle: "o" } as const,
       ]),
-      wires: fc.uniqueArray(
+      body: fc.uniqueArray(
         fc.oneof(
           // Ternary
           fc
@@ -487,8 +494,9 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
               fc.option(constantValueArb, { nil: undefined }),
             )
             .map(
-              ([cond, to, thenVal, elseVal]): Wire => ({
-                to,
+              ([cond, target, thenVal, elseVal]): WireStatement => ({
+                kind: "wire",
+                target,
                 sources: [
                   {
                     expr: {
@@ -515,8 +523,9 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
               fc.option(constantValueArb, { nil: undefined }),
             )
             .map(
-              ([left, to, rightVal]): Wire => ({
-                to,
+              ([left, target, rightVal]): WireStatement => ({
+                kind: "wire",
+                target,
                 sources: [
                   {
                     expr: {
@@ -539,8 +548,9 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
               fc.option(constantValueArb, { nil: undefined }),
             )
             .map(
-              ([left, to, rightVal]): Wire => ({
-                to,
+              ([left, target, rightVal]): WireStatement => ({
+                kind: "wire",
+                target,
                 sources: [
                   {
                     expr: {
@@ -559,7 +569,7 @@ const logicalBridgeArb: fc.Arbitrary<Bridge> = fc
         {
           minLength: 1,
           maxLength: 20,
-          selector: (wire) => wire.to.path.join("."),
+          selector: (wire) => wire.target.path.join("."),
         },
       ),
     });

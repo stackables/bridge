@@ -40,6 +40,185 @@ bridge Query.evaluate {
     );
   });
 
+  test("does not mark pipe expression as dead code when its primary entry is active", () => {
+    const bridge = getBridge(`version 1.5
+
+bridge Query.searchTrains {
+  with input as i
+  with output as o
+  with std.str.toUpperCase as uc
+
+  o.name <- uc:i.name
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    const primaryEntry = manifest.find((entry) => entry.id === "name/primary");
+    assert.ok(primaryEntry, "expected primary manifest entry");
+    // Activate only the primary entry (pipe succeeded, no error)
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(primaryEntry.bitIndex)).map(
+        (entry) => entry.id,
+      ),
+    );
+    // The pipe primary/error entry is a narrower span within the active primary span.
+    // It should be suppressed (superseded), not shown as dead code.
+    assert.deepEqual(
+      collectInactiveTraversalLocations(manifest, activeIds),
+      [],
+    );
+  });
+
+  test("unexecuted nullish fallback branch is shown as dead code", () => {
+    // o.value <- i.primary ?? i.fallback
+    // When i.primary is not nullish, the ?? fallback is never taken.
+    // It must appear as dead code — NOT suppressed just because its loc
+    // falls within the active primary's full-wire-span loc.
+    const bridge = getBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.value <- i.primary ?? i.fallback
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    const primaryEntry = manifest.find((e) => e.id === "value/primary");
+    const fallbackEntry = manifest.find((e) => e.id === "value/fallback:0");
+    assert.ok(primaryEntry, "expected value/primary");
+    assert.ok(fallbackEntry?.loc, "expected value/fallback:0 with loc");
+    // Activate only the primary path (i.primary was not nullish).
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(primaryEntry.bitIndex)).map(
+        (e) => e.id,
+      ),
+    );
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === fallbackEntry.loc!.startLine &&
+          l.startColumn === fallbackEntry.loc!.startColumn,
+      ),
+      "fallback loc should be in dead code locations",
+    );
+  });
+
+  test("ref wire and pipe wire both inactive gray their full wire lines consistently", () => {
+    // When two sibling wires are both inactive, both should highlight the full
+    // wire statement — not just the RHS expression for the ref wire.
+    const bridge = getBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+  with std.str.toUpperCase as uc
+
+  o.id <- i.user.id
+  o.name <- uc:i.user.name
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    const idPrimary = manifest.find((entry) => entry.id === "id/primary");
+    const namePrimary = manifest.find((entry) => entry.id === "name/primary");
+    assert.ok(idPrimary?.loc, "expected id/primary loc");
+    assert.ok(namePrimary?.loc, "expected name/primary loc");
+    // Both wire statements begin at the same column ("o.id" / "o.name").
+    // After the fix, id/primary should use the full wire loc (matching name/primary),
+    // not the narrower RHS expression loc it previously had.
+    assert.equal(
+      idPrimary.loc.startColumn,
+      namePrimary.loc.startColumn,
+      "id/primary and name/primary should start at the same column (full wire, not RHS-only)",
+    );
+  });
+
+  test("scope blocks with no active fields are dimmed entirely", () => {
+    const bridge = getBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.legs <- i.items[] as s {
+    .origin {
+      .id <- s.from.id
+      .name <- s.from.name
+    }
+    .destination {
+      .id <- s.to.id
+      .name <- s.to.name
+    }
+  }
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    // Activate only the origin.id and origin.name wires — destination scope is entirely dead.
+    const originIdEntry = manifest.find(
+      (e) => e.id === "legs.origin.id/primary",
+    );
+    const originNameEntry = manifest.find(
+      (e) => e.id === "legs.origin.name/primary",
+    );
+    assert.ok(originIdEntry, "expected origin.id entry");
+    assert.ok(originNameEntry, "expected origin.name entry");
+    const traceBit =
+      (1n << BigInt(originIdEntry.bitIndex)) |
+      (1n << BigInt(originNameEntry.bitIndex));
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, traceBit).map((e) => e.id),
+    );
+
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+
+    // The .destination { ... } scope block should appear as dead code.
+    const destinationScopeEntry = manifest.find(
+      (e) => e.kind === "scope" && e.loc && inactiveLocs.includes(e.loc),
+    );
+    assert.ok(
+      destinationScopeEntry,
+      "expected .destination scope block to be in dead code locations",
+    );
+  });
+
+  test("scope blocks with at least one active field are not dimmed", () => {
+    const bridge = getBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.legs <- i.items[] as s {
+    .origin {
+      .id <- s.from.id
+      .name <- s.from.name
+    }
+  }
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    // Activate only origin.id — scope still has an active descendant.
+    const originIdEntry = manifest.find(
+      (e) => e.id === "legs.origin.id/primary",
+    );
+    assert.ok(originIdEntry, "expected origin.id entry");
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(originIdEntry.bitIndex)).map(
+        (e) => e.id,
+      ),
+    );
+
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+
+    // The .origin { ... } scope block itself should NOT be dead code (origin.id is active).
+    const originScope = manifest.find((e) => e.kind === "scope");
+    assert.ok(originScope?.loc, "expected origin scope entry with loc");
+    assert.ok(
+      !inactiveLocs.includes(originScope.loc),
+      "scope block with an active descendant should not be dimmed",
+    );
+  });
+
   test("keeps granular inactive branch spans when they do not cover active code", () => {
     const bridge = getBridge(`version 1.5
 
@@ -51,8 +230,12 @@ bridge Query.test {
 }`);
 
     const manifest = buildTraversalManifest(bridge);
+    const thenEntry = manifest.find((entry) => entry.id === "name/then");
+    assert.ok(thenEntry, "expected then branch manifest entry");
     const activeIds = new Set(
-      decodeExecutionTrace(manifest, 1n << 0n).map((entry) => entry.id),
+      decodeExecutionTrace(manifest, 1n << BigInt(thenEntry.bitIndex)).map(
+        (entry) => entry.id,
+      ),
     );
     const elseEntry = manifest.find((entry) => entry.id === "name/else");
 
@@ -60,5 +243,61 @@ bridge Query.test {
     assert.deepEqual(collectInactiveTraversalLocations(manifest, activeIds), [
       elseEntry.loc,
     ]);
+  });
+
+  test("inactive wire is fully dimmed when a sibling wire is active (wireIndex -1 grouping bug)", () => {
+    // When only `price` is requested, the `source` wire must be dimmed entirely.
+    // Previously all entries had wireIndex: -1 so they were grouped together,
+    // causing allDead to be false and `o.source` line to not be dimmed at all.
+    const bridge = getBridge(`version 1.5
+
+bridge Query.assetPrice {
+  with input as i
+  with output as o
+
+  o.price <- i.primary ?? i.fallback
+  o.source <- i.primary? "yes" : "no"
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    // Activate only the price wire's primary path
+    const priceEntry = manifest.find((e) => e.id === "price/primary");
+    assert.ok(priceEntry, "expected price/primary entry");
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(priceEntry.bitIndex)).map(
+        (e) => e.id,
+      ),
+    );
+
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+
+    // The entire source wire line should be inactive (wireLoc of source wire).
+    const sourceThen = manifest.find((e) => e.id === "source/then");
+    assert.ok(sourceThen?.wireLoc, "expected source/then entry with wireLoc");
+
+    // The wireLoc of the source wire must appear in inactive locs with the
+    // EXACT same start position as the statement (not just the branch literals).
+    // This verifies the whole statement is dimmed — including the ternary condition
+    // which has no individual traversal entry pointing at it.
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === sourceThen.wireLoc!.startLine &&
+          l.startColumn === sourceThen.wireLoc!.startColumn,
+      ),
+      "source wire full statement (starting at statement column) should be in dead code locations",
+    );
+
+    // And the price fallback (i.fallback) should also be inactive.
+    const priceFallback = manifest.find((e) => e.id === "price/fallback:0");
+    assert.ok(priceFallback?.loc, "expected price/fallback:0 entry with loc");
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === priceFallback.loc!.startLine &&
+          l.startColumn === priceFallback.loc!.startColumn,
+      ),
+      "price fallback loc should be in dead code locations",
+    );
   });
 });

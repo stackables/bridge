@@ -10,10 +10,8 @@ import type {
   ControlFlowInstruction,
   NodeRef,
   SourceLocation,
-  Wire,
 } from "./types.ts";
 import type { ToolTrace } from "./tracing.ts";
-import type { TraceWireBits } from "./enumerate-traversals.ts";
 
 // ── Error classes ───────────────────────────────────────────────────────────
 
@@ -136,23 +134,8 @@ export interface TreeContext {
     pullChain?: Set<string>,
     bridgeLoc?: SourceLocation,
   ): MaybePromise<any>;
-  /** Classify an overdefined wire by marginal execution cost (lower = cheaper). */
-  classifyOverdefinitionWire?(wire: Wire): number;
   /** External abort signal — cancels execution when triggered. */
   signal?: AbortSignal;
-  /**
-   * Per-wire bit positions for execution trace recording.
-   * Present only when execution tracing is enabled.  Looked up by
-   * `resolveWires` to flip bits in `traceMask`.
-   */
-  traceBits?: Map<Wire, TraceWireBits>;
-  /**
-   * Shared mutable trace bitmask — `[mask]`.  Boxed in a single-element
-   * array so shadow trees can share the same mutable reference without
-   * extra allocation.  Present only when execution tracing is enabled.
-   * Uses `bigint` to support manifests with more than 31 entries.
-   */
-  traceMask?: [bigint];
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */

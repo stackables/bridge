@@ -4,8 +4,11 @@ import {
   parseBridgeFormat as parseBridge,
   serializeBridge,
 } from "../src/index.ts";
-import type { Bridge } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import type { Bridge, WireAliasStatement } from "@stackables/bridge-core";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatWires,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 // ── Parser tests ────────────────────────────────────────────────────────────
@@ -28,15 +31,15 @@ describe("path scoping – parser", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
     assert.ok(instr);
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
     assert.equal(constWires.length, 2);
     const theme = constWires.find(
-      (w) => w.to.path.join(".") === "settings.theme",
+      (w) => w.target.path.join(".") === "settings.theme",
     );
     const lang = constWires.find(
-      (w) => w.to.path.join(".") === "settings.lang",
+      (w) => w.target.path.join(".") === "settings.lang",
     );
     assert.ok(theme);
     assert.equal(
@@ -71,13 +74,13 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
     assert.equal(pullWires.length, 2);
-    const nameWire = pullWires.find((w) => w.to.path.join(".") === "user.name");
+    const nameWire = pullWires.find((w) => w.target.path.join(".") === "user.name");
     const emailWire = pullWires.find(
-      (w) => w.to.path.join(".") === "user.email",
+      (w) => w.target.path.join(".") === "user.email",
     );
     assert.ok(nameWire);
     const nameExpr = nameWire.sources[0]!.expr;
@@ -116,15 +119,15 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const wires = instr.wires;
+    const wires = flatWires(instr.body);
 
     // Pull wires
     const pullWires = wires.filter((w) => w.sources[0]?.expr.type === "ref");
     const idWire = pullWires.find(
-      (w) => w.to.path.join(".") === "body.user.profile.id",
+      (w) => w.target.path.join(".") === "body.user.profile.id",
     );
     const nameWire = pullWires.find(
-      (w) => w.to.path.join(".") === "body.user.profile.name",
+      (w) => w.target.path.join(".") === "body.user.profile.name",
     );
     assert.ok(idWire, "id wire should exist");
     assert.ok(nameWire, "name wire should exist");
@@ -144,10 +147,10 @@ describe("path scoping – parser", () => {
       (w) => w.sources[0]?.expr.type === "literal",
     );
     const themeWire = constWires.find(
-      (w) => w.to.path.join(".") === "body.user.settings.theme",
+      (w) => w.target.path.join(".") === "body.user.settings.theme",
     );
     const notifWire = constWires.find(
-      (w) => w.to.path.join(".") === "body.user.settings.notifications",
+      (w) => w.target.path.join(".") === "body.user.settings.notifications",
     );
     assert.ok(themeWire);
     assert.equal(
@@ -161,7 +164,7 @@ describe("path scoping – parser", () => {
       notifWire.sources[0]!.expr.type === "literal"
         ? notifWire.sources[0]!.expr.value
         : undefined,
-      "true",
+      true,
     );
   });
 
@@ -183,7 +186,7 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
+    assert.ok(flatWires(instr.body).length > 0, "should have wires in body");
   });
 
   test("scope block with fallback operators", () => {
@@ -203,10 +206,10 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const nameWire = pullWires.find((w) => w.to.path.join(".") === "data.name");
+    const nameWire = pullWires.find((w) => w.target.path.join(".") === "data.name");
     assert.ok(nameWire);
     assert.equal(nameWire.sources.length, 2);
     assert.equal(nameWire.sources[1]!.gate, "falsy");
@@ -214,18 +217,18 @@ describe("path scoping – parser", () => {
       nameWire.sources[1]!.expr.type === "literal"
         ? nameWire.sources[1]!.expr.value
         : undefined,
-      '"anonymous"',
+      "anonymous",
     );
 
     const valueWire = pullWires.find(
-      (w) => w.to.path.join(".") === "data.value",
+      (w) => w.target.path.join(".") === "data.value",
     );
     assert.ok(valueWire);
     assert.equal(
       valueWire.catch && "value" in valueWire.catch
         ? valueWire.catch.value
         : undefined,
-      "0",
+      0,
     );
   });
 
@@ -246,7 +249,10 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
+    const exprWires = flatWires(instr.body).filter(
+      (w) => w.sources[0]?.expr.type === "binary",
+    );
+    assert.ok(exprWires.length > 0, "should have binary expression wires");
   });
 
   test("scope block with ternary", () => {
@@ -266,7 +272,7 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const ternaryWires = instr.wires.filter(
+    const ternaryWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ternary",
     );
     assert.equal(ternaryWires.length, 2);
@@ -289,7 +295,10 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assert.ok(instr.pipeHandles && instr.pipeHandles.length > 0);
+    const concatWires = flatWires(instr.body).filter(
+      (w) => w.sources[0]?.expr.type === "concat",
+    );
+    assert.ok(concatWires.length > 0, "should have concat expression wires");
   });
 
   test("mixed flat wires and scope blocks", () => {
@@ -311,13 +320,13 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
     assert.equal(constWires.length, 3);
-    assert.ok(constWires.find((w) => w.to.path.join(".") === "method"));
-    assert.ok(constWires.find((w) => w.to.path.join(".") === "body.value"));
-    assert.ok(constWires.find((w) => w.to.path.join(".") === "status"));
+    assert.ok(constWires.find((w) => w.target.path.join(".") === "method"));
+    assert.ok(constWires.find((w) => w.target.path.join(".") === "body.value"));
+    assert.ok(constWires.find((w) => w.target.path.join(".") === "status"));
   });
 
   test("scope block on tool handle", () => {
@@ -344,12 +353,12 @@ describe("path scoping – parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const nameWire = pullWires.find((w) => w.to.path.join(".") === "body.name");
+    const nameWire = pullWires.find((w) => w.target.path.join(".") === "body.name");
     const emailWire = pullWires.find(
-      (w) => w.to.path.join(".") === "body.email",
+      (w) => w.target.path.join(".") === "body.email",
     );
     assert.ok(nameWire, "name wire targeting api.body.name should exist");
     assert.ok(emailWire, "email wire targeting api.body.email should exist");
@@ -395,7 +404,10 @@ describe("path scoping – parser", () => {
       (i): i is Bridge => i.kind === "bridge",
     )!;
 
-    assertDeepStrictEqualIgnoringLoc(scopedBridge.wires, flatBridge.wires);
+    assertDeepStrictEqualIgnoringLoc(
+      flatWires(scopedBridge.body),
+      flatWires(flatBridge.body),
+    );
   });
 
   test("scope block on tool input wires to tool correctly", () => {
@@ -423,8 +435,10 @@ describe("path scoping – parser", () => {
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = br.wires.filter((w) => w.sources[0]?.expr.type === "ref");
-    const qWire = pullWires.find((w) => w.to.path.join(".") === "q");
+    const pullWires = flatWires(br.body).filter(
+      (w) => w.sources[0]?.expr.type === "ref",
+    );
+    const qWire = pullWires.find((w) => w.target.path.join(".") === "q");
     assert.ok(qWire, "wire to api.q should exist");
   });
 
@@ -450,20 +464,33 @@ describe("path scoping – parser", () => {
     const br = parsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = br.wires.filter((w) => w.sources[0]?.expr.type === "ref");
-    // Alias creates a __local wire
-    const localWire = pullWires.find(
-      (w) => w.to.module === "__local" && w.to.field === "upper",
+    const pullWires = flatWires(br.body).filter(
+      (w) => w.sources[0]?.expr.type === "ref",
     );
-    assert.ok(localWire, "alias wire to __local:Shadow:upper should exist");
+    // Alias creates an alias statement (V3: WireAliasStatement in body)
+    function findAlias(
+      stmts: Bridge["body"],
+      name: string,
+    ): WireAliasStatement | undefined {
+      for (const s of stmts) {
+        if (s.kind === "alias" && s.name === name) return s;
+        if (s.kind === "scope") {
+          const found = findAlias(s.body, name);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    }
+    const aliasStmt = findAlias(br.body, "upper");
+    assert.ok(aliasStmt, "alias statement for 'upper' should exist");
     // displayName wire reads from alias
     const displayWire = pullWires.find(
-      (w) => w.to.path.join(".") === "info.displayName",
+      (w) => w.target.path.join(".") === "info.displayName",
     );
     assert.ok(displayWire, "wire to o.info.displayName should exist");
     const displayExpr = displayWire!.sources[0]!.expr;
     assert.equal(
-      displayExpr.type === "ref" ? displayExpr.ref.module : undefined,
+      displayExpr.type === "ref" ? displayExpr.ref.type : undefined,
       "__local",
     );
     assert.equal(
@@ -472,7 +499,7 @@ describe("path scoping – parser", () => {
     );
     // email wire reads from input
     const emailWire = pullWires.find(
-      (w) => w.to.path.join(".") === "info.email",
+      (w) => w.target.path.join(".") === "info.email",
     );
     assert.ok(emailWire, "wire to o.info.email should exist");
   });
@@ -505,7 +532,10 @@ describe("path scoping – serializer round-trip", () => {
     const bridge2 = reparsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assertDeepStrictEqualIgnoringLoc(bridge1.wires, bridge2.wires);
+    assertDeepStrictEqualIgnoringLoc(
+      flatWires(bridge1.body),
+      flatWires(bridge2.body),
+    );
   });
 
   test("deeply nested scope round-trips correctly", () => {
@@ -537,7 +567,10 @@ describe("path scoping – serializer round-trip", () => {
     const bridge2 = reparsed.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    assertDeepStrictEqualIgnoringLoc(bridge1.wires, bridge2.wires);
+    assertDeepStrictEqualIgnoringLoc(
+      flatWires(bridge1.body),
+      flatWires(bridge2.body),
+    );
   });
 });
 
@@ -562,7 +595,7 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
     assert.equal(constWires.length, 1);
@@ -571,10 +604,10 @@ describe("path scoping – array mapper blocks", () => {
       wire.sources[0]!.expr.type === "literal"
         ? wire.sources[0]!.expr.value
         : undefined,
-      "1",
+      1,
     );
-    assertDeepStrictEqualIgnoringLoc(wire.to.path, ["obj", "etc"]);
-    assert.equal(wire.to.element, true);
+    assertDeepStrictEqualIgnoringLoc(wire.target.path, ["obj", "etc"]);
+    assert.equal(wire.target.element, true);
   });
 
   test("scope block with pull wire inside array mapper references iterator", () => {
@@ -595,10 +628,10 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const nameWire = pullWires.find((w) => w.to.path.join(".") === "obj.name");
+    const nameWire = pullWires.find((w) => w.target.path.join(".") === "obj.name");
     assert.ok(nameWire, "wire to obj.name should exist");
     const nameExpr = nameWire!.sources[0]!.expr;
     assert.equal(
@@ -631,12 +664,12 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
     assert.equal(constWires.length, 1);
-    assertDeepStrictEqualIgnoringLoc(constWires[0].to.path, ["a", "b", "c"]);
-    assert.equal(constWires[0].to.element, true);
+    assertDeepStrictEqualIgnoringLoc(constWires[0].target.path, ["a", "b", "c"]);
+    assert.equal(constWires[0].target.element, true);
   });
 
   test("array mapper scope block and flat element lines coexist", () => {
@@ -659,22 +692,22 @@ describe("path scoping – array mapper blocks", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
     assert.ok(
-      constWires.find((w) => w.to.path.join(".") === "nested.x"),
+      constWires.find((w) => w.target.path.join(".") === "nested.x"),
       "nested.x constant should exist",
     );
     assert.ok(
-      pullWires.find((w) => w.to.path.join(".") === "flat"),
+      pullWires.find((w) => w.target.path.join(".") === "flat"),
       "flat pull wire should exist",
     );
     assert.ok(
-      pullWires.find((w) => w.to.path.join(".") === "nested.y"),
+      pullWires.find((w) => w.target.path.join(".") === "nested.y"),
       "nested.y pull wire should exist",
     );
   });
@@ -702,10 +735,10 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const spreadWire = pullWires.find((w) => w.to.path.length === 0);
+    const spreadWire = pullWires.find((w) => w.target.path.length === 0);
     assert.ok(spreadWire, "spread wire targeting tool root should exist");
     assertDeepStrictEqualIgnoringLoc(
       spreadWire.sources[0]!.expr.type === "ref"
@@ -735,18 +768,18 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const constWires = instr.wires.filter(
+    const constWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "literal",
     );
     assert.ok(
-      pullWires.find((w) => w.to.path.length === 0),
+      pullWires.find((w) => w.target.path.length === 0),
       "spread wire to tool root should exist",
     );
     assert.ok(
-      constWires.find((w) => w.to.path.join(".") === "extra"),
+      constWires.find((w) => w.target.path.join(".") === "extra"),
       "constant wire for .extra should exist",
     );
   });
@@ -770,10 +803,10 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const spreadWire = pullWires.find((w) => w.to.path.length === 0);
+    const spreadWire = pullWires.find((w) => w.target.path.length === 0);
     assert.ok(spreadWire, "spread wire should exist");
     assertDeepStrictEqualIgnoringLoc(
       spreadWire.sources[0]!.expr.type === "ref"
@@ -800,12 +833,12 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
     const spreadWire = pullWires.find(
       (w) =>
-        w.to.path.join(".") === "wrapper" &&
+        w.target.path.join(".") === "wrapper" &&
         (w.sources[0]!.expr.type === "ref"
           ? w.sources[0]!.expr.ref.path.length === 0
           : false),
@@ -832,10 +865,10 @@ describe("path scoping – spread syntax parser", () => {
     const instr = result.instructions.find(
       (i): i is Bridge => i.kind === "bridge",
     )!;
-    const pullWires = instr.wires.filter(
+    const pullWires = flatWires(instr.body).filter(
       (w) => w.sources[0]?.expr.type === "ref",
     );
-    const spreadWire = pullWires.find((w) => w.to.path.join(".") === "nested");
+    const spreadWire = pullWires.find((w) => w.target.path.join(".") === "nested");
     assert.ok(spreadWire, "spread wire to tool.nested should exist");
     assertDeepStrictEqualIgnoringLoc(
       spreadWire.sources[0]!.expr.type === "ref"

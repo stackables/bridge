@@ -40,24 +40,34 @@ function isSupersededByActiveLocation(
   loc: SourceLocation,
   activeLocations: SourceLocation[],
 ): boolean {
-  return activeLocations.some((activeLoc) => containsLocation(loc, activeLoc));
+  return activeLocations.some((activeLoc) => containsLocation(activeLoc, loc));
 }
 
 export function collectInactiveTraversalLocations(
   manifest: TraversalEntry[],
   activeIds: ReadonlySet<string>,
 ): SourceLocation[] {
-  const wireGroups = new Map<number, TraversalEntry[]>();
-  for (const entry of manifest) {
-    let group = wireGroups.get(entry.wireIndex);
+  // Scope marker entries (bitIndex: -1, kind: "scope") are handled separately:
+  // they are "active" if any active location falls within their block, not via a bit.
+  const scopeEntries = manifest.filter((e) => e.kind === "scope");
+  const wireEntries = manifest.filter((e) => e.kind !== "scope");
+
+  // Group entries by their wireLoc (the source span of the entire wire statement).
+  // All traversal entries belonging to the same wire share the same wireLoc.
+  // Note: the body-based enumeration assigns wireIndex: -1 to every entry, so
+  // grouping by wireIndex would incorrectly lump all entries together.
+  const wireGroups = new Map<string, TraversalEntry[]>();
+  for (const entry of wireEntries) {
+    const key = entry.wireLoc ? locationKey(entry.wireLoc) : `\x00${entry.id}`;
+    let group = wireGroups.get(key);
     if (!group) {
       group = [];
-      wireGroups.set(entry.wireIndex, group);
+      wireGroups.set(key, group);
     }
     group.push(entry);
   }
 
-  const activeLocations = manifest.flatMap((entry) =>
+  const activeLocations = wireEntries.flatMap((entry) =>
     activeIds.has(entry.id) && entry.loc ? [entry.loc] : [],
   );
 
@@ -88,7 +98,15 @@ export function collectInactiveTraversalLocations(
       if (activeIds.has(entry.id) || !entry.loc) {
         continue;
       }
-      if (isSupersededByActiveLocation(entry.loc, activeLocations)) {
+      // Only suppress error-path entries (synthetic sub-spans of an active primary,
+      // e.g. `primary/error` for a pipe that could throw). Genuine branch
+      // alternatives (fallback, else, catch) must always appear as dead code
+      // when they were not taken — even if their loc falls within the active
+      // primary's full-wire span.
+      if (
+        entry.error &&
+        isSupersededByActiveLocation(entry.loc, activeLocations)
+      ) {
         continue;
       }
 
@@ -96,6 +114,20 @@ export function collectInactiveTraversalLocations(
       if (seen.has(key)) {
         continue;
       }
+      seen.add(key);
+      result.push(entry.loc);
+    }
+  }
+
+  // Scope blocks: dead when no active wire location falls within the scope's span.
+  for (const entry of scopeEntries) {
+    if (!entry.loc) continue;
+    const hasActiveDescendant = activeLocations.some((al) =>
+      containsLocation(entry.loc!, al),
+    );
+    if (hasActiveDescendant) continue;
+    const key = locationKey(entry.loc);
+    if (!seen.has(key)) {
       seen.add(key);
       result.push(entry.loc);
     }

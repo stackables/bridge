@@ -3,7 +3,10 @@ import { describe, test } from "node:test";
 import { parseBridgeFormat as parseBridge } from "../src/index.ts";
 import type { ToolDef } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatWires,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 /** Shorthand to make a NodeRef for Tools */
@@ -64,8 +67,8 @@ describe("tool self-wires: constant (=)", () => {
         .baseUrl = "https://example.com"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["baseUrl"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["baseUrl"]),
       sources: [{ expr: { type: "literal", value: "https://example.com" } }],
     });
   });
@@ -77,8 +80,8 @@ describe("tool self-wires: constant (=)", () => {
         .method = GET
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["method"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["method"]),
       sources: [{ expr: { type: "literal", value: "GET" } }],
     });
   });
@@ -90,8 +93,8 @@ describe("tool self-wires: constant (=)", () => {
         .headers.Content-Type = "application/json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["headers", "Content-Type"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["headers", "Content-Type"]),
       sources: [{ expr: { type: "literal", value: "application/json" } }],
     });
   });
@@ -106,8 +109,8 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- context.auth.token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["headers", "Authorization"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["headers", "Authorization"]),
       sources: [{ expr: { type: "ref", ref: contextRef(["auth", "token"]) } }],
     });
   });
@@ -121,8 +124,8 @@ describe("tool self-wires: simple pull (<-)", () => {
         .timeout <- const.timeout
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["timeout"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["timeout"]),
       sources: [{ expr: { type: "ref", ref: constRef(["timeout"]) } }],
     });
   });
@@ -138,8 +141,8 @@ describe("tool self-wires: simple pull (<-)", () => {
         .headers.Authorization <- auth.access_token
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["headers", "Authorization"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["headers", "Authorization"]),
       sources: [
         {
           expr: {
@@ -160,14 +163,56 @@ describe('tool self-wires: plain string (<- "...")', () => {
         .format <- "json"
       }
     `);
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("api", ["format"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("api", ["format"]),
       sources: [{ expr: { type: "literal", value: "json" } }],
     });
   });
 });
 
 describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
+  test("string interpolation with pipe expression in template", () => {
+    const doc = parseBridge(bridge`
+      version 1.5
+      tool upper from std.str.toUpperCase {}
+      tool api from httpCall {
+        with upper
+        with context
+        .path <- "/{upper:context.userId}/profile"
+      }
+    `);
+    const tool = doc.instructions
+      .filter((i): i is ToolDef => i.kind === "tool")
+      .at(-1)!;
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
+    assert.ok(pathWire, "Expected a wire targeting .path");
+    assert.equal(
+      pathWire.sources[0]!.expr.type,
+      "concat",
+      "Expected a concat expression",
+    );
+    const concatExpr = pathWire.sources[0]!.expr;
+    if (concatExpr.type === "concat") {
+      // parts: literal "/", pipe(ref(userId)), literal "/profile"
+      const pipePartIdx = concatExpr.parts.findIndex((p) => p.type === "pipe");
+      assert.ok(
+        pipePartIdx !== -1,
+        "Expected a pipe expression part in concat",
+      );
+      const pipePart = concatExpr.parts[pipePartIdx]!;
+      if (pipePart.type === "pipe") {
+        assert.equal(pipePart.handle, "upper", "pipe handle should be 'upper'");
+        assert.equal(
+          pipePart.source.type,
+          "ref",
+          "pipe source should be a ref",
+        );
+      }
+    }
+  });
+
   test("string interpolation with const ref", () => {
     const tool = parseTool(bridge`
       version 1.5
@@ -177,21 +222,16 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
         .path <- "/api/{const.apiVer}/search"
       }
     `);
-    // Should produce a concat fork + pipeHandle, similar to bridge blocks
-    const pathWire = tool.wires.find((w) => w.to.path[0] === "path")!;
+    // V3: concat expressions are first-class expression nodes
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
     assert.equal(
       pathWire.sources[0]!.expr.type,
-      "ref",
-      "Expected a pull wire, not constant",
-    );
-    // The from ref should be the concat fork output
-    const pathExpr = pathWire.sources[0]!.expr;
-    assert.equal(
-      pathExpr.type === "ref" ? pathExpr.ref.field : undefined,
       "concat",
+      "Expected a concat expression",
     );
-    assert.ok(pathWire.pipe, "Expected pipe flag on interpolation wire");
   });
 
   test("string interpolation with context ref", () => {
@@ -202,17 +242,14 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
         .path <- "/users/{context.userId}/profile"
       }
     `);
-    const pathWire = tool.wires.find((w) => w.to.path[0] === "path")!;
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
     assert.equal(
       pathWire.sources[0]!.expr.type,
-      "ref",
-      "Expected a pull wire, not constant",
-    );
-    const ctxPathExpr = pathWire.sources[0]!.expr;
-    assert.equal(
-      ctxPathExpr.type === "ref" ? ctxPathExpr.ref.field : undefined,
       "concat",
+      "Expected a concat expression",
     );
   });
 
@@ -246,15 +283,15 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .limit <- const.one + 1
       }
     `);
-    const limitWire = tool.wires.find((w) => w.to.path[0] === "limit")!;
+    const limitWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "limit",
+    )!;
     assert.ok(limitWire, "Expected a wire targeting .limit");
     assert.equal(
       limitWire.sources[0]!.expr.type,
-      "ref",
-      "Expected a pull wire",
+      "binary",
+      "Expected a binary expression",
     );
-    // Expression chains produce a pipe fork (desugared to internal.add/compare/etc.)
-    assert.ok(limitWire.pipe, "Expected pipe flag on expression wire");
   });
 
   test("expression with > operator", () => {
@@ -266,10 +303,15 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .verbose <- const.threshold > 5
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "verbose")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "verbose",
+    )!;
     assert.ok(wire, "Expected a wire targeting .verbose");
-    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
-    assert.ok(wire.pipe, "Expected pipe flag on expression wire");
+    assert.equal(
+      wire.sources[0]!.expr.type,
+      "binary",
+      "Expected a binary expression",
+    );
   });
 });
 
@@ -283,7 +325,9 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .method <- const.flag ? "POST" : "GET"
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "method")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "method",
+    )!;
     assert.ok(wire, "Expected a wire targeting .method");
     // Ternary wires have sources[0].expr.type === "ternary"
     assert.equal(
@@ -295,11 +339,11 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
     if (expr.type === "ternary") {
       assert.equal(
         expr.then.type === "literal" ? expr.then.value : undefined,
-        '"POST"',
+        "POST",
       );
       assert.equal(
         expr.else.type === "literal" ? expr.else.value : undefined,
-        '"GET"',
+        "GET",
       );
     }
   });
@@ -315,7 +359,9 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .baseUrl <- const.flag ? const.urlA : const.urlB
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "baseUrl")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "baseUrl",
+    )!;
     assert.ok(wire, "Expected a wire targeting .baseUrl");
     assert.equal(
       wire.sources[0]!.expr.type,
@@ -339,7 +385,9 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .timeout <- context.settings.timeout ?? "5000"
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "timeout")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "timeout",
+    )!;
     assert.ok(wire, "Expected a wire targeting .timeout");
     assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
     assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
@@ -348,7 +396,7 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
       wire.sources[1]!.expr.type === "literal"
         ? wire.sources[1]!.expr.value
         : undefined,
-      '"5000"',
+      "5000",
     );
   });
 
@@ -360,7 +408,9 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .format <- context.settings.format || "json"
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "format")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "format",
+    )!;
     assert.ok(wire, "Expected a wire targeting .format");
     assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
     assert.equal(wire.sources[1]!.gate, "falsy");
@@ -376,13 +426,13 @@ describe("tool self-wires: catch fallback", () => {
         .path <- context.settings.path catch "/default"
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "path")!;
+    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "path")!;
     assert.ok(wire, "Expected a wire targeting .path");
     assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
     assert.ok(wire.catch, "Expected catch handler");
     assert.equal(
       "value" in wire.catch ? wire.catch.value : undefined,
-      '"/default"',
+      "/default",
     );
   });
 });
@@ -397,11 +447,15 @@ describe("tool self-wires: not prefix", () => {
         .silent <- not const.debug
       }
     `);
-    const wire = tool.wires.find((w) => w.to.path[0] === "silent")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "silent",
+    )!;
     assert.ok(wire, "Expected a wire targeting .silent");
-    assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
-    // `not` produces a pipe fork through the negation tool
-    assert.ok(wire.pipe, "Expected pipe flag on not wire");
+    assert.equal(
+      wire.sources[0]!.expr.type,
+      "unary",
+      "Expected a unary expression",
+    );
   });
 });
 
@@ -422,9 +476,9 @@ describe("tool self-wires: integration", () => {
     assert.equal(tool.fn, "std.httpCall");
     // 3 constants + expression fork wires (input to fork + constant operand + pipe output)
     assert.ok(
-      tool.wires.length >= 4,
-      `Expected at least 4 wires, got ${tool.wires.length}: ${JSON.stringify(
-        tool.wires.map((w) =>
+      flatWires(tool.body).length >= 4,
+      `Expected at least 4 wires, got ${flatWires(tool.body).length}: ${JSON.stringify(
+        flatWires(tool.body).map((w) =>
           w.sources[0]?.expr.type === "literal"
             ? w.sources[0].expr.value
             : "pull",
@@ -435,8 +489,8 @@ describe("tool self-wires: integration", () => {
     );
 
     // First 3 are constants
-    assertDeepStrictEqualIgnoringLoc(tool.wires[0], {
-      to: toolRef("geo", ["baseUrl"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[0], {
+      target: toolRef("geo", ["baseUrl"]),
       sources: [
         {
           expr: {
@@ -446,25 +500,24 @@ describe("tool self-wires: integration", () => {
         },
       ],
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires[1], {
-      to: toolRef("geo", ["path"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[1], {
+      target: toolRef("geo", ["path"]),
       sources: [{ expr: { type: "literal", value: "/search" } }],
     });
-    assertDeepStrictEqualIgnoringLoc(tool.wires[2], {
-      to: toolRef("geo", ["format"]),
+    assertDeepStrictEqualIgnoringLoc(flatWires(tool.body)[2], {
+      target: toolRef("geo", ["format"]),
       sources: [{ expr: { type: "literal", value: "json" } }],
     });
 
     // Expression wire targets .limit (with internal fork wires before it)
-    const limitWire = tool.wires.find(
-      (w) => w.to.field === "geo" && w.to.path?.[0] === "limit",
+    const limitWire = flatWires(tool.body).find(
+      (w) => w.target.field === "geo" && w.target.path?.[0] === "limit",
     );
     assert.ok(limitWire, "Expected a wire targeting geo.limit");
     assert.equal(
       limitWire.sources[0]!.expr.type,
-      "ref",
-      "Expected limit wire to be a pull wire",
+      "binary",
+      "Expected limit wire to have a binary expression",
     );
-    assert.ok(limitWire.pipe, "Expected pipe flag on expression wire");
   });
 });

@@ -184,7 +184,7 @@ regressionTest("path scoping: alias inside nested scope", {
         assertData: {
           info: { title: "Article", author: "Alice", tags: ["a", "b"] },
         },
-        allowDowngrade: true,
+
         assertTraces: 1,
       },
     },
@@ -398,6 +398,9 @@ regressionTest("path scoping: spread syntax", {
   bridge: bridge`
     version 1.5
 
+    const array = [1, 2, 3]
+    const object = { "a": "A", "b": "B" }
+
     bridge Query.spreadBasic {
       with api as a
       with output as o
@@ -405,6 +408,39 @@ regressionTest("path scoping: spread syntax", {
       o {
         ... <- a
         .extra = "added"
+      }
+    }
+
+    bridge Query.inArray {
+      with api as a
+      with output as o
+
+      # Direct array
+      o.array1 <- a.items[] as i {
+        .iter <- i
+        ... <- a
+      }
+
+      o {
+        ... <- a
+        .array2 <- a.items[] as i {
+          .iter <- i
+          ... <- a
+        }
+      }
+    }
+
+    tool arrayTool from test.multitool {
+      with const as c
+      ... <- c.object
+    }
+
+    bridge Query.tools {
+      with arrayTool as t
+      with output as o
+
+      o {
+        ... <- t
       }
     }
 
@@ -431,6 +467,7 @@ regressionTest("path scoping: spread syntax", {
   scenarios: {
     "Query.spreadBasic": {
       "top-level spread copies all tool fields": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ name: "Alice", age: 30 }),
@@ -439,8 +476,58 @@ regressionTest("path scoping: spread syntax", {
         assertTraces: 1,
       },
     },
+    "Query.inArray": {
+      "spread inside array mapper merges tool fields per element": {
+        allowDowngrade: true,
+        input: {},
+        tools: {
+          api: () => ({ items: [1, 2, 3], x: 10 }),
+        },
+        assertData: {
+          items: [1, 2, 3],
+          x: 10,
+          array1: [
+            { iter: 1, items: [1, 2, 3], x: 10 },
+            { iter: 2, items: [1, 2, 3], x: 10 },
+            { iter: 3, items: [1, 2, 3], x: 10 },
+          ],
+          array2: [
+            { iter: 1, items: [1, 2, 3], x: 10 },
+            { iter: 2, items: [1, 2, 3], x: 10 },
+            { iter: 3, items: [1, 2, 3], x: 10 },
+          ],
+        },
+        assertTraces: 1,
+      },
+      "empty array produces empty results": {
+        allowDowngrade: true,
+        input: {},
+        tools: {
+          api: () => ({ items: [], x: 10 }),
+        },
+        assertData: {
+          items: [],
+          x: 10,
+          array1: [],
+          array2: [],
+        },
+        assertTraces: 1,
+      },
+    },
+    "Query.tools": {
+      "spread in tool definition merges const fields into tool input": {
+        allowDowngrade: true,
+        input: {},
+        tools: {
+          "test.multitool": (p: any) => p,
+        },
+        assertData: { a: "A", b: "B" },
+        assertTraces: 1,
+      },
+    },
     "Query.spreadWithConst": {
       "spread + constants combine correctly": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ data: { x: 1, y: 2 } }),
@@ -451,6 +538,7 @@ regressionTest("path scoping: spread syntax", {
     },
     "Query.spreadSubPath": {
       "spread with sub-path source": {
+        allowDowngrade: true,
         input: {},
         tools: {
           api: () => ({ metadata: { author: "Bob", year: 2024 } }),

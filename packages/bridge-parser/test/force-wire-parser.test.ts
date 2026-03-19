@@ -6,7 +6,11 @@ import {
 } from "@stackables/bridge-parser";
 import type { Bridge } from "@stackables/bridge-core";
 import { SELF_MODULE } from "@stackables/bridge-core";
-import { assertDeepStrictEqualIgnoringLoc } from "./utils/parse-test-utils.ts";
+import {
+  assertDeepStrictEqualIgnoringLoc,
+  flatForces,
+  flatWires,
+} from "./utils/parse-test-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 // ── Parser: `force <handle>` creates forces entries ─────────────────────────
@@ -27,7 +31,7 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.equal(instr.forces, undefined);
+    assert.equal(flatForces(instr.body).length, 0);
   });
 
   test("force statement creates a forces entry", () => {
@@ -44,12 +48,13 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces, "should have forces");
-    assert.equal(instr.forces!.length, 1);
-    assert.equal(instr.forces![0].handle, "lg");
-    assert.equal(instr.forces![0].module, "logger");
-    assert.equal(instr.forces![0].field, "log");
-    assert.equal(instr.forces![0].instance, 1);
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0, "should have forces");
+    assert.equal(forces.length, 1);
+    assert.equal(forces[0].handle, "lg");
+    assert.equal(forces[0].module, "logger");
+    assert.equal(forces[0].field, "log");
+    assert.equal(forces[0].instance, 1);
   });
 
   test("force and regular wires coexist", () => {
@@ -70,10 +75,11 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces!.length, 1);
-    assert.equal(instr.forces![0].handle, "audit");
-    for (const w of instr.wires) {
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces.length, 1);
+    assert.equal(forces[0].handle, "audit");
+    for (const w of flatWires(instr.body)) {
       assert.equal((w as any).force, undefined, "wires should not have force");
     }
   });
@@ -95,10 +101,11 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces!.length, 2);
-    assert.equal(instr.forces![0].handle, "lg");
-    assert.equal(instr.forces![1].handle, "mt");
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces.length, 2);
+    assert.equal(forces[0].handle, "lg");
+    assert.equal(forces[1].handle, "mt");
   });
 
   test("force on undeclared handle throws", () => {
@@ -135,12 +142,13 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces!.length, 1);
-    assert.equal(instr.forces![0].handle, "t");
-    assert.equal(instr.forces![0].module, SELF_MODULE);
-    assert.equal(instr.forces![0].type, "Tools");
-    assert.equal(instr.forces![0].field, "myTool");
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces.length, 1);
+    assert.equal(forces[0].handle, "t");
+    assert.equal(forces[0].module, SELF_MODULE);
+    assert.equal(forces[0].type, "Tools");
+    assert.equal(forces[0].field, "myTool");
   });
 
   test("force without any wires to the handle", () => {
@@ -159,9 +167,10 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces![0].handle, "se");
-    assert.equal(instr.forces![0].catchError, undefined, "default is critical");
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces[0].handle, "se");
+    assert.equal(forces[0].catchError, undefined, "default is critical");
   });
 
   test("force catch null sets catchError flag", () => {
@@ -180,10 +189,11 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces!.length, 1);
-    assert.equal(instr.forces![0].handle, "ping");
-    assert.equal(instr.forces![0].catchError, true);
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces.length, 1);
+    assert.equal(forces[0].handle, "ping");
+    assert.equal(forces[0].catchError, true);
   });
 
   test("mixed critical and fire-and-forget forces", () => {
@@ -203,12 +213,13 @@ describe("parseBridge: force <handle>", () => {
       }
     `).instructions.find((i): i is Bridge => i.kind === "bridge")!;
 
-    assert.ok(instr.forces);
-    assert.equal(instr.forces!.length, 2);
-    assert.equal(instr.forces![0].handle, "lg");
-    assert.equal(instr.forces![0].catchError, undefined, "lg is critical");
-    assert.equal(instr.forces![1].handle, "mt");
-    assert.equal(instr.forces![1].catchError, true, "mt is fire-and-forget");
+    const forces = flatForces(instr.body);
+    assert.ok(forces.length > 0);
+    assert.equal(forces.length, 2);
+    assert.equal(forces[0].handle, "lg");
+    assert.equal(forces[0].catchError, undefined, "lg is critical");
+    assert.equal(forces[1].handle, "mt");
+    assert.equal(forces[1].catchError, true, "mt is fire-and-forget");
   });
 });
 

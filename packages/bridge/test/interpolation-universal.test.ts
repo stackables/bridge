@@ -45,7 +45,7 @@ regressionTest("universal interpolation: fallback", {
           nickname: "Ally",
           src: { fallbackDisplay: "unused", fallbackLabel: "unused" },
         },
-        allowDowngrade: true,
+        
         assertData: { displayName: "alice@test.com", label: "Ally" },
         assertTraces: 0,
       },
@@ -58,7 +58,7 @@ regressionTest("universal interpolation: fallback", {
             fallbackLabel: "Jane Doe",
           },
         },
-        allowDowngrade: true,
+        
         assertData: {
           displayName: "Jane Doe (jane@test.com)",
           label: "Jane Doe",
@@ -70,8 +70,18 @@ regressionTest("universal interpolation: fallback", {
       "|| fallback inside array mapping": {
         input: {
           items: [
-            { id: "1", name: "Widget", customLabel: null, defaultLabel: "Widget (#1)" },
-            { id: "2", name: "Gadget", customLabel: "Custom", defaultLabel: "Gadget (#2)" },
+            {
+              id: "1",
+              name: "Widget",
+              customLabel: null,
+              defaultLabel: "Widget (#1)",
+            },
+            {
+              id: "2",
+              name: "Gadget",
+              customLabel: "Custom",
+              defaultLabel: "Gadget (#2)",
+            },
           ],
         },
         assertData: [{ label: "Widget (#1)" }, { label: "Custom" }],

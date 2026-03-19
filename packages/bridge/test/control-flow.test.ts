@@ -131,6 +131,7 @@ regressionTest("panic control flow", {
       },
       "null name → basic panics, tool fields succeed": {
         input: { a: { name: "ok" } },
+
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
           assert.equal(err.message, "fatal error");

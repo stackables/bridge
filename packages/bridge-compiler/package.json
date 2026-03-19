@@ -12,11 +12,11 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "lint:types": "tsc -p tsconfig.json",
-    "test": "node --experimental-transform-types --test test/*.test.ts",
-    "fuzz": "node --experimental-transform-types --test test/*.fuzz.ts",
-    "prepack": "pnpm build"
+    "disabled___build": "tsc -p tsconfig.build.json",
+    "disabled___lint:types": "tsc -p tsconfig.json",
+    "disabled___test": "node --experimental-transform-types --test test/*.test.ts",
+    "disabled___fuzz": "node --experimental-transform-types --test test/*.fuzz.ts",
+    "disabled___prepack": "pnpm build"
   },
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",

@@ -42,11 +42,7 @@ function assertParallel(
 /**
  * Assert that tool B started only after tool A finished.
  */
-function assertSequential(
-  traces: ToolTrace[],
-  before: string,
-  after: string,
-) {
+function assertSequential(traces: ToolTrace[], before: string, after: string) {
   const a = traces.find((t) => t.tool === before);
   const b = traces.find((t) => t.tool === after);
   assert.ok(a, `expected trace for ${before}`);
@@ -323,7 +319,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
         assertData: { coalesced: "from-A", fromC: 84 },
         // toolA returns non-null val → toolB short-circuited (2 traces: A + C)
         assertTraces: 2,
-        allowDowngrade: true,
+        
       },
       "A null → B fallback used": {
         input: { x: 7 },
@@ -334,7 +330,7 @@ regressionTest("scheduling: A||B parallel with C depending on A", {
         },
         assertData: { coalesced: "B-7", fromC: 14 },
         assertTraces: 3,
-        allowDowngrade: true,
+        
       },
     },
   },

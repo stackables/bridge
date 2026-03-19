@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build:full": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "BRIDGE_ENABLE_COMPILER_PREVIEW=false tsc -p tsconfig.json --noEmit && vite build",
     "test": "node --experimental-transform-types --test test/*.test.ts",
     "preview": "vite preview"
   },
@@ -17,6 +18,7 @@
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.12.2",
+    "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/lint": "^6.9.5",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.40.0",
@@ -26,6 +28,7 @@
     "@radix-ui/react-select": "2.2.6",
     "@radix-ui/react-slot": "1.2.4",
     "@stackables/bridge": "workspace:*",
+    "@stackables/bridge-compiler": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cm6-graphql": "^0.2.1",

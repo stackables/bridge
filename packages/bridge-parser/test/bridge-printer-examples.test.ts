@@ -12,23 +12,25 @@ import { bridge } from "@stackables/bridge-core";
  * ============================================================================
  */
 
-describe("formatBridge - full examples", () => {
-  test("simple tool declaration", () => {
-    const input = bridge`
+describe(
+  "formatBridge - full examples",
+  () => {
+    test("simple tool declaration", () => {
+      const input = bridge`
       version 1.5
       tool geo from std.httpCall
     `;
-    const expected = bridge`
+      const expected = bridge`
       version 1.5
 
       tool geo from std.httpCall
 
     `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("tool with body", () => {
-    const input = bridge`
+    test("tool with body", () => {
+      const input = bridge`
       version 1.5
 
       tool geo from std.httpCall{
@@ -36,7 +38,7 @@ describe("formatBridge - full examples", () => {
       .method=GET
       }
     `;
-    const expected = bridge`
+      const expected = bridge`
       version 1.5
 
       tool geo from std.httpCall {
@@ -45,11 +47,11 @@ describe("formatBridge - full examples", () => {
       }
 
     `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("bridge block with assignments", () => {
-    const input = bridge`
+    test("bridge block with assignments", () => {
+      const input = bridge`
       version 1.5
 
       bridge Query.test{
@@ -58,7 +60,7 @@ describe("formatBridge - full examples", () => {
       o.value<-i.value
       }
     `;
-    const expected = bridge`
+      const expected = bridge`
       version 1.5
 
       bridge Query.test {
@@ -69,25 +71,25 @@ describe("formatBridge - full examples", () => {
       }
 
     `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("define block", () => {
-    const input = `define myHelper{
+    test("define block", () => {
+      const input = `define myHelper{
 with input as i
 o.x<-i.y
 }`;
-    const expected = `define myHelper {
+      const expected = `define myHelper {
   with input as i
 
   o.x <- i.y
 }
 `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("bridge with comment, tool handles, and pipes", () => {
-    const input = bridge`
+    test("bridge with comment, tool handles, and pipes", () => {
+      const input = bridge`
       version 1.5
 
       bridge Query.greet {
@@ -103,7 +105,7 @@ o.x<-i.y
         o.lower <- lc: i.name
       }
     `;
-    const expected = bridge`
+      const expected = bridge`
       version 1.5
 
       bridge Query.greet {
@@ -119,11 +121,11 @@ o.x<-i.y
       }
 
     `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("ternary expressions preserve formatting", () => {
-    const input = bridge`
+    test("ternary expressions preserve formatting", () => {
+      const input = bridge`
       version 1.5
 
       bridge Query.pricing {
@@ -141,12 +143,12 @@ o.x<-i.y
       }
 
     `;
-    // Should not change
-    assert.equal(formatSnippet(input), input);
-  });
+      // Should not change
+      assert.equal(formatSnippet(input), input);
+    });
 
-  test("blank line between top-level blocks", () => {
-    const input = bridge`
+    test("blank line between top-level blocks", () => {
+      const input = bridge`
       version 1.5
 
       tool geo from std.httpCall
@@ -161,7 +163,7 @@ o.x<-i.y
         with input as i
       }
     `;
-    const expected = bridge`
+      const expected = bridge`
       version 1.5
 
       tool geo from std.httpCall
@@ -181,22 +183,23 @@ o.x<-i.y
       }
 
     `;
-    assert.equal(formatSnippet(input), expected);
-  });
+      assert.equal(formatSnippet(input), expected);
+    });
 
-  test("not operator preserves space", () => {
-    const input = `o.requireMFA <- not i.verified
+    test("not operator preserves space", () => {
+      const input = `o.requireMFA <- not i.verified
 `;
-    // Should not change
-    assert.equal(formatSnippet(input), input);
-  });
+      // Should not change
+      assert.equal(formatSnippet(input), input);
+    });
 
-  test("blank lines between comments are preserved", () => {
-    const input = `#asdasd
+    test("blank lines between comments are preserved", () => {
+      const input = `#asdasd
 
 #sdasdsd
 `;
-    // Should not change
-    assert.equal(formatSnippet(input), input);
-  });
-});
+      // Should not change
+      assert.equal(formatSnippet(input), input);
+    });
+  },
+);

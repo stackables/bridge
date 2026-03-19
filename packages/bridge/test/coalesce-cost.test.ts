@@ -1,6 +1,7 @@
 import { regressionTest } from "./utils/regression.ts";
 import { tools } from "./utils/bridge-tools.ts";
 import { bridge } from "@stackables/bridge";
+import { assertRuntimeErrorAt } from "./utils/error-utils.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Coalesce & cost-based resolution
@@ -42,7 +43,6 @@ regressionTest("|| fallback chains", {
     "Fallback.lookup": {
       "a truthy → short-circuits all chains": {
         input: { a: { label: "A" } },
-        allowDowngrade: true,
         assertData: {
           twoSource: "A",
           threeSource: "A",
@@ -53,7 +53,6 @@ regressionTest("|| fallback chains", {
       },
       "a null, b truthy → b wins": {
         input: { b: { label: "B" } },
-        allowDowngrade: true,
         assertData: {
           twoSource: "B",
           threeSource: "B",
@@ -64,7 +63,6 @@ regressionTest("|| fallback chains", {
       },
       "all null → literal / third source fire": {
         input: { c: { label: "C" } },
-        allowDowngrade: true,
         assertData: {
           threeSource: "C",
           withLiteral: "default",
@@ -74,15 +72,13 @@ regressionTest("|| fallback chains", {
       },
       "a throws → error propagates on twoSource, catch fires on withCatch": {
         input: { a: { _error: "boom" } },
-        allowDowngrade: true,
         fields: ["withCatch"],
         assertData: { withCatch: "error-default" },
         assertTraces: 1,
       },
       "a throws → uncaught wires fail": {
         input: { a: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 1,
         assertGraphql: {
           twoSource: /boom/i,
@@ -93,8 +89,7 @@ regressionTest("|| fallback chains", {
       },
       "b throws → fallback error propagates": {
         input: { b: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
           twoSource: /boom/i,
@@ -105,8 +100,7 @@ regressionTest("|| fallback chains", {
       },
       "c throws → third-position fallback error": {
         input: { c: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("c.label"),
         assertTraces: 3,
         assertGraphql: {
           twoSource: null,
@@ -193,14 +187,12 @@ regressionTest("overdefinition: cost-based prioritization", {
       },
       "same-cost tools use authored order": {
         input: { a: { label: "from-A" }, b: { label: "from-B" } },
-        allowDowngrade: true,
         fields: ["sameCost"],
         assertData: { sameCost: "from-A" },
         assertTraces: 1,
       },
       "first same-cost null → second fires": {
         input: { b: { label: "from-B" } },
-        allowDowngrade: true,
         fields: ["sameCost"],
         assertData: { sameCost: "from-B" },
         assertTraces: 2,
@@ -208,22 +200,21 @@ regressionTest("overdefinition: cost-based prioritization", {
       "api throws → error when no cheaper override": {
         input: { api: { _error: "boom" } },
         fields: ["inputBeats"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: () => {},
       },
       "api throws → contextBeats error": {
         input: { api: { _error: "boom" } },
         fields: ["contextBeats"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: () => {},
       },
       "a throws → sameCost error": {
         input: { a: { _error: "boom" } },
-        allowDowngrade: true,
         fields: ["sameCost"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 2,
         assertGraphql: {
           sameCost: /boom/i,
@@ -231,9 +222,8 @@ regressionTest("overdefinition: cost-based prioritization", {
       },
       "a null, b throws → sameCost fails": {
         input: { b: { _error: "boom" } },
-        allowDowngrade: true,
         fields: ["sameCost"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
           sameCost: /boom/i,
@@ -243,20 +233,17 @@ regressionTest("overdefinition: cost-based prioritization", {
     "AliasOverdef.lookup": {
       "alias treated as zero-cost": {
         input: { api: { label: "expensive" }, hint: "cached" },
-        allowDowngrade: true,
         assertData: { label: "cached" },
         assertTraces: 0,
       },
       "alias null → tool fires": {
         input: { api: { label: "from-api" } },
-        allowDowngrade: true,
         assertData: { label: "from-api" },
         assertTraces: 1,
       },
       "api throws → error when alias null": {
         input: { api: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("api.label"),
         assertTraces: 1,
         assertGraphql: {
           label: /boom/i,
@@ -290,14 +277,12 @@ regressionTest("overdefinition: sync beats async", {
     "SyncAsync.lookup": {
       "sync tool (cost 1) tried before async (cost 2)": {
         input: { data: { label: "hello" } },
-        allowDowngrade: true,
         assertData: { label: "hello" },
         // sync tool fires first (cost 1) and succeeds → async never called
         assertTraces: 1,
       },
       "sync null → async fires": {
         input: { data: {} },
-        allowDowngrade: true,
         assertData: { label: undefined },
         assertTraces: 2,
       },
@@ -327,13 +312,11 @@ regressionTest("overdefinition: explicit cost override", {
     "ExplCost.lookup": {
       "cost-0 tool tried before async tool": {
         input: { data: { label: "win" } },
-        allowDowngrade: true,
         assertData: { label: "win" },
         assertTraces: 1,
       },
       "cost-0 null → async fires": {
         input: { data: {} },
-        allowDowngrade: true,
         assertData: { label: undefined },
         assertTraces: 2,
       },
@@ -365,7 +348,7 @@ regressionTest("?. safe execution modifier", {
       o.bare <- a?.label
       o.withLiteral <- a?.label || "fallback"
       o.withToolFallback <- a?.label || b.label || "last-resort"
-      o.constChained <- const.lorem.ipsums?.kala || "A" || "B"
+      o.constChained <- const.lorem.ipsums?.kala || "A"
       o.constMixed <- const.lorem.kala || const.lorem.ipsums?.mees ?? "C"
     }
   `,
@@ -374,7 +357,6 @@ regressionTest("?. safe execution modifier", {
     "Safe.lookup": {
       "tool throws → ?. swallows, fallbacks fire": {
         input: { a: { _error: "HTTP 500" } },
-        allowDowngrade: true,
         fields: ["bare", "withLiteral", "withToolFallback"],
         assertData: {
           withLiteral: "fallback",
@@ -384,7 +366,6 @@ regressionTest("?. safe execution modifier", {
       },
       "tool succeeds → value passes through": {
         input: { a: { label: "OK" } },
-        allowDowngrade: true,
         fields: ["bare", "withLiteral", "withToolFallback"],
         assertData: {
           bare: "OK",
@@ -395,7 +376,6 @@ regressionTest("?. safe execution modifier", {
       },
       "?. on non-existent const paths": {
         input: {},
-        allowDowngrade: true,
         fields: ["constChained", "constMixed"],
         assertData: {
           constChained: "A",
@@ -405,9 +385,8 @@ regressionTest("?. safe execution modifier", {
       },
       "b throws in fallback position → error propagates": {
         input: { a: { _error: "any" }, b: { _error: "boom" } },
-        allowDowngrade: true,
         fields: ["withToolFallback"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
           withToolFallback: /boom/i,
@@ -444,7 +423,6 @@ regressionTest("mixed || and ?? chains", {
     "Mixed.lookup": {
       "a truthy → all chains short-circuit": {
         input: { a: { label: "A" } },
-        allowDowngrade: true,
         assertData: {
           nullishThenFalsy: "A",
           falsyThenNullish: "A",
@@ -454,7 +432,6 @@ regressionTest("mixed || and ?? chains", {
       },
       "a null, b truthy → b wins nullish/falsy gates": {
         input: { b: { label: "B" } },
-        allowDowngrade: true,
         fields: ["nullishThenFalsy", "falsyThenNullish"],
         assertData: {
           nullishThenFalsy: "B",
@@ -464,7 +441,6 @@ regressionTest("mixed || and ?? chains", {
       },
       "a null, b falsy → both chains fall through ?? but diverge at ||": {
         input: { b: { label: "" } },
-        allowDowngrade: true,
         fields: ["nullishThenFalsy", "falsyThenNullish"],
         assertData: {
           nullishThenFalsy: "fallback", // ?? passes b="", then || drops it
@@ -474,7 +450,6 @@ regressionTest("mixed || and ?? chains", {
       },
       'a="", b null → ?? keeps a but || still drops it': {
         input: { a: { label: "" } },
-        allowDowngrade: true,
         fields: ["nullishThenFalsy", "falsyThenNullish"],
         assertData: {
           nullishThenFalsy: "fallback", // ?? keeps "", but || drops it
@@ -484,22 +459,19 @@ regressionTest("mixed || and ?? chains", {
       },
       "four-item: all fall through → literal": {
         input: { b: { label: 0 } },
-        allowDowngrade: true,
         fields: ["fourItem"],
         assertData: { fourItem: "last" },
         assertTraces: 3,
       },
       "four-item: c truthy → stops at c": {
         input: { b: { label: 0 }, c: { label: "C" } },
-        allowDowngrade: true,
         fields: ["fourItem"],
         assertData: { fourItem: "C" },
         assertTraces: 3,
       },
       "a throws → error on all wires": {
         input: { a: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("a.label"),
         assertTraces: 1,
         assertGraphql: {
           nullishThenFalsy: /boom/i,
@@ -509,8 +481,7 @@ regressionTest("mixed || and ?? chains", {
       },
       "b throws → fallback error": {
         input: { b: { _error: "boom" } },
-        allowDowngrade: true,
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("b.label"),
         assertTraces: 2,
         assertGraphql: {
           nullishThenFalsy: /boom/i,
@@ -520,9 +491,8 @@ regressionTest("mixed || and ?? chains", {
       },
       "c throws → fallback:1 error on fourItem": {
         input: { c: { _error: "boom" } },
-        allowDowngrade: true,
         fields: ["fourItem"],
-        assertError: /BridgeRuntimeError/,
+        assertError: assertRuntimeErrorAt("c.label"),
         assertTraces: 3,
         assertGraphql: {
           fourItem: /boom/i,
