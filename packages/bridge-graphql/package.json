@@ -28,7 +28,7 @@
     "@stackables/bridge-stdlib": "workspace:*"
   },
   "devDependencies": {
-    "@graphql-tools/executor-http": "^3.1.0",
+    "@graphql-tools/executor-http": "^3.1.1",
     "@stackables/bridge-parser": "workspace:*",
     "@types/node": "^25.5.0",
     "graphql": "16.13.1",
