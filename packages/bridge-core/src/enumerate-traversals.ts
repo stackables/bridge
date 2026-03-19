@@ -44,6 +44,7 @@ export interface TraversalEntry {
     | "fallback"
     | "catch"
     | "empty-array"
+    | "scope"
     | "then"
     | "else"
     | "const";
@@ -197,6 +198,11 @@ type EmptyArrayItem = {
   target: string[];
 };
 
+/** A scope block whose header should be dimmed when all descendants are inactive. */
+type ScopeItem = {
+  loc: SourceLocation;
+};
+
 /**
  * Walk a Statement[] body tree and collect all traceable SourceChain
  * references with their effective target paths.
@@ -206,6 +212,7 @@ function collectTraceableItems(
   pathPrefix: string[],
   items: BodyTraceItem[],
   emptyArrayItems: EmptyArrayItem[],
+  scopeItems: ScopeItem[],
 ): void {
   for (const stmt of statements) {
     switch (stmt.kind) {
@@ -224,12 +231,12 @@ function collectTraceableItems(
           !stmt.catch
         ) {
           emptyArrayItems.push({ expr: primary, target: [...target] });
-          collectTraceableItems(primary.body, target, items, emptyArrayItems);
+          collectTraceableItems(primary.body, target, items, emptyArrayItems, scopeItems);
         } else {
           items.push({ chain: stmt, target });
           // Check for array expressions in any source (e.g., with fallbacks)
           for (const source of stmt.sources) {
-            collectArrayExprs(source.expr, target, items, emptyArrayItems);
+            collectArrayExprs(source.expr, target, items, emptyArrayItems, scopeItems);
           }
         }
         break;
@@ -237,7 +244,7 @@ function collectTraceableItems(
       case "alias":
         items.push({ chain: stmt, target: [stmt.name] });
         for (const source of stmt.sources) {
-          collectArrayExprs(source.expr, [stmt.name], items, emptyArrayItems);
+          collectArrayExprs(source.expr, [stmt.name], items, emptyArrayItems, scopeItems);
         }
         break;
       case "spread":
@@ -247,11 +254,13 @@ function collectTraceableItems(
         });
         break;
       case "scope":
+        if (stmt.loc) scopeItems.push({ loc: stmt.loc });
         collectTraceableItems(
           stmt.body,
           [...pathPrefix, ...stmt.target.path],
           items,
           emptyArrayItems,
+          scopeItems,
         );
         break;
       // "with" and "force" don't produce traversal entries
@@ -265,33 +274,34 @@ function collectArrayExprs(
   target: string[],
   items: BodyTraceItem[],
   emptyArrayItems: EmptyArrayItem[],
+  scopeItems: ScopeItem[],
 ): void {
   switch (expr.type) {
     case "array":
       emptyArrayItems.push({ expr, target: [...target] });
-      collectTraceableItems(expr.body, target, items, emptyArrayItems);
-      collectArrayExprs(expr.source, target, items, emptyArrayItems);
+      collectTraceableItems(expr.body, target, items, emptyArrayItems, scopeItems);
+      collectArrayExprs(expr.source, target, items, emptyArrayItems, scopeItems);
       break;
     case "ternary":
-      collectArrayExprs(expr.cond, target, items, emptyArrayItems);
-      collectArrayExprs(expr.then, target, items, emptyArrayItems);
-      collectArrayExprs(expr.else, target, items, emptyArrayItems);
+      collectArrayExprs(expr.cond, target, items, emptyArrayItems, scopeItems);
+      collectArrayExprs(expr.then, target, items, emptyArrayItems, scopeItems);
+      collectArrayExprs(expr.else, target, items, emptyArrayItems, scopeItems);
       break;
     case "and":
     case "or":
     case "binary":
-      collectArrayExprs(expr.left, target, items, emptyArrayItems);
-      collectArrayExprs(expr.right, target, items, emptyArrayItems);
+      collectArrayExprs(expr.left, target, items, emptyArrayItems, scopeItems);
+      collectArrayExprs(expr.right, target, items, emptyArrayItems, scopeItems);
       break;
     case "unary":
-      collectArrayExprs(expr.operand, target, items, emptyArrayItems);
+      collectArrayExprs(expr.operand, target, items, emptyArrayItems, scopeItems);
       break;
     case "pipe":
-      collectArrayExprs(expr.source, target, items, emptyArrayItems);
+      collectArrayExprs(expr.source, target, items, emptyArrayItems, scopeItems);
       break;
     case "concat":
       for (const part of expr.parts) {
-        collectArrayExprs(part, target, items, emptyArrayItems);
+        collectArrayExprs(part, target, items, emptyArrayItems, scopeItems);
       }
       break;
     case "ref":
@@ -344,7 +354,7 @@ function generateChainEntries(
       target,
       kind: "primary",
       bitIndex: -1,
-      loc: primary.refLoc ?? primary.loc ?? chainLoc,
+      loc: chainLoc ?? primary.refLoc ?? primary.loc,
       wireLoc: chainLoc,
       description: refLabel(primary.ref, hmap),
     });
@@ -662,7 +672,8 @@ export function buildBodyTraversalMaps(bridge: Bridge): {
   // 1. Collect all traceable chains from body
   const items: BodyTraceItem[] = [];
   const emptyArrayItems: EmptyArrayItem[] = [];
-  collectTraceableItems(bridge.body, [], items, emptyArrayItems);
+  const scopeItems: ScopeItem[] = [];
+  collectTraceableItems(bridge.body, [], items, emptyArrayItems, scopeItems);
 
   // 2. Generate traversal entries for each chain
   const hmap = buildHandleMap(bridge);
@@ -750,8 +761,19 @@ export function buildBodyTraversalMaps(bridge: Bridge): {
     emptyArrayBits.set(expr, entry.bitIndex);
   }
 
+  // 8. Append scope marker entries (bitIndex stays -1, never assigned a bit)
+  const scopeEntries: TraversalEntry[] = scopeItems.map(({ loc }) => ({
+    id: `scope:${loc.startLine}:${loc.startColumn}`,
+    wireIndex: -1,
+    target: [],
+    kind: "scope",
+    bitIndex: -1,
+    loc,
+    wireLoc: loc,
+  }));
+
   return {
-    manifest: allEntries.map((e) => e.entry),
+    manifest: [...allEntries.map((e) => e.entry), ...scopeEntries],
     chainBitsMap,
     emptyArrayBits,
   };
@@ -772,6 +794,8 @@ export function decodeExecutionTrace(
 ): TraversalEntry[] {
   const result: TraversalEntry[] = [];
   for (const entry of manifest) {
+    // Scope marker entries have bitIndex: -1 and are never in the trace.
+    if (entry.bitIndex < 0) continue;
     // Check if the bit at position `entry.bitIndex` is set in the trace,
     // indicating this path was taken during execution.
     if (trace & (1n << BigInt(entry.bitIndex))) {

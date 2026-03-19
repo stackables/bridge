@@ -55,11 +55,12 @@ describe("buildTraversalManifest source locations", () => {
 
     const manifest = buildTraversalManifest(instr);
 
-    // Body ref entries use expr.loc (the expression's own location span)
-    const msgPrimaryExpr = messageStmt.sources[0]!.expr;
+    // Primary entries now use the full wire/alias statement loc (chainLoc),
+    // not the narrower RHS expression loc, so inactive primaries gray the
+    // whole wire line consistently regardless of expression type.
     assertLoc(
       manifest.find((entry) => entry.id === "message/primary"),
-      msgPrimaryExpr.loc,
+      messageStmt.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "message/fallback:0"),
@@ -69,10 +70,9 @@ describe("buildTraversalManifest source locations", () => {
       manifest.find((entry) => entry.id === "message/catch"),
       messageStmt.catch?.loc,
     );
-    const aliasPrimaryExpr = aliasStmt.sources[0]!.expr;
     assertLoc(
       manifest.find((entry) => entry.id === "clean/primary"),
-      aliasPrimaryExpr.loc,
+      aliasStmt.loc,
     );
     assertLoc(
       manifest.find((entry) => entry.id === "clean/catch"),

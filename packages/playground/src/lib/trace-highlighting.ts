@@ -40,15 +40,20 @@ function isSupersededByActiveLocation(
   loc: SourceLocation,
   activeLocations: SourceLocation[],
 ): boolean {
-  return activeLocations.some((activeLoc) => containsLocation(loc, activeLoc));
+  return activeLocations.some((activeLoc) => containsLocation(activeLoc, loc));
 }
 
 export function collectInactiveTraversalLocations(
   manifest: TraversalEntry[],
   activeIds: ReadonlySet<string>,
 ): SourceLocation[] {
+  // Scope marker entries (bitIndex: -1, kind: "scope") are handled separately:
+  // they are "active" if any active location falls within their block, not via a bit.
+  const scopeEntries = manifest.filter((e) => e.kind === "scope");
+  const wireEntries = manifest.filter((e) => e.kind !== "scope");
+
   const wireGroups = new Map<number, TraversalEntry[]>();
-  for (const entry of manifest) {
+  for (const entry of wireEntries) {
     let group = wireGroups.get(entry.wireIndex);
     if (!group) {
       group = [];
@@ -57,7 +62,7 @@ export function collectInactiveTraversalLocations(
     group.push(entry);
   }
 
-  const activeLocations = manifest.flatMap((entry) =>
+  const activeLocations = wireEntries.flatMap((entry) =>
     activeIds.has(entry.id) && entry.loc ? [entry.loc] : [],
   );
 
@@ -96,6 +101,20 @@ export function collectInactiveTraversalLocations(
       if (seen.has(key)) {
         continue;
       }
+      seen.add(key);
+      result.push(entry.loc);
+    }
+  }
+
+  // Scope blocks: dead when no active wire location falls within the scope's span.
+  for (const entry of scopeEntries) {
+    if (!entry.loc) continue;
+    const hasActiveDescendant = activeLocations.some((al) =>
+      containsLocation(entry.loc!, al),
+    );
+    if (hasActiveDescendant) continue;
+    const key = locationKey(entry.loc);
+    if (!seen.has(key)) {
       seen.add(key);
       result.push(entry.loc);
     }
