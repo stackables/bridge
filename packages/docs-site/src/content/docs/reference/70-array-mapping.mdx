@@ -28,7 +28,7 @@ bridge Query.getJourneys {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="sbb-train-search" autoRun={false} />
+<MiniPlaygroundModal client:only="react" exampleId="sbb-train-search" autoRun={false} />
 
 ### Shadow Scopes
 
@@ -62,7 +62,7 @@ o.items <- api.items[] as item {
 }
 ```
 
-<MiniPlaygroundModal client:load exampleId="memoized-loop-tools" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="memoized-loop-tools" autoRun={true} />
 
 Memoization is scoped to that declared handle. A nested loop can declare its
 own memoized handle without sharing the parent cache.
@@ -102,7 +102,7 @@ o.items <- billingApi.items[] as item {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="control-flow-break-continue" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="control-flow-break-continue" autoRun={true} />
 
 ### Halting the Array (`break`)
 
@@ -179,7 +179,7 @@ bridge Query.getActiveAdmins {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="array-filter" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="array-filter" autoRun={true} />
 
 ### Use Case 2: Fanout (API Call Per Element)
 
@@ -216,4 +216,4 @@ bridge Query.getEnrichedUsers {
 
 If duplicate inputs are common, add `memoize` to the loop-scoped handle so repeated IDs can reuse the earlier result within that handle's cache.
 
-<MiniPlaygroundModal client:load exampleId="array-fanout" autoRun={false} />
+<MiniPlaygroundModal client:only="react" exampleId="array-fanout" autoRun={false} />

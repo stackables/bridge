@@ -34,7 +34,7 @@ o.country = "Germany"
 ```
 
 <MiniPlaygroundModal
-  client:load
+  client:only="react"
   bridge={`
 version 1.5
 
@@ -102,7 +102,7 @@ api.body.user {
 ```
 
 <MiniPlaygroundModal
-  client:load
+  client:only="react"
   bridge={`
 version 1.5
 
@@ -165,7 +165,7 @@ bridge Query.getUser {
 
 ```
 <MiniPlaygroundModal
-  client:load
+  client:only="react"
   bridge={`
 version 1.5
 
@@ -237,7 +237,7 @@ o.pass <- isPassing
 o.total <- total
 
 ```
-<MiniPlaygroundModal client:load exampleId="alias" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="alias" autoRun={true} />
 
 
 ## 5. Forcing Execution (`force`)

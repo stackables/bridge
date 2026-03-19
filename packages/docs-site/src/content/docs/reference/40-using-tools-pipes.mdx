@@ -40,7 +40,7 @@ bridge Query.processCatalog {
 }
 ```
 
-<MiniPlaygroundModal client:load exampleId="memoized-loop-tools" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="memoized-loop-tools" autoRun={true} />
 
 ## 1. Explicit Wiring
 
@@ -64,7 +64,7 @@ bridge Query.convertCurrency {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="http-tool" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="http-tool" autoRun={true} />
 
 ## 2. The Pipe Operator (`:`)
 
@@ -78,7 +78,7 @@ o.name <- upperCase:i.rawName
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="string-transform" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="string-transform" autoRun={true} />
 
 ### Chained Pipes
 
@@ -120,7 +120,7 @@ bridge Query.convert {
 In this scenario, the `convert` tool receives *both* the explicitly wired `currency` parameter and the piped `rawPrice` payload simultaneously.
 
 
-<MiniPlaygroundModal client:load exampleId="array-filter" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="array-filter" autoRun={true} />
 
 
 ## 3. How Pipes Execute (Implicit Forking)

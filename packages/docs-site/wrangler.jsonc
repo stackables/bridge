@@ -1,19 +1,22 @@
 {
-  "main": "dist/_worker.js/index.js",
+  // Deploy worker — only handles /api/share; static pages served by ASSETS.
+  // Note: `astro dev` and `astro preview` ignore this — they use the adapter's
+  // own entrypoints. This main is only used by `wrangler deploy`.
+  "main": "src/deploy-worker.ts",
   "name": "bridge",
   "compatibility_date": "2026-02-24",
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "binding": "ASSETS",
-    "directory": "./dist"
+    "directory": "./dist",
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
   },
   "kv_namespaces": [
     {
       "binding": "SHARES",
-      "id": "9972f6f87b064a409102e66949d8564f"
-    }
-  ]
+      "id": "9972f6f87b064a409102e66949d8564f",
+    },
+  ],
 }

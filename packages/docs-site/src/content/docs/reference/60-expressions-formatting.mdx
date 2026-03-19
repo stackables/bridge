@@ -31,7 +31,7 @@ bridge Query.userOrders {
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="string-interpolation" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="string-interpolation" autoRun={true} />
 
 ### Constant Wires vs. Pull Wires
 
@@ -61,7 +61,7 @@ o.isActive <- i.status == "active"
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="expressions" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="expressions" autoRun={true} />
 
 ### Supported Operators
 
@@ -92,7 +92,7 @@ o.total <- (i.price + i.discount) * i.qty
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="boolean-logic" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="boolean-logic" autoRun={true} />
 
 ### Precedence and Chaining
 
@@ -127,7 +127,7 @@ o.amount <- i.isPro ? i.proPrice : i.basicPrice
 
 ```
 
-<MiniPlaygroundModal client:load exampleId="ternary" autoRun={true} />
+<MiniPlaygroundModal client:only="react" exampleId="ternary" autoRun={true} />
 
 The condition can be a direct boolean reference (`i.isPro`), or a full inline expression (`i.age >= 18`). The branches can be tool references, input variables, or literal values (`"premium"`, `true`, `20`).
 
