@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build:full": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "BRIDGE_ENABLE_COMPILER_PREVIEW=false tsc -p tsconfig.json --noEmit && vite build",
     "test": "node --experimental-transform-types --test test/*.test.ts",
     "preview": "vite preview"
   },

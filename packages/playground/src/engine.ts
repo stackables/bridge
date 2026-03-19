@@ -579,31 +579,6 @@ export function mergeInputSkeleton(
   }
 }
 
-// ── Compiler integration ──────────────────────────────────────────────────────
-
-import { compileBridge } from "@stackables/bridge-compiler";
-
-/**
- * Compile a bridge operation to JavaScript source code.
- * Returns the formatted JS string, or an error message prefixed with `// Error:`.
- */
-export function compileOperation(
-  bridgeText: string,
-  operation: string,
-): string {
-  if (!operation) return "// Select a bridge operation to compile.";
-  try {
-    const { document } = parseBridgeDiagnostics(bridgeText, {
-      filename: "playground.bridge",
-    });
-    const result = compileBridge(document, { operation });
-    return result.code;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `// Error: ${msg}`;
-  }
-}
-
 /**
  * Execute a bridge operation standalone — no GraphQL schema, no server.
  *

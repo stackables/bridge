@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { BridgeOperation } from "../engine";
-import { compileOperation } from "../engine";
+import { parseBridgeDiagnostics } from "@stackables/bridge";
+import { compileBridge } from "@stackables/bridge-compiler";
 import { Editor } from "./Editor";
 
 type Props = {
@@ -16,10 +17,19 @@ export function CompiledPanel({
   selectedOperation,
   autoHeight = false,
 }: Props) {
-  const compiledCode = useMemo(
-    () => compileOperation(bridge, selectedOperation),
-    [bridge, selectedOperation],
-  );
+  const compiledCode = useMemo(() => {
+    if (!selectedOperation) return "// Select a bridge operation to compile.";
+    try {
+      const { document } = parseBridgeDiagnostics(bridge, {
+        filename: "playground.bridge",
+      });
+      const result = compileBridge(document, { operation: selectedOperation });
+      return result.code;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `// Error: ${msg}`;
+    }
+  }, [bridge, selectedOperation]);
 
   return (
     <div className={autoHeight ? "space-y-3" : "flex flex-col h-full"}>

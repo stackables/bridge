@@ -1,4 +1,12 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useRef,
+  useMemo,
+  useEffect,
+  lazy,
+  Suspense,
+} from "react";
 import {
   Panel,
   Group,
@@ -8,7 +16,6 @@ import {
 import { Editor } from "./components/Editor";
 import { ResultView } from "./components/ResultView";
 import { StandaloneQueryPanel } from "./components/StandaloneQueryPanel";
-import { CompiledPanel } from "./components/CompiledPanel";
 import { clearHttpCache } from "./engine";
 import type { RunResult, BridgeOperation, OutputFieldNode } from "./engine";
 import type { GraphQLSchema } from "graphql";
@@ -17,6 +24,19 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { collectInactiveTraversalLocations } from "@/lib/trace-highlighting";
 import type { PlaygroundMode } from "./share";
+
+declare const __BRIDGE_COMPILER_PREVIEW__: boolean;
+
+const COMPILER_PREVIEW_ENABLED =
+  typeof __BRIDGE_COMPILER_PREVIEW__ === "boolean"
+    ? __BRIDGE_COMPILER_PREVIEW__
+    : true;
+const LazyCompiledPanel = COMPILER_PREVIEW_ENABLED
+  ? lazy(async () => {
+      const module = await import("./components/CompiledPanel");
+      return { default: module.CompiledPanel };
+    })
+  : null;
 
 // ── resize handle — transparent hit area, no visual indicator ────────────────
 function ResizeHandle({ direction }: { direction: "horizontal" | "vertical" }) {
@@ -271,19 +291,24 @@ import { getTraversalManifest, decodeExecutionTrace } from "./engine";
 function DslPanelTabBar({
   dslTab,
   onDslTabChange,
+  compilerPreviewEnabled,
   executionTraceId,
   onClearExecutionTraceId,
 }: {
   dslTab: "bridge" | "compiled";
   onDslTabChange: (tab: "bridge" | "compiled") => void;
+  compilerPreviewEnabled: boolean;
   executionTraceId?: bigint;
   onClearExecutionTraceId?: () => void;
 }) {
   const hasTrace =
     dslTab === "bridge" && executionTraceId != null && executionTraceId > 0n;
+  const tabs = compilerPreviewEnabled
+    ? (["bridge", "compiled"] as const)
+    : (["bridge"] as const);
   return (
     <div className="shrink-0 flex items-center gap-px px-5 pt-1.5">
-      {(["bridge", "compiled"] as const).map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab}
           onClick={() => onDslTabChange(tab)}
@@ -446,6 +471,12 @@ export function Playground({
     bridgeOperations.length > 0 ? bridgeOperations[0]!.label : "",
   );
 
+  useEffect(() => {
+    if (!COMPILER_PREVIEW_ENABLED && dslTab === "compiled") {
+      setDslTab("bridge");
+    }
+  }, [dslTab]);
+
   // Keep compiledOperation consistent with available operations
   const resolvedCompiledOperation =
     compiledOperation &&
@@ -511,6 +542,7 @@ export function Playground({
           <DslPanelTabBar
             dslTab={dslTab}
             onDslTabChange={setDslTab}
+            compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
             executionTraceId={displayResult?.executionTraceId}
             onClearExecutionTraceId={onClearExecutionTraceId}
           />
@@ -525,15 +557,23 @@ export function Playground({
                 autoHeight
                 onFormat={onFormatBridge}
               />
-            ) : (
-              <CompiledPanel
-                bridge={bridge}
-                operations={bridgeOperations}
-                selectedOperation={resolvedCompiledOperation}
-                onOperationChange={(op) => setCompiledOperation(op)}
-                autoHeight
-              />
-            )}
+            ) : LazyCompiledPanel ? (
+              <Suspense
+                fallback={
+                  <div className="text-xs text-slate-400">
+                    Loading compiled preview...
+                  </div>
+                }
+              >
+                <LazyCompiledPanel
+                  bridge={bridge}
+                  operations={bridgeOperations}
+                  selectedOperation={resolvedCompiledOperation}
+                  onOperationChange={(op) => setCompiledOperation(op)}
+                  autoHeight
+                />
+              </Suspense>
+            ) : null}
           </div>
         </div>
 
@@ -651,6 +691,7 @@ export function Playground({
                   <DslPanelTabBar
                     dslTab={dslTab}
                     onDslTabChange={setDslTab}
+                    compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
                     executionTraceId={displayResult?.executionTraceId}
                     onClearExecutionTraceId={onClearExecutionTraceId}
                   />
@@ -664,14 +705,22 @@ export function Playground({
                         deadCodeLocations={inactiveTraversalLocations}
                         onFormat={onFormatBridge}
                       />
-                    ) : (
-                      <CompiledPanel
-                        bridge={bridge}
-                        operations={bridgeOperations}
-                        selectedOperation={resolvedCompiledOperation}
-                        onOperationChange={(op) => setCompiledOperation(op)}
-                      />
-                    )}
+                    ) : LazyCompiledPanel ? (
+                      <Suspense
+                        fallback={
+                          <div className="text-xs text-slate-400">
+                            Loading compiled preview...
+                          </div>
+                        }
+                      >
+                        <LazyCompiledPanel
+                          bridge={bridge}
+                          operations={bridgeOperations}
+                          selectedOperation={resolvedCompiledOperation}
+                          onOperationChange={(op) => setCompiledOperation(op)}
+                        />
+                      </Suspense>
+                    ) : null}
                   </div>
                 </PanelBox>
               </div>
@@ -710,6 +759,7 @@ export function Playground({
                     <DslPanelTabBar
                       dslTab={dslTab}
                       onDslTabChange={setDslTab}
+                      compilerPreviewEnabled={COMPILER_PREVIEW_ENABLED}
                       executionTraceId={displayResult?.executionTraceId}
                       onClearExecutionTraceId={onClearExecutionTraceId}
                     />
@@ -723,14 +773,22 @@ export function Playground({
                           deadCodeLocations={inactiveTraversalLocations}
                           onFormat={onFormatBridge}
                         />
-                      ) : (
-                        <CompiledPanel
-                          bridge={bridge}
-                          operations={bridgeOperations}
-                          selectedOperation={resolvedCompiledOperation}
-                          onOperationChange={(op) => setCompiledOperation(op)}
-                        />
-                      )}
+                      ) : LazyCompiledPanel ? (
+                        <Suspense
+                          fallback={
+                            <div className="text-xs text-slate-400">
+                              Loading compiled preview...
+                            </div>
+                          }
+                        >
+                          <LazyCompiledPanel
+                            bridge={bridge}
+                            operations={bridgeOperations}
+                            selectedOperation={resolvedCompiledOperation}
+                            onOperationChange={(op) => setCompiledOperation(op)}
+                          />
+                        </Suspense>
+                      ) : null}
                     </div>
                   </PanelBox>
                 </Panel>
