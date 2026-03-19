@@ -1,5 +1,18 @@
 # @stackables/bridge-compiler
 
+## 2.5.0
+
+### Minor Changes
+
+- [#132](https://github.com/stackables/bridge/pull/132) [`11c5a06`](https://github.com/stackables/bridge/commit/11c5a066a1803f2b2313b047a682553076fadb9b) Thanks [@aarne](https://github.com/aarne)! - New internal wire structure with recursive expressions
+
+- [#135](https://github.com/stackables/bridge/pull/135) [`a927780`](https://github.com/stackables/bridge/commit/a927780dcf0af7e2317d48164b7ff7dd68e9bafb) Thanks [@aarne](https://github.com/aarne)! - New alias syntax alias name <- source.from ?? "full syntax" catch "supported"
+
+### Patch Changes
+
+- Updated dependencies [[`11c5a06`](https://github.com/stackables/bridge/commit/11c5a066a1803f2b2313b047a682553076fadb9b), [`a927780`](https://github.com/stackables/bridge/commit/a927780dcf0af7e2317d48164b7ff7dd68e9bafb)]:
+  - @stackables/bridge-core@1.8.0
+
 ## 2.4.4
 
 ### Patch Changes
