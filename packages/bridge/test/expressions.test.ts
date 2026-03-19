@@ -416,7 +416,7 @@ regressionTest("expressions: catch error fallback", {
       "expression with catch error fallback: api.price * 100 catch -1": {
         input: { dollars: 5 },
         assertData: { cents: -1 },
-        
+
         assertTraces: 1,
       },
     },
@@ -754,6 +754,73 @@ regressionTest("and/or short-circuit data correctness", {
         tools: { checker: async () => ({ ok: false }) },
         assertData: { result: false },
         assertTraces: 1,
+      },
+    },
+  },
+});
+
+// ── Expressions in coalesce (|| / ??) fallback positions ────────────────────
+
+regressionTest("expressions in coalesce fallback positions", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.binaryInNullish {
+      with input as i
+      with output as o
+
+      o.price <- i.a ?? i.b * 1
+    }
+
+    bridge Query.binaryInFalsy {
+      with input as i
+      with output as o
+
+      o.total <- i.subtotal || i.base + i.fee
+    }
+
+    bridge Query.multipleFallbacks {
+      with input as i
+      with output as o
+
+      o.val <- i.a ?? i.b * 2 ?? i.c + 1
+    }
+  `,
+  scenarios: {
+    "Query.binaryInNullish": {
+      "primary null → fallback binary expression executes": {
+        input: { a: null, b: 3 },
+        assertData: { price: 3 },
+        assertTraces: 0,
+      },
+      "primary non-null → fallback not evaluated": {
+        input: { a: 42, b: 3 },
+        assertData: { price: 42 },
+        assertTraces: 0,
+      },
+    },
+    "Query.binaryInFalsy": {
+      "primary falsy → fallback binary expression executes": {
+        input: { subtotal: 0, base: 10, fee: 5 },
+        assertData: { total: 15 },
+        assertTraces: 0,
+      },
+      "primary truthy → fallback not evaluated": {
+        input: { subtotal: 99, base: 10, fee: 5 },
+        assertData: { total: 99 },
+        assertTraces: 0,
+      },
+    },
+    "Query.multipleFallbacks": {
+      "first fallback evaluates when primary is null": {
+        input: { a: null, b: 4, c: 10 },
+        assertData: { val: 8 },
+        assertTraces: 0,
+      },
+      "second fallback evaluates when first is also null": {
+        input: { a: null, b: null, c: 10 },
+        assertData: { val: 11 },
+        assertTraces: 0,
       },
     },
   },

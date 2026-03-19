@@ -1131,10 +1131,21 @@ export function buildBody(
       return { type: "literal", value: JSON.parse(jsonStr) as JsonValue, loc };
     }
     if (c.sourceAlt) {
-      return buildSourceExpression(
+      const primaryExpr = buildSourceExpression(
         (c.sourceAlt as CstNode[])[0],
         lineNum,
         iterScope,
+      );
+      const altExprOps = (c.altExprOp as CstNode[] | undefined) ?? [];
+      const altExprRights = (c.altExprRight as CstNode[] | undefined) ?? [];
+      if (altExprOps.length === 0) return primaryExpr;
+      return buildExprChain(
+        primaryExpr,
+        altExprOps,
+        altExprRights,
+        lineNum,
+        iterScope,
+        loc,
       );
     }
     throw new Error(`Line ${lineNum}: Invalid coalesce alternative`);

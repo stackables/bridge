@@ -893,7 +893,16 @@ class BridgeParser extends CstParser {
       {
         ALT: () => this.SUBRULE(this.jsonInlineArray, { LABEL: "arrayLit" }),
       },
-      { ALT: () => this.SUBRULE(this.sourceExpr, { LABEL: "sourceAlt" }) },
+      {
+        ALT: () => {
+          this.SUBRULE(this.sourceExpr, { LABEL: "sourceAlt" });
+          // Optional expression chain after source ref in fallback position
+          this.MANY(() => {
+            this.SUBRULE(this.exprOperator, { LABEL: "altExprOp" });
+            this.SUBRULE(this.exprOperand, { LABEL: "altExprRight" });
+          });
+        },
+      },
     ]);
   });
 
@@ -1833,4 +1842,3 @@ function buildBridge(
   });
   return instructions;
 }
-

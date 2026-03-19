@@ -496,6 +496,76 @@ describe("parenthesized expressions: serializer round-trip", () => {
   });
 });
 
+// -- Expressions in coalesce (|| / ??) fallback positions --
+
+describe("expressions in coalesce fallback positions", () => {
+  test("binary expression in ?? fallback position parses correctly", () => {
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.price <- i.a * 1 ?? i.b * 1
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const wire = flatWires(instr.body).find(
+      (w) => w.target.path[0] === "price",
+    )!;
+    assert.ok(wire, "has price wire");
+    assert.equal(
+      wire.sources.length,
+      2,
+      "has two sources (primary + fallback)",
+    );
+    assert.equal(wire.sources[1]!.gate, "nullish", "fallback gate is nullish");
+    assert.equal(
+      wire.sources[1]!.expr.type,
+      "binary",
+      "fallback expr is binary",
+    );
+  });
+
+  test("binary expression in || fallback position parses correctly", () => {
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.total <- i.subtotal || i.base + i.fee
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const wire = flatWires(instr.body).find(
+      (w) => w.target.path[0] === "total",
+    )!;
+    assert.ok(wire, "has total wire");
+    assert.equal(wire.sources[1]!.gate, "falsy", "fallback gate is falsy");
+    assert.equal(
+      wire.sources[1]!.expr.type,
+      "binary",
+      "fallback expr is binary",
+    );
+  });
+
+  test("multiple fallbacks with expressions all parse", () => {
+    const doc = parseBridge(bridge`
+      version 1.5
+      bridge Query.test {
+        with input as i
+        with output as o
+        o.val <- i.a ?? i.b * 2 ?? i.c + 1
+      }
+    `);
+    const instr = doc.instructions.find((i) => i.kind === "bridge")!;
+    const wire = flatWires(instr.body).find((w) => w.target.path[0] === "val")!;
+    assert.ok(wire, "has val wire");
+    assert.equal(wire.sources.length, 3, "has three sources");
+    assert.equal(wire.sources[1]!.expr.type, "binary");
+    assert.equal(wire.sources[2]!.expr.type, "binary");
+  });
+});
+
 // -- Keyword strings in serializer --
 
 describe("serializeBridge: keyword strings are quoted", () => {
