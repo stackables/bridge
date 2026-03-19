@@ -10,6 +10,8 @@ Tracks engine performance work: what was tried, what failed, and what's planned.
 | 2   | Single-segment fast path via `__get` | March 2026 | ✅ Done (partial recovery on compiled hot paths)                          |
 | 3   | Array loop IIFE elimination          | June 2026  | ✅ Done (array benchmarks within 3–7 % of baseline)                       |
 | 4   | Batch-level loc annotation           | June 2026  | ✅ Done (tool-input/output IIFEs replaced with statement-level try/catch) |
+| 5   | Remove `.finally()` from `__memoize` | June 2026  | ✅ Done (simple chain +7 %, chained 3-tool +12 %)                         |
+| 6   | Cached tool fn references            | June 2026  | ✅ Done (eliminates repeated `tools['name']` lookups in getter bodies)    |
 
 ## Baseline (main, March 2026)
 
@@ -25,18 +27,18 @@ document are from this machine — compare only against the same hardware.
 
 | Benchmark                              | ops/sec | avg (ms) |
 | -------------------------------------- | ------- | -------- |
-| compiled: passthrough (no tools)       | ~649K   | 0.002    |
-| compiled: short-circuit                | ~622K   | 0.002    |
-| compiled: simple chain (1 tool)        | ~551K   | 0.002    |
-| compiled: chained 3-tool fan-out       | ~343K   | 0.003    |
-| compiled: flat array 10                | ~424K   | 0.002    |
-| compiled: flat array 100               | ~176K   | 0.006    |
-| compiled: flat array 1000              | ~26.4K  | 0.038    |
-| compiled: nested array 5×5             | ~220K   | 0.005    |
-| compiled: nested array 10×10           | ~101K   | 0.010    |
-| compiled: nested array 20×10           | ~53.6K  | 0.019    |
-| compiled: array + tool-per-element 10  | ~278K   | 0.004    |
-| compiled: array + tool-per-element 100 | ~49.1K  | 0.036    |
+| compiled: passthrough (no tools)       | ~650K   | 0.002    |
+| compiled: short-circuit                | ~614K   | 0.002    |
+| compiled: simple chain (1 tool)        | ~589K   | 0.002    |
+| compiled: chained 3-tool fan-out       | ~386K   | 0.003    |
+| compiled: flat array 10                | ~443K   | 0.002    |
+| compiled: flat array 100               | ~180K   | 0.006    |
+| compiled: flat array 1000              | ~26K    | 0.039    |
+| compiled: nested array 5×5             | ~225K   | 0.005    |
+| compiled: nested array 10×10           | ~100K   | 0.010    |
+| compiled: nested array 20×10           | ~55K    | 0.019    |
+| compiled: array + tool-per-element 10  | ~283K   | 0.004    |
+| compiled: array + tool-per-element 100 | ~56K    | 0.020    |
 
 This table is the current perf level. It is updated after a successful optimisation is committed.
 
@@ -216,3 +218,64 @@ additions in tool getter bodies that the baseline did not have: sync tool
 detection, timeout handling, `__checkAbort()` calls, and conditional await.
 These are correctness requirements and are not optimisable without removing
 features.
+
+### 5. Remove `.finally()` from `__memoize`
+
+**Date:** June 2026
+**Status:** ✅ Done
+
+**Problem:**
+
+The `__memoize` helper wrapped every getter’s Promise in `.finally(() => {
+  active = false; })`. This added an extra microtask per tool getter invocation.
+Because `cached` is set on the first call and re-returned on every subsequent
+call, `active` is never checked after the first invocation completes and
+therefore never needs to be reset.
+
+**What changed:**
+
+`fn().finally(() => { active = false; })` → `fn()`. One fewer `.finally()`
+allocation per memoized tool getter.
+
+**Result:**
+
+| Benchmark                        | Before | After | Change |
+| -------------------------------- | ------ | ----- | ------ |
+| compiled: simple chain (1 tool)  | ~551K  | ~589K | +7%    |
+| compiled: chained 3-tool fan-out | ~343K  | ~386K | +12%   |
+
+### 6. Cached tool fn references
+
+**Date:** June 2026
+**Status:** ✅ Done
+
+**Problem:**
+
+Tool getter bodies referenced tools via `tools['name']` on every access (type
+check, sync detection, trace detection, invocation, etc.). The preamble already
+declared `const __toolFn_name_0 = tools['name']`, but `resolveToolFnExpr`
+ignored this cached variable and returned the dynamic lookup.
+
+**What changed:**
+
+`resolveToolFnExpr` now returns the cached `__toolFn_` variable from the scope
+binding. The tool function reference is resolved once at declaration time and
+reused in all getter body accesses.
+
+**Result:**
+
+Combined with optimisation #5 (measured together):
+
+| Benchmark                              | Start | After #5 + #6 | Baseline | Gap  |
+| -------------------------------------- | ----- | ------------- | -------- | ---- |
+| compiled: simple chain (1 tool)        | ~551K | ~589K         | ~612K    | −4%  |
+| compiled: chained 3-tool fan-out       | ~343K | ~386K         | ~523K    | −26% |
+| compiled: array + tool-per-element 100 | ~49K  | ~56K          | ~59K     | −6%  |
+
+**What remains:**
+
+The remaining chained 3-tool gap (−26 %) comes from per-tool correctness
+overhead that the baseline lacked: sync tool validation
+(`tool.bridge?.sync && typeof __raw.then`), timeout handling (`Promise.race`),
+`__checkAbort()` calls, and conditional await. These are not optimisable
+without reducing features.
