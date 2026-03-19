@@ -1679,4 +1679,79 @@ bridge Query.assetPrice {
     ],
     context: `{}`,
   },
+  {
+    id: "crypto-price-multi",
+    name: "Crypto Prices (Multi-Symbol)",
+    description:
+      "Loop over an array of symbols and fan out Coinbase/Binance calls in parallel — falling back from Coinbase to Binance per symbol",
+    schema: `
+type Query {
+  assetPrice(symbols: [String!]!): AssetPriceResult
+}
+
+type AssetPriceResult {
+  prices: [PriceItem!]!
+}
+
+type PriceItem {
+  symbol: String
+  price: String
+}
+    `,
+    bridge: `version 1.5
+
+tool binance from std.httpCall {
+  .baseUrl = "https://api.binance.com"
+  .path = "/api/v3/ticker/price"
+  .method = "GET"
+}
+
+tool coinbase from std.httpCall {
+  .baseUrl = "https://api.coinbase.com"
+  .method = "GET"
+}
+
+bridge Query.assetPrice {
+  with input as i
+  with output as o
+  with std.str.toUpperCase as toUpper
+
+  o.prices <- i.symbols[] as s {
+    with coinbase
+    with binance
+
+    # 1. Normalize input to uppercase
+    alias symbol <- toUpper:s
+
+    # 2. Dynamically build the path using native string interpolation
+    coinbase.path <- "/v2/prices/{symbol}-USD/spot"
+    binance.symbol <- "{symbol}USDT"
+
+    .symbol <- symbol
+    .price <- coinbase?.data?.amount ?? binance.price
+  }
+
+}`,
+    queries: [
+      {
+        name: "ETH + BTC prices",
+        query: `{
+  assetPrice(symbols: ["ETH", "btc"]) {
+    prices {
+      symbol
+      price
+    }
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.assetPrice",
+        outputFields: "prices",
+        input: { symbols: ["ETH", "btc"] },
+      },
+    ],
+    context: `{}`,
+  },
 ];
