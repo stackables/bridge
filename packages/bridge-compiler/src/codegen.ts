@@ -2343,7 +2343,12 @@ class CodegenContext {
       this.emit(`const ${settledVar} = await Promise.all([`);
       this.pushIndent();
       for (const it of asyncItems) {
-        this.emit(`(async () => ${it.expr})().catch((__e) => __e),`);
+        // Strip "await " prefix to access the raw Promise directly,
+        // avoiding async IIFE closure allocation
+        const raw = it.expr.startsWith("await ")
+          ? it.expr.slice(6)
+          : `(async () => ${it.expr})()`;
+        this.emit(`${raw}.catch((__e) => __e),`);
       }
       this.popIndent();
       this.emit(`]);`);
@@ -3060,7 +3065,13 @@ class CodegenContext {
     if (!jsOp) return "undefined";
     // Parallelize when both sides contain await to avoid sequential bottleneck
     if (left.includes("await") && right.includes("await")) {
-      return `(await Promise.all([(async () => ${left})(), (async () => ${right})()])).reduce((__l, __r) => (__l ${jsOp} __r))`;
+      const rawL = left.startsWith("await ")
+        ? left.slice(6)
+        : `(async () => ${left})()`;
+      const rawR = right.startsWith("await ")
+        ? right.slice(6)
+        : `(async () => ${right})()`;
+      return `((__b) => __b[0] ${jsOp} __b[1])(await Promise.all([${rawL}, ${rawR}]))`;
     }
     return `(${left} ${jsOp} ${right})`;
   }
