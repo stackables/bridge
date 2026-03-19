@@ -2323,7 +2323,6 @@ class CodegenContext {
       // (including traces) before we propagate the first error — matching
       // runtime semantics where all output wires settle before re-throw.
       const batchId = this.parallelBatchCount++;
-      const varNames = asyncItems.map((_, i) => `__p${batchId}_${i}`);
       const settledVar = `__s${batchId}`;
       this.emit(`const ${settledVar} = await Promise.allSettled([`);
       this.pushIndent();
