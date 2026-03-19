@@ -1613,7 +1613,9 @@ type Query {
 }
 
 type AssetPrice {
-  price: String
+  price: Float
+  source: String
+  symbol: String
 }
     `,
     bridge: `version 1.5
@@ -1646,6 +1648,8 @@ bridge Query.assetPrice {
   # 3. Map the nested output (Coinbase returns {"data": {"amount": "65000.00"}})
   #    Fall back to Binance price when Coinbase returns null or errors
   o.price <- coinbase?.data?.amount ?? binance.price
+  o.source <- coinbase?.data?.amount? "coinbase" : "binance"
+  o.symbol <- symbol
 }`,
     queries: [
       {
@@ -1653,6 +1657,8 @@ bridge Query.assetPrice {
         query: `{
   assetPrice(symbol: "BTC") {
     price
+    source
+    symbol
   }
 }`,
       },
@@ -1661,6 +1667,8 @@ bridge Query.assetPrice {
         query: `{
   assetPrice(symbol: "ETH") {
     price
+    source
+    symbol
   }
 }`,
       },

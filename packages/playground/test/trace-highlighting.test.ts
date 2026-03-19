@@ -244,4 +244,60 @@ bridge Query.test {
       elseEntry.loc,
     ]);
   });
+
+  test("inactive wire is fully dimmed when a sibling wire is active (wireIndex -1 grouping bug)", () => {
+    // When only `price` is requested, the `source` wire must be dimmed entirely.
+    // Previously all entries had wireIndex: -1 so they were grouped together,
+    // causing allDead to be false and `o.source` line to not be dimmed at all.
+    const bridge = getBridge(`version 1.5
+
+bridge Query.assetPrice {
+  with input as i
+  with output as o
+
+  o.price <- i.primary ?? i.fallback
+  o.source <- i.primary? "yes" : "no"
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    // Activate only the price wire's primary path
+    const priceEntry = manifest.find((e) => e.id === "price/primary");
+    assert.ok(priceEntry, "expected price/primary entry");
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(priceEntry.bitIndex)).map(
+        (e) => e.id,
+      ),
+    );
+
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+
+    // The entire source wire line should be inactive (wireLoc of source wire).
+    const sourceThen = manifest.find((e) => e.id === "source/then");
+    assert.ok(sourceThen?.wireLoc, "expected source/then entry with wireLoc");
+
+    // The wireLoc of the source wire must appear in inactive locs with the
+    // EXACT same start position as the statement (not just the branch literals).
+    // This verifies the whole statement is dimmed — including the ternary condition
+    // which has no individual traversal entry pointing at it.
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === sourceThen.wireLoc!.startLine &&
+          l.startColumn === sourceThen.wireLoc!.startColumn,
+      ),
+      "source wire full statement (starting at statement column) should be in dead code locations",
+    );
+
+    // And the price fallback (i.fallback) should also be inactive.
+    const priceFallback = manifest.find((e) => e.id === "price/fallback:0");
+    assert.ok(priceFallback?.loc, "expected price/fallback:0 entry with loc");
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === priceFallback.loc!.startLine &&
+          l.startColumn === priceFallback.loc!.startColumn,
+      ),
+      "price fallback loc should be in dead code locations",
+    );
+  });
 });

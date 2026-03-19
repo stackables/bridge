@@ -52,12 +52,17 @@ export function collectInactiveTraversalLocations(
   const scopeEntries = manifest.filter((e) => e.kind === "scope");
   const wireEntries = manifest.filter((e) => e.kind !== "scope");
 
-  const wireGroups = new Map<number, TraversalEntry[]>();
+  // Group entries by their wireLoc (the source span of the entire wire statement).
+  // All traversal entries belonging to the same wire share the same wireLoc.
+  // Note: the body-based enumeration assigns wireIndex: -1 to every entry, so
+  // grouping by wireIndex would incorrectly lump all entries together.
+  const wireGroups = new Map<string, TraversalEntry[]>();
   for (const entry of wireEntries) {
-    let group = wireGroups.get(entry.wireIndex);
+    const key = entry.wireLoc ? locationKey(entry.wireLoc) : `\x00${entry.id}`;
+    let group = wireGroups.get(key);
     if (!group) {
       group = [];
-      wireGroups.set(entry.wireIndex, group);
+      wireGroups.set(key, group);
     }
     group.push(entry);
   }
