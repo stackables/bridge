@@ -231,6 +231,8 @@ interface ScopeBinding {
   jsExpr: string;
   /** For tools: the tool function name for lookup */
   toolName?: string;
+  /** For tools: cached __toolFn_ variable referencing tools['name'] */
+  toolFnExpr?: string;
   /** For defines: the define name for lookup */
   defineName?: string;
   /** For tools: whether this is memoized */
@@ -526,7 +528,16 @@ class CodegenContext {
     }
 
     const functionBody = this.lines.join("\n");
+    const header =
+      "// " +
+      "\u2500".repeat(62) +
+      "\n" +
+      "//          GENERATED FILE \u2014 DO NOT EDIT DIRECTLY\n" +
+      "// " +
+      "\u2500".repeat(62) +
+      "\n";
     const code =
+      header +
       `export default async function ${funcName}(input, tools, context, __opts) {\n` +
       functionBody +
       "\n}";
@@ -555,7 +566,7 @@ class CodegenContext {
     this.pushIndent();
     this.emit("let cached; let active = false;");
     this.emit(
-      "return () => { if (cached) return cached; if (active) throw new __PanicError('Circular dependency detected: \"' + (name || '?') + '\" depends on itself'); active = true; return (cached = fn().finally(() => { active = false; })); };",
+      "return () => { if (cached) return cached; if (active) throw new __PanicError('Circular dependency detected: \"' + (name || '?') + '\" depends on itself'); active = true; return (cached = fn()); };",
     );
     this.popIndent();
     this.emit("}");
@@ -916,16 +927,18 @@ class CodegenContext {
         break;
       case "tool": {
         const toolId = safeId(h.handle) + "_" + this.toolGetterCount++;
+        const toolFnVar = `__toolFn_${toolId}`;
         scope.set(h.handle, {
           kind: "tool",
-          jsExpr: `__toolFn_${toolId}`,
+          jsExpr: toolFnVar,
           toolName: h.name,
+          toolFnExpr: toolFnVar,
           memoize: h.memoize === true || undefined,
         });
         // Emit tool function lookup — resolve fn through ToolDef extends chain
         const toolDef = this.resolveToolDef(h.name);
         const fnName = toolDef?.fn ?? h.name;
-        this.emit(`const __toolFn_${toolId} = tools[${jsStr(fnName)}];`);
+        this.emit(`const ${toolFnVar} = tools[${jsStr(fnName)}];`);
         break;
       }
       case "define":
@@ -1117,16 +1130,18 @@ class CodegenContext {
               break;
             case "tool": {
               const toolId = safeId(h.handle) + "_" + this.toolGetterCount++;
+              const toolFnVar = `__toolFn_${toolId}`;
               defScope.set(h.handle, {
                 kind: "tool",
-                jsExpr: `__toolFn_${toolId}`,
+                jsExpr: toolFnVar,
                 toolName: h.name,
+                toolFnExpr: toolFnVar,
                 memoize: h.memoize === true || undefined,
               });
               // Resolve fn through ToolDef extends chain
               const innerToolDef = this.resolveToolDef(h.name);
               const fnName = innerToolDef?.fn ?? h.name;
-              this.emit(`const __toolFn_${toolId} = tools[${jsStr(fnName)}];`);
+              this.emit(`const ${toolFnVar} = tools[${jsStr(fnName)}];`);
               break;
             }
             case "define":
@@ -1670,12 +1685,15 @@ class CodegenContext {
 
   private resolveToolFnExpr(handleName: string, scope: ScopeChain): string {
     const binding = scope.get(handleName);
-    if (!binding || binding.kind !== "tool" || !binding.toolName) {
+    if (!binding || binding.kind !== "tool") {
       return `tools[${jsStr(handleName)}]`;
     }
-    // Check ToolDef extends chain for the root fn
-    const toolDef = this.resolveToolDef(binding.toolName);
-    const fnName = toolDef?.fn ?? binding.toolName;
+    // Use the cached __toolFn_ variable (resolves extends chain once at declaration)
+    if (binding.toolFnExpr) return binding.toolFnExpr;
+    const toolDef = binding.toolName
+      ? this.resolveToolDef(binding.toolName)
+      : undefined;
+    const fnName = toolDef?.fn ?? binding.toolName ?? handleName;
     return `tools[${jsStr(fnName)}]`;
   }
 
@@ -3032,7 +3050,7 @@ class CodegenContext {
     // Resolve fn through ToolDef extends chain
     const toolDef = this.resolveToolDef(toolName);
     const fnName = toolDef?.fn ?? toolName;
-    const toolFnExpr = `tools[${jsStr(fnName)}]`;
+    const toolFnExpr = binding.toolFnExpr ?? `tools[${jsStr(fnName)}]`;
 
     // Check if this tool has ToolDef defaults or bridge input wires
     const hasToolDefDefaults = toolDef && toolDef.body.length > 0;
