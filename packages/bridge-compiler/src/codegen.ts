@@ -362,9 +362,7 @@ class CodegenContext {
     this.emit(
       "const __checkAbort = () => { if (__opts?.signal?.aborted) throw new __AbortError(); };",
     );
-    this.emit(
-      "const __str = (__v) => __v == null ? '' : String(__v);",
-    );
+    this.emit("const __str = (__v) => __v == null ? '' : String(__v);");
     this.emit(
       "const __catchSafe = (__e) => { if (__isFatal(__e)) throw __e; return undefined; };",
     );
@@ -2428,8 +2426,7 @@ class CodegenContext {
       const catchBody = wireCatch ? this.compileCatch(wireCatch, scope) : "";
 
       // Adaptive: only use async IIFE when the expression actually awaits
-      const isAsync =
-        expr.includes("await") || catchBody.includes("await");
+      const isAsync = expr.includes("await") || catchBody.includes("await");
       const wrap = isAsync ? "await (async () => {" : "(() => {";
 
       if (wireCatch) {
@@ -3004,8 +3001,7 @@ class CodegenContext {
     }
 
     // Safe flags present — use IIFE with try/catch via preamble __catchSafe
-    const hasAwait =
-      leftExpr.includes("await") || rightExpr.includes("await");
+    const hasAwait = leftExpr.includes("await") || rightExpr.includes("await");
     const parts: string[] = [];
     parts.push(hasAwait ? "(await (async () => {" : "(() => {");
 
@@ -3087,7 +3083,9 @@ class CodegenContext {
       const batchId = this.parallelBatchCount++;
       const resolved = `__cp${batchId}`;
       // Pre-resolve all async parts in parallel
-      this.emit(`const ${resolved} = await Promise.all([${asyncIndices.map((i) => `(async () => ${compiled[i]!})()`).join(", ")}]);`);
+      this.emit(
+        `const ${resolved} = await Promise.all([${asyncIndices.map((i) => `(async () => ${compiled[i]!})()`).join(", ")}]);`,
+      );
       let asyncIdx = 0;
       for (let i = 0; i < compiled.length; i++) {
         if (compiled[i]!.includes("await")) {
