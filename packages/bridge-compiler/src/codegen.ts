@@ -2317,8 +2317,20 @@ class CodegenContext {
   ) {
     if (items.length === 0) return;
 
-    const asyncItems = items.filter((it) => it.expr.includes("await"));
-    const syncItems = items.filter((it) => !it.expr.includes("await"));
+    const hasAsync = items.some((it) => it.expr.includes("await"));
+    const asyncItems: typeof items = [];
+    const syncItems: typeof items = [];
+    for (const it of items) {
+      if (it.expr.includes("await")) {
+        asyncItems.push(it);
+      } else if (hasAsync && it.expr.includes("throw ")) {
+        // Sync items that can throw must join the async batch so they
+        // don't prevent concurrent tool getters from starting.
+        asyncItems.push(it);
+      } else {
+        syncItems.push(it);
+      }
+    }
 
     for (const it of syncItems) {
       this.emit(it.assign(it.expr));
@@ -2413,13 +2425,18 @@ class CodegenContext {
       const locExpr = loc ? jsLoc(loc) : "undefined";
 
       const fatalGuard = `if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = ${locExpr}; throw __e; }`;
+      const catchBody = wireCatch ? this.compileCatch(wireCatch, scope) : "";
+
+      // Adaptive: only use async IIFE when the expression actually awaits
+      const isAsync =
+        expr.includes("await") || catchBody.includes("await");
+      const wrap = isAsync ? "await (async () => {" : "(() => {";
 
       if (wireCatch) {
-        const catchExpr = this.compileCatch(wireCatch, scope);
-        return `await (async () => { try { return ${expr}; } catch (__e) { ${fatalGuard} return ${catchExpr}; } })()`;
+        return `${wrap} try { return ${expr}; } catch (__e) { ${fatalGuard} return ${catchBody}; } })()`;
       }
 
-      return `await (async () => { try { return ${expr}; } catch (__e) { ${fatalGuard} throw __wrapErr(__e, {bridgeLoc:${locExpr}}); } })()`;
+      return `${wrap} try { return ${expr}; } catch (__e) { ${fatalGuard} throw __wrapErr(__e, {bridgeLoc:${locExpr}}); } })()`;
     }
 
     // Multi-source fallback chain — build IIFE with per-entry loc tracking
@@ -2431,9 +2448,12 @@ class CodegenContext {
     const tryParts: string[] = [];
     tryParts.push(`let __v = ${firstExpr};`);
 
+    let anyAsync = firstExpr.includes("await");
+
     for (let i = 1; i < sources.length; i++) {
       const src = sources[i]!;
       const fbExpr = this.compileExpression(src.expr, scope);
+      if (fbExpr.includes("await")) anyAsync = true;
       const fbLoc = src.expr.loc;
 
       const cond = src.gate === "nullish" ? "__v == null" : "!__v";
@@ -2445,15 +2465,17 @@ class CodegenContext {
     tryParts.push(`return __v;`);
 
     const tryBody = tryParts.join(" ");
-
     const multiFatalGuard = `if (__isFatal(__e)) { if (__e && !__e.bridgeLoc) __e.bridgeLoc = __loc; throw __e; }`;
+    const catchBody = wireCatch ? this.compileCatch(wireCatch, scope) : "";
+    if (catchBody.includes("await")) anyAsync = true;
+
+    const wrap = anyAsync ? "await (async () => {" : "(() => {";
 
     if (wireCatch) {
-      const catchExpr = this.compileCatch(wireCatch, scope);
-      return `await (async () => { ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} return ${catchExpr}; } })()`;
+      return `${wrap} ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} return ${catchBody}; } })()`;
     }
 
-    return `await (async () => { ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} throw __wrapErr(__e, {bridgeLoc:__loc}); } })()`;
+    return `${wrap} ${locDecl} try { ${tryBody} } catch (__e) { ${multiFatalGuard} throw __wrapErr(__e, {bridgeLoc:__loc}); } })()`;
   }
 
   private compileCatch(wireCatch: WireCatch, scope: ScopeChain): string {
