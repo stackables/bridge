@@ -652,15 +652,6 @@ regressionTest("expressions: arithmetic null/undefined propagates through ??", {
       o.price <- api?.price * 100 ?? -1
     }
 
-    bridge Query.nullArith {
-      with test.multitool as api
-      with input as i
-      with output as o
-
-      api <- i.api
-      o.price <- api.price * 100 ?? -1
-    }
-
     bridge Query.toolFallback {
       with test.multitool as primary
       with test.multitool as backup
@@ -680,16 +671,14 @@ regressionTest("expressions: arithmetic null/undefined propagates through ??", {
         assertData: { price: -1 },
         assertTraces: 1,
       },
+      "null * 100 ?? -1 → fallback fires (null field from tool)": {
+        input: { api: { price: null } },
+        assertData: { price: -1 },
+        assertTraces: 1,
+      },
       "5 * 100 ?? -1 → arithmetic value returned (api succeeds)": {
         input: { api: { price: 5 } },
         assertData: { price: 500 },
-        assertTraces: 1,
-      },
-    },
-    "Query.nullArith": {
-      "null * 100 ?? -1 → fallback fires (null operand)": {
-        input: { api: { price: null } },
-        assertData: { price: -1 },
         assertTraces: 1,
       },
     },
