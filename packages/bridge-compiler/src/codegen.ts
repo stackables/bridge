@@ -362,6 +362,12 @@ class CodegenContext {
     this.emit(
       "const __checkAbort = () => { if (__opts?.signal?.aborted) throw new __AbortError(); };",
     );
+    this.emit(
+      "const __str = (__v) => __v == null ? '' : String(__v);",
+    );
+    this.emit(
+      "const __catchSafe = (__e) => { if (__isFatal(__e)) throw __e; return undefined; };",
+    );
     this.emit("__checkAbort();");
     this.emitMemoHelper();
     this.emitPipeHelper();
@@ -2319,24 +2325,24 @@ class CodegenContext {
     }
 
     if (asyncItems.length > 1) {
-      // Use Promise.allSettled so every concurrent wire/getter completes
+      // Use Promise.all + .catch to wait for all wires to settle
       // (including traces) before we propagate the first error — matching
-      // runtime semantics where all output wires settle before re-throw.
+      // runtime semantics. Avoids Promise.allSettled wrapper-object allocation.
       const batchId = this.parallelBatchCount++;
       const settledVar = `__s${batchId}`;
-      this.emit(`const ${settledVar} = await Promise.allSettled([`);
+      this.emit(`const ${settledVar} = await Promise.all([`);
       this.pushIndent();
       for (const it of asyncItems) {
-        this.emit(`(async () => ${it.expr})(),`);
+        this.emit(`(async () => ${it.expr})().catch((__e) => __e),`);
       }
       this.popIndent();
       this.emit(`]);`);
       // Re-throw the first rejection (fatal errors first, matching runtime)
       this.emit(
-        `{ let __fatal, __first; for (const __r of ${settledVar}) { if (__r.status === 'rejected') { if (__isFatal(__r.reason)) { if (!__fatal) __fatal = __r.reason; } else { if (!__first) __first = __r.reason; } } } if (__fatal) throw __fatal; if (__first) throw __first; }`,
+        `{ let __fatal, __first; for (const __r of ${settledVar}) { if (__r instanceof Error) { if (__isFatal(__r)) { if (!__fatal) __fatal = __r; } else { if (!__first) __first = __r; } } } if (__fatal) throw __fatal; if (__first) throw __first; }`,
       );
       for (let i = 0; i < asyncItems.length; i++) {
-        this.emit(asyncItems[i]!.assign(`${settledVar}[${i}].value`));
+        this.emit(asyncItems[i]!.assign(`${settledVar}[${i}]`));
       }
     } else if (asyncItems.length === 1) {
       this.emit(asyncItems[0]!.assign(asyncItems[0]!.expr));
@@ -2369,7 +2375,10 @@ class CodegenContext {
     // Catch handler
     if (wireCatch) {
       const catchExpr = this.compileCatch(wireCatch, scope);
-      return `await (async () => { try { return ${expr}; } catch (_e) { return ${catchExpr}; } })()`;
+      if (expr.includes("await")) {
+        return `(await (async () => ${expr})().catch(() => ${catchExpr}))`;
+      }
+      return `(() => { try { return ${expr}; } catch (_e) { return ${catchExpr}; } })()`;
     }
 
     return expr;
@@ -2471,7 +2480,12 @@ class CodegenContext {
         if (expr.safe) {
           // Match runtime catchSafe: swallow non-fatal errors, rethrow fatal (panic/abort)
           const inner = this.compileRefExpr(expr.ref, scope);
-          return `await (async () => { try { return ${inner}; } catch (__e) { if (__isFatal(__e)) throw __e; return undefined; } })()`;
+          if (inner.includes("await")) {
+            // Async: use .catch on the async wrapper — avoids try/catch inside async IIFE
+            return `(await (async () => ${inner})().catch(__catchSafe))`;
+          }
+          // Sync: lightweight non-async IIFE — no promise overhead
+          return `(() => { try { return ${inner}; } catch (__e) { return __catchSafe(__e); } })()`;
         }
         return this.compileRefExpr(expr.ref, scope);
 
@@ -2967,14 +2981,15 @@ class CodegenContext {
       return `(${leftExpr} ? true : Boolean(${rightExpr}))`;
     }
 
-    // Safe flags present — emit async IIFE with try/catch
-    const __isFatal = `(__e?.name === 'BridgePanicError' || __e?.name === 'BridgeAbortError')`;
+    // Safe flags present — use IIFE with try/catch via preamble __catchSafe
+    const hasAwait =
+      leftExpr.includes("await") || rightExpr.includes("await");
     const parts: string[] = [];
-    parts.push("(await (async () => {");
+    parts.push(hasAwait ? "(await (async () => {" : "(() => {");
 
     if (expr.leftSafe) {
       parts.push(
-        `  let __l; try { __l = ${leftExpr}; } catch (__e) { if (${__isFatal}) throw __e; __l = undefined; }`,
+        `  let __l; try { __l = ${leftExpr}; } catch (__e) { __l = __catchSafe(__e); }`,
       );
     } else {
       parts.push(`  const __l = ${leftExpr};`);
@@ -2990,14 +3005,14 @@ class CodegenContext {
 
     if (expr.rightSafe) {
       parts.push(
-        `  let __r; try { __r = ${rightExpr}; } catch (__e) { if (${__isFatal}) throw __e; __r = undefined; }`,
+        `  let __r; try { __r = ${rightExpr}; } catch (__e) { __r = __catchSafe(__e); }`,
       );
       parts.push("  return Boolean(__r);");
     } else {
       parts.push(`  return Boolean(${rightExpr});`);
     }
 
-    parts.push("})())");
+    parts.push(hasAwait ? "})())" : "})()");
     return parts.join("\n");
   }
 
@@ -3025,6 +3040,10 @@ class CodegenContext {
 
     const jsOp = opMap[expr.op];
     if (!jsOp) return "undefined";
+    // Parallelize when both sides contain await to avoid sequential bottleneck
+    if (left.includes("await") && right.includes("await")) {
+      return `(await Promise.all([(async () => ${left})(), (async () => ${right})()])).reduce((__l, __r) => (__l ${jsOp} __r))`;
+    }
     return `(${left} ${jsOp} ${right})`;
   }
 
@@ -3034,10 +3053,30 @@ class CodegenContext {
     expr: Extract<Expression, { type: "concat" }>,
     scope: ScopeChain,
   ): string {
-    const parts = expr.parts.map(
-      (p) =>
-        `((__v) => __v == null ? "" : String(__v))(${this.compileExpression(p, scope)})`,
-    );
+    const compiled = expr.parts.map((p) => this.compileExpression(p, scope));
+    const asyncParts = compiled.filter((c) => c.includes("await"));
+    if (asyncParts.length > 1) {
+      // Parallelize async parts to avoid sequential await bottleneck
+      const syncParts: string[] = [];
+      const asyncIndices: number[] = [];
+      for (let i = 0; i < compiled.length; i++) {
+        if (compiled[i]!.includes("await")) asyncIndices.push(i);
+      }
+      const batchId = this.parallelBatchCount++;
+      const resolved = `__cp${batchId}`;
+      // Pre-resolve all async parts in parallel
+      this.emit(`const ${resolved} = await Promise.all([${asyncIndices.map((i) => `(async () => ${compiled[i]!})()`).join(", ")}]);`);
+      let asyncIdx = 0;
+      for (let i = 0; i < compiled.length; i++) {
+        if (compiled[i]!.includes("await")) {
+          syncParts.push(`__str(${resolved}[${asyncIdx++}])`);
+        } else {
+          syncParts.push(`__str(${compiled[i]!})`);
+        }
+      }
+      return `(${syncParts.join(" + ")})`;
+    }
+    const parts = compiled.map((c) => `__str(${c})`);
     return `(${parts.join(" + ")})`;
   }
 
