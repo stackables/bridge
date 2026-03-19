@@ -55,7 +55,6 @@ describe("builtin tools", () => {
           assertTraces: 4,
         },
         "missing std tool when namespace overridden": {
-          disable: ["compiled"],
           input: { text: "Hello" },
           tools: {
             std: { somethingElse: () => ({}) },
@@ -142,7 +141,6 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.admins": {
         "filters array by criteria": {
-          disable: ["compiled"],
           input: {},
           assertData: [
             { id: 1, name: "Alice" },
@@ -151,7 +149,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "empty when no matches": {
-          disable: ["compiled"],
           input: {},
           tools: {
             getUsers: async () => ({
@@ -162,7 +159,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "users source error propagates": {
-          disable: ["compiled"],
           input: {},
           tools: {
             getUsers: async () => {
@@ -206,13 +202,11 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.findUser": {
         "finds object in array": {
-          disable: ["compiled"],
           input: { role: "editor" },
           assertData: { id: 2, name: "Bob", role: "editor" },
           assertTraces: 1,
         },
         "users source error propagates": {
-          disable: ["compiled"],
           input: { role: "editor" },
           tools: {
             getUsers: async () => {
@@ -223,7 +217,6 @@ describe("builtin tools", () => {
           assertTraces: 1,
         },
         "find tool failure propagates to projected fields": {
-          disable: ["compiled"],
           input: { role: "editor" },
           tools: {
             std: {
@@ -264,7 +257,6 @@ describe("builtin tools", () => {
           assertTraces: 0,
         },
         "first tool failure propagates": {
-          disable: ["compiled"],
           input: { items: ["a", "b"] },
           tools: {
             std: {
@@ -399,7 +391,6 @@ describe("builtin tools", () => {
     scenarios: {
       "Query.search": {
         "forced audit logs via engine logger": {
-          disable: ["compiled"],
           input: { q: "bridge" },
           assertData: { title: "Result for bridge" },
           assertTraces: 1,

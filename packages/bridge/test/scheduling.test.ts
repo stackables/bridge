@@ -377,7 +377,6 @@ regressionTest("scheduling: tool-level deps resolve in parallel", {
   scenarios: {
     "Query.toolDeps": {
       "auth and quota resolve in parallel, then mainApi runs": {
-        disable: ["compiled"],
         input: { q: "search" },
         assertData: {
           result: {

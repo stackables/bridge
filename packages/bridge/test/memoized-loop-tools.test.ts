@@ -69,7 +69,6 @@ regressionTest("memoized loop-scoped tools - data correctness", {
   scenarios: {
     "Query.singleMemoize": {
       "memoized tool produces correct data for duplicated ids": {
-        disable: ["compiled"],
         input: {},
         context: {
           catalog: [{ id: "a" }, { id: "a" }, { id: "b" }, { id: "a" }],
@@ -91,7 +90,6 @@ regressionTest("memoized loop-scoped tools - data correctness", {
     },
     "Query.dualMemoize": {
       "each memoized handle keeps its own cache": {
-        disable: ["compiled"],
         input: {},
         context: {
           catalog1: [{ id: "same" }, { id: "same" }],
@@ -195,7 +193,6 @@ regressionTest("define blocks with memoized tools in loops", {
   scenarios: {
     "Query.processCatalog": {
       "memoized tool inside define block deduplicates across loop elements": {
-        disable: ["compiled"],
         input: {},
         context: {
           catalog: [{ id: "user-1" }, { id: "user-2" }, { id: "user-1" }],

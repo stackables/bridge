@@ -137,7 +137,6 @@ regressionTest("path scoping: scope block on tool input", {
   scenarios: {
     "Query.toolInputScope": {
       "scope block on tool input constructs nested input": {
-        disable: ["compiled"],
         input: { searchText: "hello" },
         tools: {
           api: (p: any) => {

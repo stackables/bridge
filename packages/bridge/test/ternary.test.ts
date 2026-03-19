@@ -301,7 +301,6 @@ regressionTest("alias ternary: panic gate on age check", {
   scenarios: {
     "Query.location": {
       "alias ternary + ?? panic fires on false branch → null": {
-        disable: ["compiled"],
         input: { age: 15, city: "Zurich" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgePanicError);
@@ -310,7 +309,6 @@ regressionTest("alias ternary: panic gate on age check", {
         assertTraces: 0,
       },
       "alias ternary + ?? panic does NOT fire when condition is true": {
-        disable: ["compiled"],
         input: { age: 25, city: "Zurich" },
         assertData: { lat: 47.37, lon: 8.54 },
         assertTraces: 1,

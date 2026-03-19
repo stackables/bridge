@@ -24,7 +24,6 @@ regressionTest("circular dependency detection", {
   scenarios: {
     "Query.loop": {
       "circular A→B→A dependency throws BridgePanicError": {
-        disable: ["compiled"],
         input: {},
         assertError: (err: any) => {
           assert.equal(err.name, "BridgePanicError");

@@ -47,7 +47,6 @@ regressionTest("sync tool enforcement", {
   scenarios: {
     "Query.bad": {
       "throws when sync tool returns a Promise": {
-        disable: ["compiled"],
         input: { q: "hello" },
         assertError: /sync.*Promise|Promise.*sync/i,
         assertTraces: (_traces) => {

@@ -166,7 +166,6 @@ regressionTest("timeout error location", {
   scenarios: {
     "Query.timeout": {
       "timeout error carries bridgeLoc of the pulling wire": {
-        disable: ["compiled"],
         input: { _delay: 500 },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);
@@ -179,7 +178,6 @@ regressionTest("timeout error location", {
     },
     "Query.timeoutToolDef": {
       "ToolDef timeout error carries bridgeLoc": {
-        disable: ["compiled"],
         input: { path: "/data" },
         assertError: (err: any) => {
           assert.ok(err instanceof BridgeRuntimeError);

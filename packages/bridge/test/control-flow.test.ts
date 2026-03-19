@@ -44,7 +44,6 @@ regressionTest("throw control flow", {
         assertTraces: 1,
       },
       "falsy name → || throw fires, others succeed": {
-        disable: ["compiled"],
         input: { name: "", a: { name: "ok" } },
         assertError: /name is required/,
         assertTraces: 1,
@@ -55,7 +54,6 @@ regressionTest("throw control flow", {
         },
       },
       "null name → || and ?? both throw, catch succeeds": {
-        disable: ["compiled"],
         input: { a: { name: "ok" } },
         assertError: /name is required|name cannot be null/,
         assertTraces: 1,
@@ -66,7 +64,6 @@ regressionTest("throw control flow", {
         },
       },
       "tool throws → all three throw": {
-        disable: ["compiled"],
         input: { a: { _error: "network error" } },
         assertError: /name is required|name cannot be null|api call failed/,
         assertTraces: 1,
@@ -133,7 +130,6 @@ regressionTest("panic control flow", {
         assertTraces: 1,
       },
       "null name → basic panics, tool fields succeed": {
-        disable: ["compiled"],
         input: { a: { name: "ok" } },
 
         assertError: (err: any) => {
@@ -427,7 +423,6 @@ regressionTest("AbortSignal control flow", {
   scenarios: {
     "Abort.test": {
       "pre-aborted signal prevents tool, bypasses catch and safe": {
-        disable: ["compiled"],
         input: {},
         timeout: 0,
         assertError: (err: any) => {
@@ -451,7 +446,6 @@ regressionTest("AbortSignal control flow", {
         },
       },
       "signal is passed to tool context": {
-        disable: ["compiled"],
         input: {},
         tools: {
           api: async (_input: any, ctx: any) => {

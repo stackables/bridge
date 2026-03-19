@@ -158,6 +158,8 @@ function emitPath(
   return code;
 }
 
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 // ── Scope-based code generator ──────────────────────────────────────────────
 
 /**
@@ -233,8 +235,19 @@ class CodegenContext {
   private arrayDepthCounter = 0;
   private overdefCount = 0;
   private needsToolCostHelper = false;
+  private needsBatchHelper = false;
+  private currentBatchQueue: string | undefined;
   private requestedFields: string[] | undefined;
   private parallelBatchCount = 0;
+  /**
+   * Map from tool getter name → memo map variable name.
+   * Populated during emitToolGetters for memoized-in-loop tools.
+   * The Maps are emitted at function scope via post-processing.
+   */
+  private memoMapForGetter = new Map<string, string>();
+  private memoMapCounter = 0;
+  /** List of memo map variable names to inject at function scope. */
+  private memoMapDeclarations: string[] = [];
 
   constructor(
     bridge: Bridge,
@@ -248,6 +261,11 @@ class CodegenContext {
     this.toolDefs = toolDefs;
     this.defineDefs = defineDefs;
     this.requestedFields = requestedFields;
+  }
+
+  /** Get the scoped memo map variable for a memoized loop tool getter. */
+  private getMemoMapVar(getterName: string): string | undefined {
+    return this.memoMapForGetter.get(getterName);
   }
 
   /**
@@ -305,7 +323,10 @@ class CodegenContext {
     // Build root scope from bridge handles
     const rootScope = new ScopeChain();
 
-    // Register handle bindings
+    // Register non-tool/define handle bindings.
+    // Tools and defines are registered by compileBody → registerWithBinding
+    // when their actual scope is compiled, so we skip them here to avoid
+    // polluting the root scope with nested (loop-scoped) handles.
     for (const h of this.bridge.handles) {
       switch (h.kind) {
         case "input":
@@ -321,21 +342,6 @@ class CodegenContext {
           rootScope.set(h.handle, { kind: "const", jsExpr: "__consts" });
           break;
         }
-        case "tool":
-          rootScope.set(h.handle, {
-            kind: "tool",
-            jsExpr: `__tool_${safeId(h.handle)}`,
-            toolName: h.name,
-            memoize: h.memoize === true || undefined,
-          });
-          break;
-        case "define":
-          rootScope.set(h.handle, {
-            kind: "define",
-            jsExpr: `__define_${safeId(h.handle)}`,
-            defineName: h.name,
-          });
-          break;
       }
     }
 
@@ -346,9 +352,21 @@ class CodegenContext {
     this.emit(
       "const __isFatal = (__e) => __e?.name === 'BridgePanicError' || __e?.name === 'BridgeAbortError';",
     );
+    this.emit(
+      "const __toolCtx = { logger: __opts?.logger || {}, signal: __opts?.signal };",
+    );
+    this.emit("const __PanicError = __opts?.__BridgePanicError || Error;");
+    this.emit("const __AbortError = __opts?.__BridgeAbortError || Error;");
+    this.emit("const __timeoutMs = __opts?.toolTimeoutMs ?? 0;");
+    this.emit("const __TimeoutError = __opts?.__BridgeTimeoutError;");
+    this.emit(
+      "const __checkAbort = () => { if (__opts?.signal?.aborted) throw new __AbortError(); };",
+    );
+    this.emit("__checkAbort();");
     this.emitMemoHelper();
     this.emitPipeHelper();
     this.emitGetPathHelper();
+    this.emitStableKeyHelper();
     this.emitConsts();
     this.emitToolLookups(rootScope);
     this.emit("let __output = {};");
@@ -376,6 +394,71 @@ class CodegenContext {
       );
       if (insertIdx >= 0) {
         this.lines.splice(insertIdx + 1, 0, ...helperLines);
+      }
+    }
+
+    // Insert batch helper at preamble position if needed
+    if (this.needsBatchHelper) {
+      const helperLines = [
+        "  function __callBatched(__fn, __input, __bq, __toolName, __fnName, __doTrace) {",
+        "    if (!__fn?.bridge?.batch) return __fn(__input, __toolCtx);",
+        "    let __q = __bq.get(__fn);",
+        "    if (!__q) {",
+        "      __q = [];",
+        "      __bq.set(__fn, __q);",
+        "      queueMicrotask(async () => {",
+        "        __bq.delete(__fn);",
+        "        const __items = __q;",
+        "        const __inputs = __items.map(__i => __i.input);",
+        "        const __start = __doTrace ? performance.now() : 0;",
+        "        try {",
+        "          const __results = await __fn(__inputs, __toolCtx);",
+        "          const __dur = performance.now() - __start;",
+        "          if (__doTrace) __trace(__toolName, __fnName, __start, __start + __dur, __inputs, __results, null);",
+        "          const __logLevel = __fn.bridge?.log?.execution;",
+        "          if (__logLevel) __toolCtx.logger?.[__logLevel]?.({ tool: __toolName, fn: __fnName, durationMs: __dur }, '[bridge] tool completed');",
+        "          if (!Array.isArray(__results) || __results.length !== __items.length) {",
+        "            const __e = new Error('Batch tool \"' + __fnName + '\" returned ' + (Array.isArray(__results) ? __results.length : typeof __results) + ' items, expected ' + __items.length);",
+        "            for (const __it of __items) __it.reject(__e);",
+        "            return;",
+        "          }",
+        "          for (let __i = 0; __i < __items.length; __i++) {",
+        "            if (__results[__i] instanceof Error) __items[__i].reject(__results[__i]);",
+        "            else __items[__i].resolve(__results[__i]);",
+        "          }",
+        "        } catch (__e) {",
+        "          const __dur = performance.now() - __start;",
+        "          if (__doTrace) __trace(__toolName, __fnName, __start, __start + __dur, __inputs, null, __e);",
+        "          const __logLevel = __fn.bridge?.log?.errors;",
+        "          if (__logLevel) __toolCtx.logger?.[__logLevel]?.({ tool: __toolName, fn: __fnName, err: __e?.message }, '[bridge] tool failed');",
+        "          for (const __it of __items) __it.reject(__e);",
+        "        }",
+        "      });",
+        "    }",
+        "    return new Promise((__resolve, __reject) => {",
+        "      __q.push({ input: __input, resolve: __resolve, reject: __reject });",
+        "    });",
+        "  }",
+        "",
+      ];
+      const insertIdx = this.lines.findIndex(
+        (l, i) => i > 5 && l.trim() === "" && this.lines[i - 1]?.trim() === "}",
+      );
+      if (insertIdx >= 0) {
+        this.lines.splice(insertIdx + 1, 0, ...helperLines);
+      }
+    }
+
+    // Insert memoization Maps at function scope (before "let __output = {};")
+    if (this.memoMapDeclarations.length > 0) {
+      const mapLines = this.memoMapDeclarations.map(
+        (v) => `  const ${v} = new Map();`,
+      );
+      const insertIdx = this.lines.findIndex(
+        (l) => l.trim() === "let __output = {};",
+      );
+      if (insertIdx >= 0) {
+        this.lines.splice(insertIdx, 0, ...mapLines);
       }
     }
 
@@ -409,7 +492,7 @@ class CodegenContext {
     this.pushIndent();
     this.emit("let cached; let active = false;");
     this.emit(
-      "return () => { if (cached) return cached; if (active) throw new Error('Circular dependency detected: \"' + (name || '?') + '\" depends on itself'); active = true; return (cached = fn().finally(() => { active = false; })); };",
+      "return () => { if (cached) return cached; if (active) throw new __PanicError('Circular dependency detected: \"' + (name || '?') + '\" depends on itself'); active = true; return (cached = fn().finally(() => { active = false; })); };",
     );
     this.popIndent();
     this.emit("}");
@@ -428,7 +511,21 @@ class CodegenContext {
     this.emit("const __start = __doTrace ? performance.now() : 0;");
     this.emit("try {");
     this.pushIndent();
-    this.emit("const __result = await __fn(__input, context);");
+    this.emit("let __raw = __fn(__input, __toolCtx);");
+    this.emit(
+      "if (__timeoutMs > 0 && __raw && typeof __raw.then === 'function') {",
+    );
+    this.pushIndent();
+    this.emit("let __timer;");
+    this.emit(
+      "const __tout = new Promise((_, rej) => { __timer = setTimeout(() => rej(new (__TimeoutError || Error)(__fnName, __timeoutMs)), __timeoutMs); });",
+    );
+    this.emit(
+      "__raw = Promise.race([__raw, __tout]).finally(() => clearTimeout(__timer));",
+    );
+    this.popIndent();
+    this.emit("}");
+    this.emit("const __result = await __raw;");
     this.emit(
       "if (__doTrace) __trace(__name, __fnName, __start, performance.now(), __input, __result, null);",
     );
@@ -481,6 +578,27 @@ class CodegenContext {
     this.popIndent();
     this.emit("}");
     this.emit("return __c;");
+    this.popIndent();
+    this.emit("}");
+    this.emit("");
+  }
+
+  private emitStableKeyHelper() {
+    this.emit("function __stableKey(v) {");
+    this.pushIndent();
+    this.emit("if (v == null) return v === null ? 'n' : 'u';");
+    this.emit("if (typeof v === 'boolean') return v ? 'T' : 'F';");
+    this.emit(
+      "if (typeof v === 'number' || typeof v === 'bigint') return typeof v === 'number' ? 'd:' + v : 'B:' + v;",
+    );
+    this.emit("if (typeof v === 'string') return 's:' + v;");
+    this.emit(
+      "if (Array.isArray(v)) return '[' + v.map(__stableKey).join(',') + ']';",
+    );
+    this.emit(
+      "if (typeof v === 'object') { const ks = Object.keys(v).sort(); return '{' + ks.map(k => k + ':' + __stableKey(v[k])).join(',') + '}'; }",
+    );
+    this.emit("return String(v);");
     this.popIndent();
     this.emit("}");
     this.emit("");
@@ -671,10 +789,17 @@ class CodegenContext {
           flushPending();
           this.compileAlias(stmt, scope);
           break;
-        case "scope":
+        case "scope": {
+          // Skip scope blocks targeting tools (handled by tool getters)
+          const scopeHandle = this.findTargetHandle(stmt.target, scope);
+          if (scopeHandle) {
+            const scopeBinding = scope.get(scopeHandle);
+            if (scopeBinding?.kind === "tool") break;
+          }
           flushPending();
           this.compileScope(stmt, scope, outputVar, pathPrefix, absolutePrefix);
           break;
+        }
         case "spread":
           flushPending();
           this.compileSpread(stmt, scope, outputVar);
@@ -747,29 +872,54 @@ class CodegenContext {
   ): Map<string, { field: string; stmt: WireStatement }[]> {
     const map = new Map<string, { field: string; stmt: WireStatement }[]>();
 
-    for (const stmt of body) {
-      if (stmt.kind !== "wire") continue;
-      const target = stmt.target;
-
-      // Check if this wire targets a tool's input
-      // Tool inputs look like: target.module=toolModule, target.type=toolType, etc.
-      // In the statement model, tool input wires target the tool handle
-      // We need to identify which handle this targets
-      const handleName = this.findTargetHandle(target, scope);
-      if (!handleName) continue;
-
-      const binding = scope.get(handleName);
-      if (!binding || binding.kind !== "tool") continue;
-
+    const addEntry = (
+      handleName: string,
+      field: string,
+      stmt: WireStatement,
+    ) => {
       let entries = map.get(handleName);
       if (!entries) {
         entries = [];
         map.set(handleName, entries);
       }
-
-      // The target path after the tool reference is the input field
-      const field = target.path.join(".");
       entries.push({ field, stmt });
+    };
+
+    const collectFromScope = (
+      stmts: Statement[],
+      handleName: string,
+      pathPrefix: string[],
+    ) => {
+      for (const inner of stmts) {
+        if (inner.kind === "wire") {
+          const field = [...pathPrefix, ...inner.target.path].join(".");
+          addEntry(handleName, field, inner);
+        } else if (inner.kind === "scope") {
+          collectFromScope(inner.body, handleName, [
+            ...pathPrefix,
+            ...inner.target.path,
+          ]);
+        }
+      }
+    };
+
+    for (const stmt of body) {
+      if (stmt.kind === "wire") {
+        const target = stmt.target;
+        const handleName = this.findTargetHandle(target, scope);
+        if (!handleName) continue;
+        const binding = scope.get(handleName);
+        if (!binding || binding.kind !== "tool") continue;
+        const field = target.path.join(".");
+        addEntry(handleName, field, stmt);
+      } else if (stmt.kind === "scope") {
+        // Check if the scope targets a tool (instance != null)
+        const handleName = this.findTargetHandle(stmt.target, scope);
+        if (!handleName) continue;
+        const binding = scope.get(handleName);
+        if (!binding || binding.kind !== "tool") continue;
+        collectFromScope(stmt.body, handleName, stmt.target.path);
+      }
     }
 
     return map;
@@ -1096,6 +1246,15 @@ class CodegenContext {
     toolInputs: Map<string, { field: string; stmt: WireStatement }[]>,
     scope: ScopeChain,
   ) {
+    // Two-pass approach: first register all getter names so cross-references
+    // between tool getters resolve to memoized getters (not raw tool fns).
+    const entries: {
+      handleName: string;
+      inputs: { field: string; stmt: WireStatement }[];
+      binding: ScopeBinding;
+      getterName: string;
+      memoKey: string;
+    }[] = [];
     for (const [handleName, inputs] of toolInputs) {
       const binding = scope.get(handleName);
       if (!binding || binding.kind !== "tool") continue;
@@ -1104,12 +1263,38 @@ class CodegenContext {
       const getterName = `__get_${getterId}`;
       const memoKey = this.toolNodeKey(handleName, binding);
 
-      // Update scope binding to getter BEFORE compiling body so self-references
-      // go through the memoized getter (enabling cycle detection).
+      // Update scope binding to getter BEFORE compiling any getter body so
+      // cross-tool references go through memoized getters (with tracing).
       binding.jsExpr = getterName;
       binding.instanceKey = getterId;
 
-      this.emit(`const ${getterName} = __memoize(async () => {`);
+      // For memoized tools inside a loop, allocate a function-scoped Map.
+      // The Map is injected at function scope via post-processing so it
+      // persists across all loop iterations (matching runtime semantics).
+      if (binding.memoize && this.iteratorStack.length > 0) {
+        const mapVar = `__memoMap_${this.memoMapCounter++}`;
+        this.memoMapForGetter.set(getterName, mapVar);
+        this.memoMapDeclarations.push(mapVar);
+      }
+
+      entries.push({ handleName, inputs, binding, getterName, memoKey });
+    }
+
+    // Second pass: emit getter bodies (all bindings already point to getters).
+    for (const {
+      handleName,
+      inputs,
+      binding,
+      getterName,
+      memoKey,
+    } of entries) {
+      const useMemoCache = this.getMemoMapVar(getterName);
+      if (useMemoCache) {
+        // Memoized-by-input: the getter is called every iteration and deduplicates by input key
+        this.emit(`const ${getterName} = async () => {`);
+      } else {
+        this.emit(`const ${getterName} = __memoize(async () => {`);
+      }
       this.pushIndent();
 
       // Check for root wire (empty field) — passes entire value as tool input
@@ -1178,6 +1363,13 @@ class CodegenContext {
       // Separate overdefined from single-source fields
       const singleFields: { field: string; expr: string }[] = [];
       for (const { field, stmts } of fieldGroups) {
+        // Prototype pollution guard for tool input fields
+        if (UNSAFE_KEYS.has(field)) {
+          this.emit(
+            `throw new Error(${jsStr(`Unsafe assignment key: ${field}`)});`,
+          );
+          continue;
+        }
         if (stmts.length === 1) {
           const valueExpr = this.compileSourceChainWithLoc(
             stmts[0]!.sources,
@@ -1222,7 +1414,7 @@ class CodegenContext {
             this.emit(`if (__toolInput[${jsStr(field)}] == null) {`);
             this.pushIndent();
             this.emit(
-              `try { __toolInput[${jsStr(field)}] = ${nextExpr}; ${errVar} = undefined; } catch (_e) { ${errVar} = _e; }`,
+              `try { __toolInput[${jsStr(field)}] = ${nextExpr}; if (__toolInput[${jsStr(field)}] != null) ${errVar} = undefined; } catch (_e) { ${errVar} = _e; }`,
             );
             this.popIndent();
             this.emit("}");
@@ -1235,10 +1427,30 @@ class CodegenContext {
       }
 
       // Emit single-source fields — parallelize async ones via Promise.all
+      // For dotted field paths (from scope blocks), ensure parent objects exist
+      for (const f of singleFields) {
+        if (f.field.includes(".")) {
+          const parts = f.field.split(".");
+          for (let i = 0; i < parts.length - 1; i++) {
+            const parentPath = parts
+              .slice(0, i + 1)
+              .map((p) => `[${jsStr(p)}]`)
+              .join("");
+            this.emit(`__toolInput${parentPath} ??= {};`);
+          }
+        }
+      }
       this.emitParallelAssignments(
         singleFields.map((f) => ({
           expr: f.expr,
-          assign: (v: string) => `__toolInput[${jsStr(f.field)}] = ${v};`,
+          assign: (v: string) => {
+            if (f.field.includes(".")) {
+              const parts = f.field.split(".");
+              const pathExpr = parts.map((p) => `[${jsStr(p)}]`).join("");
+              return `__toolInput${pathExpr} = ${v};`;
+            }
+            return `__toolInput[${jsStr(f.field)}] = ${v};`;
+          },
         })),
       );
 
@@ -1250,6 +1462,15 @@ class CodegenContext {
       const fnName = toolDef?.fn ?? toolName;
 
       // Call tool with tracing support (respecting trace:false on tool metadata)
+      if (useMemoCache) {
+        // Input-keyed memoization: check scoped cache before calling tool
+        const mapVar = useMemoCache;
+        this.emit(`const __ck = __stableKey(__toolInput);`);
+        this.emit(`if (${mapVar}.has(__ck)) return ${mapVar}.get(__ck);`);
+        this.emit(`const __p = (async () => {`);
+        this.pushIndent();
+      }
+      this.emit("__checkAbort();");
       this.emit(
         `if (typeof ${toolFnExpr} !== 'function') throw new Error('No tool found for "${toolName}"');`,
       );
@@ -1260,16 +1481,63 @@ class CodegenContext {
       this.emit("let __result;");
       this.emit("try {");
       this.pushIndent();
-      this.emit(`__result = await ${toolFnExpr}(__toolInput, context);`);
-      this.emit(
-        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, __result, null);`,
-      );
+
+      if (this.currentBatchQueue) {
+        // Inside a concurrent (Promise.all) loop — batch tools need __callBatched
+        // For batch tools, tracing is handled by the __callBatched microtask flush.
+        this.emit(`if (${toolFnExpr}?.bridge?.batch) {`);
+        this.pushIndent();
+        this.emit(
+          `__result = await __callBatched(${toolFnExpr}, __toolInput, ${this.currentBatchQueue}, ${jsStr(toolName)}, ${jsStr(fnName)}, __doTrace);`,
+        );
+        this.popIndent();
+        this.emit("} else {");
+        this.pushIndent();
+        this.emit(`let __raw = ${toolFnExpr}(__toolInput, __toolCtx);`);
+        this.emit(
+          `if (${toolFnExpr}?.bridge?.sync && __raw && typeof __raw.then === 'function') throw new Error('Tool "${fnName}" declared {sync:true} but returned a Promise');`,
+        );
+        this.emit(
+          `if (__timeoutMs > 0 && __raw && typeof __raw.then === 'function') { let __timer; const __tout = new Promise((_, rej) => { __timer = setTimeout(() => rej(new (__TimeoutError || Error)(${jsStr(fnName)}, __timeoutMs)), __timeoutMs); }); __raw = Promise.race([__raw, __tout]).finally(() => clearTimeout(__timer)); }`,
+        );
+        this.emit(
+          "__result = (__raw && typeof __raw.then === 'function') ? await __raw : __raw;",
+        );
+        this.emit(
+          `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, __result, null);`,
+        );
+        this.popIndent();
+        this.emit("}");
+      } else {
+        // Sync tool validation: check if tool declared {sync:true} but returned a Promise
+        this.emit(`let __raw = ${toolFnExpr}(__toolInput, __toolCtx);`);
+        this.emit(
+          `if (${toolFnExpr}?.bridge?.sync && __raw && typeof __raw.then === 'function') throw new Error('Tool "${fnName}" declared {sync:true} but returned a Promise');`,
+        );
+        this.emit(
+          `if (__timeoutMs > 0 && __raw && typeof __raw.then === 'function') { let __timer; const __tout = new Promise((_, rej) => { __timer = setTimeout(() => rej(new (__TimeoutError || Error)(${jsStr(fnName)}, __timeoutMs)), __timeoutMs); }); __raw = Promise.race([__raw, __tout]).finally(() => clearTimeout(__timer)); }`,
+        );
+        this.emit(
+          "__result = (__raw && typeof __raw.then === 'function') ? await __raw : __raw;",
+        );
+        this.emit(
+          `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, __result, null);`,
+        );
+      }
+
       this.popIndent();
       this.emit("} catch (__err) {");
       this.pushIndent();
-      this.emit(
-        `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, null, __err);`,
-      );
+      if (this.currentBatchQueue) {
+        // Only trace errors for non-batch tools; batch tool error tracing is in __callBatched
+        this.emit(
+          `if (__doTrace && !${toolFnExpr}?.bridge?.batch) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, null, __err);`,
+        );
+      } else {
+        this.emit(
+          `if (__doTrace) __trace(${jsStr(toolName)}, ${jsStr(fnName)}, __start, performance.now(), __toolInput, null, __err);`,
+        );
+      }
       // onError — return fallback instead of rethrowing
       if (toolDef?.onError) {
         if ("value" in toolDef.onError) {
@@ -1296,9 +1564,21 @@ class CodegenContext {
       }
       this.popIndent();
       this.emit("}");
-      this.emit("return __result;");
+      if (useMemoCache) {
+        this.emit("return __result;");
+        this.popIndent();
+        this.emit("})();");
+        this.emit(`${useMemoCache}.set(__ck, __p);`);
+        this.emit("return __p;");
+      } else {
+        this.emit("return __result;");
+      }
       this.popIndent();
-      this.emit(`}, ${jsStr(memoKey)});`);
+      if (useMemoCache) {
+        this.emit("};");
+      } else {
+        this.emit(`}, ${jsStr(memoKey)});`);
+      }
     }
   }
 
@@ -1403,7 +1683,7 @@ class CodegenContext {
             this.emit(`try {`);
             this.pushIndent();
             this.emit(
-              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`,
+              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, ${jsStr(innerFn)}, __innerInput);`,
             );
             this.popIndent();
             this.emit(`} catch (__err) {`);
@@ -1413,7 +1693,7 @@ class CodegenContext {
             this.emit("}");
           } else {
             this.emit(
-              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, __innerInput);`,
+              `return await __pipe(${innerFnExpr}, ${jsStr(innerName)}, ${jsStr(innerFn)}, __innerInput);`,
             );
           }
           this.popIndent();
@@ -1431,7 +1711,9 @@ class CodegenContext {
       }
     }
 
-    // Compile self-wires (instance==null, non-scope) and scope blocks
+    // Compile self-wires (instance==null, non-scope) and scope blocks.
+    // Collect single-path wires for parallel execution, emit others directly.
+    const parallelWires: { expr: string; assign: (v: string) => string }[] = [];
     for (const stmt of toolDef.body) {
       if (stmt.kind === "wire" && stmt.target.instance == null) {
         const value = this.compileSourceChain(
@@ -1441,15 +1723,34 @@ class CodegenContext {
         );
         const path = stmt.target.path;
         if (path.length === 0) {
-          // Root wire — spread into __toolInput
+          // Root wire — spread into __toolInput (not parallelizable)
           this.emit(`Object.assign(__toolInput, ${value});`);
         } else {
-          this.emitSetPath("__toolInput", path, value);
+          // Ensure parent objects exist for multi-segment paths
+          for (let i = 0; i < path.length - 1; i++) {
+            const parentPath = path
+              .slice(0, i + 1)
+              .map((p) => `[${jsStr(p)}]`)
+              .join("");
+            this.emit(`__toolInput${parentPath} ??= {};`);
+          }
+          parallelWires.push({
+            expr: value,
+            assign: (v: string) => {
+              const pathExpr = path.map((p) => `[${jsStr(p)}]`).join("");
+              return `__toolInput${pathExpr} = ${v};`;
+            },
+          });
         }
       } else if (stmt.kind === "scope") {
+        // Flush any pending parallel wires before scope block
+        this.emitParallelAssignments(parallelWires);
+        parallelWires.length = 0;
         this.emitToolDefScope(stmt, defScope, []);
       }
     }
+    // Flush remaining parallel wires
+    this.emitParallelAssignments(parallelWires);
   }
 
   /**
@@ -1505,6 +1806,15 @@ class CodegenContext {
    * Emit code to set a nested path on an object, ensuring parents exist.
    */
   private emitSetPath(objVar: string, path: string[], valueExpr: string) {
+    // Prototype pollution guard — static check at compile time
+    for (const key of path) {
+      if (UNSAFE_KEYS.has(key)) {
+        this.emit(
+          `throw new Error(${jsStr(`Unsafe assignment key: ${key}`)});`,
+        );
+        return;
+      }
+    }
     // Ensure parent objects exist
     for (let i = 0; i < path.length - 1; i++) {
       const parentPath = path
@@ -1762,7 +2072,7 @@ class CodegenContext {
     const errVar = `${odVar}_err`;
 
     // Emit the first (cheapest) wire's value
-    const firstVal = this.compileSourceChain(
+    const firstVal = this.compileSourceChainWithLoc(
       sorted[0]!.sources,
       sorted[0]!.catch,
       scope,
@@ -1781,7 +2091,7 @@ class CodegenContext {
     }
 
     for (let i = 1; i < sorted.length; i++) {
-      const nextVal = this.compileSourceChain(
+      const nextVal = this.compileSourceChainWithLoc(
         sorted[i]!.sources,
         sorted[i]!.catch,
         scope,
@@ -1789,7 +2099,7 @@ class CodegenContext {
       this.emit(`if (${odVar} == null) {`);
       this.pushIndent();
       this.emit(
-        `try { ${odVar} = ${nextVal}; ${errVar} = undefined; } catch (_e) { ${errVar} = _e; }`,
+        `try { ${odVar} = ${nextVal}; if (${odVar} != null) ${errVar} = undefined; } catch (_e) { ${errVar} = _e; }`,
       );
       this.popIndent();
       this.emit("}");
@@ -1846,7 +2156,7 @@ class CodegenContext {
     this.emit(`const ${odVar}_entries = [`);
     this.pushIndent();
     for (const entry of entries) {
-      const valueExpr = this.compileSourceChain(
+      const valueExpr = this.compileSourceChainWithLoc(
         entry.wire.sources,
         entry.wire.catch,
         scope,
@@ -1865,7 +2175,7 @@ class CodegenContext {
     this.emit(`for (const __e of ${odVar}_entries) {`);
     this.pushIndent();
     this.emit(
-      `try { ${odVar} = await __e.fn(); ${odVar}_err = undefined; } catch (_e) { ${odVar}_err = _e; continue; }`,
+      `try { ${odVar} = await __e.fn(); if (${odVar} != null) ${odVar}_err = undefined; } catch (_e) { ${odVar}_err = _e; continue; }`,
     );
     this.emit(`if (${odVar} != null) break;`);
     this.popIndent();
@@ -2009,17 +2319,25 @@ class CodegenContext {
     }
 
     if (asyncItems.length > 1) {
+      // Use Promise.allSettled so every concurrent wire/getter completes
+      // (including traces) before we propagate the first error — matching
+      // runtime semantics where all output wires settle before re-throw.
       const batchId = this.parallelBatchCount++;
       const varNames = asyncItems.map((_, i) => `__p${batchId}_${i}`);
-      this.emit(`const [${varNames.join(", ")}] = await Promise.all([`);
+      const settledVar = `__s${batchId}`;
+      this.emit(`const ${settledVar} = await Promise.allSettled([`);
       this.pushIndent();
       for (const it of asyncItems) {
         this.emit(`(async () => ${it.expr})(),`);
       }
       this.popIndent();
       this.emit(`]);`);
+      // Re-throw the first rejection (fatal errors first, matching runtime)
+      this.emit(
+        `{ let __fatal, __first; for (const __r of ${settledVar}) { if (__r.status === 'rejected') { if (__isFatal(__r.reason)) { if (!__fatal) __fatal = __r.reason; } else { if (!__first) __first = __r.reason; } } } if (__fatal) throw __fatal; if (__first) throw __first; }`,
+      );
       for (let i = 0; i < asyncItems.length; i++) {
-        this.emit(asyncItems[i]!.assign(varNames[i]!));
+        this.emit(asyncItems[i]!.assign(`${settledVar}[${i}].value`));
       }
     } else if (asyncItems.length === 1) {
       this.emit(asyncItems[0]!.assign(asyncItems[0]!.expr));
@@ -2202,6 +2520,12 @@ class CodegenContext {
     startIdx = 0,
     forceRootSafe = false,
   ): string {
+    // Static prototype-pollution guard: reject unsafe path segments at compile time
+    for (let i = startIdx; i < ref.path.length; i++) {
+      if (UNSAFE_KEYS.has(ref.path[i]!)) {
+        return `(() => { throw new Error("Unsafe property traversal: " + ${jsStr(ref.path[i]!)}); })()`;
+      }
+    }
     const pathStr = emitPath(ref, startIdx, forceRootSafe, base);
     // If emitPath returned a __getPath call (full expression), use it directly
     if (pathStr.startsWith("__getPath(")) return pathStr;
@@ -2365,7 +2689,12 @@ class CodegenContext {
 
   /**
    * Compile an array mapping expression as a wire assignment.
+   *
    * Uses a for-loop to support continue/break control flow sentinels.
+   * When the loop body contains a tool with `batch` metadata, the loop
+   * is compiled concurrently (Promise.all + map) so that microtask-based
+   * batch queueing can accumulate all per-element tool calls into a single
+   * batched invocation.
    */
   private compileArrayAssignment(
     expr: Extract<Expression, { type: "array" }>,
@@ -2379,6 +2708,11 @@ class CodegenContext {
     const resultVar = `__result_${depth}`;
     const arrVar = `__arr_${depth}`;
 
+    // Check if this loop body uses any tool — if so, we need batch support
+    const hasTool = expr.body.some(
+      (s) => s.kind === "with" && s.binding.kind === "tool",
+    );
+
     // Compile the source iterable expression
     const sourceExpr = this.compileExpression(expr.source, scope);
 
@@ -2390,10 +2724,28 @@ class CodegenContext {
     this.popIndent();
     this.emit(`} else {`);
     this.pushIndent();
-    this.emit(`const ${resultVar} = [];`);
-    this.emit(`for (const ${iterVar} of ${arrVar}) {`);
-    this.pushIndent();
-    this.emit(`const ${outVar} = {};`);
+
+    if (hasTool) {
+      this.needsBatchHelper = true;
+      // Emit batch queue shared across all iterations of this loop
+      const batchQueueVar = `__bq_${depth}`;
+      this.emit(`const ${batchQueueVar} = new Map();`);
+      this.currentBatchQueue = batchQueueVar;
+
+      // Concurrent loop: Promise.all + map for batch support.
+      // Each element runs concurrently; batch tools queue their calls
+      // via microtask and flush once all elements have queued.
+      this.emit(
+        `const ${resultVar} = await Promise.all(${arrVar}.map(async (${iterVar}) => {`,
+      );
+      this.pushIndent();
+      this.emit(`const ${outVar} = {};`);
+    } else {
+      this.emit(`const ${resultVar} = [];`);
+      this.emit(`for (const ${iterVar} of ${arrVar}) {`);
+      this.pushIndent();
+      this.emit(`const ${outVar} = {};`);
+    }
 
     // Create child scope — iterator may shadow parent bindings (scope rules)
     const childScope = scope.child();
@@ -2409,34 +2761,45 @@ class CodegenContext {
     this.compileBody(expr.body, childScope, outVar, [], absolutePrefix);
 
     this.iteratorStack.pop();
+    this.currentBatchQueue = undefined;
 
-    // Check for control flow sentinels in output fields
-    const sigVar = `__sig_${depth}`;
-    this.emit(
-      `const ${sigVar} = Object.values(${outVar}).find(__v => __v === Symbol.for("BRIDGE_BREAK") || __v === Symbol.for("BRIDGE_CONTINUE") || (__v && typeof __v === 'object' && (__v.__bridgeControl === 'break' || __v.__bridgeControl === 'continue')));`,
-    );
-    this.emit(`if (${sigVar} != null) {`);
-    this.pushIndent();
-    // Single-level symbols: break/continue this loop directly
-    this.emit(`if (${sigVar} === Symbol.for("BRIDGE_BREAK")) break;`);
-    this.emit(`if (${sigVar} === Symbol.for("BRIDGE_CONTINUE")) { continue; }`);
-    // Multi-level: decrement and propagate as a value on the result array
-    this.emit(
-      `const __next = ${sigVar}.levels <= 2 ? (${sigVar}.__bridgeControl === 'break' ? Symbol.for("BRIDGE_BREAK") : Symbol.for("BRIDGE_CONTINUE")) : { __bridgeControl: ${sigVar}.__bridgeControl, levels: ${sigVar}.levels - 1 };`,
-    );
-    this.emit(
-      `if (${sigVar}.__bridgeControl === 'break') { ${resultVar}.__propagate = __next; break; }`,
-    );
-    this.emit(`${resultVar}.__propagate = __next; continue;`);
-    this.popIndent();
-    this.emit("}");
-    this.emit(`${resultVar}.push(${outVar});`);
-    this.popIndent();
-    this.emit(`}`);
-    // If a multi-level signal was propagated, return it instead of the result
-    this.emit(
-      `if (${resultVar}.__propagate != null) { ${targetExpr} = ${resultVar}.__propagate; } else { ${targetExpr} = ${resultVar}; }`,
-    );
+    if (hasTool) {
+      // Concurrent path: return element output from map callback
+      this.emit(`return ${outVar};`);
+      this.popIndent();
+      this.emit(`}));`);
+      this.emit(`${targetExpr} = ${resultVar};`);
+    } else {
+      // Sequential path: check for control flow sentinels
+      const sigVar = `__sig_${depth}`;
+      this.emit(
+        `const ${sigVar} = Object.values(${outVar}).find(__v => __v === Symbol.for("BRIDGE_BREAK") || __v === Symbol.for("BRIDGE_CONTINUE") || (__v && typeof __v === 'object' && (__v.__bridgeControl === 'break' || __v.__bridgeControl === 'continue')));`,
+      );
+      this.emit(`if (${sigVar} != null) {`);
+      this.pushIndent();
+      // Single-level symbols: break/continue this loop directly
+      this.emit(`if (${sigVar} === Symbol.for("BRIDGE_BREAK")) break;`);
+      this.emit(
+        `if (${sigVar} === Symbol.for("BRIDGE_CONTINUE")) { continue; }`,
+      );
+      // Multi-level: decrement and propagate as a value on the result array
+      this.emit(
+        `const __next = ${sigVar}.levels <= 2 ? (${sigVar}.__bridgeControl === 'break' ? Symbol.for("BRIDGE_BREAK") : Symbol.for("BRIDGE_CONTINUE")) : { __bridgeControl: ${sigVar}.__bridgeControl, levels: ${sigVar}.levels - 1 };`,
+      );
+      this.emit(
+        `if (${sigVar}.__bridgeControl === 'break') { ${resultVar}.__propagate = __next; break; }`,
+      );
+      this.emit(`${resultVar}.__propagate = __next; continue;`);
+      this.popIndent();
+      this.emit("}");
+      this.emit(`${resultVar}.push(${outVar});`);
+      this.popIndent();
+      this.emit(`}`);
+      // If a multi-level signal was propagated, return it instead of the result
+      this.emit(
+        `if (${resultVar}.__propagate != null) { ${targetExpr} = ${resultVar}.__propagate; } else { ${targetExpr} = ${resultVar}; }`,
+      );
+    }
     this.popIndent();
     this.emit(`}`);
   }

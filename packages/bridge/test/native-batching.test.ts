@@ -26,7 +26,6 @@ regressionTest("native batching: loop-scoped calls", {
   scenarios: {
     "Query.users": {
       "batches all loop items into a single call": {
-        disable: ["compiled"],
         input: {},
         context: {
           userIds: [
@@ -75,7 +74,6 @@ regressionTest("native batching: traces and logs", {
   scenarios: {
     "Query.users": {
       "single trace with batched input/output": {
-        disable: ["compiled"],
         input: {},
         context: {
           userIds: [
@@ -145,7 +143,6 @@ regressionTest("native batching: partial failures with catch", {
   scenarios: {
     "Query.users": {
       "error item falls back to catch value": {
-        disable: ["compiled"],
         input: {},
         context: {
           userIds: [

@@ -218,7 +218,6 @@ regressionTest("resilience: wire catch", {
     },
     "Query.catchChain": {
       "catch catches chain failure": {
-        disable: ["compiled"],
         input: {},
         tools: {
           first: () => {
