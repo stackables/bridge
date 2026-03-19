@@ -444,6 +444,7 @@ export function buildBody(
   options?: {
     forbiddenHandleKinds?: Set<string>;
     selfWireNodes?: CstNode[];
+    spreadNodes?: CstNode[];
   },
 ): {
   handles: HandleBinding[];
@@ -1596,6 +1597,11 @@ export function buildBody(
       } satisfies WireStatement);
     }
 
+    // elemMapSpreadLine: ... <- source (spread inside array mapper)
+    for (const spreadLine of subs(arrayMappingNode, "elemMapSpreadLine")) {
+      buildSpreadLine(spreadLine, stmts, iterScope);
+    }
+
     // elementLine: .field = value | .field <- expr | .field { ... }
     for (const elemLine of subs(arrayMappingNode, "elementLine")) {
       const elemLineNum = line(findFirstToken(elemLine));
@@ -1757,6 +1763,7 @@ export function buildBody(
       ternaryOp: "scopeTernaryOp",
       thenBranch: "scopeThenBranch",
       elseBranch: "scopeElseBranch",
+      arrayMapping: "scopeArrayMapping",
       coalesceItem: "scopeCoalesceItem",
       catchAlt: "scopeCatchAlt",
     });
@@ -2084,6 +2091,14 @@ export function buildBody(
         ...(rhs.catch ? { catch: rhs.catch } : {}),
         loc: locFromNode(selfWire),
       } satisfies WireStatement);
+    }
+  }
+
+  // ── Tool-level spread lines (... <- source) ──────────────────────────
+
+  if (options?.spreadNodes) {
+    for (const spreadNode of options.spreadNodes) {
+      buildSpreadLine(spreadNode, body, undefined);
     }
   }
 

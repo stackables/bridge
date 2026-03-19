@@ -169,6 +169,12 @@ class BridgeParser extends CstParser {
             ALT: () =>
               this.SUBRULE(this.elementLine, { LABEL: "toolSelfWire" }),
           },
+          {
+            ALT: () =>
+              this.SUBRULE(this.scopeSpreadLine, {
+                LABEL: "toolSpreadLine",
+              }),
+          },
           { ALT: () => this.SUBRULE(this.bridgeBodyLine) },
         ]),
       );
@@ -507,6 +513,12 @@ class BridgeParser extends CstParser {
         { ALT: () => this.SUBRULE(this.elementToolWithDecl) },
         { ALT: () => this.SUBRULE(this.elementHandleWire) },
         { ALT: () => this.SUBRULE(this.elementLine) },
+        {
+          ALT: () =>
+            this.SUBRULE(this.scopeSpreadLine, {
+              LABEL: "elemMapSpreadLine",
+            }),
+        },
       ]),
     );
     this.CONSUME(RCurly);
@@ -786,6 +798,10 @@ class BridgeParser extends CstParser {
               },
             },
           ]);
+          // Optional array mapping: [] as <iter> { ... }
+          this.OPTION6(() =>
+            this.SUBRULE(this.arrayMapping, { LABEL: "scopeArrayMapping" }),
+          );
           // || / ?? coalesce chain (mixed order)
           this.MANY2(() => {
             this.SUBRULE3(this.coalesceChainItem, {
@@ -3144,6 +3160,7 @@ function buildToolDef(
   // Tool blocks reuse bridgeBodyLine for with-declarations and handle-targeted wires
   const bodyLines = subs(node, "bridgeBodyLine");
   const selfWireNodes = subs(node, "toolSelfWire");
+  const spreadNodes = subs(node, "toolSpreadLine");
   const { handles } = buildBridgeBody(
     bodyLines,
     "Tools",
@@ -3178,6 +3195,7 @@ function buildToolDef(
     {
       forbiddenHandleKinds: new Set(["input", "output"]),
       selfWireNodes,
+      spreadNodes,
     },
   );
 
@@ -5334,6 +5352,100 @@ function buildBridgeBody(
         }
 
         sourceParts.push({ ref: condRef, isPipeFork: condIsPipeFork });
+
+        // ── Array mapping inside scope block: .field <- source[] as iter { ... } ──
+        const scopeArrayMappingNode = (
+          sc.scopeArrayMapping as CstNode[] | undefined
+        )?.[0];
+        if (scopeArrayMappingNode) {
+          const srcRef = sourceParts[0].ref;
+
+          // Coalesce alternatives (|| and ??)
+          const arrayFallbacks: WireSourceEntry[] = [];
+          const arrayFallbackInternalWires: Wire[] = [];
+          for (const item of subs(scopeLine, "scopeCoalesceItem")) {
+            const type = tok(item, "falsyOp")
+              ? ("falsy" as const)
+              : ("nullish" as const);
+            const altNode = sub(item, "altValue")!;
+            const preLen = wires.length;
+            const altResult = extractCoalesceAlt(altNode, scopeLineNum);
+            arrayFallbacks.push(buildSourceEntry(type, altNode, altResult));
+            if ("sourceRef" in altResult) {
+              arrayFallbackInternalWires.push(...wires.splice(preLen));
+            }
+          }
+          let arrayCatchHandler: WireCatch | undefined;
+          let arrayCatchInternalWires: Wire[] = [];
+          const arrayCatchAlt = sub(scopeLine, "scopeCatchAlt");
+          if (arrayCatchAlt) {
+            const preLen = wires.length;
+            const altResult = extractCoalesceAlt(arrayCatchAlt, scopeLineNum);
+            arrayCatchHandler = buildCatchHandler(arrayCatchAlt, altResult);
+            if ("sourceRef" in altResult) {
+              arrayCatchInternalWires = wires.splice(preLen);
+            }
+          }
+
+          wires.push(
+            withLoc(
+              {
+                to: toRef,
+                sources: [
+                  { expr: { type: "ref", ref: srcRef } },
+                  ...arrayFallbacks,
+                ],
+                ...(arrayCatchHandler ? { catch: arrayCatchHandler } : {}),
+              },
+              scopeLineLoc,
+            ),
+          );
+          wires.push(...arrayFallbackInternalWires);
+          wires.push(...arrayCatchInternalWires);
+
+          const iterName = extractNameToken(
+            sub(scopeArrayMappingNode, "iterName")!,
+          );
+          assertNotReserved(iterName, scopeLineNum, "iterator handle");
+          const arrayToPath = toRef.path;
+          arrayIterators[arrayToPath.join(".")] = iterName;
+
+          const elemWithDecls = subs(scopeArrayMappingNode, "elementWithDecl");
+          const elemToolWithDecls = subs(
+            scopeArrayMappingNode,
+            "elementToolWithDecl",
+          );
+          const { writableHandles, cleanup: toolCleanup } =
+            processLocalToolBindings(elemToolWithDecls);
+          const cleanup = processLocalBindings(elemWithDecls, iterName);
+          processElementHandleWires(
+            subs(scopeArrayMappingNode, "elementHandleWire"),
+            iterName,
+            writableHandles,
+          );
+          processElementLines(
+            subs(scopeArrayMappingNode, "elementLine"),
+            arrayToPath,
+            iterName,
+            bridgeType,
+            bridgeField,
+            wires,
+            arrayIterators,
+            buildSourceExpr,
+            extractCoalesceAlt,
+            desugarExprChain,
+            extractTernaryBranch,
+            processLocalBindings,
+            processLocalToolBindings,
+            processElementHandleWires,
+            desugarTemplateString,
+            desugarNot,
+            resolveParenExpr,
+          );
+          cleanup();
+          toolCleanup();
+          continue;
+        }
 
         // Coalesce alternatives (|| and ??)
         const fallbacks: WireSourceEntry[] = [];

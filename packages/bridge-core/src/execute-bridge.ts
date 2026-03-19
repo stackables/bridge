@@ -1392,9 +1392,10 @@ async function evaluateToolDefBody(
 
   // Evaluate wires targeting the tool itself (no instance = tool config)
   const configStmts = body.filter(
-    (stmt): stmt is WireStatement | ScopeStatement =>
+    (stmt): stmt is WireStatement | ScopeStatement | SpreadStatement =>
       (stmt.kind === "wire" && stmt.target.instance == null) ||
-      stmt.kind === "scope",
+      stmt.kind === "scope" ||
+      stmt.kind === "spread",
   );
   await Promise.all(
     configStmts.map(async (stmt) => {
@@ -1406,6 +1407,20 @@ async function evaluateToolDefBody(
           pullPath,
         );
         setPath(input, stmt.target.path, value);
+      } else if (stmt.kind === "spread") {
+        const spreadValue = await evaluateSourceChain(
+          stmt,
+          toolDefScope,
+          undefined,
+          pullPath,
+        );
+        if (
+          spreadValue != null &&
+          typeof spreadValue === "object" &&
+          !Array.isArray(spreadValue)
+        ) {
+          Object.assign(input, spreadValue as Record<string, unknown>);
+        }
       } else {
         await evaluateToolDefScope(stmt, input, toolDefScope, pullPath);
       }
@@ -2477,9 +2492,8 @@ async function evaluateArrayElement(
         typeof spreadValue === "object" &&
         !Array.isArray(spreadValue)
       ) {
-        const targetOutput = childScope.root().output;
         if (pathPrefix.length > 0) {
-          let nested: Record<string, unknown> = targetOutput;
+          let nested: Record<string, unknown> = elementOutput;
           for (const segment of pathPrefix) {
             if (UNSAFE_KEYS.has(segment))
               throw new Error(`Unsafe assignment key: ${segment}`);
@@ -2494,7 +2508,7 @@ async function evaluateArrayElement(
           }
           Object.assign(nested, spreadValue as Record<string, unknown>);
         } else {
-          Object.assign(targetOutput, spreadValue as Record<string, unknown>);
+          Object.assign(elementOutput, spreadValue as Record<string, unknown>);
         }
       }
     },
