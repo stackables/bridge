@@ -1602,4 +1602,81 @@ bridge Mutation.deepseekChat {
     ],
     context: `{ "DEEPSEEK_API_KEY": "" }`,
   },
+  {
+    id: "crypto-price-failover",
+    name: "Crypto Price Failover",
+    description:
+      "Query Coinbase as the primary price source and fall back to Binance automatically using ?? — a single bridge handles both APIs",
+    schema: `
+type Query {
+  assetPrice(symbol: String!): AssetPrice
+}
+
+type AssetPrice {
+  price: String
+}
+    `,
+    bridge: `version 1.5
+
+tool binance from std.httpCall {
+  .baseUrl = "https://api.binance.com"
+  .path = "/api/v3/ticker/price"
+  .method = "GET"
+}
+
+tool coinbase from std.httpCall {
+  .baseUrl = "https://api.coinbase.com"
+  .method = "GET"
+}
+
+bridge Query.assetPrice {
+  with coinbase
+  with binance
+  with input as i
+  with output as o
+  with std.str.toUpperCase as toUpper
+
+  # 1. Normalize input to uppercase
+  alias symbol <- toUpper:i.symbol
+
+  # 2. Dynamically build the path using native string interpolation
+  coinbase.path <- "/v2/prices/{symbol}-USD/spot"
+  binance.symbol <- "{symbol}USDT"
+
+  # 3. Map the nested output (Coinbase returns {"data": {"amount": "65000.00"}})
+  #    Fall back to Binance price when Coinbase returns null or errors
+  o.price <- coinbase?.data?.amount ?? binance.price
+}`,
+    queries: [
+      {
+        name: "BTC price",
+        query: `{
+  assetPrice(symbol: "BTC") {
+    price
+  }
+}`,
+      },
+      {
+        name: "ETH price",
+        query: `{
+  assetPrice(symbol: "ETH") {
+    price
+  }
+}`,
+      },
+    ],
+    standaloneQueries: [
+      {
+        operation: "Query.assetPrice",
+        outputFields: "price",
+        input: { symbol: "BTC" },
+      },
+      {
+        operation: "Query.assetPrice",
+        outputFields: "price",
+        input: { symbol: "ETH" },
+      },
+    ],
+    context: `{}`,
+  },
 ];
