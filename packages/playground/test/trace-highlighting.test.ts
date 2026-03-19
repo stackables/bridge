@@ -68,6 +68,42 @@ bridge Query.searchTrains {
     );
   });
 
+  test("unexecuted nullish fallback branch is shown as dead code", () => {
+    // o.value <- i.primary ?? i.fallback
+    // When i.primary is not nullish, the ?? fallback is never taken.
+    // It must appear as dead code — NOT suppressed just because its loc
+    // falls within the active primary's full-wire-span loc.
+    const bridge = getBridge(`version 1.5
+
+bridge Query.test {
+  with input as i
+  with output as o
+
+  o.value <- i.primary ?? i.fallback
+}`);
+
+    const manifest = buildTraversalManifest(bridge);
+    const primaryEntry = manifest.find((e) => e.id === "value/primary");
+    const fallbackEntry = manifest.find((e) => e.id === "value/fallback:0");
+    assert.ok(primaryEntry, "expected value/primary");
+    assert.ok(fallbackEntry?.loc, "expected value/fallback:0 with loc");
+    // Activate only the primary path (i.primary was not nullish).
+    const activeIds = new Set(
+      decodeExecutionTrace(manifest, 1n << BigInt(primaryEntry.bitIndex)).map(
+        (e) => e.id,
+      ),
+    );
+    const inactiveLocs = collectInactiveTraversalLocations(manifest, activeIds);
+    assert.ok(
+      inactiveLocs.some(
+        (l) =>
+          l.startLine === fallbackEntry.loc!.startLine &&
+          l.startColumn === fallbackEntry.loc!.startColumn,
+      ),
+      "fallback loc should be in dead code locations",
+    );
+  });
+
   test("ref wire and pipe wire both inactive gray their full wire lines consistently", () => {
     // When two sibling wires are both inactive, both should highlight the full
     // wire statement — not just the RHS expression for the ref wire.
@@ -118,8 +154,12 @@ bridge Query.test {
 
     const manifest = buildTraversalManifest(bridge);
     // Activate only the origin.id and origin.name wires — destination scope is entirely dead.
-    const originIdEntry = manifest.find((e) => e.id === "legs.origin.id/primary");
-    const originNameEntry = manifest.find((e) => e.id === "legs.origin.name/primary");
+    const originIdEntry = manifest.find(
+      (e) => e.id === "legs.origin.id/primary",
+    );
+    const originNameEntry = manifest.find(
+      (e) => e.id === "legs.origin.name/primary",
+    );
     assert.ok(originIdEntry, "expected origin.id entry");
     assert.ok(originNameEntry, "expected origin.name entry");
     const traceBit =
@@ -158,7 +198,9 @@ bridge Query.test {
 
     const manifest = buildTraversalManifest(bridge);
     // Activate only origin.id — scope still has an active descendant.
-    const originIdEntry = manifest.find((e) => e.id === "legs.origin.id/primary");
+    const originIdEntry = manifest.find(
+      (e) => e.id === "legs.origin.id/primary",
+    );
     assert.ok(originIdEntry, "expected origin.id entry");
     const activeIds = new Set(
       decodeExecutionTrace(manifest, 1n << BigInt(originIdEntry.bitIndex)).map(

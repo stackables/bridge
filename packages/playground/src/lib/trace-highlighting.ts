@@ -93,7 +93,15 @@ export function collectInactiveTraversalLocations(
       if (activeIds.has(entry.id) || !entry.loc) {
         continue;
       }
-      if (isSupersededByActiveLocation(entry.loc, activeLocations)) {
+      // Only suppress error-path entries (synthetic sub-spans of an active primary,
+      // e.g. `primary/error` for a pipe that could throw). Genuine branch
+      // alternatives (fallback, else, catch) must always appear as dead code
+      // when they were not taken — even if their loc falls within the active
+      // primary's full-wire span.
+      if (
+        entry.error &&
+        isSupersededByActiveLocation(entry.loc, activeLocations)
+      ) {
         continue;
       }
 

@@ -3241,6 +3241,11 @@ class CodegenContext {
 
     const jsOp = opMap[expr.op];
     if (!jsOp) return "undefined";
+    const isArithmetic =
+      expr.op === "add" ||
+      expr.op === "sub" ||
+      expr.op === "mul" ||
+      expr.op === "div";
     // Parallelize when both sides contain await to avoid sequential bottleneck
     if (left.includes("await") && right.includes("await")) {
       const rawL = left.startsWith("await ")
@@ -3249,7 +3254,13 @@ class CodegenContext {
       const rawR = right.startsWith("await ")
         ? right.slice(6)
         : `(async () => ${right})()`;
+      if (isArithmetic) {
+        return `((__b) => __b[0] == null || __b[1] == null ? null : __b[0] ${jsOp} __b[1])(await Promise.all([${rawL}, ${rawR}]))`;
+      }
       return `((__b) => __b[0] ${jsOp} __b[1])(await Promise.all([${rawL}, ${rawR}]))`;
+    }
+    if (isArithmetic) {
+      return `((__a, __b) => __a == null || __b == null ? null : __a ${jsOp} __b)(${left}, ${right})`;
     }
     return `(${left} ${jsOp} ${right})`;
   }

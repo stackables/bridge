@@ -799,15 +799,62 @@ export function buildBody(
       if (seg.kind === "text") {
         parts.push({ type: "literal", value: seg.value, loc });
       } else {
-        // Parse the ref path: could be "handle.path" or "pipe:handle.path"
-        const segments = seg.path.split(".");
-        const root = segments[0];
-        const path = segments.slice(1);
-        const ref = resolveRef(root, path, lineNum, iterScope);
-        parts.push({ type: "ref", ref, loc });
+        parts.push(
+          buildTemplateSegExpression(seg.path, lineNum, iterScope, loc),
+        );
       }
     }
     return { type: "concat", parts, loc };
+  }
+
+  /**
+   * Build an Expression from a raw template segment path.
+   * Handles simple refs ("handle.field") and pipe chains ("pipe:handle.field").
+   */
+  function buildTemplateSegExpression(
+    segPath: string,
+    lineNum: number,
+    iterScope?: string[],
+    loc?: SourceLocation,
+  ): Expression {
+    // Split on ":" to detect pipe chains: "toUpper:i.symbol" → ["toUpper", "i.symbol"]
+    const colonIdx = segPath.indexOf(":");
+    if (colonIdx === -1) {
+      // Simple ref: "handle.field.subfield"
+      const dotParts = segPath.split(".");
+      const root = dotParts[0]!;
+      const path = dotParts.slice(1);
+      const ref = resolveRef(root, path, lineNum, iterScope);
+      return { type: "ref", ref, loc };
+    }
+
+    // Pipe chain: split on ":" — everything before the last segment are pipe handles,
+    // the last segment is the actual data source ref.
+    const pipeAndSource = segPath.split(":");
+    const pipeHandles = pipeAndSource.slice(0, -1);
+    const sourceSegment = pipeAndSource[pipeAndSource.length - 1]!;
+
+    // Build the innermost source ref
+    const dotParts = sourceSegment.split(".");
+    const root = dotParts[0]!;
+    const path = dotParts.slice(1);
+    const ref = resolveRef(root, path, lineNum, iterScope);
+
+    // Validate pipe handles
+    for (const handle of pipeHandles) {
+      if (!handleRes.has(handle)) {
+        throw new Error(
+          `Line ${lineNum}: Undeclared handle in pipe: "${handle}". Add 'with <tool> as ${handle}' to the bridge header.`,
+        );
+      }
+    }
+
+    // Wrap in PipeExpressions from innermost (rightmost) to outermost (leftmost)
+    let expr: Expression = { type: "ref", ref, loc };
+    for (const handle of [...pipeHandles].reverse()) {
+      expr = { type: "pipe", source: expr, handle, loc };
+    }
+    return expr;
   }
 
   /**

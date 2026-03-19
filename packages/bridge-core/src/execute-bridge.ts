@@ -2299,13 +2299,22 @@ async function evaluateExpression(
       ]);
       switch (expr.op) {
         case "add":
-          return Number(left) + Number(right);
         case "sub":
-          return Number(left) - Number(right);
         case "mul":
-          return Number(left) * Number(right);
         case "div":
-          return Number(left) / Number(right);
+          // Propagate null/undefined so that downstream `??` fallbacks can fire.
+          if (left == null || right == null) return null;
+          switch (expr.op) {
+            case "add":
+              return Number(left) + Number(right);
+            case "sub":
+              return Number(left) - Number(right);
+            case "mul":
+              return Number(left) * Number(right);
+            case "div":
+              return Number(left) / Number(right);
+          }
+          break;
         case "eq":
           return left === right;
         case "neq":

@@ -171,6 +171,48 @@ describe('tool self-wires: plain string (<- "...")', () => {
 });
 
 describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
+  test("string interpolation with pipe expression in template", () => {
+    const doc = parseBridge(bridge`
+      version 1.5
+      tool upper from std.str.toUpperCase {}
+      tool api from httpCall {
+        with upper
+        with context
+        .path <- "/{upper:context.userId}/profile"
+      }
+    `);
+    const tool = doc.instructions
+      .filter((i): i is ToolDef => i.kind === "tool")
+      .at(-1)!;
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
+    assert.ok(pathWire, "Expected a wire targeting .path");
+    assert.equal(
+      pathWire.sources[0]!.expr.type,
+      "concat",
+      "Expected a concat expression",
+    );
+    const concatExpr = pathWire.sources[0]!.expr;
+    if (concatExpr.type === "concat") {
+      // parts: literal "/", pipe(ref(userId)), literal "/profile"
+      const pipePartIdx = concatExpr.parts.findIndex((p) => p.type === "pipe");
+      assert.ok(
+        pipePartIdx !== -1,
+        "Expected a pipe expression part in concat",
+      );
+      const pipePart = concatExpr.parts[pipePartIdx]!;
+      if (pipePart.type === "pipe") {
+        assert.equal(pipePart.handle, "upper", "pipe handle should be 'upper'");
+        assert.equal(
+          pipePart.source.type,
+          "ref",
+          "pipe source should be a ref",
+        );
+      }
+    }
+  });
+
   test("string interpolation with const ref", () => {
     const tool = parseTool(bridge`
       version 1.5
@@ -181,7 +223,9 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
       }
     `);
     // V3: concat expressions are first-class expression nodes
-    const pathWire = flatWires(tool.body).find((w) => w.target.path[0] === "path")!;
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
     assert.equal(
       pathWire.sources[0]!.expr.type,
@@ -198,7 +242,9 @@ describe('tool self-wires: string interpolation (<- "...{ref}...")', () => {
         .path <- "/users/{context.userId}/profile"
       }
     `);
-    const pathWire = flatWires(tool.body).find((w) => w.target.path[0] === "path")!;
+    const pathWire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "path",
+    )!;
     assert.ok(pathWire, "Expected a wire targeting .path");
     assert.equal(
       pathWire.sources[0]!.expr.type,
@@ -257,7 +303,9 @@ describe("tool self-wires: expression chain (<- ref + expr)", () => {
         .verbose <- const.threshold > 5
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "verbose")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "verbose",
+    )!;
     assert.ok(wire, "Expected a wire targeting .verbose");
     assert.equal(
       wire.sources[0]!.expr.type,
@@ -277,7 +325,9 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .method <- const.flag ? "POST" : "GET"
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "method")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "method",
+    )!;
     assert.ok(wire, "Expected a wire targeting .method");
     // Ternary wires have sources[0].expr.type === "ternary"
     assert.equal(
@@ -309,7 +359,9 @@ describe("tool self-wires: ternary (<- cond ? then : else)", () => {
         .baseUrl <- const.flag ? const.urlA : const.urlB
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "baseUrl")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "baseUrl",
+    )!;
     assert.ok(wire, "Expected a wire targeting .baseUrl");
     assert.equal(
       wire.sources[0]!.expr.type,
@@ -333,7 +385,9 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .timeout <- context.settings.timeout ?? "5000"
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "timeout")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "timeout",
+    )!;
     assert.ok(wire, "Expected a wire targeting .timeout");
     assert.equal(wire.sources[0]!.expr.type, "ref", "Expected a pull wire");
     assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
@@ -354,7 +408,9 @@ describe("tool self-wires: coalesce (<- ref ?? fallback)", () => {
         .format <- context.settings.format || "json"
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "format")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "format",
+    )!;
     assert.ok(wire, "Expected a wire targeting .format");
     assert.ok(wire.sources.length >= 2, "Expected fallbacks for coalesce");
     assert.equal(wire.sources[1]!.gate, "falsy");
@@ -391,7 +447,9 @@ describe("tool self-wires: not prefix", () => {
         .silent <- not const.debug
       }
     `);
-    const wire = flatWires(tool.body).find((w) => w.target.path[0] === "silent")!;
+    const wire = flatWires(tool.body).find(
+      (w) => w.target.path[0] === "silent",
+    )!;
     assert.ok(wire, "Expected a wire targeting .silent");
     assert.equal(
       wire.sources[0]!.expr.type,

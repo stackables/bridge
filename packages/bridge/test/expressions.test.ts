@@ -632,6 +632,88 @@ regressionTest("safe flag on right operand expressions", {
   },
 });
 
+// ── Arithmetic null/undefined propagation through ?? fallback ───────────────
+//
+// Bug: `undefined * N ?? fallback` returned NaN instead of the fallback value.
+// When an arithmetic operand is null/undefined (e.g. from a mistyped path
+// accessed via `?.`), the result should propagate null so that `??` can
+// correctly fall through to the next source in the chain.
+
+regressionTest("expressions: arithmetic null/undefined propagates through ??", {
+  bridge: bridge`
+    version 1.5
+
+    bridge Query.undefinedArith {
+      with test.multitool as api
+      with input as i
+      with output as o
+
+      api <- i.api
+      o.price <- api?.price * 100 ?? -1
+    }
+
+    bridge Query.nullArith {
+      with test.multitool as api
+      with input as i
+      with output as o
+
+      api <- i.api
+      o.price <- api.price * 100 ?? -1
+    }
+
+    bridge Query.toolFallback {
+      with test.multitool as primary
+      with test.multitool as backup
+      with input as i
+      with output as o
+
+      primary <- i.primary
+      backup <- i.backup
+      o.price <- primary?.amount * 1 ?? backup.price
+    }
+  `,
+  tools: tools,
+  scenarios: {
+    "Query.undefinedArith": {
+      "undefined * 100 ?? -1 → fallback fires (safe api crash)": {
+        input: { api: { _error: "HTTP 500" } },
+        assertData: { price: -1 },
+        assertTraces: 1,
+      },
+      "5 * 100 ?? -1 → arithmetic value returned (api succeeds)": {
+        input: { api: { price: 5 } },
+        assertData: { price: 500 },
+        assertTraces: 1,
+      },
+    },
+    "Query.nullArith": {
+      "null * 100 ?? -1 → fallback fires (null operand)": {
+        input: { api: { price: null } },
+        assertData: { price: -1 },
+        assertTraces: 1,
+      },
+    },
+    "Query.toolFallback": {
+      "primary?.amount missing (typo path) → fallback to backup.price": {
+        input: {
+          primary: { wrongKey: 65000 },
+          backup: { price: 99 },
+        },
+        assertData: { price: 99 },
+        assertTraces: 2,
+      },
+      "primary?.amount present → use calculated value": {
+        input: {
+          primary: { amount: 65000 },
+          backup: { price: 99 },
+        },
+        assertData: { price: 65000 },
+        assertTraces: 1,
+      },
+    },
+  },
+});
+
 // ── Short-circuit data correctness ──────────────────────────────────────────
 
 regressionTest("and/or short-circuit data correctness", {
