@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.build.json",
     "lint:types": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
-    "test": "node --experimental-transform-types --test test/*.test.ts"
+    "test": "node --experimental-transform-types --test test/*.test.ts",
+    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --test test/*.test.ts"
   },
   "repository": {
     "type": "git",

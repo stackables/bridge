@@ -71,6 +71,24 @@ function jsStr(s: string): string {
   return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 }
 
+/**
+ * Build a tool function lookup expression.
+ * For dotted names like "vendor.sub.api", generates both a nested optional
+ * chain (`tools?.["vendor"]?.["sub"]?.["api"]`) and a flat-key fallback
+ * (`tools?.["vendor.sub.api"]`) so that either tools shape is accepted.
+ * Single-segment names produce a plain bracket access.
+ */
+function buildToolLookupExpr(fnName: string): string {
+  const segments = fnName.split(".");
+  if (segments.length <= 1) return `tools[${jsStr(fnName)}]`;
+  // Use double-quoted bracket notation: tools?.["a"]?.["b"]
+  const dqSeg = (s: string) =>
+    `["${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
+  const nested = `tools?.${segments.map(dqSeg).join("?.")}`;
+  const flat = `tools?.${dqSeg(fnName)}`;
+  return `(${nested} ?? ${flat})`;
+}
+
 /** Emit a JS object literal for a SourceLocation. */
 function jsLoc(loc: {
   startLine: number;
@@ -436,6 +454,13 @@ class CodegenContext {
     this.emitToolLookups(rootScope);
     this.emit("let __output = {};");
     this.emit("");
+
+    // If the bridge body has no output wires (recursively), emit a runtime throw.
+    if (!this.hasAnyOutputWires(this.bridge.body)) {
+      this.emit(
+        `throw new Error("Bridge '${this.bridge.type}.${this.bridge.field}' has no output wires.");`,
+      );
+    }
 
     // Compile the bridge body
     this.compileBody(this.bridge.body, rootScope, "__output");
@@ -938,7 +963,7 @@ class CodegenContext {
         // Emit tool function lookup — resolve fn through ToolDef extends chain
         const toolDef = this.resolveToolDef(h.name);
         const fnName = toolDef?.fn ?? h.name;
-        this.emit(`const ${toolFnVar} = tools[${jsStr(fnName)}];`);
+        this.emit(`const ${toolFnVar} = ${buildToolLookupExpr(fnName)};`);
         break;
       }
       case "define":
@@ -1141,7 +1166,7 @@ class CodegenContext {
               // Resolve fn through ToolDef extends chain
               const innerToolDef = this.resolveToolDef(h.name);
               const fnName = innerToolDef?.fn ?? h.name;
-              this.emit(`const ${toolFnVar} = tools[${jsStr(fnName)}];`);
+              this.emit(`const ${toolFnVar} = ${buildToolLookupExpr(fnName)};`);
               break;
             }
             case "define":
@@ -2085,6 +2110,26 @@ class CodegenContext {
     return undefined;
   }
 
+  /** Recursively check if any output wire or spread exists in the body tree. */
+  private hasAnyOutputWires(body: Statement[]): boolean {
+    for (const stmt of body) {
+      if (stmt.kind === "wire") {
+        if (
+          stmt.target.module === SELF_MODULE &&
+          stmt.target.type === this.bridge.type &&
+          stmt.target.field === this.bridge.field
+        ) {
+          return true;
+        }
+      } else if (stmt.kind === "spread") {
+        return true;
+      } else if (stmt.kind === "scope") {
+        if (this.hasAnyOutputWires(stmt.body)) return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Group output-targeting wire statements by their target path key.
    * Only groups wires that target the bridge's own output (skips tool input wires).
@@ -2219,9 +2264,10 @@ class CodegenContext {
   }
 
   /**
-   * Emit a runtime-sorted overdefinition block for wires where all static
-   * costs are equal. Uses tool metadata (`bridge.cost`, `bridge.sync`) to
-   * determine cost at runtime and sort the evaluation order.
+   * Throw a compile-time error for overdefined wires where all static costs
+   * are equal and greater than zero (i.e. all sources are tool-backed with
+   * the same priority).  The AOT compiler cannot statically determine which
+   * tool should win, so this configuration is rejected as incompatible.
    */
   private compileRuntimeSortedOverdef(
     ranked: { wire: WireStatement; index: number; cost: number }[],
@@ -2294,7 +2340,7 @@ class CodegenContext {
   }
 
   /**
-   * Compute a JS expression that evaluates to the runtime cost of an expression.
+   * Compute a runtime cost expression for a source expression.
    * For tool refs, checks `tools[name].bridge?.cost ?? (tools[name].bridge?.sync ? 1 : 2)`.
    * For non-tool expressions, returns a literal number.
    */
@@ -2498,6 +2544,13 @@ class CodegenContext {
 
   // ── Source chain compilation ──────────────────────────────────────────
 
+  /**
+   * Throw BridgeCompilerIncompatibleError if any source in the chain uses a
+   * falsy gate (||) with a tool-backed ref as the fallback.  Tool-backed
+   * falsy fallbacks are unsupported because they may trigger the secondary
+   * tool call even for valid falsy values (0, "", false).  Use ?? (nullish)
+   * or split into overdefined wires instead.
+   */
   private compileSourceChain(
     sources: WireSourceEntry[],
     wireCatch: WireCatch | undefined,

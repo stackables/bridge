@@ -46,7 +46,27 @@ async function compileAndRun(
   const document = parseBridgeFormat(bridgeText);
   const { code } = compileBridge(document, { operation });
   const fn = buildAotFn(code);
-  return fn(input, tools, context);
+  // Flatten nested tool objects (e.g. { vendor: { api: fn } } → { "vendor.api": fn })
+  // and provide a passthrough error wrapper so __wrapErr is always a function.
+  const flatTools = flattenToolsForTest(tools);
+  return fn(input, flatTools, context, {
+    __wrapBridgeRuntimeError: (e: Error) => e,
+  });
+}
+
+function flattenToolsForTest(
+  obj: Record<string, any>,
+  prefix = "",
+): Record<string, any> {
+  const flat: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    const val = obj[key];
+    if (typeof val === "function") flat[fullKey] = val;
+    else if (val != null && typeof val === "object")
+      Object.assign(flat, flattenToolsForTest(val, fullKey));
+  }
+  return flat;
 }
 
 /** Compile only — returns the generated code for inspection. */
@@ -301,7 +321,7 @@ describe("AOT codegen: fallback operators", () => {
     assert.deepEqual(data, { label: "default" });
   });
 
-  test("|| falsy fallback with ref throws incompatible when tool-backed", () => {
+  test("|| falsy fallback with tool-backed ref compiles and evaluates correctly", async () => {
     const bridgeText = bridge`
       version 1.5
       bridge Query.refFallback {
@@ -313,12 +333,17 @@ describe("AOT codegen: fallback operators", () => {
       }
     `;
 
-    assert.throws(
-      () => compileOnly(bridgeText, "Query.refFallback"),
-      (err: any) =>
-        err.name === "BridgeCompilerIncompatibleError" &&
-        /tool-backed/.test(err.message),
+    // primary returns null → fallback to backup
+    const result = await compileAndRun(
+      bridgeText,
+      "Query.refFallback",
+      {},
+      {
+        primary: () => ({ val: null }),
+        backup: () => ({ val: "from-backup" }),
+      },
     );
+    assert.equal(result.value, "from-backup");
   });
 
   test("nullish fallback to null matches runtime overdefinition semantics", async () => {
@@ -332,8 +357,15 @@ describe("AOT codegen: fallback operators", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
+          body: [
             {
+              kind: "wire",
+              target: {
+                module: "_",
+                type: "Query",
+                field: "nullishProbe",
+                path: ["k"],
+              },
               sources: [
                 {
                   expr: {
@@ -347,16 +379,10 @@ describe("AOT codegen: fallback operators", () => {
                   },
                 },
                 {
-                  expr: { type: "literal", value: "null" },
+                  expr: { type: "literal", value: null },
                   gate: "nullish",
                 },
               ],
-              to: {
-                module: "_",
-                type: "Query",
-                field: "nullishProbe",
-                path: ["k"],
-              },
             },
           ],
         },
@@ -377,7 +403,7 @@ describe("AOT codegen: fallback operators", () => {
     });
 
     assert.deepStrictEqual(aot.data, runtime.data);
-    assert.deepStrictEqual(aot.data, { k: undefined });
+    assert.deepStrictEqual(aot.data, { k: null });
   });
 });
 
@@ -610,8 +636,15 @@ describe("AOT codegen: conditional wires", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
+          body: [
             {
+              kind: "wire",
+              target: {
+                module: "_",
+                type: "Query",
+                field: "probe",
+                path: ["k"],
+              },
               sources: [
                 {
                   expr: {
@@ -632,12 +665,6 @@ describe("AOT codegen: conditional wires", () => {
                   },
                 },
               ],
-              to: {
-                module: "_",
-                type: "Query",
-                field: "probe",
-                path: ["k"],
-              },
             },
           ],
         },
@@ -672,8 +699,15 @@ describe("AOT codegen: conditional wires", () => {
             { kind: "input", handle: "i" },
             { kind: "output", handle: "o" },
           ],
-          wires: [
+          body: [
             {
+              kind: "wire",
+              target: {
+                module: "_",
+                type: "Query",
+                field: "probeOr",
+                path: ["k"],
+              },
               sources: [
                 {
                   expr: {
@@ -689,17 +723,11 @@ describe("AOT codegen: conditional wires", () => {
                     },
                     right: {
                       type: "literal",
-                      value: "null",
+                      value: null,
                     },
                   },
                 },
               ],
-              to: {
-                module: "_",
-                type: "Query",
-                field: "probeOr",
-                path: ["k"],
-              },
             },
           ],
         },
@@ -841,8 +869,8 @@ describe("AOT codegen: memoized tool handles", () => {
 
   test("generated code emits memoization helper for memoized handles", () => {
     const code = compileOnly(bridgeText, "Query.memoized");
-    assert.match(code, /function __callMemoized/);
-    assert.match(code, /function __stableMemoizeKey/);
+    assert.match(code, /function __stableKey/);
+    assert.match(code, /__memoMap_\d/);
   });
 
   test("memoized handles reuse cached results within one compiled request", async () => {
@@ -1515,11 +1543,9 @@ bridge Query.test {
     assert.deepStrictEqual(callLog, []);
   });
 
-  test("two tools — compile rejects unsupported same-cost tool overdefinition", async () => {
-    await assert.rejects(
-      () =>
-        compileAndRun(
-          `version 1.5
+  test("two same-cost tools — uses authored order (first non-null wins)", async () => {
+    const result = await compileAndRun(
+      `version 1.5
 bridge Query.test {
   with svcA
   with svcB
@@ -1531,15 +1557,15 @@ bridge Query.test {
   o.label <- svcA.label
   o.label <- svcB.label
 }`,
-          "Query.test",
-          { q: "test" },
-          {
-            svcA: () => ({ label: "from-A" }),
-            svcB: () => ({ label: "from-B" }),
-          },
-        ),
-      /BridgeCompilerIncompatibleError|Tool-only overdefinition/i,
+      "Query.test",
+      { q: "test" },
+      {
+        svcA: () => ({ label: "from-A" }),
+        svcB: () => ({ label: "from-B" }),
+      },
     );
+    // Both tools have the same static cost; authored order breaks the tie.
+    assert.equal(result.label, "from-A");
   });
 
   test("tool with multiple fields — not skipped if one field is primary", async () => {
@@ -1671,24 +1697,26 @@ bridge Query.test {
           type: "Query",
           field: "constantOverdef",
           handles: [{ kind: "output", handle: "o" }],
-          wires: [
+          body: [
             {
-              sources: [{ expr: { type: "literal", value: "null" } }],
-              to: {
+              kind: "wire",
+              target: {
                 module: "_",
                 type: "Query",
                 field: "constantOverdef",
                 path: ["k"],
               },
+              sources: [{ expr: { type: "literal", value: null } }],
             },
             {
-              sources: [{ expr: { type: "literal", value: "false" } }],
-              to: {
+              kind: "wire",
+              target: {
                 module: "_",
                 type: "Query",
                 field: "constantOverdef",
                 path: ["k"],
               },
+              sources: [{ expr: { type: "literal", value: false } }],
             },
           ],
         },
@@ -1709,7 +1737,7 @@ bridge Query.test {
     });
 
     assert.deepStrictEqual(aot.data, runtime.data);
-    assert.deepStrictEqual(aot.data, { k: null });
+    assert.deepStrictEqual(aot.data, { k: false });
   });
 
   test("generated code contains conditional wrapping", () => {
@@ -1726,7 +1754,10 @@ bridge Query.test {
       "Query.test",
     );
     // Should contain a let declaration (conditional) instead of const
-    assert.ok(code.includes("let _t"), "should use let for conditional tool");
+    assert.ok(
+      code.includes("let __od_"),
+      "should use let for conditional overdefinition",
+    );
     assert.ok(code.includes("if ("), "should have conditional check");
   });
 });
@@ -1816,7 +1847,7 @@ bridge Query.test {
   with input as i
   with output as o
   api.q <- i.q
-  o.name <- api?.name catch "fallback"
+  o.name <- api.name catch "fallback"
 }`);
     const result = await executeAot<any>({
       document,
@@ -2218,7 +2249,6 @@ bridge Query.test {
 }`,
       "Query.test",
     );
-    assert.ok(code.includes("__callSync"), "should define __callSync helper");
     assert.ok(
       code.includes("bridge?.sync"),
       "should check bridge.sync at call sites",

@@ -97,10 +97,6 @@ export type {
   WithStatement,
 } from "./types.ts";
 
-// ── Expression evaluation ──────────────────────────────────────────────────
-
-export { evaluateExpression } from "./resolveWiresSources.ts";
-
 // ── Traversal enumeration ───────────────────────────────────────────────────
 
 export {

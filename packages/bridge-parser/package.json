@@ -16,6 +16,7 @@
     "build": "tsc -p tsconfig.build.json",
     "lint:types": "tsc -p tsconfig.json",
     "test": "node --experimental-transform-types --test test/*.test.ts",
+    "test:coverage": "node --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --test test/*.test.ts",
     "fuzz": "node --experimental-transform-types --test test/*.fuzz.ts",
     "prepack": "pnpm build"
   },
