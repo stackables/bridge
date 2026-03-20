@@ -1,5 +1,11 @@
 # @stackables/bridge-compiler
 
+## 2.5.1
+
+### Patch Changes
+
+- [`fdcfbfd`](https://github.com/stackables/bridge/commit/fdcfbfda953138638584caf6f3af3d30ddd4f280) Thanks [@aarne](https://github.com/aarne)! - Republish broken package
+
 ## 2.5.0
 
 ### Minor Changes
