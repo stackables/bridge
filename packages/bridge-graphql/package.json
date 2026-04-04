@@ -29,12 +29,12 @@
     "@stackables/bridge-stdlib": "workspace:*"
   },
   "devDependencies": {
-    "@graphql-tools/executor-http": "^3.1.1",
+    "@graphql-tools/executor-http": "^3.2.1",
     "@stackables/bridge-parser": "workspace:*",
-    "@types/node": "^25.5.0",
-    "graphql": "16.13.1",
-    "graphql-yoga": "^5.18.1",
-    "typescript": "^5.9.3"
+    "@types/node": "^25.5.2",
+    "graphql": "16.13.2",
+    "graphql-yoga": "^5.20.0",
+    "typescript": "^6.0.2"
   },
   "peerDependencies": {
     "@graphql-tools/utils": "^11",

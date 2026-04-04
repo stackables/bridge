@@ -2,13 +2,11 @@
  * Slim Cloudflare Worker for production deployment.
  *
  * Handles /api/share endpoints (KV-backed) directly.
- * Everything else is served as static assets by the ASSETS binding
- * (Cloudflare Workers Static Assets).
- *
- * Note: `astro dev` and `astro preview` do NOT use this file — they use
- * the @astrojs/cloudflare adapter's own entrypoints. This is only used
- * by `wrangler deploy`.
+ * Everything else is delegated to the Astro handler (serves static assets
+ * via the ASSETS binding in production, or through the Vite dev server).
  */
+
+import { handle } from "@astrojs/cloudflare/handler";
 
 interface Env {
   SHARES: KVNamespace;
@@ -96,7 +94,7 @@ export default {
   async fetch(
     request: Request,
     env: Env,
-    _ctx: ExecutionContext,
+    ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
 
@@ -106,7 +104,7 @@ export default {
       return new Response(null, { status: 405 });
     }
 
-    // Everything else: serve from static assets
-    return env.ASSETS.fetch(request);
+    // Everything else: let Astro handle it (static assets + SSR)
+    return handle(request, env, ctx);
   },
 };

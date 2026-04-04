@@ -26,16 +26,16 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api": "^1.9.1",
     "@stackables/bridge-stdlib": "workspace:*",
     "@stackables/bridge-types": "workspace:*"
   },
   "devDependencies": {
     "@stackables/bridge-graphql": "workspace:*",
     "@stackables/bridge-parser": "workspace:*",
-    "@types/node": "^25.5.0",
-    "graphql": "16.13.1",
-    "typescript": "^5.9.3"
+    "@types/node": "^25.5.2",
+    "graphql": "16.13.2",
+    "typescript": "^6.0.2"
   },
   "publishConfig": {
     "access": "public",

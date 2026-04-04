@@ -17,7 +17,6 @@
     "noUnusedParameters": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@stackables/bridge": ["../bridge/src/index.ts"],
