@@ -273,8 +273,8 @@ export async function runBridge(
     return {
       errors: [
         formatBridgeError(err, {
-          source: document.source,
-          filename: document.filename,
+          source: instructions.source,
+          filename: instructions.filename,
         }),
       ],
       ...(traces && traces.length > 0 ? { traces } : {}),

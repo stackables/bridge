@@ -34,10 +34,10 @@
   "homepage": "https://github.com/stackables/bridge#readme",
   "devDependencies": {
     "@stackables/bridge-compiler": "workspace:*",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.5.2",
     "fast-check": "^4.6.0",
-    "graphql": "16.13.1",
-    "typescript": "^5.9.3"
+    "graphql": "16.13.2",
+    "typescript": "^6.0.2"
   },
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",

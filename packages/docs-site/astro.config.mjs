@@ -112,9 +112,6 @@ export default defineConfig({
     umami({ id: "1f6b3965-db14-4b6f-bf61-e6b70f1e0994", tag: "bridge" }),
   ],
   adapter: cloudflare({
-    platformProxy: {
-      enabled: true,
-      persist: true,
-    },
+    persistState: true,
   }),
 });
