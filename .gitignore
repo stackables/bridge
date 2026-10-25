@@ -14,4 +14,5 @@ isolate-*.log
 # Build artifacts that may land in src/ during cross-package compilation
 packages/*/src/**/*.js
 packages/*/src/**/*.d.ts
+!packages/docs-site/src/env.d.ts
 packages/*/src/**/*.d.ts.map
