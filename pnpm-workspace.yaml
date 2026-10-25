@@ -20,3 +20,6 @@ overrides:
 
 # A release must be 7 days old before pnpm resolves it, also when Renovate refreshes the lockfile.
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  # Renovate security update: @astrojs/cloudflare@13.1.10
+  - "@astrojs/cloudflare@13.1.10"
