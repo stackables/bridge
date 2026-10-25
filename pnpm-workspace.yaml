@@ -17,3 +17,6 @@ overrides:
   undici@>=7.17.0 <7.24.0: '>=7.24.0'
   wrangler@>=4.0.0 <4.59.1: '>=4.59.1'
   yaml@>=2.0.0 <2.8.3: '>=2.8.3'
+
+# A release must be 7 days old before pnpm resolves it, also when Renovate refreshes the lockfile.
+minimumReleaseAge: 10080
