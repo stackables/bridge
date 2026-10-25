@@ -20,3 +20,6 @@ overrides:
 
 # A release must be 7 days old before pnpm resolves it, also when Renovate refreshes the lockfile.
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  # Renovate security update: astro@7.2.8
+  - astro@7.2.8
