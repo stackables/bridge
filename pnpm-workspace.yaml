@@ -20,3 +20,9 @@ overrides:
 
 # A release must be 7 days old before pnpm resolves it, also when Renovate refreshes the lockfile.
 minimumReleaseAge: 10080
+
+# The docs site's Cloudflare worker bundle resolves satteri to its WebAssembly binding.
+supportedArchitectures:
+  cpu:
+    - current
+    - wasm32

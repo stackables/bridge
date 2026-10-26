@@ -14,7 +14,6 @@ export default defineConfig({
   site: "https://bridge.sdk42.com/",
   vite: {
     plugins: [
-      //@ts-expect-error wrong vite verions
       tailwindcss(),
     ],
     resolve: {
@@ -76,19 +75,19 @@ export default defineConfig({
       sidebar: [
         {
           label: "Guides",
-          autogenerate: { directory: "guides" },
+          items: [{ autogenerate: { directory: "guides" } }],
         },
         {
           label: "Language Reference",
-          autogenerate: { directory: "reference" },
+          items: [{ autogenerate: { directory: "reference" } }],
         },
         {
           label: "Standard Library",
-          autogenerate: { directory: "tools" },
+          items: [{ autogenerate: { directory: "tools" } }],
         },
         {
           label: "Advanced Topics",
-          autogenerate: { directory: "advanced" },
+          items: [{ autogenerate: { directory: "advanced" } }],
         },
         {
           label: "Blog",
@@ -113,5 +112,6 @@ export default defineConfig({
   ],
   adapter: cloudflare({
     persistState: true,
+    prerenderEnvironment: "node",
   }),
 });
