@@ -29,3 +29,5 @@ supportedArchitectures:
 minimumReleaseAgeExclude:
   # Renovate security update: sharp@0.35.5
   - sharp@0.35.5
+  # Renovate security update: vite@8.1.6
+  - vite@8.1.6
