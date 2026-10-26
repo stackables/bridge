@@ -6,6 +6,7 @@ import type {
   DefineDef,
   Expression,
   HandleBinding,
+  JsonValue,
   NodeRef,
   SourceChain,
   Statement,
@@ -237,6 +238,20 @@ function serBodyRef(
     );
   }
   return serPath(ref.path, ref.rootSafe, ref.pathSafe);
+}
+
+/**
+ * Serialize the value of a constant assignment (`target = value`).
+ *
+ * The parser reads a quoted constant back as JSON when its text is an object
+ * or array (`"{}"` → `{}`), and has no bare object/array syntax, so those
+ * are written as a quoted JSON string.
+ */
+function serConstantValue(value: JsonValue): string {
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(JSON.stringify(value));
+  }
+  return JSON.stringify(value);
 }
 
 /** Serialize an Expression to source text. */
@@ -514,7 +529,7 @@ function serializeBodyStatements(
           stmt.sources[0]!.expr.type === "literal"
         ) {
           lines.push(
-            `${indent}${target} = ${JSON.stringify(stmt.sources[0]!.expr.value)}`,
+            `${indent}${target} = ${serConstantValue(stmt.sources[0]!.expr.value)}`,
           );
         } else {
           const rhs = serBodySourceChain(stmt, ctx, indent);
