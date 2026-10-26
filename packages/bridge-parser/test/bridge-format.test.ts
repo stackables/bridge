@@ -453,6 +453,25 @@ describe("serializeBridge", () => {
     assertDeepStrictEqualIgnoringLoc(parseBridge(output), instructions);
   });
 
+  test('string constants "{}" and "[]" roundtrip through serialize and parse', () => {
+    const input = bridge`
+      version 1.5
+      bridge Query.consts {
+        with input as i
+        with output as o
+
+      o.obj = "{}"
+      o.arr = "[]"
+      o.nums = "[1,2]"
+      o.text = "hello"
+
+      }
+    `;
+    const instructions = parseBridge(input);
+    const output = serializeBridge(instructions);
+    assertDeepStrictEqualIgnoringLoc(parseBridge(output), instructions);
+  });
+
   test("tool bridge roundtrip", () => {
     const input = bridge`
       version 1.5
