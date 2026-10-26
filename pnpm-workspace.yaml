@@ -26,3 +26,6 @@ supportedArchitectures:
   cpu:
     - current
     - wasm32
+minimumReleaseAgeExclude:
+  # Renovate security update: sharp@0.35.5
+  - sharp@0.35.5
