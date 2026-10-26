@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This document covers everything you ne
 
 ## Prerequisites
 
-- **Node.js ≥ 22** (the test runner uses `node:test` APIs that require it)
+- **Node.js ≥ 24** (the repo's CI and tooling run on it)
 - **pnpm ≥ 10** — install with `npm install -g pnpm`
 
 ---
