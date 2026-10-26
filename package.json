@@ -2,7 +2,7 @@
   "name": "bridge-monorepo",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
+  "packageManager": "pnpm@10.34.7+sha512.ba98abc585539933375b5971f4bc6d6c73a1b4b7edc4a879e7d102fe5423d1e02309d67c60a11f04955093a96e521ad9c3b138cdd654ca5be563f378b3ae48bd",
   "scripts": {
     "test": "pnpm -r test",
     "fuzz": "pnpm -r --filter './packages/*' fuzz",
@@ -23,7 +23,7 @@
     "mutants": "npx stryker run"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.30.0",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^9.6.0",
