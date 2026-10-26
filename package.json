@@ -2,7 +2,7 @@
   "name": "bridge-monorepo",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@10.34.7",
+  "packageManager": "pnpm@12.14.0",
   "scripts": {
     "test": "pnpm -r test",
     "fuzz": "pnpm -r --filter './packages/*' fuzz",

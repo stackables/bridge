@@ -2,9 +2,14 @@ packages:
   - packages/*
   - examples/*
 
-onlyBuiltDependencies:
-  - esbuild
-  - workerd
+# bridge-core's tests import bridge-parser, which depends on bridge-core. pnpm 10 ran the tasks of such a cycle in
+# an arbitrary order; pnpm 12 fails `pnpm -r` on it (ERR_PNPM_TASK_CYCLE) unless told to keep doing that.
+ignoreWorkspaceCycles: true
+
+# Only these dependencies run their install scripts (pnpm 11 and later read allowBuilds; onlyBuiltDependencies is gone).
+allowBuilds:
+  esbuild: true
+  workerd: true
 
 overrides:
   flatted@<=3.4.1: '>=3.4.2'
@@ -27,11 +32,5 @@ supportedArchitectures:
     - current
     - wasm32
 minimumReleaseAgeExclude:
-  # Renovate security update: sharp@0.35.5
-  - sharp@0.35.5
-  # Renovate security update: vite@8.1.6
-  - vite@8.1.6
   # Renovate security update: @graphql-tools/utils@13.1.3
   - "@graphql-tools/utils@13.1.3"
-  # Renovate security update: esbuild@0.28.1
-  - esbuild@0.28.1
