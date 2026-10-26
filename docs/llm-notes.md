@@ -9,7 +9,7 @@
 - **Name:** The Bridge
 - **npm package:** `@stackables/bridge`
 - **package.json name still says:** `bridge-engine` (was never updated — do it in the new repo)
-- **Node:** v22+ (tested on v24.9.0)
+- **Node:** v24 (tested on v24.9.0)
 - **Module system:** ESM (`"type": "module"`)
 - **Test runner:** `node:test` + `tsx` — no Jest, no Vitest
 
