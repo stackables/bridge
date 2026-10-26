@@ -15,12 +15,12 @@
     "@astrojs/starlight": "^0.42.0",
     "@catppuccin/starlight": "^2.1.0",
     "@stackables/bridge-playground": "workspace:*",
-    "@tailwindcss/vite": "4.2.2",
+    "@tailwindcss/vite": "4.3.3",
     "astro": "^7.4.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "sharp": "^0.35.0",
-    "tailwindcss": "4.2.2"
+    "tailwindcss": "4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.8",
