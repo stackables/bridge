@@ -200,7 +200,7 @@ importers:
   packages/bridge-graphql:
     dependencies:
       '@graphql-tools/utils':
-        specifier: ^11
+        specifier: ^11 || ^13.0.0
         version: 11.0.0(graphql@16.13.2)
       '@stackables/bridge-core':
         specifier: workspace:*

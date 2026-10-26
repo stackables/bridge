@@ -37,7 +37,7 @@
     "typescript": "^6.0.2"
   },
   "peerDependencies": {
-    "@graphql-tools/utils": "^11",
+    "@graphql-tools/utils": "^11 || ^13.0.0",
     "graphql": "^16"
   },
   "publishConfig": {
