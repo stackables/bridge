@@ -11,5 +11,15 @@
     "**/tests/**",
     "**/__fixtures__/**",
     "loadtest/**"
-  ]
+  ],
+  "packageRules": [
+    {
+      "description": "Test (unit, fuzz, build, lint), CodeQL and the Workers build check every update",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ],
+  "lockFileMaintenance": {
+    "automerge": true
+  }
 }
