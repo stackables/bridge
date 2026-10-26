@@ -33,3 +33,5 @@ minimumReleaseAgeExclude:
   - vite@8.1.6
   # Renovate security update: @graphql-tools/utils@13.1.3
   - "@graphql-tools/utils@13.1.3"
+  # Renovate security update: esbuild@0.28.1
+  - esbuild@0.28.1
