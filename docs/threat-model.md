@@ -189,7 +189,7 @@ The VS Code extension (`packages/bridge-syntax-highlight`) provides syntax highl
 | `bridge-parser`           | `chevrotain@^11`                                         | Low — mature, deterministic parser framework with no `eval`                    |
 | `bridge-stdlib`           | `lru-cache@^11`                                          | Low — widely used, actively maintained in-memory cache                         |
 | `bridge-core`             | `@opentelemetry/api@^1.9`                                | Low — CNCF project, passive by default (no-op without SDK)                     |
-| `bridge-graphql`          | `graphql@^16`, `@graphql-tools/utils@^11` (peer)         | Low — reference implementation                                                 |
+| `bridge-graphql`          | `graphql@^16 \|\| ^17`, `@graphql-tools/utils@^11` (peer) | Low — reference implementation                                                 |
 | `playground`              | React 19, CodeMirror 6, Radix UI, Cloudflare Workers SDK | Medium — large dependency surface area, partially mitigated by browser sandbox |
 | `bridge-syntax-highlight` | `vscode-languageclient`, `vscode-languageserver`         | Low — standard LSP libraries, IPC transport                                    |
 

@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "@stackables/bridge": "^2.1.1",
-    "graphql": "^16.13.0",
+    "graphql": "^17.0.2",
     "graphql-yoga": "^6.0.0"
   }
 }

@@ -38,6 +38,14 @@ cd packages/bridge
 node --import tsx/esm --test test/parser-compat.test.ts
 ```
 
+The repo develops on graphql 17, but `@stackables/bridge-graphql` also supports graphql 16 (its peer range is `^16 || ^17`). To run the tests that use graphql against graphql 16:
+
+```bash
+pnpm test:graphql16
+```
+
+It installs graphql 16 for the run (overriding the `graphql` pin in `pnpm-workspace.yaml`), tests `bridge-graphql` and `bridge`, then restores the workspace file and lock file and reinstalls graphql 17. CI runs both: `Test` on graphql 17 and `Test (graphql 16)`.
+
 Tests use the built-in `node:test` runner. No Jest, no Vitest. Output is TAP-style with a summary at the end.
 
 ---
