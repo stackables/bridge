@@ -21,6 +21,8 @@ const config: KnipConfig = {
     "cycles",
   ],
   ignoreExportsUsedInFile: production,
+  // knip reports cycles as a warning by default, which never fails CI; make an import cycle an error.
+  rules: { cycles: "error" },
   // includeEntryExports stays off: these are published packages, so an entry's exports
   // are used by code knip cannot see.
   workspaces: {

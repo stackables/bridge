@@ -28,7 +28,7 @@ pnpm knip        # unused files, exports and dependencies (0 findings required)
 pnpm knip --production   # the same without tests and devDependencies (0 findings required)
 ```
 
-Both knip runs fail CI (`test.yml`). Fix what knip finds by deleting the dead code or the unused dependency; don't add it to the config. Every `ignore*` entry in `knip.ts` needs a comment saying why.
+Both knip runs fail CI (`test.yml`), and so does an import cycle. The production run leaves tests and devDependencies out, so code only a test calls counts as dead: delete it, or move it into the test. Fix what knip finds by deleting the dead code or the unused dependency; don't add it to the config. Every `ignore*` entry in `knip.ts` needs a comment saying why.
 
 If tests fail before your changes, **fix them first**.
 
