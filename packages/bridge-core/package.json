@@ -16,7 +16,6 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm build",
     "lint:types": "tsc -p tsconfig.json",
-    "dump": "node dump-tree.mjs | pbcopy && echo 'ExecutionTree source copied to clipboard'",
     "test": "node --experimental-transform-types --test test/*.test.ts",
     "test:coverage": "node --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info --experimental-transform-types --test test/*.test.ts"
   },
@@ -26,15 +25,12 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@opentelemetry/api": "^1.9.1",
     "@stackables/bridge-stdlib": "workspace:*",
     "@stackables/bridge-types": "workspace:*"
   },
   "devDependencies": {
-    "@stackables/bridge-graphql": "workspace:*",
     "@stackables/bridge-parser": "workspace:*",
     "@types/node": "^25.5.2",
-    "graphql": "16.14.2",
     "typescript": "^6.0.2"
   },
   "publishConfig": {

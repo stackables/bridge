@@ -25,7 +25,6 @@ import {
 } from "@stackables/bridge-stdlib";
 import type { Bridge, BridgeDocument, ToolMap } from "@stackables/bridge-core";
 
-export type { Logger };
 export { BridgeGraphQLIncompatibleError } from "./bridge-asserts.ts";
 
 /**

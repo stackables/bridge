@@ -73,25 +73,6 @@ const schema = bridgeTransform(
 
 ---
 
-## Linting
-
-The package ships a `bridge-lint` CLI to validate `.bridge` files from the terminal or CI.
-
-```bash
-# Lint a single file
-npx bridge-lint path/to/logic.bridge
-
-# Lint multiple files / globs
-npx bridge-lint src/**/*.bridge
-
-# Output diagnostics as JSON (for tooling / CI integration)
-npx bridge-lint --json src/**/*.bridge
-```
-
-Exit code is `1` when any errors are present, `0` when everything is clean.
-
----
-
 ## Packages
 
 `@stackables/bridge` is the all-in-one — it re-exports everything so you can get started fast. But you don't always need the full stack. If you're optimizing for bundle size (say, deploying to Cloudflare Workers), pick only the packages you need:

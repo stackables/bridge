@@ -1,10 +1,9 @@
 /**
  * @stackables/bridge-core — The Bridge runtime engine.
  *
- * Contains the execution engine, type system, internal tools (math, logic,
- * string concat), and utilities.  Given pre-parsed `Instruction[]` (JSON AST),
- * you can execute a bridge without pulling in the parser (Chevrotain) or
- * GraphQL dependencies.
+ * Contains the execution engine, type system, and utilities.  Given pre-parsed
+ * `Instruction[]` (JSON AST), you can execute a bridge without pulling in the parser
+ * (Chevrotain) or GraphQL dependencies.
  */
 
 // ── Tagged template literal ──────────────────────────────────────────────────

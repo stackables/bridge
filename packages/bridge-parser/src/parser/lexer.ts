@@ -8,19 +8,19 @@ import { createToken, Lexer } from "chevrotain";
 
 // ── Whitespace & comments ──────────────────────────────────────────────────
 
-export const Newline = createToken({
+const Newline = createToken({
   name: "Newline",
   pattern: /\r?\n/,
   group: Lexer.SKIPPED,
 });
 
-export const WS = createToken({
+const WS = createToken({
   name: "WS",
   pattern: /[ \t]+/,
   group: Lexer.SKIPPED,
 });
 
-export const Comment = createToken({
+const Comment = createToken({
   name: "Comment",
   pattern: /#[^\r\n]*/,
   group: "comments",
