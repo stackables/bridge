@@ -11,7 +11,7 @@
     "smoke": "node scripts/smoke-test-packages.mjs",
     "e2e": "pnpm -r e2e",
     "depcheck": "pnpm -r exec pnpm dlx depcheck",
-    "ci:publish": "changeset tag && pnpm publish -r --filter '@stackables/*'",
+    "ci:publish": "changeset git-tag && pnpm publish -r --filter '@stackables/*'",
     "test:coverage": "pnpm -r test:coverage",
     "bench": "pnpm -r bench",
     "profile:cpu": "node scripts/profile-cpu.mjs",
@@ -24,8 +24,8 @@
     "mutants": "npx stryker run"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.7.0",
-    "@changesets/cli": "^2.30.0",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^9.6.0",
     "@stryker-mutator/typescript-checker": "^9.6.0",
