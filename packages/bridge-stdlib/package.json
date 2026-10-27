@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-stdlib",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Bridge standard library — httpCall, string, array, and audit tools",
   "main": "./src/index.ts",
   "type": "module",

@@ -1,5 +1,18 @@
 # @stackables/bridge-parser
 
+## 1.5.1
+
+### Patch Changes
+
+- [#176](https://github.com/stackables/bridge/pull/176) [`847c3fb`](https://github.com/stackables/bridge/commit/847c3fb7c4694ad04ec246b632da5e8e86e7662b) Thanks [@factory-coder](https://github.com/apps/factory-coder)! - Remove unused code and dependencies found by knip: the unused `@opentelemetry/api` dependency of bridge-core and the unused `@stackables/bridge-types` dependency of bridge-compiler, plus unexported dead helpers.
+
+- [#186](https://github.com/stackables/bridge/pull/186) [`17936c0`](https://github.com/stackables/bridge/commit/17936c0d72420521e4c9df549e1a4180977d0203) Thanks [@factory-release-manager](https://github.com/apps/factory-release-manager)! - Update the parser's `chevrotain` dependency from 12 to 13. `.bridge` files parse to the same result as before, and the supported Node version is unchanged (Node 22 or newer, which chevrotain 12 already required).
+
+- [#165](https://github.com/stackables/bridge/pull/165) [`221d40d`](https://github.com/stackables/bridge/commit/221d40dcc51f5bb73fa1cb225c51c6ed84cedc8e) Thanks [@factory-coder](https://github.com/apps/factory-coder)! - `serializeBridge` no longer writes a constant like `o.a = "{}"` or `"[]"` as a bare `{}` / `[]` that `parseBridge` rejects; it keeps the quotes.
+- Updated dependencies [[`847c3fb`](https://github.com/stackables/bridge/commit/847c3fb7c4694ad04ec246b632da5e8e86e7662b), [`5d39680`](https://github.com/stackables/bridge/commit/5d39680a9c161786152ca83f78b875f8707a2bfa)]:
+  - @stackables/bridge-core@1.8.1
+  - @stackables/bridge-stdlib@1.5.4
+
 ## 1.5.0
 
 ### Minor Changes
