@@ -47,5 +47,3 @@ jobs:
           publish-script: pnpm ci:publish
           create-github-releases: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
