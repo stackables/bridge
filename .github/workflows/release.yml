@@ -42,8 +42,6 @@ jobs:
       - name: Create and publish versions
         uses: changesets/action@v2.1.2
         with:
-          commit-message: "chore: update versions"
-          pr-title: "chore: update versions"
           publish-script: pnpm ci:publish
           create-github-releases: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
