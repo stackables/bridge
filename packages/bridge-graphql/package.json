@@ -34,7 +34,7 @@
     "@types/node": "^25.5.2",
     "graphql": "16.14.2",
     "graphql-yoga": "^6.0.0",
-    "typescript": "^6.0.2"
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "@graphql-tools/utils": "^11 || ^13.0.0",
