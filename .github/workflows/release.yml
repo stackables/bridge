@@ -44,7 +44,7 @@ jobs:
           git clean -fd
 
       - name: Create and publish versions
-        uses: changesets/action@v1
+        uses: changesets/action@v2.1.2
         with:
           commit: "chore: update versions"
           title: "chore: update versions"
