@@ -11,9 +11,11 @@
   "commandRunner": {
     "command": "node --experimental-transform-types --test packages/bridge/test/*.test.ts packages/bridge/test/bugfixes/*.test.ts"
   },
+  "plugins": ["@stryker-mutator/typescript-checker"],
   "checkers": ["typescript"],
-  "tsconfigFile": "tsconfig.base.json",
+  "tsconfigFile": "tsconfig.stryker.json",
   "reporters": ["html", "clear-text", "progress"],
+  "ignorePatterns": ["docs"],
   "tempDirName": ".stryker-tmp",
   "concurrency": 4
 }

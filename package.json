@@ -30,6 +30,7 @@
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/typescript-checker": "^10.0.0",
     "@tsconfig/node24": "^24.0.4",
+    "@types/node": "^25.5.2",
     "eslint": "^10.2.0",
     "knip": "6.42.1",
     "tinybench": "^6.0.0",

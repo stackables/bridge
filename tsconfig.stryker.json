@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/bridge-core/src",
+    "packages/bridge-parser/src",
+    "packages/bridge-stdlib/src",
+    "packages/bridge-compiler/src"
+  ]
+}
