@@ -20,6 +20,7 @@
     "profile:deopt": "node scripts/profile-deopt.mjs",
     "profile:flamegraph": "node scripts/flamegraph.mjs",
     "bench:compare": "node scripts/bench-compare.mjs",
+    "knip": "knip",
     "mutants": "npx stryker run"
   },
   "devDependencies": {
@@ -30,6 +31,7 @@
     "@stryker-mutator/typescript-checker": "^9.6.0",
     "@tsconfig/node24": "^24.0.4",
     "eslint": "^10.2.0",
+    "knip": "6.42.1",
     "tinybench": "^6.0.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.0"

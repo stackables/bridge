@@ -28,3 +28,7 @@ jobs:
         run: pnpm build
       - name: Lint with ESLint
         run: pnpm lint
+      - name: Knip
+        run: pnpm knip
+      - name: Knip (production)
+        run: pnpm knip --production

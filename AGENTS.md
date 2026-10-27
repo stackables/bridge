@@ -24,7 +24,11 @@ pnpm build       # type-check (0 errors required)
 pnpm lint        # coding standards (0 errors required)
 pnpm test        # all unit tests (0 failures baseline)
 pnpm e2e         # end-to-end tests
+pnpm knip        # unused files, exports and dependencies (0 findings required)
+pnpm knip --production   # the same without tests and devDependencies (0 findings required)
 ```
+
+Both knip runs fail CI (`test.yml`). Fix what knip finds by deleting the dead code or the unused dependency; don't add it to the config. Every `ignore*` entry in `knip.ts` needs a comment saying why.
 
 If tests fail before your changes, **fix them first**.
 
