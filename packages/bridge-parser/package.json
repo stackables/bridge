@@ -28,7 +28,7 @@
   "dependencies": {
     "@stackables/bridge-core": "workspace:*",
     "@stackables/bridge-stdlib": "workspace:*",
-    "chevrotain": "^12.0.0"
+    "chevrotain": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
