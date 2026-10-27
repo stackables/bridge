@@ -1,5 +1,13 @@
 # @stackables/bridge-core
 
+## 1.8.1
+
+### Patch Changes
+
+- [#176](https://github.com/stackables/bridge/pull/176) [`847c3fb`](https://github.com/stackables/bridge/commit/847c3fb7c4694ad04ec246b632da5e8e86e7662b) Thanks [@factory-coder](https://github.com/apps/factory-coder)! - Remove unused code and dependencies found by knip: the unused `@opentelemetry/api` dependency of bridge-core and the unused `@stackables/bridge-types` dependency of bridge-compiler, plus unexported dead helpers.
+- Updated dependencies [[`5d39680`](https://github.com/stackables/bridge/commit/5d39680a9c161786152ca83f78b875f8707a2bfa)]:
+  - @stackables/bridge-stdlib@1.5.4
+
 ## 1.8.0
 
 ### Minor Changes

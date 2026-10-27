@@ -1,6 +1,6 @@
 {
   "name": "@stackables/bridge-graphql",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Bridge GraphQL adapter — wire bridges into a GraphQL schema",
   "main": "./src/index.ts",
   "type": "module",

@@ -1,5 +1,11 @@
 # @stackables/bridge-stdlib
 
+## 1.5.4
+
+### Patch Changes
+
+- [#190](https://github.com/stackables/bridge/pull/190) [`5d39680`](https://github.com/stackables/bridge/commit/5d39680a9c161786152ca83f78b875f8707a2bfa) Thanks [@factory-coder](https://github.com/apps/factory-coder)! - The published type declarations are now emitted by TypeScript 7. In `tools/arrays.d.ts`, `tools/audit.d.ts` and `tools/strings.d.ts`, the `bridge` metadata of each tool is declared as `export { syncUtility as bridge }` inside the tool's namespace instead of `var bridge: { sync: true; trace: false }`. The type of `bridge` is the same, and the declarations still work with TypeScript 6. The JavaScript is unchanged.
+
 ## 1.5.3
 
 ### Patch Changes

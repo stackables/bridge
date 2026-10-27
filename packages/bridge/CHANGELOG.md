@@ -1,5 +1,15 @@
 # @stackables/bridge
 
+## 2.4.1
+
+### Patch Changes
+
+- Updated dependencies [[`847c3fb`](https://github.com/stackables/bridge/commit/847c3fb7c4694ad04ec246b632da5e8e86e7662b), [`17936c0`](https://github.com/stackables/bridge/commit/17936c0d72420521e4c9df549e1a4180977d0203), [`54d6715`](https://github.com/stackables/bridge/commit/54d67156ccff7d75e60fd9f573f79f191fa12b45), [`221d40d`](https://github.com/stackables/bridge/commit/221d40dcc51f5bb73fa1cb225c51c6ed84cedc8e), [`5d39680`](https://github.com/stackables/bridge/commit/5d39680a9c161786152ca83f78b875f8707a2bfa)]:
+  - @stackables/bridge-core@1.8.1
+  - @stackables/bridge-parser@1.5.1
+  - @stackables/bridge-graphql@1.4.0
+  - @stackables/bridge-stdlib@1.5.4
+
 ## 2.4.0
 
 ### Minor Changes
