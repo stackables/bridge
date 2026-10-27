@@ -36,7 +36,7 @@
     "@stackables/bridge-compiler": "workspace:*",
     "@stackables/bridge-types": "workspace:*",
     "@types/node": "^25.5.2",
-    "graphql": "16.14.2",
+    "graphql": "17.0.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {

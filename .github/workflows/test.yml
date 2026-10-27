@@ -31,3 +31,18 @@ jobs:
         run: pnpm knip
       - name: Knip (production)
         run: pnpm knip --production
+
+  test-graphql-16:
+    name: Test (graphql 16)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          require-lockfile: true
+      - name: Install dependencies
+        run: pnpm install
+      - name: Test on graphql 16
+        run: pnpm test:graphql16
