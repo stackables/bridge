@@ -30,7 +30,7 @@ jobs:
       - name: Run the tests
         run: pnpm test:coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: stackables/bridge
