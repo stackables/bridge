@@ -17,6 +17,20 @@
       "description": "Test (unit, fuzz, build, lint), CodeQL and the Workers build check every update",
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
+    },
+    {
+      "description": "A major update of a runtime dependency of a published package widens the range instead of replacing it, so users on the dependency's old major keep working without changing anything",
+      "matchFileNames": [
+        "packages/bridge/package.json",
+        "packages/bridge-core/package.json",
+        "packages/bridge-compiler/package.json",
+        "packages/bridge-parser/package.json",
+        "packages/bridge-graphql/package.json",
+        "packages/bridge-stdlib/package.json",
+        "packages/bridge-types/package.json"
+      ],
+      "matchDepTypes": ["dependencies", "peerDependencies"],
+      "rangeStrategy": "widen"
     }
   ],
   "lockFileMaintenance": {
