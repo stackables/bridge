@@ -16,7 +16,7 @@ import { buildSchema, type GraphQLSchema } from "graphql";
 import type { PlaygroundMode, SharePayload } from "./share";
 
 // ── build query tab array from an example ────────────────────────────────────
-export function buildQueryTabs(e: (typeof examples)[number]): QueryTab[] {
+function buildQueryTabs(e: (typeof examples)[number]): QueryTab[] {
   return e.queries.map((q, i) => {
     const sq = e.standaloneQueries?.[i];
     return {

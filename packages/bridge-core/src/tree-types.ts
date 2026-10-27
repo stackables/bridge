@@ -8,7 +8,6 @@
 
 import type {
   ControlFlowInstruction,
-  NodeRef,
   SourceLocation,
 } from "./types.ts";
 import type { ToolTrace } from "./tracing.ts";
@@ -58,10 +57,6 @@ export class BridgeRuntimeError extends Error {
   }
 }
 
-type BridgeErrorMetadataCarrier = {
-  bridgeLoc?: SourceLocation;
-};
-
 // ── Sentinels ───────────────────────────────────────────────────────────────
 
 /** Sentinel for `continue` — skip the current array element */
@@ -85,21 +80,6 @@ export const MAX_EXECUTION_DEPTH = 30;
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /**
- * A value that may already be resolved (synchronous) or still pending (asynchronous).
- * Using this instead of always returning `Promise<T>` lets callers skip
- * microtask scheduling when the value is immediately available.
- * See packages/bridge-core/performance.md (#10).
- */
-export type MaybePromise<T> = T | Promise<T>;
-
-export type Trunk = {
-  module: string;
-  type: string;
-  field: string;
-  instance?: number;
-};
-
-/**
  * Structured logger interface for Bridge engine events.
  * Accepts any compatible logger: pino, winston, bunyan, `console`, etc.
  * All methods default to silent no-ops when no logger is provided.
@@ -109,33 +89,6 @@ export interface Logger {
   info?: (...args: any[]) => void;
   warn?: (...args: any[]) => void;
   error?: (...args: any[]) => void;
-}
-
-/** Matches graphql's internal Path type (not part of the public exports map) */
-export interface Path {
-  readonly prev: Path | undefined;
-  readonly key: string | number;
-  readonly typename: string | undefined;
-}
-
-// ── Helper functions ────────────────────────────────────────────────────────
-
-/**
- * Narrow interface that extracted modules use to call back into the
- * execution tree.  Keeps extracted functions honest about their
- * dependencies and makes mock-based unit testing straightforward.
- *
- * `ExecutionTree` implements this interface.
- */
-export interface TreeContext {
-  /** Resolve a single NodeRef, returning sync when already in state. */
-  pullSingle(
-    ref: NodeRef,
-    pullChain?: Set<string>,
-    bridgeLoc?: SourceLocation,
-  ): MaybePromise<any>;
-  /** External abort signal — cancels execution when triggered. */
-  signal?: AbortSignal;
 }
 
 /** Returns `true` when `value` is a thenable (Promise or Promise-like). */
@@ -178,23 +131,6 @@ export function wrapBridgeRuntimeError(
     bridgeLoc: options.bridgeLoc,
     cause: err,
   });
-}
-
-export function attachBridgeErrorMetadata<T>(
-  err: T,
-  options: {
-    bridgeLoc?: SourceLocation;
-  } = {},
-): T {
-  if (!err || (typeof err !== "object" && typeof err !== "function")) {
-    return err;
-  }
-
-  const carrier = err as BridgeErrorMetadataCarrier;
-  if (carrier.bridgeLoc === undefined) {
-    carrier.bridgeLoc = options.bridgeLoc;
-  }
-  return err;
 }
 
 function controlLevels(

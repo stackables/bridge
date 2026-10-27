@@ -9,7 +9,6 @@ import {
   boundedClone,
   TraceCollector,
 } from "../src/index.ts";
-import { coerceConstant, setNested } from "../src/tree-utils.ts";
 import { bridge } from "@stackables/bridge-core";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -263,109 +262,6 @@ describe("engine hardening: abort discipline", () => {
         }),
       /abort/i,
     );
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Step 4: Strict coerceConstant (no JSON.parse)
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("engine hardening: strict coerceConstant", () => {
-  test("coerces true", () => {
-    assert.strictEqual(coerceConstant("true"), true);
-  });
-
-  test("coerces false", () => {
-    assert.strictEqual(coerceConstant("false"), false);
-  });
-
-  test("coerces null", () => {
-    assert.strictEqual(coerceConstant("null"), null);
-  });
-
-  test("coerces integers", () => {
-    assert.strictEqual(coerceConstant("42"), 42);
-    assert.strictEqual(coerceConstant("-7"), -7);
-    assert.strictEqual(coerceConstant("0"), 0);
-  });
-
-  test("coerces floats", () => {
-    assert.strictEqual(coerceConstant("3.14"), 3.14);
-  });
-
-  test("returns plain strings as-is", () => {
-    assert.strictEqual(coerceConstant("hello"), "hello");
-    assert.strictEqual(coerceConstant("/search"), "/search");
-  });
-
-  test("JSON-encoded strings are decoded", () => {
-    assert.strictEqual(coerceConstant('"hello"'), "hello");
-    assert.strictEqual(coerceConstant('"with \\"quotes\\""'), 'with "quotes"');
-  });
-
-  test("trailing backslash in JSON string is preserved", () => {
-    // '"trailing\' — backslash as last char before closing quote
-    assert.strictEqual(coerceConstant('"trailing\\\\"'), "trailing\\");
-  });
-
-  test("invalid unicode escape is preserved as literal", () => {
-    // '"\uZZZZ"' — not valid hex digits
-    assert.strictEqual(coerceConstant('"\\uZZZZ"'), "\\uZZZZ");
-  });
-
-  test("JSON objects are returned as raw string (no parse)", () => {
-    const raw = '{"key":"value"}';
-    const result = coerceConstant(raw);
-    assert.strictEqual(result, raw);
-  });
-
-  test("JSON arrays are returned as raw string (no parse)", () => {
-    const raw = "[1,2,3]";
-    const result = coerceConstant(raw);
-    assert.strictEqual(result, raw);
-  });
-
-  test("empty string stays as empty string", () => {
-    assert.strictEqual(coerceConstant(""), "");
-  });
-
-  test("non-string input is returned as-is", () => {
-    assert.strictEqual(coerceConstant(42 as any), 42);
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Step 5: setNested primitive guard
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe("engine hardening: setNested primitive guard", () => {
-  test("throws when trying to set nested on a string", () => {
-    const obj: any = { name: "hello" };
-    assert.throws(
-      () => setNested(obj, ["name", "inner"], "value"),
-      /Cannot set nested property: value at "name" is not an object/,
-    );
-  });
-
-  test("throws when trying to set nested on a number", () => {
-    const obj: any = { count: 42 };
-    assert.throws(
-      () => setNested(obj, ["count", "sub"], "value"),
-      /Cannot set nested property: value at "count" is not an object/,
-    );
-  });
-
-  test("normal nested assignment still works", () => {
-    const obj: any = {};
-    setNested(obj, ["a", "b", "c"], "deep");
-    assert.equal(obj.a.b.c, "deep");
-  });
-
-  test("array creation via digit key still works", () => {
-    const obj: any = {};
-    setNested(obj, ["items", "0"], "first");
-    assert.ok(Array.isArray(obj.items));
-    assert.equal(obj.items[0], "first");
   });
 });
 

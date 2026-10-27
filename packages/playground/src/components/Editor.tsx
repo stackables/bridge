@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
  * - "javascript"    — JavaScript highlighting (read-only compiled output)
  * - "plain"         — no language support (fallback)
  */
-export type EditorLanguage =
+type EditorLanguage =
   | "bridge"
   | "graphql"
   | "graphql-query"

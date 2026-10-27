@@ -2170,22 +2170,3 @@ export function buildBody(
 
   return { handles: handleBindings, body, handleRes };
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Top-level document builder
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Build a complete BridgeDocument from a Chevrotain CST, populating
- * `body: Statement[]` on all bridge/tool/define instructions.
- *
- * This can be called alongside the existing `toBridgeAst()` to augment
- * instructions with the nested IR.
- */
-export function buildBodies(_cst: CstNode, instructions: Instruction[]): void {
-  // Walk instruction list and build body for each bridge/tool/define
-  for (const _inst of instructions) {
-    // Find corresponding CST node and call buildBody per-block.
-    // This function is a hook for future integration.
-  }
-}

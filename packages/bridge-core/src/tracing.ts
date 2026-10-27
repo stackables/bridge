@@ -5,53 +5,10 @@
  * See docs/execution-tree-refactor.md
  */
 
-import { metrics, trace } from "@opentelemetry/api";
-import type { Span } from "@opentelemetry/api";
 import type { ToolMetadata } from "@stackables/bridge-types";
 import type { BatchToolMetadata } from "@stackables/bridge-types";
 import type { Logger } from "./tree-types.ts";
 import { roundMs } from "./tree-utils.ts";
-
-// ── OTel setup ──────────────────────────────────────────────────────────────
-
-export const otelTracer = trace.getTracer("@stackables/bridge");
-
-/**
- * Lazily detect whether the OpenTelemetry tracer is a real (recording)
- * tracer or the default no-op.  Probed once on first tool call; result
- * is cached for the lifetime of the process.
- *
- * If the SDK has not been registered by the time the first tool runs,
- * all subsequent calls will skip OTel instrumentation.
- */
-let _otelActive: boolean | undefined;
-export function isOtelActive(): boolean {
-  if (_otelActive === undefined) {
-    const probe = otelTracer.startSpan("_bridge_probe_");
-    _otelActive = probe.isRecording();
-    probe.end();
-  }
-  return _otelActive;
-}
-
-const otelMeter = metrics.getMeter("@stackables/bridge");
-export const toolCallCounter = otelMeter.createCounter("bridge.tool.calls", {
-  description: "Total number of tool invocations",
-});
-export const toolDurationHistogram = otelMeter.createHistogram(
-  "bridge.tool.duration",
-  {
-    description: "Tool call duration in milliseconds",
-    unit: "ms",
-  },
-);
-export const toolErrorCounter = otelMeter.createCounter("bridge.tool.errors", {
-  description: "Total number of tool invocation errors",
-});
-
-// Re-export SpanStatusCode for internal usage
-export { SpanStatusCode as SpanStatusCodeEnum } from "@opentelemetry/api";
-import { SpanStatusCode } from "@opentelemetry/api";
 
 // ── Trace types ─────────────────────────────────────────────────────────────
 
@@ -313,40 +270,4 @@ export function logToolError(
     { tool: toolName, fn: fnName, err: err.message },
     "[bridge] tool failed",
   );
-}
-
-/** Record an exception on a span and mark it as errored. */
-export function recordSpanError(span: Span | undefined, err: Error): void {
-  if (!span) return;
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-}
-
-/**
- * Run `fn` inside an OTel span when `doTrace` is true;
- * otherwise call it directly with `undefined` as the span argument.
- */
-export function withSpan<T>(
-  doTrace: boolean,
-  name: string,
-  attrs: Record<string, string>,
-  fn: (span: Span | undefined) => Promise<T>,
-): Promise<T> {
-  if (!doTrace) return fn(undefined);
-  return otelTracer.startActiveSpan(name, { attributes: attrs }, fn);
-}
-
-/**
- * Synchronous variant of `withSpan` — runs `fn` inside an OTel span
- * without introducing a Promise.  Used by the sync-tool instrumented
- * path so that `{sync: true, trace: true}` tools still produce spans.
- */
-export function withSyncSpan<T>(
-  doTrace: boolean,
-  name: string,
-  attrs: Record<string, string>,
-  fn: (span: Span | undefined) => T,
-): T {
-  if (!doTrace) return fn(undefined);
-  return otelTracer.startActiveSpan(name, { attributes: attrs }, fn);
 }

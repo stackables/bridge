@@ -18,7 +18,6 @@ import {
   parseBridgeChevrotain,
   type ParseBridgeOptions,
 } from "./parser/index.ts";
-export { parsePath } from "@stackables/bridge-core";
 
 /**
  * Parse .bridge text — delegates to the Chevrotain parser.
