@@ -15,19 +15,19 @@
     "@astrojs/starlight": "^0.42.0",
     "@catppuccin/starlight": "^2.1.0",
     "@stackables/bridge-playground": "workspace:*",
-    "@tailwindcss/vite": "4.3.3",
+    "@tailwindcss/vite": "4.3.4",
     "astro": "^7.4.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "sharp": "^0.35.0",
-    "tailwindcss": "4.3.3"
+    "tailwindcss": "4.3.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.8",
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@yeskunall/astro-umami": "^0.0.9",
+    "@yeskunall/astro-umami": "^0.0.10",
     "typescript": "^6.0.2",
     "wrangler": "^4.151.1"
   }
