@@ -33,7 +33,7 @@ jobs:
           name: bench-results
           path: packages/bridge/bench-results.json
 
-      - uses: bencherdev/bencher@v0.6.13
+      - uses: bencherdev/bencher@v0.6.16
 
       - name: Track base branch benchmarks with Bencher
         run: |
@@ -73,7 +73,7 @@ jobs:
       - name: Run benchmarks
         run: cd packages/bridge && CI=true node --experimental-transform-types bench/engine.bench.ts > bench-results.json 2>/dev/null
 
-      - uses: bencherdev/bencher@v0.6.13
+      - uses: bencherdev/bencher@v0.6.16
 
       - name: Track PR benchmarks with Bencher
         run: |

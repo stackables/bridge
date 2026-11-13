@@ -2,7 +2,7 @@
   "name": "bridge-monorepo",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@12.15.0",
+  "packageManager": "pnpm@12.18.0",
   "scripts": {
     "test": "pnpm -r test",
     "fuzz": "pnpm -r --filter './packages/*' fuzz",
@@ -33,7 +33,7 @@
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^25.5.2",
     "eslint": "^10.2.0",
-    "knip": "6.43.0",
+    "knip": "6.44.1",
     "tinybench": "^6.0.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.0"
