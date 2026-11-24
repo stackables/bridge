@@ -203,9 +203,9 @@ importers:
       '@stryker-mutator/typescript-checker':
         specifier: ^10.0.0
         version: 10.1.1(@stryker-mutator/core@10.1.1(@types/node@25.9.9))(typescript@6.0.3)
-      '@tsconfig/node24':
-        specifier: ^24.0.4
-        version: 24.0.6
+      '@tsconfig/node26':
+        specifier: ^26.0.0
+        version: 26.0.2
       '@types/node':
         specifier: ^25.5.2
         version: 25.9.9
@@ -2994,8 +2994,8 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tsconfig/node24@24.0.6':
-    resolution: {integrity: sha512-/SK4JuydRQLGSCq7+hbiQ8fdAVR4Suv5EcBvkIAG3zo3GbXQvGoSclz4olL12Ar4OpH8gwGYJ67P4wwQqBRxKw==}
+  '@tsconfig/node26@26.0.2':
+    resolution: {integrity: sha512-RIBSoNGQxUQ8r4hSrEzS6TrUneoKaCuX6BjL4zF3wqttGq2w06zCea4d8P1gRvM/HZyDT1FQJ8trZSyy/63oMg==}
 
   '@tybys/wasm-util@0.10.5':
     resolution: {integrity: sha512-dOGOPxlaNV+G046mZzN+9C0dAcQZeSKcXiVaM0TYy/LM4ttTmgSBDxYfovcYI8Em3+eAbiAYpvWLOv8+ZVRJKA==}
@@ -7676,7 +7676,7 @@ snapshots:
       tailwindcss: 4.3.5
       vite: 8.3.8(@types/node@25.9.9)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
 
-  '@tsconfig/node24@24.0.6': {}
+  '@tsconfig/node26@26.0.2': {}
 
   '@tybys/wasm-util@0.10.5':
     dependencies:
