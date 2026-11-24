@@ -12,7 +12,7 @@
   "dependencies": {
     "@astrojs/cloudflare": "^14.0.0",
     "@astrojs/react": "^7.0.0",
-    "@astrojs/starlight": "^0.42.0",
+    "@astrojs/starlight": "^0.43.0",
     "@catppuccin/starlight": "^2.1.0",
     "@stackables/bridge-playground": "workspace:*",
     "@tailwindcss/vite": "4.3.5",
